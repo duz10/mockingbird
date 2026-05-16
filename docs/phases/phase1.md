@@ -159,7 +159,18 @@ part of `p1-judges-run`: `migrations-applied`, `fts5-smoke`,
 
 | Iteration | Scope                              | Notes                                    |
 |-----------|------------------------------------|------------------------------------------|
-| 1         | Wave 1 (scaffolding + ADR 0004)    | Lands in this session — fresh context.   |
-| 2         | Wave 2 (migrations + runner + tests)| Fresh context — migrations are SEALED forever after `phase-1-complete`, want full attention. |
+| 1         | Wave 1 (scaffolding + ADR 0004)    | ✅ commit `8e70d7c`.                     |
+| 2         | Wave 2 (migrations + runner + tests)| **Pre-resolved in `phase1-wave2-brief.md`** — all design decisions PLAN doesn't pin down are captured there. Wave 2 is mechanical implementation. |
 | 3         | Wave 3 + Wave 4 (DB repos + app shell) | Likely combinable; depends on Wave 2 surprises. |
 | 4         | Wave 5 (docs + seal) — buffer for any 5-attempt-rule escalation | Tag `phase-1-complete`. |
+
+## Wave-specific briefs
+
+- **Wave 2:** `docs/phases/phase1-wave2-brief.md` — exhaustive
+  implementation brief: full audit-trigger SQL for all 4 tables
+  (extrapolated from PLAN's dictionary-only example), runner file
+  layout (`db/mod.rs` + `db/migrations.rs` + `db/prompt_loader.rs`)
+  with function signatures, token-substitution strategy for migration
+  003, integration-test specs (7 tests), known PLAN bugs flagged
+  (dictionary trigger references non-existent `enabled` column),
+  deviations recorded. Read BEFORE invoking `migration-author`.

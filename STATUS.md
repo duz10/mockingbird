@@ -102,12 +102,23 @@ Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks a
 | 4 | App shell: logging, settings, tray, commands, app wire | Parallel after Wave 2 runner. |
 | 5 | Docs flesh-out, lefthook live-fire verify, judges, seal + tag | Final iteration before phase-1-complete. |
 
-### How to resume Phase 1 in a fresh session
+### How to resume Phase 1 Wave 2 in a fresh session
 
 1. `/agent code-puppy`
 2. `/phase1-goal`
-3. The slash command tells code-puppy to read `docs/phases/phase1.md` and `bd ready` — Wave 2 tasks will be top of the queue (`mb-4qg`, `mb-l6d`, `mb-7u9`, `mb-o0d`, `mb-rzf`).
-4. Wave 2 starts by invoking `migration-author` for migration 001.
+3. **Required reading for Wave 2** (in this order):
+   1. `.code_puppy/AGENTS.md`
+   2. `docs/phases/phase1.md` (phase plan)
+   3. **`docs/phases/phase1-wave2-brief.md`** ← THIS IS BINDING for Wave 2
+   4. `docs/LESSONS.md` (10 entries; search for `[phase-1]` and `migration`)
+   5. `bd ready` (Wave 2 tasks `mb-4qg`, `mb-l6d`, `mb-7u9`, `mb-o0d`, `mb-rzf` are top)
+4. **Implementation plan, codified in the Wave 2 brief**:
+   - **DO NOT re-decide** audit-trigger column projections — the brief has the full SQL for all four `_history_*` tables, extrapolated from PLAN's dictionary-only example, with the dictionary `OLD.enabled` PLAN bug already worked around.
+   - **DO NOT re-decide** the runner file layout — the brief specifies `db/mod.rs` + `db/migrations.rs` + `db/prompt_loader.rs` with function signatures.
+   - **DO NOT re-decide** the integration-test set — the brief specifies 7 tests with exact assertion counts (trigger_count_is_14, history_prompts == 3 after seed, etc.).
+   - **DO** invoke `migration-author` for the three .sql files and the integration tests; the runner is code-puppy's.
+5. Wave 2 is **mechanical** at this point. Deviations from the brief require a LESSONS.md note explaining why.
+6. **DO NOT tag `phase-1-complete` at end of Wave 2.** The tag seals migrations forever and lands at Wave 5 after DB repos + app shell + judges run.
 
 ---
 
