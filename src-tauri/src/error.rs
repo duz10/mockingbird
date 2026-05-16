@@ -39,6 +39,22 @@ pub enum AppError {
     #[error("stt error: {0}")]
     Stt(String),
 
+    /// Hotkey subsystem failures.
+    ///
+    /// Sources: `SetWindowsHookEx` install failure, message-pump thread
+    /// death, conflict-probe failures, watchdog timeouts. Phase 3 +.
+    #[error("hotkey error: {0}")]
+    Hotkey(String),
+
+    /// Text-injection failures.
+    ///
+    /// Sources: clipboard lock contention, `SetClipboardData` failures,
+    /// `SendInput` failures, secure-input abort (when treated as an
+    /// error path rather than a normal abort), strategy resolution.
+    /// Phase 3 +.
+    #[error("injection error: {0}")]
+    Injection(String),
+
     /// Generic catch-all for early Phase 1; replaced by typed variants
     /// as concrete modules surface their errors.
     #[error("{0}")]
@@ -63,5 +79,17 @@ mod tests {
     fn other_displays_payload() {
         let err = AppError::Other("explanation".to_string());
         assert_eq!(err.to_string(), "explanation");
+    }
+
+    #[test]
+    fn hotkey_displays_with_prefix() {
+        let err = AppError::Hotkey("hook install failed".to_string());
+        assert_eq!(err.to_string(), "hotkey error: hook install failed");
+    }
+
+    #[test]
+    fn injection_displays_with_prefix() {
+        let err = AppError::Injection("clipboard locked".to_string());
+        assert_eq!(err.to_string(), "injection error: clipboard locked");
     }
 }

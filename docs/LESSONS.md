@@ -14,6 +14,37 @@ Format:
 
 ---
 
+
+## 2026-05-17 [phase-3-wave-1] Build env, parallelism, and PowerShell stream/arg parsing
+
+- **Context:** Phase 3 Wave 1 — five ADRs + module scaffolds + first cargo gate post-Phase-2. Hit six separate Windows toolchain papercuts before the gate went green.
+- **Finding 1 — `scripts/cargo-with-cuda.ps1` is now the one-call wrapper for ALL cargo invocations in this project.** Imports MSVC env via `vcvars64.bat`, pins `CUDA_PATH` + `CUDA_PATH_V12_8` to v12.8 (ADR 0011), prepends cmake to PATH, caps `CMAKE_BUILD_PARALLEL_LEVEL=4`, then forwards args through `cmd.exe /c "cargo ... 2>&1"`. Replaces the prior "set env inline before every cargo call" pattern from Phase 2. Always invoke via `-File`, never `-Command` (see Finding 4).
+- **Finding 2 — whisper-rs-sys CUDA compile OOMs at `--parallel 16` on a 16 GB machine.** Each `fattn-mma` template instance can use 2–4 GB resident RAM. With 16 cores, MSBuild fires 16 nvcc processes in parallel and one or more get killed silently, leaving 0-byte `.obj` files. The downstream `Lib.exe` then fails with `LNK1136: invalid or corrupt file`. **Fix:** export `CMAKE_BUILD_PARALLEL_LEVEL=4` (now baked into the wrapper script). Build time goes from ~5 min (when it works) to ~10 min, but the OOM is gone.
+- **Finding 3 — Em-dashes in PowerShell scripts break `-File` invocations.** `powershell -File` reads the script as system code page (cp1252 on US Windows), not UTF-8. UTF-8 em-dashes (U+2014, three bytes `E2 80 94`) get split into bogus tokens (e.g. `'\libnvvp'`), parser fails downstream of the actual problem with a misleading "Unexpected token" error. **Fix:** stick to ASCII hyphens in `.ps1` files. Markdown / Rust source / ADRs can use em-dashes freely.
+- **Finding 4 — `powershell -Command` eats the `--` argument delimiter; `-File` preserves it.** This kills `cargo clippy ... -- -D warnings`-style invocations. PowerShell's `-Command` parser silently swallows the `--`, sending `-D warnings` to cargo-clippy directly, which forwards it to `cargo check`, which errors out with `unexpected argument '-D'`. **Fix:** the wrapper script uses no `param` block and no `[CmdletBinding()]` — it grabs everything from `$args` — and all callers invoke via `-File`, not `-Command`.
+- **Finding 5 — cmd.exe `%ERRORLEVEL%` expands at PARSE time, not run time, across `&` separators.** Writing `powershell ... & echo exit:%ERRORLEVEL%>exit.log` captures the previous-iteration exit code (typically 0), NOT the just-finished powershell's exit. **Fix:** use `call echo exit:%^ERRORLEVEL%` — the `^` escapes the `%` past parse-time, and `call` re-parses the line at run-time. Now exit codes propagate correctly.
+- **Finding 6 — PowerShell pipelines treat native-command stderr as terminating errors under various `Tee-Object` / `*>&1` combinations.** Cargo writes "Compiling …" progress lines to stderr; under the wrong stream config, PowerShell promotes these to `NativeCommandError` and kills cargo mid-build. **Fix:** the wrapper invokes cargo via `& cmd.exe /c "cargo ARGS 2>&1"` — merging streams INSIDE cmd.exe means PowerShell only sees a unified text stream, no error promotion. `$ErrorActionPreference = 'Continue'` immediately before the cargo call adds belt-and-braces protection.
+- **Action — all six findings now codified in `scripts/cargo-with-cuda.ps1`.** Future iterations should call `pwsh scripts/cargo-with-cuda.ps1 <cargo-args>` rather than reinventing the env-setup wheel.
+
+---
+
+## 2026-05-17 [phase-3-wave-1] Wave 1 retrospective
+
+**Delivered:** 5 ADRs (0015–0019), 16 module scaffolds across `hotkey/`, `injection/`, `window_context/`, `AppError::Hotkey` + `AppError::Injection` variants, `phf` workspace dep, broader `windows-rs` feature set (UI_WindowsAndMessaging + UI_Input_KeyboardAndMouse + System_DataExchange + System_Memory + System_Threading + System_ProcessStatus), and a reusable `scripts/cargo-with-cuda.ps1` build wrapper.
+
+**Surprised:** six separate PowerShell / cmd.exe / cmake / nvcc papercuts before the cargo gate went green. Each was one specific subtlety — ASCII-only scripts, parallelism cap, `-File` vs `-Command`, `%^ERRORLEVEL%`, cmd.exe stream merging, $ErrorActionPreference scope. Lost about 90 minutes here. None of these would have surfaced from "just write Rust code" planning — they only show up the first time a fresh shell tries to run the gate after Phase 2.
+
+**Deferred:** none. All Wave 1 deliverables landed in one iteration.
+
+**Carry-forward:**
+- Wave 2 implementor (injection-author + code-puppy) MUST use `pwsh scripts/cargo-with-cuda.ps1` for every cargo call. No inline env setup; the script is the contract.
+- Default for `WinKeyboardHook` is a non-derived impl that sets `vk = VK_RMENU`. Wave 3 must reconsider when the conflict probe (ADR 0019) resolves the binding — the constructor should accept a `vk` parameter.
+- The `block-bare-paste` hook (`scripts/hooks/warn-bare-clipboard-set.py`) is shell-side only. Rust-side static enforcement of "only `injection/paste.rs` calls `SetClipboardData`" is deferred to a clippy lint or rust-analyzer rule in a later wave — YAGNI for Wave 1.
+
+**Numbers:** 13 new tests (164 / 164 passing). 16 new files. ~600 net lines of code (counted in implementation files; ADRs are separate ~1100 lines). ADRs 0015–0019 sealed. bd tasks closed: 6 of 24 (mb-q1z, mb-3az, mb-anl, mb-jzm, mb-dlo, mb-rne).
+
+---
+
 ## 2026-05-16 [phase-2] CUDA 12.8 install + GPU re-enable success story
 - **Context:** Wave 4 punted CUDA because chocolatey only ships CUDA 13.2.1, which is too new (deprecated ggml archs + empty MSBuild `CudaToolkitDir`). Wave 5 finale: install CUDA 12.8 manually from developer.nvidia.com, side-by-side with the existing 13.2.
 - **Finding 1 — Side-by-side works fine.** CUDA Toolkit installations live in version-suffixed dirs (`v12.8\`, `v13.2\`) under `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\`. The installer asks about this politely (the "Environment Variable Check" dialog at the end is informational, not an action item) — pick custom install, uncheck Nsight / Documentation / Display Driver / HD Audio (the driver components would DOWNGRADE you from a newer driver), KEEP `Development` + `Runtime` + **`Visual Studio Integration`** under CUDA. Visual Studio Integration is the one that ships `.targets`/`.props` files into the VS BuildTools BuildCustomizations dir — without it cmake's VS generator can't build CUDA at all.

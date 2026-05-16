@@ -43,6 +43,9 @@ thiserror          = { workspace = true }
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true }
 
+# Phase 3 — per-app injection-strategy override table (ADR 0016).
+phf     = { workspace = true }
+
 [dev-dependencies]
 tempfile  = { workspace = true }
 rstest    = { workspace = true }
@@ -56,5 +59,10 @@ harness = false
 
 # Notes:
 # - Phase 2 Wave 4 added `whisper-rs` (currently CPU-only; see bd mb-ltq).
-# - Phase 3 will add `enigo` for SendInput fallback.
+# - Phase 3 adds `phf` for the injection-strategy override table (ADR 0016)
+#   and broader `windows` features for hotkey + injection + window-context
+#   (ADRs 0015 / 0017 / 0018 / 0019).
+# - `enigo` deliberately NOT used — raw `SendInput` via `windows-rs` gives us
+#   Unicode surrogate-pair handling that `enigo` historically botches.
+# - `tauri-plugin-global-shortcut` deliberately NOT used — see ADR 0015.
 # - `tauri-plugin-sql` deliberately NOT included — see ADR 0004.

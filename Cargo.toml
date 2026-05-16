@@ -73,11 +73,30 @@ chrono         = { version = "0.4", features = ["serde"] }
 uuid           = { version = "1", features = ["v4", "serde"] }
 thiserror      = "1"
 
-# Windows-only OS surface (path/registry helpers).
+# Windows-only OS surface.
+# Phase 1 features: Foundation + UI_Shell (path/registry helpers).
+# Phase 3 features (hotkey + injection + window context):
+#   - UI_WindowsAndMessaging: SetWindowsHookEx, GetForegroundWindow,
+#     GetGUIThreadInfo, GetWindowTextW, GetWindowLongPtrW
+#   - UI_Input_KeyboardAndMouse: SendInput + KEYBDINPUT + VIRTUAL_KEY
+#   - System_DataExchange: clipboard open/set/get/enum (ONLY paste.rs)
+#   - System_Memory: GlobalAlloc / GlobalLock for clipboard HGLOBAL
+#   - System_Threading: GetCurrentThreadId for hook thread bookkeeping
+#   - System_ProcessStatus: GetModuleBaseNameW for foreground process name
 windows        = { version = "0.56", features = [
     "Win32_Foundation",
     "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
+    "Win32_System_ProcessStatus",
 ] }
+
+# Phase 3 — Static per-app injection-strategy override table.
+# Zero-allocation compile-time lookup. See ADR 0016.
+phf            = { version = "0.11", features = ["macros"] }
 
 # Dev / test helpers.
 tempfile       = "3"

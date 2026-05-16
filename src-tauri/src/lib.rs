@@ -16,10 +16,13 @@ pub mod audio;
 pub mod commands;
 pub mod db;
 pub mod error;
+pub mod hotkey;
+pub mod injection;
 pub mod logging;
 pub mod settings;
 pub mod stt;
 pub mod tray;
+pub mod window_context;
 
 use tauri::Manager;
 

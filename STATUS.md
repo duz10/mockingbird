@@ -1,8 +1,24 @@
 # Mockingbird — STATUS
 
-**Current phase:** Phase 2 — ✅ **COMPLETE** (sealed at `phase-2-complete` tag); Phase 3 queued
-**Last updated:** 2026-05-16 (Phase 2 sealed)
-**Last successful judge run:** _Phase-2-complete cargo gate: 151/151 tests on GPU (`--release`), clippy `--release -D warnings` clean, fmt clean, 2026-05-16. CUDA 12.8 verified on RTX 2060 — `gpu_used=true` in stt_test JSON, ggml_cuda_init registers CUDA0 backend, 573 MB model loaded into GPU memory, 716 ms cold latency on silent.wav._
+**Current phase:** Phase 3 — Wave 1 ✅ **COMPLETE**; Wave 2 IN PROGRESS
+**Last updated:** 2026-05-17 (Phase 3 Wave 1 finished)
+**Last successful judge run:** _Phase-3 Wave-1 cargo gate: 164/164 tests on GPU (`--release`), clippy `--release --all-targets -- -D warnings` clean, fmt clean, 2026-05-17._
+
+**Blocked on:** nothing — Wave 2 ready to start (mb-dl2, mb-pux, mb-tye, mb-7xs all unblocked).
+
+---
+
+## Phase 3 progress (current)
+
+| Wave | Deliverables                                                                                                                                                                                                                                                       | Status |
+|------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|
+| 1    | ADRs 0015–0019 (low-level hook, injection strategy, secure-input guard, clipboard save/restore, hotkey conflict probe), `AppError::Hotkey/Injection` variants, `phf` dep, broader `windows-rs` feature set, 16 module scaffolds across `hotkey/` `injection/` `window_context/`, `scripts/cargo-with-cuda.ps1` wrapper, 164/164 tests | ✅ |
+| 2    | `window_context/windows.rs`, `hotkey/state.rs` (pure §6.1), `injection/secure_guard.rs`, `injection/strategy.rs` (phf table)                                                                                                                                       | 🚧 |
+| 3    | `hotkey/windows.rs` (`WH_KEYBOARD_LL` hook), synthetic-event integration tests, conflict probe, tray pause toggle                                                                                                                                                  | ⏳ |
+| 4    | `injection/paste.rs` clipboard save/restore, `injection/windows.rs` SendInput, orchestrator `dictation.rs`, DB persistence, recording-window stub, cross-app QA matrix                                                                                              | ⏳ |
+| 5    | 4 new judges + retrospective + seal `phase-3-complete`                                                                                                                                                                                                             | ⏳ |
+
+bd: 24 tasks seeded; 6 closed (Wave 1 done), 5 ready (Wave 2), 13 blocked downstream.
 
 ---
 
