@@ -246,6 +246,21 @@ impl HotkeyStateMachine {
             return StateAction::None;
         }
 
+        // PipelineComplete is the orchestrator's signal that
+        // `complete()` / `discard()` finished. Routes to the
+        // existing `complete_processing()` method which transitions
+        // `Processing → Idle`. Without this, the machine sticks in
+        // `Processing` after the first hold (§6.1 ignores KeyDown
+        // there) — silently breaking every subsequent hold.
+        //
+        // Idempotent: `complete_processing` is a no-op in any state
+        // other than `Processing`, so spurious / duplicate
+        // PipelineComplete events can't corrupt state.
+        if matches!(ev, HotkeyEvent::PipelineComplete) {
+            self.complete_processing();
+            return StateAction::None;
+        }
+
         match (self.state, ev) {
             // ---- IDLE ----
             (HotkeyState::Idle, HotkeyEvent::KeyDown { vk, at }) => {
@@ -776,6 +791,47 @@ mod tests {
             at: at(t, 1_000),
         });
         m.complete_processing();
+        assert_eq!(*m.state(), HotkeyState::Idle);
+    }
+
+    /// Wave 4.8 regression: PipelineComplete event must route to
+    /// `complete_processing()`. Without this routing the second hold
+    /// of any session is silently dropped (machine stays in
+    /// `Processing` forever — production was missing the only
+    /// production caller of complete_processing).
+    #[test]
+    fn pipeline_complete_event_returns_processing_to_idle() {
+        let mut m = machine();
+        let t = t0();
+        m.handle(HotkeyEvent::KeyDown { vk: VK, at: t });
+        m.handle(HotkeyEvent::Tick { at: at(t, 80) });
+        m.handle(HotkeyEvent::KeyUp {
+            vk: VK,
+            at: at(t, 1_000),
+        });
+        assert!(matches!(m.state(), HotkeyState::Processing { .. }));
+
+        let act = m.handle(HotkeyEvent::PipelineComplete);
+        assert_eq!(act, StateAction::None);
+        assert_eq!(*m.state(), HotkeyState::Idle);
+
+        // Critical: a new KeyDown after PipelineComplete must be
+        // accepted (this is the bug Dustin reported live).
+        let act2 = m.handle(HotkeyEvent::KeyDown {
+            vk: VK,
+            at: at(t, 2_000),
+        });
+        assert_eq!(act2, StateAction::None); // PendingHold, not yet StartCapture
+        assert!(matches!(m.state(), HotkeyState::PendingHold { .. }));
+    }
+
+    /// PipelineComplete in any non-Processing state is a tolerated
+    /// no-op (idempotent). Guards against double-signal hazards.
+    #[test]
+    fn pipeline_complete_event_in_idle_is_noop() {
+        let mut m = machine();
+        let act = m.handle(HotkeyEvent::PipelineComplete);
+        assert_eq!(act, StateAction::None);
         assert_eq!(*m.state(), HotkeyState::Idle);
     }
 

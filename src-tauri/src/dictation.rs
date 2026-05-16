@@ -53,7 +53,7 @@
 pub mod runtime;
 
 use std::collections::HashMap;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -65,6 +65,7 @@ use crate::cleanup::Cleaner;
 use crate::db::sessions::{self, NewSession, ProcessingCompletion, SessionStatus};
 use crate::error::{AppError, AppResult};
 use crate::hotkey::state::StateAction;
+use crate::hotkey::HotkeyEvent;
 use crate::injection::secure_guard::SecureInputGuard;
 use crate::injection::strategy::InjectionStrategy;
 use crate::injection::{InjectionOutcome, Injector};
@@ -110,6 +111,14 @@ pub struct DictationOrchestrator {
     config: OrchestratorConfig,
     user_overrides: HashMap<String, InjectionStrategy>,
 
+    /// Feedback channel to the hotkey driver. After every
+    /// `complete()` / `discard()` (including error paths) we emit
+    /// `HotkeyEvent::PipelineComplete` so the §6.1 state machine can
+    /// transition `Processing → Idle`. Without this signal the
+    /// machine sticks in `Processing` after one hold and ignores
+    /// every subsequent KeyDown.
+    hotkey_tx: Sender<HotkeyEvent>,
+
     // Per-session transient state.
     state: SessionState,
 }
@@ -145,6 +154,7 @@ impl DictationOrchestrator {
         db: Arc<Mutex<Connection>>,
         config: OrchestratorConfig,
         user_overrides: HashMap<String, InjectionStrategy>,
+        hotkey_tx: Sender<HotkeyEvent>,
     ) -> Self {
         Self {
             audio,
@@ -158,7 +168,26 @@ impl DictationOrchestrator {
             db,
             config,
             user_overrides,
+            hotkey_tx,
             state: SessionState::default(),
+        }
+    }
+
+    /// Send `PipelineComplete` to the state-machine driver.
+    ///
+    /// Called at the end of every terminal orchestrator action
+    /// (`complete()`, `discard()`, and the persistence-helper error
+    /// paths invoked from inside `complete()`). The state machine
+    /// uses this to transition `Processing → Idle`; without it the
+    /// machine sticks in `Processing` and silently ignores all
+    /// further hotkey events per §6.1.
+    ///
+    /// Send failure is tracing-logged but not propagated: if the
+    /// driver is gone, we're shutting down anyway and the orchestrator
+    /// will see its own action channel close on the next iteration.
+    fn signal_pipeline_complete(&self) {
+        if let Err(e) = self.hotkey_tx.send(HotkeyEvent::PipelineComplete) {
+            tracing::warn!(error = ?e, "could not signal PipelineComplete — driver gone?");
         }
     }
 
@@ -180,8 +209,21 @@ impl DictationOrchestrator {
         match action {
             StateAction::None => Ok(()),
             StateAction::StartCapture(_mode) => self.start_capture(),
-            StateAction::StopCapture => self.complete(),
-            StateAction::DiscardAudio => self.discard(),
+            // Wave 4.8: every terminal action MUST emit
+            // PipelineComplete back to the state machine, even on
+            // pipeline error. Centralised here (not inside
+            // complete()/discard()) so the signal can't get lost in
+            // an early-return error path inside the helpers.
+            StateAction::StopCapture => {
+                let result = self.complete();
+                self.signal_pipeline_complete();
+                result
+            }
+            StateAction::DiscardAudio => {
+                let result = self.discard();
+                self.signal_pipeline_complete();
+                result
+            }
             StateAction::ShowConfirmCancel => {
                 // Wave 5 surfaces the tray toast. For now: log.
                 tracing::info!("confirm-cancel UI requested (Wave 5 will render)");

@@ -71,6 +71,17 @@ impl PauseHandle {
         self.set(next)?;
         Ok(next)
     }
+
+    /// Hand out another `Sender` for the same channel.
+    ///
+    /// Used by the dictation thread (Wave 4.8) to inject
+    /// `HotkeyEvent::PipelineComplete` after each session completes.
+    /// Sharing the existing channel keeps event ordering well-
+    /// defined: pipeline completion can never be reordered before
+    /// the KeyUp that triggered it.
+    pub fn sender_clone(&self) -> Sender<HotkeyEvent> {
+        self.events.clone()
+    }
 }
 
 #[cfg(test)]

@@ -532,3 +532,71 @@ Format:
   followed by `SELECT COUNT(*) FROM sqlite_master WHERE type='trigger'`
   for the ground truth. The integration test asserts the ground truth
   (`trigger_count_is_14`) and that's the canonical check.
+
+
+## 2026-05-16 — Phase 3 Wave 4.8 — Test-only callers are landmines
+
+**Symptom.** First hold-release dictation cycle worked end-to-end.
+Second + third hold did nothing: no beep, no log entry, no audio
+captured. The LL hook was firing fine, the orchestrator was alive,
+the audio layer was restartable (Wave 4.8 fix #1) — but the §6.1
+state machine sat in `Processing` forever and
+`(Processing, _) => StateAction::None` silently dropped every event.
+
+**Root cause.** `HotkeyStateMachine::complete_processing()` was the
+designated `Processing → Idle` transition method. It had unit tests
+(`complete_processing_returns_to_idle`,
+`complete_processing_in_idle_is_noop`). It had docstrings. The
+state-machine module looked complete.
+
+It had **zero production callers**. `grep complete_processing`
+across the whole codebase returned only the method definition + its
+tests. The orchestrator never signalled "pipeline done" back to the
+driver, so the machine never transitioned.
+
+**Why it slipped through review.**
+1. The state-machine unit tests called `complete_processing()`
+   directly — they exercised the transition without exercising the
+   wiring.
+2. The orchestrator's own tests (`pipeline::tests`) tested decision
+   logic, not the full action-loop.
+3. There was no end-to-end smoke test that ran two consecutive
+   hold-release cycles through the real runtime. Phase 3 Wave 5 is
+   when integration testing was planned.
+
+**The fix.**
+- Added `HotkeyEvent::PipelineComplete` variant — back-channel from
+  dictation thread to driver thread.
+- State machine routes `PipelineComplete` to the existing
+  `complete_processing()` method (idempotent: no-op outside
+  `Processing`).
+- Orchestrator's `handle()` wraps `StopCapture` + `DiscardAudio`
+  with a `signal_pipeline_complete()` call AFTER the inner method
+  returns — guaranteed signal even on pipeline error, no risk of
+  losing the signal in an early-return error path.
+- `PauseHandle::sender_clone()` exposes the existing hotkey channel
+  Sender for the dictation thread to use (same channel as
+  PauseToggle — preserves event ordering wrt KeyUp).
+
+**Lessons.**
+1. **`grep <method_name>` looking only at non-test results is a
+   useful pre-commit check** for any method that's supposed to be
+   wired into production. If the only callers are tests, it's not
+   wired — regardless of how complete it looks.
+2. **State-machine handshake protocols need a counterpart end-to-
+   end smoke test**, not just unit tests of each transition. Two
+   consecutive sessions is the minimum useful smoke for any state
+   machine that has a "completion ack" step.
+3. **Centralise mandatory signals in the dispatch site**, not the
+   per-branch helpers. `handle()` wrapping
+   `let r = self.complete(); self.signal_pipeline_complete(); r`
+   guarantees the signal fires on every code path through complete,
+   including the four `persist_failed_*` early-returns. Sprinkling
+   the signal at every return site of complete() would have been
+   DRY-violating and bug-prone.
+4. **Audio capture restartability (Wave 4.8 fix #1) was a real bug
+   masked by this one.** Both needed to be fixed. The producer-slot
+   bug would have surfaced on cycle 2 if the state machine had
+   actually transitioned out of Processing. Lucky-ish that both
+   showed at once — could have been a long debugging session if
+   they'd shown up sequentially.

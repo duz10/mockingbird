@@ -56,6 +56,13 @@ pub enum HotkeyEvent {
     Tick { at: Instant },
     /// The tray "Pause dictation" toggle changed state.
     PauseToggle { paused: bool },
+    /// The orchestrator's `complete()` / `discard()` finished. Drives
+    /// the §6.1 `Processing → Idle` transition, which the state
+    /// machine can't make on its own (the orchestrator owns the
+    /// pipeline completion signal). Without this, the machine is
+    /// stuck in `Processing` after the first hold and silently
+    /// drops every subsequent KeyDown per §6.1.
+    PipelineComplete,
 }
 
 /// Listens for the configured global hotkey and yields key-down +

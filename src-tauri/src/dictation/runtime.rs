@@ -118,14 +118,26 @@ impl DictationRuntime {
         std::mem::forget(driver_handle);
 
         // 5. Dictation thread. !Send deps live inside.
+        //
+        // The dictation thread also needs a `Sender<HotkeyEvent>` so
+        // the orchestrator can emit `PipelineComplete` back to the
+        // driver after each session — without it, the state machine
+        // sticks in `Processing` after one hold (§6.1 ignores
+        // KeyDown there). Clones the same Sender the hook uses.
         let recording_window = RecordingWindow::new();
         let rw_clone = recording_window.clone();
+        let pipeline_complete_tx = pause.sender_clone();
         let dictation_join = std::thread::Builder::new()
             .name("mockingbird-dictation".into())
             .spawn(move || {
-                if let Err(e) =
-                    run_dictation_thread(action_rx, rw_clone, db, config, user_overrides)
-                {
+                if let Err(e) = run_dictation_thread(
+                    action_rx,
+                    rw_clone,
+                    db,
+                    config,
+                    user_overrides,
+                    pipeline_complete_tx,
+                ) {
                     tracing::error!(error = ?e, "dictation thread bailed out");
                 }
             })
@@ -162,6 +174,7 @@ fn run_dictation_thread(
     db: Arc<Mutex<Connection>>,
     config: OrchestratorConfig,
     user_overrides: HashMap<String, InjectionStrategy>,
+    hotkey_tx: std::sync::mpsc::Sender<crate::hotkey::HotkeyEvent>,
 ) -> AppResult<()> {
     // Build !Send deps here on this thread. None cross thread boundaries.
     let audio = crate::audio::make_default_capture()?;
@@ -184,6 +197,7 @@ fn run_dictation_thread(
         db,
         config,
         user_overrides,
+        hotkey_tx,
     );
 
     orchestrator.run(actions)
