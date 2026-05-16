@@ -27,6 +27,10 @@ pub enum AppError {
     #[error("sqlite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
 
+    /// Logging / tracing-subscriber initialization failures.
+    #[error("tracing error: {0}")]
+    Tracing(String),
+
     /// Generic catch-all for early Phase 1; replaced by typed variants
     /// as concrete modules surface their errors.
     #[error("{0}")]

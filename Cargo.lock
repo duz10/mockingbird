@@ -1916,6 +1916,7 @@ dependencies = [
  "chrono",
  "mockall",
  "proptest",
+ "regex",
  "rstest",
  "rusqlite",
  "serde",

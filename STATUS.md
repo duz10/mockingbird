@@ -1,8 +1,8 @@
 # Mockingbird — STATUS
 
-**Current phase:** Phase 1 — Waves 1 + 2 + 3 ✅ landed; Waves 4-5 queued
-**Last updated:** 2026-05-15 (Phase 1 Wave 3 iteration)
-**Last successful judge run:** _Wave-3 cargo gate green (fmt/clippy/test/check) + **77/77** tests pass (64 unit + 7 db_migrations + 6 db_repos), 2026-05-15_
+**Current phase:** Phase 1 — Waves 1 + 2 + 3 + 4 ✅ landed; Wave 5 queued
+**Last updated:** 2026-05-15 (Phase 1 Wave 4 iteration)
+**Last successful judge run:** _Wave-4 cargo gate green (fmt/clippy/test/check) + **101/101** tests pass first run, 2026-05-15_
 **Cost line (cumulative):** _Track from first /goal run — bootstrap + Phase 0 + Phase 1 Waves 1+2 across two sessions; record when LLM judges run._
 
 ---
@@ -69,7 +69,7 @@ Install before kicking off `/phase2-goal`.
 
 ---
 
-## Phase 1 — Foundation: IN PROGRESS (Waves 1 + 2 + 3 ✅; Waves 4-5 queued)
+## Phase 1 — Foundation: IN PROGRESS (Waves 1 + 2 + 3 + 4 ✅; Wave 5 queued)
 
 Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks across 5 waves).
 
@@ -136,12 +136,36 @@ Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks a
 - `cargo test --workspace` ✅ — **77/77** PASS
 - `cargo fmt --check` ✅
 
-### Waves 4-5 — queued
+### Wave 4 — Logging + settings + tray + commands + app wire ✅ (commit pending)
 
-| Wave | Scope | bd tasks |
-|------|-------|----------|
-| 4 | App shell: logging (rotation + PII scrub), settings (typed facade), tray (placeholder menu), commands (#[tauri::command]s), app wire | `mb-uo1 mb-7si mb-yof mb-8og mb-nk5 mb-mpv` |
-| 5 | Docs flesh-out, lefthook live-fire verify, end-of-phase judges, seal commit + `phase-1-complete` tag | `mb-65j mb-20w mb-6op mb-l07 mb-6ph mb-3pn mb-dhi` |
+| File | Lines | Tests | Notes |
+|------|-------|-------|-------|
+| `src/logging.rs` | ~220 | 6 | Daily rolling appender + PII scrub MakeWriter (regex for sk-* + emails + literal USERPROFILE) |
+| `src/settings/model.rs` | ~120 | 4 | `SettingKey` enum (8 keys), `as_str`/`try_parse`/`default_value`/`all` |
+| `src/settings/mod.rs` | ~180 | 9 | Typed get/set facade, UPSERT, corrupt-value fallback, raw + typed paths |
+| `src/tray.rs` | ~75 | 2 | Tauri 2 TrayIconBuilder + 4-item menu + `handle_menu_event_pure` helper |
+| `src/commands.rs` | ~110 | 2 | `AppState{Mutex<Database>}`; `get_setting`/`set_setting`/`fts_smoke_test` |
+| `src/lib.rs` (edit) | +25 | — | logging init → DB open → `app.manage(AppState)` → tray → 3 commands |
+| `src/error.rs` (edit) | +4 | — | Added `Tracing(String)` variant |
+| `Cargo.toml` (edit) | +2 | — | Added `regex` workspace dep |
+
+**Cargo quality gate all four green first run:**
+- `cargo check --workspace` ✅
+- `cargo clippy --workspace --all-targets -- -D warnings` ✅ (no fixes needed)
+- `cargo test --workspace` ✅ — **101/101** PASS (88 unit + 7 db_migrations + 6 db_repos)
+- `cargo fmt --check` ✅
+
+### Wave 5 — queued
+
+| bd id    | Scope                                          |
+|----------|------------------------------------------------|
+| `mb-65j` | docs/CONTRIBUTING.md flesh-out                 |
+| `mb-20w` | docs/SETTINGS.md (now binding — Wave 4 ships keys) |
+| `mb-6op` | lefthook live-fire dry run on a commit         |
+| `mb-l07` | End-of-phase judge cards (rusqlite, FTS5 smoke, no-pack-agents) |
+| `mb-6ph` | Phase-1 retrospective in LESSONS.md            |
+| `mb-3pn` | Re-enable `#![warn(missing_docs)]` with proper docs |
+| `mb-dhi` | Seal commit + tag `phase-1-complete`           |
 
 **Note:** migrations 001-003 are **NOT YET SEALED**. The tag
 `phase-1-complete` lands at end of Wave 5 after all phase deliverables
