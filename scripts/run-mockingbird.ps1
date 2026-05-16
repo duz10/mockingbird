@@ -8,10 +8,18 @@
 # `WHISPER_MODEL_PATH` so first-run with non-standard model locations
 # Just Works.
 #
-# Usage (from project root):
+# Usage (the script is cwd-independent — runs from any directory):
+#
+#   # Windows PowerShell 5.1 (built-in):
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-mockingbird.ps1
+#
+#   # PowerShell 7+ (if you have `pwsh` installed):
 #   pwsh scripts/run-mockingbird.ps1
-#   pwsh scripts/run-mockingbird.ps1 -Foreground   # see stdout/stderr live
-#   pwsh scripts/run-mockingbird.ps1 -ModelsDir D:\models
+#
+# Flags:
+#   -Foreground            # run attached, see stdout/stderr live
+#   -ModelsDir D:\models   # override the default %USERPROFILE%\mockingbird_models
+#   -CudaRoot 'C:\...\v12.8'
 #
 # To stop: right-click tray → Quit, OR `taskkill /F /IM mockingbird.exe`.
 
