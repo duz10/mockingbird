@@ -26,7 +26,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 #[cfg(target_os = "windows")]
 use cpal::{Device, Host, SampleFormat, Stream, StreamConfig};
 #[cfg(target_os = "windows")]
-use ringbuf::traits::{Consumer, Producer, Split};
+use ringbuf::traits::{Consumer, Split};
 #[cfg(target_os = "windows")]
 use ringbuf::HeapRb;
 
@@ -44,7 +44,7 @@ pub const RING_CAPACITY: usize = 480_000;
 pub const DEVICE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 #[cfg(target_os = "windows")]
-type SampleProducer = <HeapRb<i16> as Split>::Prod;
+pub(super) type SampleProducer = <HeapRb<i16> as Split>::Prod;
 #[cfg(target_os = "windows")]
 type SampleConsumer = <HeapRb<i16> as Split>::Cons;
 
@@ -102,7 +102,12 @@ impl CpalCapture {
 
     /// Build the cpal stream for `device`, moving `producer` into the
     /// data callback. Returns the live stream.
-    fn build_stream(device: &Device, mut producer: SampleProducer) -> AppResult<Stream> {
+    ///
+    /// Accepts ANY device-native config and resamples / downmixes /
+    /// converts on the fly via [`super::resampler::AudioPipeline`].
+    /// The downstream consumer always sees `TARGET_SAMPLE_RATE` mono
+    /// `i16`, regardless of what the device exposed.
+    fn build_stream(device: &Device, producer: SampleProducer) -> AppResult<Stream> {
         let supported = device
             .default_input_config()
             .map_err(|e| AppError::Audio(format!("default_input_config: {e}")))?;
@@ -116,39 +121,67 @@ impl CpalCapture {
 
         let device_rate = config.sample_rate.0;
         let device_channels = config.channels;
-        let needs_resample =
-            device_rate != TARGET_SAMPLE_RATE || device_channels != TARGET_CHANNELS;
-        if needs_resample {
-            return Err(AppError::Audio(format!(
-                "device provides {device_rate} Hz / {device_channels} ch; \
-                 Wave 2 expects 16 kHz mono. Add rubato resampler — see ADR 0013."
-            )));
-        }
-        if sample_format != SampleFormat::I16 {
-            return Err(AppError::Audio(format!(
-                "device sample format is {sample_format:?}; Wave 2 expects i16. \
-                 Add conversion — see ADR 0013."
-            )));
-        }
+
+        let pipeline = super::resampler::AudioPipeline::new(device_rate, device_channels)?;
 
         let err_cb = |e| tracing::warn!(target: "audio", error = %e, "cpal stream error");
 
-        let stream = device
+        // Branch on cpal sample format. The callback closure captures
+        // both the pipeline and the producer; cpal type-checks `T` by
+        // the closure signature, so each arm needs its own typed call.
+        let stream = match sample_format {
+            SampleFormat::I16 => {
+                Self::build_i16_stream(device, &config, pipeline, producer, err_cb)?
+            }
+            SampleFormat::F32 => {
+                Self::build_f32_stream(device, &config, pipeline, producer, err_cb)?
+            }
+            other => {
+                return Err(AppError::Audio(format!(
+                    "unsupported cpal sample format {other:?}; supported: i16, f32"
+                )));
+            }
+        };
+
+        Ok(stream)
+    }
+
+    fn build_i16_stream(
+        device: &Device,
+        config: &StreamConfig,
+        mut pipeline: super::resampler::AudioPipeline,
+        mut producer: SampleProducer,
+        err_cb: impl FnMut(cpal::StreamError) + Send + 'static,
+    ) -> AppResult<Stream> {
+        device
             .build_input_stream(
-                &config,
+                config,
                 move |data: &[i16], _info: &cpal::InputCallbackInfo| {
-                    let pushed = producer.push_slice(data);
-                    if pushed < data.len() {
-                        let dropped = data.len() - pushed;
-                        tracing::warn!(target: "audio", dropped, "ring overflow");
-                    }
+                    pipeline.process_i16(data, &mut producer);
                 },
                 err_cb,
                 None,
             )
-            .map_err(|e| AppError::Audio(format!("build_input_stream: {e}")))?;
+            .map_err(|e| AppError::Audio(format!("build_input_stream<i16>: {e}")))
+    }
 
-        Ok(stream)
+    fn build_f32_stream(
+        device: &Device,
+        config: &StreamConfig,
+        mut pipeline: super::resampler::AudioPipeline,
+        mut producer: SampleProducer,
+        err_cb: impl FnMut(cpal::StreamError) + Send + 'static,
+    ) -> AppResult<Stream> {
+        device
+            .build_input_stream(
+                config,
+                move |data: &[f32], _info: &cpal::InputCallbackInfo| {
+                    pipeline.process_f32(data, &mut producer);
+                },
+                err_cb,
+                None,
+            )
+            .map_err(|e| AppError::Audio(format!("build_input_stream<f32>: {e}")))
     }
 
     /// Spawn the device-watcher thread. Runs until `watcher_alive`

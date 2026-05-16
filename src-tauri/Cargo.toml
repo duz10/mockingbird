@@ -30,6 +30,7 @@ regex              = { workspace = true }
 cpal               = { workspace = true }
 ringbuf            = { workspace = true }
 hound              = { workspace = true }
+rubato             = { workspace = true }
 
 # Phase 2 Wave 3 — VAD dep.
 ort                = { workspace = true }

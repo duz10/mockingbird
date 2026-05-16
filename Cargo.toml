@@ -40,6 +40,13 @@ regex          = "1"
 cpal           = "0.15"
 ringbuf        = "0.4"
 hound          = "3"
+# Sample-rate + channel-count conversion. cpal hands us whatever the
+# device's native config is (commonly 44.1 kHz or 48 kHz stereo f32 on
+# Windows); rubato downsamples to the 16 kHz mono i16 the rest of the
+# pipeline expects. ADR 0013 pre-approved this; Phase 2 deferred it
+# because the dev box happened to expose 16 kHz natively — but real
+# users almost never do.
+rubato         = "0.16"
 
 # Phase 2 — STT + VAD (heavy deps).
 # `ort` is the ONNX runtime for Silero VAD (ADR 0012). Default features
