@@ -166,9 +166,42 @@ Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks a
 - Phase 1 retrospective in LESSONS.md (~100 lines: delivered/test count/what worked/what surprised us/what we deferred/carry-forward/numbers).
 - Lefthook live-fire DEFERRED — binary not on dev PATH. Note in LESSONS for follow-up after install.
 
-## Phase 2 — STT + audio capture: QUEUED
+## Phase 2 — Audio capture & STT: IN PROGRESS (Wave 1 ✅; Waves 2-5 queued)
 
-Blocked on: nothing. Resume with `/agent code-puppy` → `/phase2-goal`.
+**Plan:** `docs/phases/phase2.md` (planning-agent session, 5 waves, 26 tasks).
+
+### Wave 1 — Decisions, deps, AppError, download, scaffolds ✅
+
+| File | Notes |
+|------|-------|
+| `docs/adr/0011-whisper-rs-cuda-build.md` | Build-time CUDA, runtime CPU fallback via `use_gpu=false` retry |
+| `docs/adr/0012-ort-runtime.md` | `ort = "2"` default features (bundled DLLs), Silero on disk |
+| `docs/adr/0013-cpal-ringbuf-design.md` | 16 kHz mono i16, 30 ms frames, 1 MB SPSC ringbuf, rubato deferred to Wave 2 |
+| `docs/adr/0014-model-storage-path.md` | `%LOCALAPPDATA%\Mockingbird\models\` + `MODEL_PATH` env override |
+| `Cargo.toml` + `src-tauri/Cargo.toml` | `cpal`/`ringbuf`/`hound` workspace deps; `ort` staged to W3, `whisper-rs` to W4 (cmake/CUDA gate) |
+| `src-tauri/src/error.rs` | +`Audio(String)` and `Stt(String)` variants |
+| `scripts/download-models.ps1` + `scripts/model-manifest.json` | BITS-resumable, SHA-256-verified, idempotent |
+| `src-tauri/src/audio/{mod,capture,vad}.rs` | `AudioCapture` + `VoiceActivityDetector` traits + Windows `todo!()` bodies |
+| `src-tauri/src/stt/{mod,whisper,prompt_builder}.rs` | `SpeechToText` trait + `Transcript` + `models_dir()` helper + Windows `todo!()` bodies + 3 unit tests |
+| `src-tauri/src/bin/stt_test.rs` | CLI harness scaffold (args parsing only; Wave 5 wires the pipeline) |
+| `src-tauri/src/lib.rs` | +`pub mod audio;` and `pub mod stt;` |
+
+**Cargo quality gate all four green:**
+- `cargo check --workspace` ✅ (zero warnings)
+- `cargo clippy --workspace --all-targets -- -D warnings` ✅
+- `cargo test --workspace` ✅ — **104/104** PASS (91 unit + 7 db_migrations + 6 db_repos)
+- `cargo fmt --check` ✅
+
+### Waves 2-5 — queued
+
+| Wave | Scope | Blocker |
+|------|-------|---------|
+| 2 | `cpal` Windows capture + ring buffer + default-device-changed handler + TTS fixtures | none |
+| 3 | Silero VAD via `ort` v2 + VAD trim helper | needs `silero_vad.onnx` downloaded (run `scripts/download-models.ps1`) |
+| 4 | whisper-rs CUDA init + 224-token prompt builder | **HARD BLOCKER:** cmake + CUDA Toolkit 12.x must be on PATH (`scripts/verify-environment.ps1` to be added) |
+| 5 | CLI harness + criterion bench + 3 new judges + `phase-2-complete` tag | depends on Wave 4 |
+
+Resume Wave 2 in a fresh session with `/agent code-puppy` → `/phase2-goal`. Wave 2 brief lives at `docs/phases/phase2-wave2-brief.md`.
 
 Carry-forward from Phase 1 (full list in LESSONS retrospective):
 - **Brief pattern is the default.** Write `docs/phases/phase2-waveN-brief.md` at the end of each wave with the next wave's full context. Pattern has shipped ~100% first-run test pass rates.

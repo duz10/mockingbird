@@ -33,6 +33,25 @@ tracing-appender   = "0.2"
 # Pattern matching for PII scrub layer.
 regex          = "1"
 
+# Phase 2 — Audio capture.
+# `cpal` is pure-Rust + thin OS wrappers (WASAPI / CoreAudio / ALSA).
+# `ringbuf` is the lock-free SPSC for the capture→consumer handoff.
+# `hound` is for WAV I/O (CLI harness + fixture loading in tests).
+cpal           = "0.15"
+ringbuf        = "0.4"
+hound          = "3"
+
+# Phase 2 — STT + VAD (heavy deps).
+# `ort` added in Wave 3 — ONNX runtime for Silero VAD. Pin minor.
+# `whisper-rs` added in Wave 4 — requires cmake + CUDA Toolkit on PATH
+#   at build time (ADR 0011). Adding it earlier breaks `cargo check`
+#   on machines without the C toolchain.
+# ort         = "2"
+# whisper-rs  = { version = "0.13", features = ["cuda"] }
+
+# Phase 2 — Benchmarks.
+criterion      = { version = "0.5", features = ["html_reports"] }
+
 # Std-adjacent.
 chrono         = { version = "0.4", features = ["serde"] }
 uuid           = { version = "1", features = ["v4", "serde"] }

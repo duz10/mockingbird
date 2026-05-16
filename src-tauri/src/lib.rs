@@ -12,11 +12,13 @@
 //! `PLAN-mockingbird-v2.md` for the design and `docs/phases/` for
 //! per-phase implementation plans.
 
+pub mod audio;
 pub mod commands;
 pub mod db;
 pub mod error;
 pub mod logging;
 pub mod settings;
+pub mod stt;
 pub mod tray;
 
 use tauri::Manager;

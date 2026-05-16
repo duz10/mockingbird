@@ -31,6 +31,14 @@ pub enum AppError {
     #[error("tracing error: {0}")]
     Tracing(String),
 
+    /// Audio capture / VAD failures (cpal, ort, ringbuf overflow).
+    #[error("audio error: {0}")]
+    Audio(String),
+
+    /// Speech-to-text failures (whisper-rs init, transcribe, model load).
+    #[error("stt error: {0}")]
+    Stt(String),
+
     /// Generic catch-all for early Phase 1; replaced by typed variants
     /// as concrete modules surface their errors.
     #[error("{0}")]

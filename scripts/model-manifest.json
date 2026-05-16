@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "description": "Model manifest for Mockingbird. Used by scripts/download-models.ps1. Per ADR 0014, models live at %LOCALAPPDATA%\\Mockingbird\\models\\ in production and <repo>/models/ in dev.",
+  "version": 1,
+  "models": [
+    {
+      "name": "whisper-large-v3-turbo-q5_0",
+      "filename": "ggml-large-v3-turbo-q5_0.bin",
+      "size_bytes": 1574000000,
+      "sha256": "TBD-pin-when-downloaded",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+      "phase": "2",
+      "wave": 4
+    },
+    {
+      "name": "silero-vad",
+      "filename": "silero_vad.onnx",
+      "size_bytes": 1810000,
+      "sha256": "TBD-pin-when-downloaded",
+      "url": "https://github.com/snakers4/silero-vad/raw/master/files/silero_vad.onnx",
+      "phase": "2",
+      "wave": 3
+    }
+  ]
+}

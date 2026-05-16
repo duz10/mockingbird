@@ -25,6 +25,11 @@ tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-appender   = { workspace = true }
 regex              = { workspace = true }
+
+# Phase 2 Wave 1 — Audio capture deps (whisper-rs + ort staged to their waves).
+cpal               = { workspace = true }
+ringbuf            = { workspace = true }
+hound              = { workspace = true }
 chrono             = { workspace = true }
 uuid               = { workspace = true }
 thiserror          = { workspace = true }
@@ -33,10 +38,11 @@ thiserror          = { workspace = true }
 windows = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
-rstest   = { workspace = true }
-proptest = { workspace = true }
-mockall  = { workspace = true }
+tempfile  = { workspace = true }
+rstest    = { workspace = true }
+proptest  = { workspace = true }
+mockall   = { workspace = true }
+criterion = { workspace = true }
 
 # Notes:
 # - Phase 2 will add `whisper-rs` (with CUDA feature), `cpal`, `ort`.
