@@ -17,6 +17,9 @@
 //! OS) from a hold (≥80 ms — start recording). See ADR 0015 for the
 //! rationale.
 
+pub mod driver;
+pub mod pause;
+pub mod probe;
 pub mod state;
 
 #[cfg(target_os = "windows")]

@@ -15,6 +15,27 @@ Format:
 ---
 
 
+## 2026-05-17 [phase-3-wave-3] WH_KEYBOARD_LL thread-local discipline
+
+- **Context:** Implementing `hotkey/windows.rs` real `SetWindowsHookEx(WH_KEYBOARD_LL, ...)` per ADR 0015. The callback is `unsafe extern "system" fn` — no captures, no closures, no `&self`. State has to live in a `static` somewhere.
+- **Finding:** The natural temptation is `static SENDER: Mutex<Option<Sender>> = ...`. **Don't.** The callback fires on the hook-installing thread (the only thread that ever touches it), so a `Mutex` adds zero safety and risks the 300 ms hook-watchdog timeout if any other code on the same process ever locks it. The right tool is `thread_local!(static SENDER: RefCell<Option<Sender>> = RefCell::new(None))`. Uncontended by construction.
+- **Action:** Used three `thread_local!` cells: `CALLBACK_TX` (the channel sender), `CALLBACK_VK` (configured VK for filtering), `CALLBACK_HHOOK` (owned hook handle for RAII unhook). All set on hook-thread entry, all cleared on exit. Drop order matters — unhook BEFORE dropping the sender (so a stray late callback can still no-op cleanly).
+
+## 2026-05-17 [phase-3-wave-3] Pure-vs-OS split makes WH_KEYBOARD_LL testable
+
+- **Context:** Without care, every test of `LowLevelKeyboardProc` would have to install a real hook + use real `SendInput`. Slow, flaky, and impossible on headless CI.
+- **Finding:** The callback's actual work is "decide if this message + VK is interesting, and if so emit which `HotkeyEvent`". That's a pure function: `fn classify_keystroke(wparam, vk_code, configured_vk, at) -> Option<HotkeyEvent>`. The OS-side glue (read `KBDLLHOOKSTRUCT`, `try_send`, `CallNextHookEx`) is a 10-line shim with no decisions in it. **9 of the 11 unit tests in `hotkey/windows.rs` exercise the pure helper** with synthesised message/VK pairs; the 2 remaining are `#[ignore]` live SendInput round-trips.
+- **Action:** Establish the pattern for the rest of Wave 3+: ANY new OS-bound module should split into a pure-helper file (or function) covered by fast unit tests, plus a thin OS shim that's `#[ignore]`-tested live. `hotkey/probe.rs` follows the same recipe (`probe_with` is pure, `probe_live` is the OS wrapper).
+
+## 2026-05-17 [phase-3-wave-3] State-driver tick cadence is not "as fast as possible"
+
+- **Context:** Designing `hotkey/driver.rs` — the loop that pulls from the listener channel + synthesises `HotkeyEvent::Tick` events when no real event arrives. First instinct: tick every 1 ms for sub-millisecond resolution.
+- **Finding:** 1 ms ticks are pointless. The §6.1 thresholds we care about are 80 ms (hold), 300 s (max session), 30 s (cancel-threshold), 3 s (confirm-timeout). The TIGHTEST resolution we ever need is 80 ms / 4 = 20 ms. Lower cadence means: less CPU wake-up overhead on battery, less syscall churn through `recv_timeout`, and the LL-hook watchdog logger (every 250th tick = 5 min @ 20 ms) gets a clean integer count.
+- **Action:** Default `DEFAULT_TICK_INTERVAL = Duration::from_millis(20)`. Tests in `driver.rs` use `Duration::from_millis(5)` for faster wall-clock test runs but the production constant stays 20 ms. **Generalisation:** when designing a tick loop, derive the cadence from the tightest deadline / (4 to 8), not from "feels precise."
+
+---
+
+
 ## 2026-05-17 [phase-3-wave-2] windows-rs 0.56 HWND is isize, not pointer
 
 - **Context:** Implementing `window_context/windows.rs` + `injection/secure_guard.rs`. First attempt used `.is_null()` and `*mut c_void` patterns that work in newer `windows-rs` releases.

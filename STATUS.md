@@ -1,10 +1,15 @@
 # Mockingbird — STATUS
 
-**Current phase:** Phase 3 — Waves 1 + 2 ✅ **COMPLETE**; Wave 3 IN PROGRESS
-**Last updated:** 2026-05-17 (Phase 3 Wave 2 finished)
-**Last successful judge run:** _Phase-3 Wave-2 cargo gate: 213/213 tests on GPU (`--release`), clippy `--release --all-targets -- -D warnings` clean, fmt clean, 2026-05-17._
+**Current phase:** Phase 3 — Waves 1 + 2 + 3 ✅ **COMPLETE**; Wave 4 PAUSED (needs Dustin)
+**Last updated:** 2026-05-17 (Phase 3 Wave 3 finished; STOPPING per task brief)
+**Last successful judge run:** _Phase-3 Wave-3 cargo gate: 244/244 tests on GPU (`--release`), clippy `--release --all-targets -- -D warnings` clean, fmt clean, 2026-05-17. +4 ignored live SendInput tests (run with `cargo test -- --ignored`)._
 
-**Blocked on:** nothing — Wave 3 ready to start (mb-7mp, mb-vrl, mb-cef, mb-q9e all unblocked). NOTE: Wave 4 needs Dustin at the keyboard for the cross-app injection checklist; code-puppy will STOP at end of Wave 3.
+**Blocked on:** 🛑 **Dustin** — Wave 4 is the cross-app injection wave. Before code-puppy can pick it back up, please:
+1. Skim `docs/phases/phase3-wave4-brief.md` (especially §"QA matrix" — 12 apps × ~30 s each).
+2. Confirm the design (clipboard save/restore closure API, focus-loss double-snapshot, secure-input guard ordering) looks right.
+3. Reply with "go on Wave 4" or specific tweaks. Once code-puppy lands the mechanical work, you'll do the QA-matrix pass at the keyboard.
+
+Ready tasks waiting: mb-cm3, mb-x7i, mb-8cd, mb-3yn, mb-vs3, mb-uhk (Wave 4).
 
 ---
 
@@ -14,7 +19,8 @@
 |------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|
 | 1    | ADRs 0015–0019 (low-level hook, injection strategy, secure-input guard, clipboard save/restore, hotkey conflict probe), `AppError::Hotkey/Injection` variants, `phf` dep, broader `windows-rs` feature set, 16 module scaffolds across `hotkey/` `injection/` `window_context/`, `scripts/cargo-with-cuda.ps1` wrapper, 164/164 tests | ✅ |
 | 2    | `window_context/windows.rs` (real `GetForegroundWindow` + `K32GetModuleBaseNameW` + `OwnedHandle` RAII), `hotkey/state.rs` (pure §6.1, 26 tests), `injection/secure_guard.rs` (`WinSecureInputGuard` with class allowlist + `ES_PASSWORD`; ADR 0017 amended), `injection/strategy.rs` (`phf::phf_map!` 12-entry override table + case-insensitive `resolve()`), 213/213 tests | ✅ |
-| 3    | `hotkey/windows.rs` (`WH_KEYBOARD_LL` hook on dedicated thread), state-machine driver with 20 ms tick cadence, ADR 0019 conflict probe with F23/F24/Ctrl+Shift+Space fallback, tray pause-toggle, watchdog log                                                       | 🚧 |
+| 3    | `hotkey/windows.rs` (`WH_KEYBOARD_LL` on dedicated `mockingbird-hotkey` thread, pure `classify_keystroke` helper with 9 tests), `hotkey/driver.rs` (20 ms tick cadence, 6 tests), `hotkey/probe.rs` (ADR 0019 fallback chain, 7 tests), `hotkey/pause.rs` (Arc<AtomicBool>+channel `PauseHandle`, 6 tests), 244/244 tests + 4 ignored live | ✅ |
+| 4    | `injection/paste.rs` clipboard save/restore (closure API + Drop guard), `injection/windows.rs` SendInput (Ctrl+V + KEYEVENTF_UNICODE), `dictation.rs` orchestrator (focus-loss double-snapshot + secure-input guard), DB persistence, `recording_window.rs` stub, **12-row cross-app QA matrix run by Dustin**  | 🛑 NEEDS DUSTIN |
 | 4    | `injection/paste.rs` clipboard save/restore, `injection/windows.rs` SendInput, orchestrator `dictation.rs`, DB persistence, recording-window stub, cross-app QA matrix                                                                                              | ⏳ |
 | 5    | 4 new judges + retrospective + seal `phase-3-complete`                                                                                                                                                                                                             | ⏳ |
 
