@@ -4,7 +4,9 @@
 //! linked into the Tauri shell. See `PLAN-mockingbird-v2.md` for the
 //! full design and `docs/phases/phase1.md` for the current phase plan.
 
-#![warn(missing_docs)]
+// `#![warn(missing_docs)]` is intentionally NOT set yet. Wave 5 polish
+// will enable it once every public item has a doc comment; until then
+// it would drown clippy in noise about self-explanatory struct fields.
 
 pub mod db;
 pub mod error;

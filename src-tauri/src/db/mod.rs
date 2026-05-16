@@ -13,6 +13,15 @@
 pub(crate) mod migrations;
 pub(crate) mod prompt_loader;
 
+// Wave 3 — repository modules.
+pub mod audit;
+pub mod dictionary;
+pub mod examples;
+pub mod prompts;
+pub mod search;
+pub mod sessions;
+pub mod transcripts;
+
 use rusqlite::Connection;
 use std::path::Path;
 

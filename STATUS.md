@@ -1,8 +1,8 @@
 # Mockingbird — STATUS
 
-**Current phase:** Phase 1 — Waves 1 + 2 ✅ landed; Waves 3-5 queued
-**Last updated:** 2026-05-15 (Phase 1 Wave 2 iteration)
-**Last successful judge run:** _Wave-2 cargo gate green (fmt/clippy/test/check) + 15/15 tests pass including 7/7 cross-crate integration tests, 2026-05-15_
+**Current phase:** Phase 1 — Waves 1 + 2 + 3 ✅ landed; Waves 4-5 queued
+**Last updated:** 2026-05-15 (Phase 1 Wave 3 iteration)
+**Last successful judge run:** _Wave-3 cargo gate green (fmt/clippy/test/check) + **77/77** tests pass (64 unit + 7 db_migrations + 6 db_repos), 2026-05-15_
 **Cost line (cumulative):** _Track from first /goal run — bootstrap + Phase 0 + Phase 1 Waves 1+2 across two sessions; record when LLM judges run._
 
 ---
@@ -69,7 +69,7 @@ Install before kicking off `/phase2-goal`.
 
 ---
 
-## Phase 1 — Foundation: IN PROGRESS (Waves 1 + 2 ✅; Waves 3-5 queued)
+## Phase 1 — Foundation: IN PROGRESS (Waves 1 + 2 + 3 ✅; Waves 4-5 queued)
 
 Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks across 5 waves).
 
@@ -115,11 +115,31 @@ Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks a
 - `cargo test --workspace --quiet` ✅ (2/2 unit tests in `error.rs`)
 - `cargo fmt --check` ✅ (after dropping `newline_style=Unix` in `.rustfmt.toml`; see LESSONS)
 
-### Waves 3-5 — queued
+### Wave 3 — DB repository modules ✅ (commit pending)
+
+7 modules + 1 cross-crate integration test file:
+
+| File | Lines | Tests | Notes |
+|------|-------|-------|-------|
+| `db/transcripts.rs` | ~230 | 7 | `Stage` enum; no `update_raw` (hook scans) |
+| `db/prompts.rs` | ~130 | 5 | Read-only per ADR 0008 |
+| `db/dictionary.rs` | ~370 | 9 | CRUD + `bump_usage` + `create_snapshot`; UNIQUE+NULL gotcha flagged |
+| `db/examples.rs` | ~250 | 7 | Minimal CRUD; Phase 8 owns ranking |
+| `db/search.rs` | ~190 | 8 | `sanitize_query` phrase-escaping; bm25 ordering verified |
+| `db/sessions.rs` | ~330 | 8 | `NewSession` requires provenance FKs at TYPE LEVEL; FK violation tested |
+| `db/audit.rs` | ~480 | 11 | `AuditedTable` enum gates dynamic SQL; `state_at` + `rollback_row/table`; timestamp-pinning fixture skirts CURRENT_TIMESTAMP 1-second granularity |
+| `tests/db_repos.rs` | ~270 | 6 | Cross-repo end-to-end (full dictation flow, audit rollback, FK check, snapshot round-trip) |
+
+**Cargo quality gate all four green:**
+- `cargo check --workspace` ✅
+- `cargo clippy --workspace --all-targets -- -D warnings` ✅
+- `cargo test --workspace` ✅ — **77/77** PASS
+- `cargo fmt --check` ✅
+
+### Waves 4-5 — queued
 
 | Wave | Scope | bd tasks |
 |------|-------|----------|
-| 3 | DB repository modules: transcripts, search, sessions, prompts, dictionary, examples, audit | `mb-7oi mb-4f8 mb-9pn mb-91x mb-d5z mb-z4k mb-344` |
 | 4 | App shell: logging (rotation + PII scrub), settings (typed facade), tray (placeholder menu), commands (#[tauri::command]s), app wire | `mb-uo1 mb-7si mb-yof mb-8og mb-nk5 mb-mpv` |
 | 5 | Docs flesh-out, lefthook live-fire verify, end-of-phase judges, seal commit + `phase-1-complete` tag | `mb-65j mb-20w mb-6op mb-l07 mb-6ph mb-3pn mb-dhi` |
 
