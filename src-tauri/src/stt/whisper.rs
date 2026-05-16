@@ -206,28 +206,29 @@ mod tests {
         assert!(!stt.gpu_loaded(), "force_cpu must yield CPU-loaded context");
     }
 
+    /// Post-Wave-5: tests default to GPU (the cuda feature is on).
+    /// The CPU-fallback path stays covered by
+    /// `force_cpu_constructs_without_gpu_attempt` above and by
+    /// `tests/whisper.rs::cpu_fallback_construct_succeeds`.
     #[test]
     fn transcribe_silent_audio_returns_short_text() {
         if !model_available() {
             return;
         }
-        let mut stt = WhisperStt::new_with_options(true).unwrap();
+        let mut stt = WhisperStt::new().unwrap(); // GPU-first
         let silent = vec![0i16; 16_000]; // 1 s
         let req = TranscribeRequest {
             audio: &silent,
             initial_prompt: None,
-            force_cpu: true,
+            force_cpu: false,
         };
         let tx = stt.transcribe(req).unwrap();
-        // Whisper may emit special tokens like "[BLANK_AUDIO]" for
-        // pure silence; assert it didn't fabricate a long sentence.
         assert!(
             tx.text.len() < 50,
             "silent audio produced unexpected text: {:?}",
             tx.text
         );
         assert_eq!(tx.model_id, MODEL_ID);
-        assert!(!tx.gpu_used);
     }
 
     #[test]
@@ -235,11 +236,11 @@ mod tests {
         if !model_available() {
             return;
         }
-        let mut stt = WhisperStt::new_with_options(true).unwrap();
+        let mut stt = WhisperStt::new().unwrap();
         let req = TranscribeRequest {
             audio: &vec![0i16; 16_000],
             initial_prompt: None,
-            force_cpu: true,
+            force_cpu: false,
         };
         let tx = stt.transcribe(req).unwrap();
         assert!(tx.latency_ms > 0, "latency_ms is zero — clock issue?");
@@ -250,11 +251,11 @@ mod tests {
         if !model_available() {
             return;
         }
-        let mut stt = WhisperStt::new_with_options(true).unwrap();
+        let mut stt = WhisperStt::new().unwrap();
         let req = TranscribeRequest {
             audio: &vec![0i16; 16_000],
             initial_prompt: Some("Hello world."),
-            force_cpu: true,
+            force_cpu: false,
         };
         let tx = stt.transcribe(req).unwrap();
         // Pure silence + a prompt shouldn't fabricate. Just verify it didn't error.

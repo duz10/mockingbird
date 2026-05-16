@@ -56,24 +56,14 @@ hound          = "3"
 # fetches the static lib) and add `ndarray` back explicitly.
 ort            = { version = "=2.0.0-rc.10", default-features = false, features = ["load-dynamic", "ndarray"] }
 
-# whisper-rs — Phase 2 Wave 4.
+# whisper-rs — Phase 2 Wave 4 / Wave 5 GPU re-enable.
 #
-# The `cuda` feature is intentionally OFF in Wave 4 because whisper-rs
-# 0.13's bundled whisper.cpp/ggml CUDA build fails against CUDA 13.x:
-#   1. ggml hard-codes CUDA architectures 52;61;70;75; CUDA 13 dropped
-#      pre-Turing support, MSBuild's CudaToolkitDir comes up empty
-#      against CUDA 13's integration files.
-#   2. Chocolatey ships only CUDA 13.2.1; no older version available.
-#
-# This is the EXACT scenario ADR 0011's runtime CPU fallback was
-# designed for. WhisperStt::new() tries `use_gpu=true` first; without
-# the cuda feature compiled in, whisper-rs falls back to CPU at runtime
-# (libwhisper.lib was built without CUDA kernels). When CUDA 12.x is
-# installed alongside CUDA 13 (manual install from developer.nvidia.com),
-# flip the feature back on and the GPU path activates automatically.
-#
-# See bd issue tracker for the GPU re-enable follow-up task.
-whisper-rs     = { version = "0.16" }
+# CUDA feature ON, built against CUDA 12.8 installed side-by-side with
+# the existing CUDA 13.2 (the chocolatey-default). CUDA_PATH points at
+# v12.8 to win the find_package(CUDAToolkit) lookup. ADR 0011's runtime
+# CPU fallback still applies if GPU init fails at app launch (driver
+# missing, OOM, etc) — see WhisperStt::new.
+whisper-rs     = { version = "0.16", features = ["cuda"] }
 
 # Phase 2 — Benchmarks.
 criterion      = { version = "0.5", features = ["html_reports"] }
