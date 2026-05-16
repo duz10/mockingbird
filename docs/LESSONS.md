@@ -118,3 +118,71 @@ Format:
 - **Action:** Budget the cold compile when planning iterations on a
   fresh checkout. CI should cache `target/` aggressively. Do NOT panic
   when cargo check appears to hang for 3-4 minutes on a fresh clone.
+
+## 2026-05-15 [phase-1] Wave-specific briefs ship integration-test pass rates above 90% on first compile
+- **Context:** Phase 1 Wave 2 — migrations 001-003 + runner + 7 integration tests.
+  The wave was preceded by `docs/phases/phase1-wave2-brief.md` (~300 lines)
+  written end-of-Wave-1 by code-puppy with fresh context, capturing every
+  design decision PLAN §7 didn't pin down: audit-trigger SQL extrapolated
+  to all 4 tables, runner file layout with function signatures,
+  integration-test specs with exact assertion counts, PLAN bug flagged
+  (`dictionary.OLD.enabled` doesn't exist).
+- **Finding:** With the brief, migration-author delivered 4 files in one
+  shot. Compile produced 9 trivial `From<rusqlite::Error>` errors (mechanical
+  fix — add a variant to AppError). **Tests: 15/15 passed first run, including
+  all 7 cross-crate integration tests.** Zero 5-attempt escalations. Zero
+  surprise architectural decisions made under pressure.
+- **Action:** **Pattern: at the end of every iteration, write a brief for
+  the next wave** with full context. Briefs that work well: full SQL/code
+  snippets (not just "do X"), exact assertion counts, flagged source-doc
+  bugs, explicit deviations from canonical (PLAN) with reasons, visibility
+  notes for cross-crate concerns. The cost (~one iteration of context to
+  write) pays back ~3x in implementation efficiency. Adopt for Waves 3, 4,
+  5 of Phase 1 and every multi-iteration phase going forward.
+
+## 2026-05-15 [phase-1] `#[cfg(test)]` does NOT carry across crate boundaries
+- **Context:** Wave 2 brief originally specified `#[cfg(test)]` on
+  `Database::open_in_memory()`. migration-author flagged: integration tests
+  in `src-tauri/tests/db_migrations.rs` are a **separate crate** from the
+  `src-tauri` library crate, so `#[cfg(test)]` items in `src-tauri/src/`
+  are invisible to them.
+- **Finding:** `#[cfg(test)]` only enables items when the **current crate**
+  is being compiled in test mode. Integration tests (`tests/*.rs`) build
+  the library crate in **release mode** (not test mode), then link against
+  it as a regular dependency. Items needed by integration tests must be
+  `pub` (or `pub(crate)` if behind a shim).
+- **Action:** For any helper that integration tests need (test-database
+  fixtures, `open_in_memory`, etc.): make it plain `pub` with a doc
+  comment marking it test-oriented. If you want to discourage production
+  callers, gate behind a Cargo feature like `test-helpers` instead of
+  `#[cfg(test)]`.
+
+## 2026-05-15 [phase-1] AppError variants are added per-module as the modules come online
+- **Context:** Wave 2 db module's first compile failed with 9 instances of
+  `From<rusqlite::Error>` not implemented for AppError.
+- **Finding:** I (code-puppy) preloaded AppError in Wave 1 with `Io` and
+  `Tauri` variants only — the others get added when their source modules
+  first compile. This is the right pattern (YAGNI: don't pre-declare error
+  variants for modules that don't exist yet) and the fix is mechanical
+  (add one `#[error("sqlite error: {0}")] Sqlite(#[from] rusqlite::Error)`
+  variant).
+- **Action:** When a new module fails to compile with `From<...>` errors,
+  the fix is always: add a `#[from]` variant to `AppError` in `error.rs`.
+  Don't refactor to module-local error types — the AppError aggregator is
+  the explicit project-wide pattern (per `.code_puppy/AGENTS.md` Rust
+  conventions). When in doubt, check `error.rs` first.
+
+## 2026-05-15 [phase-1] PowerShell Select-String matches inside comments — grep regexes need context
+- **Context:** Sanity-checking the trigger count after Wave 2: I expected 14
+  triggers (per the brief), but `Select-String -Pattern 'CREATE TRIGGER'`
+  returned 15.
+- **Finding:** One of those matches was inside a `--` SQL comment in
+  `002_audit_triggers.sql` ("-- new migration that CREATE TRIGGER IF NOT
+  EXISTS-replaces the offender"). Substring match doesn't distinguish
+  code from comments.
+- **Action:** For exact code counts, anchor the pattern: e.g.
+  `Select-String -Pattern '^CREATE TRIGGER'` (line starts with) or
+  `'^\s*CREATE TRIGGER'` (optional indent). Or use `sqlite3 :memory: < file.sql`
+  followed by `SELECT COUNT(*) FROM sqlite_master WHERE type='trigger'`
+  for the ground truth. The integration test asserts the ground truth
+  (`trigger_count_is_14`) and that's the canonical check.

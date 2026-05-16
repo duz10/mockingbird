@@ -23,6 +23,10 @@ pub enum AppError {
     #[error("tauri error: {0}")]
     Tauri(#[from] tauri::Error),
 
+    /// Wrap a `rusqlite::Error` from the DB layer.
+    #[error("sqlite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+
     /// Generic catch-all for early Phase 1; replaced by typed variants
     /// as concrete modules surface their errors.
     #[error("{0}")]

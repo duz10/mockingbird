@@ -1,9 +1,9 @@
 # Mockingbird — STATUS
 
-**Current phase:** Phase 1 — Wave 1 ✅ landed; Waves 2-5 queued for fresh-context iterations
-**Last updated:** 2026-05-15 (end of session containing bootstrap + Phase 0 + Phase 1 Wave 1)
-**Last successful judge run:** _Phase-0 structural self-check + Phase-1 Wave-1 cargo gate (fmt/clippy/test/check all green), 2026-05-15_
-**Cost line (cumulative):** _Track from first /goal run — bootstrap + Phase 0 + Phase 1 Wave 1 in one session; record when LLM judges run._
+**Current phase:** Phase 1 — Waves 1 + 2 ✅ landed; Waves 3-5 queued
+**Last updated:** 2026-05-15 (Phase 1 Wave 2 iteration)
+**Last successful judge run:** _Wave-2 cargo gate green (fmt/clippy/test/check) + 15/15 tests pass including 7/7 cross-crate integration tests, 2026-05-15_
+**Cost line (cumulative):** _Track from first /goal run — bootstrap + Phase 0 + Phase 1 Waves 1+2 across two sessions; record when LLM judges run._
 
 ---
 
@@ -69,11 +69,33 @@ Install before kicking off `/phase2-goal`.
 
 ---
 
-## Phase 1 — Foundation: IN PROGRESS (Wave 1 ✅)
+## Phase 1 — Foundation: IN PROGRESS (Waves 1 + 2 ✅; Waves 3-5 queued)
 
 Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks across 5 waves).
 
-### Wave 1 — Decisions, scaffolding, prompt stubs ✅
+### Wave 2 — Migrations + runner + integration tests ✅
+
+| File | What it does | Lines |
+|------|--------------|-------|
+| `src-tauri/src/db/migrations/001_initial.sql` | Core tables + FTS5 per PLAN §7 verbatim (BEGIN/COMMIT, PRAGMA WAL+FK) | 174 |
+| `src-tauri/src/db/migrations/002_audit_triggers.sql` | All 4 `_history_*` tables + **12 audit triggers** (4 tables × INSERT/UPDATE/DELETE) extrapolated per Wave 2 brief | 186 |
+| `src-tauri/src/db/migrations/003_seed_modes.sql` | Seed 3 prompts + 3 modes with `__PROMPT_*_BODY__` tokens + `(SELECT id FROM prompts ...)` sub-selects | 37 |
+| `src-tauri/src/db/mod.rs` | `Database::open(path)` + `::open_in_memory()` + `pub fn apply_migrations()` shim + PRAGMA gating + `integrity_check` + `foreign_key_check` | ~115 |
+| `src-tauri/src/db/migrations.rs` | Runner with `include_str!` + `schema_version` idempotency + 3 inline unit tests | ~110 |
+| `src-tauri/src/db/prompt_loader.rs` | Token substitution + SQL-quote escaping + 3 unit tests | ~80 |
+| `src-tauri/tests/db_migrations.rs` | 7 integration tests (schema_version=3, tables present, **14 triggers**, seeded data with audit fired, audit UPDATE before/after, FTS5 round-trip, idempotency via the shim) | 188 |
+| `src-tauri/src/lib.rs` | Wired `pub mod db;` + `.setup()` opens DB at `%APPDATA%/Mockingbird/mockingbird.db` | edit |
+| `src-tauri/src/error.rs` | Added `Sqlite(#[from] rusqlite::Error)` variant | edit |
+
+**Cargo quality gate all four green:**
+- `cargo check --workspace` ✅ (warm 5.5s)
+- `cargo clippy --workspace --all-targets -- -D warnings` ✅ (15.7s)
+- `cargo test --workspace` ✅ — **15/15** (5 unit + 3 unit + 7 cross-crate integration)
+- `cargo fmt --check` ✅ (after auto-fmt)
+
+**Delegation worked:** migration-author authored all 4 SQL/test files; code-puppy authored the runner + lib.rs wiring + error variant. Zero 5-attempt escalations. 15/15 tests pass first run.
+
+### Wave 1 — Decisions, scaffolding, prompt stubs ✅ (commit `8e70d7c`)
 
 | File | What it does |
 |------|--------------|
@@ -93,32 +115,32 @@ Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks a
 - `cargo test --workspace --quiet` ✅ (2/2 unit tests in `error.rs`)
 - `cargo fmt --check` ✅ (after dropping `newline_style=Unix` in `.rustfmt.toml`; see LESSONS)
 
-### Waves 2-5 — queued for next iteration
+### Waves 3-5 — queued
 
-| Wave | Scope | Notes |
-|------|-------|-------|
-| 2 | Migrations 001/002/003 + runner + integration tests | **Migrations are SEALED forever once `phase-1-complete` tag lands** — wants a fresh full-context iteration. Delegated to `migration-author` project agent. |
-| 3 | DB repository modules (7 files in `src-tauri/src/db/`) | Depends on Wave 2 runner. |
-| 4 | App shell: logging, settings, tray, commands, app wire | Parallel after Wave 2 runner. |
-| 5 | Docs flesh-out, lefthook live-fire verify, judges, seal + tag | Final iteration before phase-1-complete. |
+| Wave | Scope | bd tasks |
+|------|-------|----------|
+| 3 | DB repository modules: transcripts, search, sessions, prompts, dictionary, examples, audit | `mb-7oi mb-4f8 mb-9pn mb-91x mb-d5z mb-z4k mb-344` |
+| 4 | App shell: logging (rotation + PII scrub), settings (typed facade), tray (placeholder menu), commands (#[tauri::command]s), app wire | `mb-uo1 mb-7si mb-yof mb-8og mb-nk5 mb-mpv` |
+| 5 | Docs flesh-out, lefthook live-fire verify, end-of-phase judges, seal commit + `phase-1-complete` tag | `mb-65j mb-20w mb-6op mb-l07 mb-6ph mb-3pn mb-dhi` |
 
-### How to resume Phase 1 Wave 2 in a fresh session
+**Note:** migrations 001-003 are **NOT YET SEALED**. The tag
+`phase-1-complete` lands at end of Wave 5 after all phase deliverables
+are green and judges pass. Until then, fixes to 001-003 are permitted
+(hook `block-migration-edit-after-phase-1` checks tag existence).
+
+### How to resume Phase 1 Wave 3 in a fresh session
 
 1. `/agent code-puppy`
 2. `/phase1-goal`
-3. **Required reading for Wave 2** (in this order):
+3. **Required reading for Wave 3** (in this order):
    1. `.code_puppy/AGENTS.md`
    2. `docs/phases/phase1.md` (phase plan)
-   3. **`docs/phases/phase1-wave2-brief.md`** ← THIS IS BINDING for Wave 2
-   4. `docs/LESSONS.md` (10 entries; search for `[phase-1]` and `migration`)
-   5. `bd ready` (Wave 2 tasks `mb-4qg`, `mb-l6d`, `mb-7u9`, `mb-o0d`, `mb-rzf` are top)
-4. **Implementation plan, codified in the Wave 2 brief**:
-   - **DO NOT re-decide** audit-trigger column projections — the brief has the full SQL for all four `_history_*` tables, extrapolated from PLAN's dictionary-only example, with the dictionary `OLD.enabled` PLAN bug already worked around.
-   - **DO NOT re-decide** the runner file layout — the brief specifies `db/mod.rs` + `db/migrations.rs` + `db/prompt_loader.rs` with function signatures.
-   - **DO NOT re-decide** the integration-test set — the brief specifies 7 tests with exact assertion counts (trigger_count_is_14, history_prompts == 3 after seed, etc.).
-   - **DO** invoke `migration-author` for the three .sql files and the integration tests; the runner is code-puppy's.
-5. Wave 2 is **mechanical** at this point. Deviations from the brief require a LESSONS.md note explaining why.
-6. **DO NOT tag `phase-1-complete` at end of Wave 2.** The tag seals migrations forever and lands at Wave 5 after DB repos + app shell + judges run.
+   3. **`docs/phases/phase1-wave3-brief.md`** ← if it exists, BINDING; if not, code-puppy should write one at start of iteration before authoring DB repos
+   4. `docs/LESSONS.md` (now 14 entries; the brief-pattern lesson is the meta-lesson worth honoring)
+   5. `bd ready` (Wave 3 tasks `mb-7oi mb-4f8 mb-9pn mb-91x mb-d5z mb-z4k mb-344` are top)
+4. **What Wave 3 implements:** repository modules over the migrations Wave 2 sealed-in-spirit. Each module is a thin typed wrapper around `rusqlite::Connection` for one table family. **No `update_raw` method on transcripts** (hook scans for it). Mockall trait boundaries so unit tests don't need a real DB. `db::search.rs` is on the FTS5 smoke-test critical path.
+5. **Wave 3 is NOT migrations**, so no SEAL concerns. But the brief-pattern from Wave 2 worked beautifully (15/15 tests first try) — apply it again: write `docs/phases/phase1-wave3-brief.md` end-of-Wave-3 OR start-of-Wave-3 with the function signatures and test specs for each repo module.
+6. **DO NOT tag `phase-1-complete` at end of Wave 3.** Tag lands at Wave 5 after DB repos + app shell + judges run.
 
 ---
 
