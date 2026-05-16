@@ -19,7 +19,12 @@ use crate::error::AppResult;
 ///
 /// See ADR 0013 for the design rationale (frame size, ring-buffer
 /// sizing, default-device-changed handling).
-pub trait AudioCapture: Send {
+///
+/// **Not `Send` by design.** cpal's `Stream` is `!Send` on Windows
+/// (WASAPI handles are thread-bound). Phase 5 will own the recording
+/// thread; until then, construct on whichever thread will drive the
+/// capture lifecycle.
+pub trait AudioCapture {
     /// Begin capturing from the current default input device.
     fn start(&mut self) -> AppResult<()>;
 

@@ -172,7 +172,7 @@ Format:
   the explicit project-wide pattern (per `.code_puppy/AGENTS.md` Rust
   conventions). When in doubt, check `error.rs` first.
 
-## 2026-05-15 [phase-1] RETROSPECTIVE — Foundation phase complete
+
 
 ### Delivered (5 waves, 5 commits + 4 brief commits + seal)
 

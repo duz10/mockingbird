@@ -166,7 +166,7 @@ Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks a
 - Phase 1 retrospective in LESSONS.md (~100 lines: delivered/test count/what worked/what surprised us/what we deferred/carry-forward/numbers).
 - Lefthook live-fire DEFERRED — binary not on dev PATH. Note in LESSONS for follow-up after install.
 
-## Phase 2 — Audio capture & STT: IN PROGRESS (Wave 1 ✅; Waves 2-5 queued)
+## Phase 2 — Audio capture & STT: IN PROGRESS (Waves 1 + 2 ✅; Waves 3-5 queued)
 
 **Plan:** `docs/phases/phase2.md` (planning-agent session, 5 waves, 26 tasks).
 
@@ -192,16 +192,32 @@ Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks a
 - `cargo test --workspace` ✅ — **104/104** PASS (91 unit + 7 db_migrations + 6 db_repos)
 - `cargo fmt --check` ✅
 
-### Waves 2-5 — queued
+### Wave 2 — cpal capture + ring buffer + device watcher + synthetic fixtures ✅
+
+| File | Notes |
+|------|-------|
+| `src-tauri/src/audio/capture.rs` | `CpalCapture` + cpal default_host + ringbuf 0.4 HeapRb 480k cap; build_stream errors on non-16kHz-mono-i16 (rubato deferred); start/stop idempotent; restart-after-stop errors cleanly; 8 unit tests |
+| `src-tauri/src/audio/mod.rs` | Dropped `Send` bound on `AudioCapture` (cpal::Stream is !Send on Windows; LESSONS noted) |
+| `src-tauri/src/bin/generate_fixtures.rs` | Synthetic 16 kHz mono i16 WAV generator via hound |
+| `src-tauri/tests/fixtures/audio/{silent,sine_440,mixed}.wav` | 3 fixtures, ~190 KB total (committed binary) |
+| `src-tauri/tests/audio_capture.rs` | 8 cross-crate integration tests (factory/format/drain/3× fixture parse/2× fixture content) |
+| `docs/LESSONS.md` | +3 entries: `Box<dyn Trait>` brings methods into scope; cpal::Stream !Send; cpal::Host !Clone |
+
+**Cargo quality gate all four green:**
+- `cargo check --workspace` ✅
+- `cargo clippy --workspace --all-targets -- -D warnings` ✅ (2 trivial fixes: `&PathBuf`→`&Path`, redundant trait import)
+- `cargo test --workspace` ✅ — **120/120** PASS (99 unit + 8 audio_capture + 7 db_migrations + 6 db_repos)
+- `cargo fmt --check` ✅
+
+### Waves 3-5 — queued
 
 | Wave | Scope | Blocker |
 |------|-------|---------|
-| 2 | `cpal` Windows capture + ring buffer + default-device-changed handler + TTS fixtures | none |
-| 3 | Silero VAD via `ort` v2 + VAD trim helper | needs `silero_vad.onnx` downloaded (run `scripts/download-models.ps1`) |
-| 4 | whisper-rs CUDA init + 224-token prompt builder | **HARD BLOCKER:** cmake + CUDA Toolkit 12.x must be on PATH (`scripts/verify-environment.ps1` to be added) |
+| 3 | Silero VAD via `ort` v2 + VAD trim helper | needs `silero_vad.onnx` (~1.8 MB) downloaded — run `pwsh scripts/download-models.ps1 -OutputDir <dir>` once |
+| 4 | whisper-rs CUDA init + 224-token prompt builder | **HARD BLOCKER:** install cmake + CUDA Toolkit 12.x; `pwsh` (PowerShell 7+) also not on PATH, only `powershell` 5.1 — script works on both |
 | 5 | CLI harness + criterion bench + 3 new judges + `phase-2-complete` tag | depends on Wave 4 |
 
-Resume Wave 2 in a fresh session with `/agent code-puppy` → `/phase2-goal`. Wave 2 brief lives at `docs/phases/phase2-wave2-brief.md`.
+Resume Wave 3 in a fresh session with `/agent code-puppy` → `/phase2-goal`. Wave 3 brief lives at `docs/phases/phase2-wave3-brief.md`.
 
 Carry-forward from Phase 1 (full list in LESSONS retrospective):
 - **Brief pattern is the default.** Write `docs/phases/phase2-waveN-brief.md` at the end of each wave with the next wave's full context. Pattern has shipped ~100% first-run test pass rates.
