@@ -1,0 +1,50 @@
+# lefthook — git hook orchestration.
+# Phase 0 strategy: hooks fire on glob matches only. With no .rs/.ts/.tsx
+# files committed yet, every command is a no-op for free. Phase 1+ adds
+# Cargo.toml and package.json and the commands start doing real work.
+#
+# Install once:
+#   lefthook install
+#
+# Bypass an individual run (rarely): LEFTHOOK=0 git commit ...
+
+pre-commit:
+  parallel: true
+  commands:
+    rust-fmt:
+      glob: "*.rs"
+      run: cargo fmt --check -- {staged_files}
+      skip:
+        - merge
+        - rebase
+    rust-clippy:
+      glob: "*.rs"
+      run: cargo clippy --all-targets -- -D warnings
+      skip:
+        - merge
+        - rebase
+    ts-lint:
+      glob: "{*.ts,*.tsx}"
+      root: ui/
+      run: npm run lint -- --no-warn-ignored {staged_files}
+      skip:
+        - merge
+        - rebase
+    py-syntax:
+      glob: "scripts/hooks/*.py"
+      run: python -m py_compile {staged_files}
+
+pre-push:
+  parallel: false
+  commands:
+    rust-test:
+      glob: "*.rs"
+      run: cargo test --quiet
+      skip:
+        - rebase
+    ts-test:
+      glob: "{*.ts,*.tsx,*.test.ts,*.test.tsx}"
+      root: ui/
+      run: npm test --silent
+      skip:
+        - rebase

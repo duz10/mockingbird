@@ -51,6 +51,22 @@ Format:
   decode `.stdout` as `utf-8, errors='replace'`. The shared
   `scripts/hooks/_lib.py` has examples.
 
+## 2026-05-15 [phase-0] rust-toolchain.toml is a PIN, not an MSRV declaration
+- **Context:** Added `rust-toolchain.toml` with `channel = "1.77"` thinking
+  it would declare the project's MSRV. The next `rustc --version` call
+  triggered rustup to install Rust 1.77 (a downgrade from the dev's
+  installed 1.93), hanging the whole shell for ~40s.
+- **Finding:** `rust-toolchain.toml` is a hard pin — rustup auto-installs
+  the channel on *any* cargo/rustc invocation in that directory. MSRV
+  (minimum supported) is a separate concept and belongs in
+  `Cargo.toml`'s `[package] rust-version = "..."` field.
+- **Action:** Do NOT commit `rust-toolchain.toml` unless you genuinely
+  want every developer on the same exact Rust version. For "works on
+  1.77+", use `rust-version = "1.77"` in `Cargo.toml` (added in Phase 1).
+  Side lesson: `Get-Command rustc` in PowerShell will also block on the
+  toolchain auto-install — diagnosis was confusing because the hang
+  surfaces as a `Get-Command` hang, not a `rustup install` log.
+
 ## 2026-05-15 [bootstrap] Secret-scan hook needs a known-public-prefix allowlist
 - **Context:** The Tauri updater public key in STATUS.md tripped the
   high-entropy heuristic in `block-secret-commit.py` (152-char base64 token).

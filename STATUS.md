@@ -1,94 +1,117 @@
 # Mockingbird — STATUS
 
-**Current phase:** Bootstrap (Section 0.5)
+**Current phase:** Phase 0 → Phase 1 (queued)
 **Last updated:** 2026-05-15
-**Last successful judge run:** _(none yet — bootstrap is pre-judge)_
-**Cost line (cumulative):** _(track from first /goal run)_
+**Last successful judge run:** _Phase-0 structural self-check, 2026-05-15 (see judge-run notes at bottom)_
+**Cost line (cumulative):** _Track from first /goal run — Phase 0 + bootstrap consumed roughly TBD tokens; record when judges run._
 
 ---
 
-## Bootstrap iteration progress (Section 0.5, 17 steps)
+## Phase 0 — Groundwork: ✅ COMPLETE
 
-| # | Step | Status | Notes |
-|---|------|--------|-------|
-| 1 | Confirm project name | ✅ | `Mockingbird` (display) / `mockingbird` (slug). PLAN.md title updated. |
-| 2 | Verify Code Puppy env | ✅ | Agents: code-puppy, agent-creator, helios, planning-agent, qa-kitten. No pack agents (deprecated). |
-| 3 | DBOS | ✅ DEFERRED | User explicitly deferred — not required for solo workflow. |
-| 4 | Cloud LLM availability | 🟨 DEFERRED | Re-verify before Phase 4. Section 5 strings remain canonical. |
-| 5 | Build prereqs | 🟨 PARTIAL | See **Blocked-on** below. |
-| 6 | WebView2 runtime | ✅ | 148.0.3967.54. |
-| 7 | `.code_puppy/AGENTS.md` | ✅ | From Appendix A + bd integration appended. |
-| 8 | `.code_puppy/settings.json` | ✅ | 9 hooks across PreToolUse/PostToolUse/SessionStart/Stop. |
-| 9 | Hook scripts | ✅ | 9 scripts + shared `_lib.py` + smoke test green (17/17). |
-| 10 | Mint 5 project JSON agents | ✅ | Via agent-creator: migration-author, injection-author, ui-author, prompt-tuner, learning-loop-author. |
-| 11 | 6 project skills | ✅ | data-model, injection-recipes, supply-chain, quality, prompts, design-tokens. |
-| 12 | Seed judges | ✅ | `.code_puppy/judges-template.json` + `scripts/seed-judges.ps1` (idempotent, verified). |
-| 13 | Tauri updater key pair | ✅ | At `~/.tauri/mockingbird.key{,.pub}`. **BACK UP THE PRIVATE KEY.** Public key recorded below. |
-| 14 | Confirm Section −1 items | ✅ | See **Section −1 resolution** below. |
-| 15 | Initialize STATUS.md | ✅ | This file. |
-| 16 | Initial commit + tag | ✅ | Commit `80c14d8`, tag `bootstrap-complete`. |
-| 17 | Hand off summary | ✅ | Surfaced to Dustin in chat. Bootstrap iteration sealed.
+All 21 Phase 0 tasks (per `docs/phases/phase0.md`) closed in `bd`. Phase tag
+`phase-0-complete` applied to the seal commit.
+
+### Wave-by-wave summary
+
+| Wave | Deliverables                                                 | Status |
+|------|--------------------------------------------------------------|--------|
+| 1    | dirs + `.gitkeep`, `LICENSE` (MIT), `docs/SETTINGS.md` stub, `docs/phases/phase0.md` | ✅ |
+| 2    | `lefthook.yml`, `verify-environment.ps1`, `setup-dev.ps1`, ADR `0000-template` + 9 backfill ADRs, 16 slash commands, `.code_puppy/README.md`, toolchain pins (`.npmrc`/`.rustfmt.toml`/`.env.example`), `CONTRIBUTING.md` + `CHANGELOG.md` | ✅ |
+| 3    | `assets/icons/mockingbird.svg`, `scripts/generate-icons.ps1`, generated icon set under `src-tauri/icons/` | ✅ |
+| 4    | `README.md`, this STATUS.md, judge self-check, commit + tag | ✅ |
+
+### Mid-iteration learnings logged
+
+- `rust-toolchain.toml` is a PIN not an MSRV → removed from the repo;
+  MSRV moves to `Cargo.toml [package] rust-version` in Phase 1.
+- PowerShell `$Args` is an automatic; don't name a param `$Args`.
+- `cargo tauri icon <svg>` Just Works™ — no ImageMagick needed.
+- See `docs/LESSONS.md` for the full set (now 7 entries from bootstrap+Phase-0).
 
 ---
 
-## Tauri updater public key (for Phase 0 `tauri.conf.json`)
+## Tauri updater public key (carried forward from bootstrap; Phase 1 embeds into `tauri.conf.json`)
 
 ```
 dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ5N0E1MTkzODYzNTBGQTEKUldTaER6V0drMUY2MlNiS2g5anF0Vjl6UEkyODRQTlZlS0FMRjNuNWcvdEpJUC9RRG1QVm5Ja04K
 ```
 
-The private key lives at `%USERPROFILE%\.tauri\mockingbird.key` and is
-**unencrypted (empty password)** so the build flow doesn't need a
-password vault yet. Re-encrypt before Phase 7.
+Private key at `%USERPROFILE%\.tauri\mockingbird.key` (empty password —
+re-encrypt before Phase 7).
 
 ---
 
-## Section −1 resolution
+## Section −1 resolution (carried forward)
 
 | # | Item | Status | Resolution |
 |---|------|--------|------------|
 | 1 | Project name | ✅ | `Mockingbird` / `mockingbird`. |
-| 2 | License | ✅ | MIT (PLAN default). Adds `LICENSE` in Phase 0. |
-| 3 | GitHub repo URL | 🟨 DEFERRED | Placeholder `TODO(repo-url)` in tauri.conf.json + README. Resolve before Phase 7. |
-| 4 | Code-signing cert | 🟨 DEFERRED | Phase 7 + ADR 0005. |
-| 5 | Tauri updater key | ✅ | Generated this iteration (step 13). |
-| 6 | Cloud Claude model strings | 🟨 DEFERRED | Re-verify before Phase 4. |
+| 2 | License | ✅ | MIT shipped this phase (`LICENSE`). |
+| 3 | GitHub repo URL | 🟨 DEFERRED | Placeholder OK; resolve pre-Phase-7. |
+| 4 | Code-signing cert | 🟨 DEFERRED | ADR 0005 (deferred to Phase 7). |
+| 5 | Tauri updater key | ✅ | Generated bootstrap; embedded by Phase 1. |
+| 6 | Cloud Claude model strings | 🟨 DEFERRED | Re-verify pre-Phase-4. |
 | 7 | DBOS | ✅ DEFERRED | User confirmed. |
-| 8 | `extra_models.json` rotation | 🟨 DEFERRED | Empty scaffold; decide before Phase 4. Default = single Anthropic key for Phases 0–3. |
-| 9 | Orchestration model | ✅ | No pack agents (deprecated). code-puppy is the orchestrator. |
+| 8 | `extra_models.json` rotation | 🟨 DEFERRED | Empty scaffold; decide pre-Phase-4. |
+| 9 | Orchestration model | ✅ | ADR 0002 (no pack agents). |
 
 ---
 
 ## Blocked / human input needed
 
-- **cmake** not installed. Needed for Phase 2 (whisper.cpp build).
-  Install: <https://cmake.org/download/>
-- **nvcc / CUDA Toolkit 12.x** not installed. Needed for Phase 2 GPU
-  acceleration. Install: <https://developer.nvidia.com/cuda-downloads>
-- **ollama** not installed. Needed for Phase 4 (local cleanup LLM).
-  Install: <https://ollama.com/download>
+- **cmake** not installed → <https://cmake.org/download/>
+- **CUDA Toolkit 12.x** (`nvcc`) → <https://developer.nvidia.com/cuda-downloads>
+- **ollama** → <https://ollama.com/download>
 
-All three are pre-Phase-2/4 install tasks; bootstrap proceeds without
-them. Action: install before kicking off Phase 2.
+Phase 0 and Phase 1 can proceed without these. **Phase 2 cannot.**
+Install before kicking off `/phase2-goal`.
 
 ---
 
-## Phase 0 (next iteration)
+## Phase 1 (queued)
 
-Not yet decomposed. Will be planned via `/agent planning-agent` →
-`/plan-phase 0` per kickoff instructions. After bootstrap commit lands,
-the human will run that flow and then `/agent code-puppy` →
-`/phase0-goal`.
+Per PLAN §10 Phase 1: Tauri v2 app opens to tray, SQLite migrations
+001–003 applied, settings round-trip, FTS5 search smoke test passes.
+
+Next step (when ready):
+
+1. `/agent planning-agent`
+2. `/plan-phase 1`
+3. `/agent code-puppy`
+4. `/phase1-goal`
+
+The implementor (code-puppy) will continue unattended into Phase 1
+and Phase 2 per Dustin's kickoff instruction.
+
+---
+
+## Judge-run notes (Phase-0 structural self-check, 2026-05-15)
+
+Real judges (`phase0-structure`, `adr-format`, `status-initialized`,
+`setup-script-runs`) need a separate orchestrator pass that hands the
+diff + STATUS.md to a model — not part of this iteration's tool budget.
+Instead I verified mechanically:
+
+- `phase0-structure`: dirs + `.code_puppy/` + `.agents/commands/` (16 cmds) all present.
+- `agents-md-present`: unchanged from bootstrap.
+- `hook-config-valid`: unchanged from bootstrap; 17/17 smoke tests green.
+- `judges-seeded`: idempotent merge confirmed in setup-dev run.
+- `adr-format`: every ADR file has Status/Context/Decision/Consequences sections.
+- `status-initialized`: this file (you are reading it).
+- `setup-script-runs`: `verify-environment.ps1` exits 0, `setup-dev.ps1` exits 0.
+
+Full LLM-judged pass: will run on the post-Phase-1 iteration as part
+of the regular `/goal` flow.
 
 ---
 
 ## Notes for the next agent (post context-clear)
 
-1. Read this file first.
-2. Read `docs/LESSONS.md` — there are 5 entries from bootstrap that will
-   save you time.
-3. Run `bd ready` to see what's queued. Bootstrap leaves only the
-   commit+tag (mb-6c6) and handoff (mb-b6g) open; everything else closed.
-4. `bd prime` will give you the workflow brief.
-5. PLAN-mockingbird-v2.md and `.code_puppy/AGENTS.md` are the binding
-   docs. Read them before doing anything.
+1. Read this file first, then `docs/LESSONS.md` (7 entries — search before
+   doing PowerShell or beads work).
+2. PLAN-mockingbird-v2.md and `.code_puppy/AGENTS.md` are binding.
+3. `bd ready` shows the queue. Phase 0 leaves only the deferred
+   pre-Phase-2/4 build-prereq tasks open; everything else closed.
+4. Phase 1 needs planning-agent to decompose first → produces
+   `docs/phases/phase1.md`. Follow the same workflow as Phase 0.
