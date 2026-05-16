@@ -90,7 +90,10 @@ pub fn run() {
             {
                 match DictationRuntime::spawn(shared_conn, orchestrator_config, HashMap::new()) {
                     Ok(runtime) => {
-                        tracing::info!("dictation runtime started; hold RightAlt to dictate");
+                        tracing::info!(
+    "🐦 dictation runtime started; hold RightAlt to dictate \
+     (beep on start, lower beep on stop)"
+);
                         app.manage(runtime);
                     }
                     Err(e) => {

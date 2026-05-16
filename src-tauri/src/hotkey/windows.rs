@@ -355,6 +355,24 @@ fn run_hook_thread(vk: u32, tx: Sender<HotkeyEvent>, tid_tx: Sender<u32>) {
 }
 
 /// `LowLevelKeyboardProc` callback. **ZERO non-trivial work inside.**
+///
+/// ## Suppression policy (Phase 3 Wave 4.7)
+///
+/// When the keystroke matches our `configured_vk` (e.g. RightAlt),
+/// we return `LRESULT(1)` to **block propagation**. Without this,
+/// the OS still processes the bare key — for Alt that means menu-bar
+/// activation on key-up; for Win that would mean Start-menu opening;
+/// for Ctrl alone it's harmless but distracting in keyboard hooks.
+///
+/// The tradeoff: the hotkey VK becomes exclusive to mockingbird while
+/// the app is running. Tap-passthrough (PLAN §6.1 "taps < 80 ms pass
+/// through to OS for native shortcuts") is architecturally impossible
+/// in a `WH_KEYBOARD_LL` hook — the suppress-or-not decision must be
+/// made at key-down before we know hold duration. We chose exclusivity.
+///
+/// Escape always passes through. The state machine receives Escape
+/// events for cancel-during-recording, but Escape must remain useful
+/// to every other app on the system (dialogs, modals, etc.).
 #[cfg(target_os = "windows")]
 unsafe extern "system" fn low_level_keyboard_proc(
     code: i32,
@@ -372,9 +390,9 @@ unsafe extern "system" fn low_level_keyboard_proc(
     let kbd = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
 
     let configured_vk = CALLBACK_VK.with(|cell| *cell.borrow());
+    let event = classify_keystroke(wparam.0 as u32, kbd.vkCode, configured_vk, Instant::now());
 
-    if let Some(ev) = classify_keystroke(wparam.0 as u32, kbd.vkCode, configured_vk, Instant::now())
-    {
+    if let Some(ev) = event {
         CALLBACK_TX.with(|cell| {
             if let Some(tx) = cell.borrow().as_ref() {
                 // Std mpsc `send` is non-blocking (unbounded), so
@@ -384,7 +402,23 @@ unsafe extern "system" fn low_level_keyboard_proc(
         });
     }
 
+    // Suppress IFF this was an event on our configured hotkey VK.
+    // Escape (when classified) is passed through — it's classified
+    // for our visibility, not for consumption.
+    if should_suppress(kbd.vkCode, configured_vk) {
+        return LRESULT(1);
+    }
+
     CallNextHookEx(None, code, wparam, lparam)
+}
+
+/// Pure helper: decide whether the LL hook should suppress this key.
+///
+/// Suppress iff the key's VK equals the configured hotkey VK. Pure
+/// so it's unit-testable without an OS hook.
+#[inline]
+fn should_suppress(vk_code: u32, configured_vk: u32) -> bool {
+    vk_code == configured_vk
 }
 
 #[cfg(test)]
@@ -447,6 +481,39 @@ mod tests {
         assert!(classify_keystroke(WM_KEYDOWN_U32, 0x41, 0xA5, now()).is_none()); // 'A'
         assert!(classify_keystroke(WM_KEYDOWN_U32, 0x86, 0xA5, now()).is_none());
         // VK_F23
+    }
+
+    // -----------------------------------------------------------------
+    // should_suppress — pure suppression-policy helper (Wave 4.7)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn suppress_matches_configured_vk() {
+        // RightAlt configured; RightAlt event → suppress (blocks the
+        // OS from triggering menu activation).
+        assert!(should_suppress(0xA5, 0xA5));
+    }
+
+    #[test]
+    fn suppress_lets_unrelated_keys_pass_through() {
+        // 'A' down, RightAlt configured: must not suppress (otherwise
+        // we'd nuke every keystroke on the system).
+        assert!(!should_suppress(0x41, 0xA5));
+    }
+
+    #[test]
+    fn suppress_lets_escape_pass_through_even_when_classified() {
+        // Escape is classified for our visibility but suppression
+        // must not consume it — Escape is sacred everywhere else.
+        assert!(!should_suppress(0x1B, 0xA5));
+    }
+
+    #[test]
+    fn suppress_when_configured_to_some_other_vk() {
+        // If a user reconfigures to e.g. RightCtrl (0xA3), then
+        // RightAlt events should pass through cleanly.
+        assert!(should_suppress(0xA3, 0xA3));
+        assert!(!should_suppress(0xA5, 0xA3));
     }
 
     #[test]
