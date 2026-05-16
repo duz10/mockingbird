@@ -1,0 +1,5 @@
+{
+  "$schema": "https://code-puppy.dev/schemas/extra-models-v1.json",
+  "comment": "Empty scaffold. Section -1 item 8 (LLM key rotation) is DEFERRED until pre-Phase-4. Default for Phases 0-3 is single-Anthropic-key (no rotation). When ready, add entries like: {\"name\":\"sonnet-primary\",\"provider\":\"anthropic\",\"model\":\"claude-sonnet-4-5\",\"weight\":1.0}.",
+  "models": []
+}

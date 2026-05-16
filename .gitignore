@@ -1,0 +1,52 @@
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+
+# Mockingbird ignores
+
+# Model downloads (multi-GB whisper.cpp / GGUF files; user fetches locally)
+models/
+
+# Tauri signing keys live outside the repo by convention (~/.tauri/), but
+# if they ever leak in, refuse to ship.
+*.key
+*.key.pub
+!.code_puppy/**/*.key.pub  # (defensive: never expected, but doesn't shadow)
+*.pfx
+*.pem
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+target/
+node_modules/
+dist/
+build/
+src-tauri/target/
+
+# IDE / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Test / coverage
+coverage/
+*.profraw
+playwright-report/
+test-results/
+
+# Python hook caches
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Logs
+*.log
+
+# User-local reference docs (kept on disk but not in source control)
+Code-Puppy-Capabilities-Insight.docx

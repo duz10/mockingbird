@@ -1,0 +1,48 @@
+{
+  "$schema": "https://code-puppy.dev/schemas/judges-v1.json",
+  "version": 1,
+  "project": "mockingbird",
+  "judges": [
+    {
+      "id": "mb-plan-fidelity",
+      "name": "PLAN fidelity",
+      "description": "Verifies the iteration's deliverables match what PLAN.md (and the current phase doc) actually asks for. Flags scope drift early.",
+      "model": "anthropic/claude-sonnet-4-5",
+      "prompt": "You are scoring an iteration against the Mockingbird PLAN. Read PLAN.md (spine) and docs/phases/phase{N}.md, then read STATUS.md and the last commit's diff. Score 0-10 on PLAN fidelity. Explicitly cite any deliverable the iteration claimed-done that the PLAN does NOT actually mandate, and any PLAN mandate the iteration silently skipped. Reply in JSON: {score, summary, drift_in[], drift_out[], next_action}.",
+      "trigger": "iteration_end"
+    },
+    {
+      "id": "mb-invariants",
+      "name": "Invariant guard",
+      "description": "Checks the eight binding invariants from AGENTS.md are respected by the iteration's diff.",
+      "model": "anthropic/claude-sonnet-4-5",
+      "prompt": "Examine the iteration's diff (git diff against the previous tag or commit). For each of these invariants, report PASS / FAIL / N/A with a one-line justification: (1) raw transcripts immutable; (2) provenance total; (3) layers replaceable; (4) no telemetry; (5) cross-platform abstractions; (6) clipboard save/restore around paste; (7) secure-input fields abort injection; (8) no @tanstack/* dependency. Reply in JSON: {invariants:{name, status, note}, overall}.",
+      "trigger": "iteration_end"
+    },
+    {
+      "id": "mb-quality-bar",
+      "name": "Quality bar",
+      "description": "Verifies fmt/clippy/tests are green AND the iteration didn't disable any lint/test to make them green.",
+      "model": "anthropic/claude-sonnet-4-5",
+      "prompt": "Read the diff. Confirm: (a) cargo fmt clean (no .rustfmt.toml relaxation), (b) clippy clean WITHOUT any new #[allow] without a justifying comment, (c) tests pass AND none were marked #[ignore] or deleted, (d) test count went up or stayed equal to LOC growth ratio. Reply in JSON: {fmt, clippy, tests, suppressed_lints[], deleted_tests[], verdict}.",
+      "trigger": "iteration_end"
+    },
+    {
+      "id": "mb-status-md",
+      "name": "STATUS.md hygiene",
+      "description": "Confirms STATUS.md was updated and contains the required sections (task progress, cost line, blocked-on, last-judge).",
+      "model": "anthropic/claude-sonnet-4-5",
+      "prompt": "Open STATUS.md. Confirm it includes: current phase, last-updated date, completed tasks for this iteration, an updated cost line, a Blocked-on section, and a Last-successful-judge-run line. Reply in JSON: {present:{phase, updated, completed, cost, blocked, last_judge}, missing_sections[]}.",
+      "trigger": "iteration_end"
+    },
+    {
+      "id": "mb-supply-chain",
+      "name": "Supply-chain hygiene",
+      "description": "If package.json, package-lock.json, Cargo.toml, or Cargo.lock changed, audits the new deps against the IOC list and the project's banned-namespace rules.",
+      "model": "anthropic/claude-sonnet-4-5",
+      "prompt": "Examine the diff for changes to package.json, package-lock.json, Cargo.toml, or Cargo.lock. For each added/upgraded dep, check: (a) not in @tanstack/* namespace, (b) not in the PLAN Appendix D IOC list, (c) lockfile updated alongside, (d) no install scripts enabled. Reply in JSON: {npm_changes[], cargo_changes[], violations[], verdict}.",
+      "trigger": "iteration_end",
+      "applies_when": "diff_touches: ['package.json', 'package-lock.json', 'Cargo.toml', 'Cargo.lock']"
+    }
+  ]
+}

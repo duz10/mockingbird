@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "PreToolUse": [
+    {
+      "matcher": "edit_file|create_file|delete_file|replace_in_file",
+      "hooks": [
+        {
+          "type": "command",
+          "name": "block-raw-transcript-edit",
+          "command": "python scripts/hooks/block-raw-transcript-edit.py",
+          "timeout": 5000
+        },
+        {
+          "type": "command",
+          "name": "block-migration-edit-after-phase-1",
+          "command": "python scripts/hooks/block-migration-edit-after-phase-1.py",
+          "timeout": 5000
+        },
+        {
+          "type": "command",
+          "name": "block-tanstack",
+          "command": "python scripts/hooks/block-tanstack.py",
+          "timeout": 5000
+        }
+      ]
+    },
+    {
+      "matcher": "agent_run_shell_command",
+      "hooks": [
+        {
+          "type": "command",
+          "name": "block-unsafe-npm",
+          "command": "python scripts/hooks/block-unsafe-npm.py",
+          "timeout": 5000
+        },
+        {
+          "type": "command",
+          "name": "warn-bare-clipboard-set",
+          "command": "python scripts/hooks/warn-bare-clipboard-set.py",
+          "timeout": 5000
+        },
+        {
+          "type": "command",
+          "name": "block-secret-commit",
+          "command": "python scripts/hooks/block-secret-commit.py",
+          "timeout": 10000
+        }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": "agent_run_shell_command",
+      "hooks": [
+        {
+          "type": "command",
+          "name": "post-commit-status-check",
+          "command": "python scripts/hooks/post-commit-status-check.py",
+          "timeout": 5000
+        }
+      ]
+    }
+  ],
+  "SessionStart": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "name": "session-start-briefing",
+          "command": "python scripts/hooks/session-start-briefing.py",
+          "timeout": 8000
+        }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "name": "stop-quality-gate",
+          "command": "python scripts/hooks/stop-quality-gate.py",
+          "timeout": 120000
+        }
+      ]
+    }
+  ]
+}
