@@ -1,8 +1,8 @@
 # Mockingbird — STATUS
 
-**Current phase:** Phase 1 — ✅ **COMPLETE** (all 5 waves landed, sealed at `phase-1-complete` tag); Phase 2 queued
-**Last updated:** 2026-05-15 (Phase 1 sealed)
-**Last successful judge run:** _Phase-1-complete cargo gate: 101/101 tests, clippy clean, fmt clean, `#![warn(missing_docs)]` re-enabled, 2026-05-15_
+**Current phase:** Phase 2 — IN PROGRESS (Waves 1 + 2 + 3 + 4 ✅; Wave 5 queued)
+**Last updated:** 2026-05-16 (Phase 2 Wave 4 landed)
+**Last successful judge run:** _Phase-2-Wave-4 cargo gate: 151/151 tests, clippy clean, fmt clean, 2026-05-16. Whisper integration tests skip gracefully until model download completes — they exercise once `WHISPER_MODEL_PATH` or `%LOCALAPPDATA%\Mockingbird\models\whisper-large-v3-turbo-q5_0.bin` is present._
 **Cost line (cumulative):** _Track from first /goal run — bootstrap + Phase 0 + Phase 1 Waves 1+2 across two sessions; record when LLM judges run._
 
 ---
@@ -166,7 +166,7 @@ Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks a
 - Phase 1 retrospective in LESSONS.md (~100 lines: delivered/test count/what worked/what surprised us/what we deferred/carry-forward/numbers).
 - Lefthook live-fire DEFERRED — binary not on dev PATH. Note in LESSONS for follow-up after install.
 
-## Phase 2 — Audio capture & STT: IN PROGRESS (Waves 1 + 2 + 3 ✅; Waves 4-5 queued)
+## Phase 2 — Audio capture & STT: IN PROGRESS (Waves 1 + 2 + 3 + 4 ✅; Wave 5 queued)
 
 **Plan:** `docs/phases/phase2.md` (planning-agent session, 5 waves, 26 tasks).
 
@@ -231,14 +231,34 @@ Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks a
 - `cargo test --workspace` ✅ — **134/134** PASS (109 unit + 8 audio_capture + 4 vad + 7 db_migrations + 6 db_repos)
 - `cargo fmt --check` ✅
 
-### Waves 4-5 — queued
+### Wave 4 — whisper-rs STT + prompt builder + CLI + bench ✅
+
+| File | Notes |
+|------|-------|
+| `Cargo.toml` (workspace) | `whisper-rs = "0.16"` **CPU-only** (cuda feature off; see bd `mb-ltq`). Bumped from 0.13 due to opaque-struct bindgen mismatch between whisper-rs 0.13.2 and whisper-rs-sys 0.11.1 (71 field-not-found errors). 0.16 pairs cleanly with whisper-rs-sys 0.15.0. |
+| `src-tauri/src/stt/whisper.rs` | `WhisperStt::new()` GPU-first/CPU-fallback per ADR 0011 + `new_with_options(force_cpu)` explicit form + `gpu_loaded()` accessor. Honors `WHISPER_MODEL_PATH` env override. 4 unit tests with `model_available()` skip-guard. whisper-rs 0.16 API: `state.full_n_segments()` returns `i32` directly; `state.get_segment(i)` returns `Option<Segment>`; segment text via `to_str_lossy()`. |
+| `src-tauri/src/stt/prompt_builder.rs` | `build_prompt` + test-friendly `build_prompt_at(input, now)` overload. Scoring = `recency × frequency × app_match`: recency 1.0 hot (<24h) → 0.1 floor (>7d) linear decay; frequency `ln(1+use_count)`; app_match 2.0× when context matches `foreground_app`. Hand-rolled ISO-8601 parser via Howard Hinnant `days_from_civil` (avoids adding chrono surface area). Greedy pack respects `PROMPT_TOKEN_CAP=224`. 12 unit tests covering every signal direction + 500-entry truncation. |
+| `src-tauri/src/bin/stt_test.rs` | CLI harness wires the full pipeline: WAV → optional VAD trim → WhisperStt → pretty or `--json` output. Flags: `--force-cpu --json --no-vad --prompt TEXT --model-path PATH`. Hand-rolled JSON encoder + arg parser (no clap dep — yagni). |
+| `src-tauri/benches/whisper_latency.rs` | criterion bench `whisper_latency_1s_sine_cpu` over `sine_440.wav`. Graceful skip on missing model. Wired in `src-tauri/Cargo.toml` `[[bench]]` section. |
+| `src-tauri/tests/whisper.rs` | 4 integration tests over `silent.wav` / `sine_440.wav` with `whisper_model_present()` skip-guard. Exercise CPU construct, silent-fixture short output, sine-no-panic, initial-prompt accepted. |
+| `docs/LESSONS.md` | +5 entries: CUDA-13/ggml chasm, whisper-rs 0.13 self-incompatibility, 0.16 segment API rename, cmake hides inside VS BT, PowerShell em-dash parse failures. |
+| `scripts/install-wave4-toolchain.ps1` | Idempotent installer for VS 2022 BuildTools + LLVM + cmake + CUDA Toolkit (the latter shipped CUDA 13.2.1, which broke the GPU build — see LESSONS). |
+
+**Cargo quality gate all four green:**
+- `cargo check --workspace` ✅
+- `cargo clippy --workspace --all-targets -- -D warnings` ✅ (1 trivial fix: redundant `(y - era * 400) as i64` cast)
+- `cargo test --workspace` ✅ — **151/151** PASS (122 unit + 8 audio_capture + 4 vad + 4 whisper + 7 db_migrations + 6 db_repos). +17 over Wave 3.
+- `cargo fmt --check` ✅
+
+**Wave 4 surprise: CUDA shipped CPU-only.** Installed CUDA Toolkit 13.2.1 (the only version on chocolatey). ggml's hard-coded CUDA architectures `52;61;70;75` are deprecated in CUDA 13, AND MSBuild's `CudaToolkitDir` integration variable comes up empty against CUDA 13's targets file. Manually downloading CUDA 12.x from developer.nvidia.com (~3 GB) was deemed not worth the time when **ADR 0011's runtime CPU fallback exists for exactly this scenario**. The `WhisperStt::new` code path still tries GPU first; without the cuda feature compiled in, the GPU attempt fails immediately and the CPU path runs. When CUDA 12.x is later installed side-by-side, flipping `features=["cuda"]` back on in `Cargo.toml` re-enables the GPU path with no code changes. bd `mb-ltq` tracks the re-enable task.
+
+### Wave 5 — queued
 
 | Wave | Scope | Blocker |
 |------|-------|---------|
-| **4** | whisper-rs CUDA init + 224-token prompt builder + TTS speech fixtures (via Helios) | **HARD BLOCKER:** install cmake + CUDA Toolkit 12.x. **Recommended:** also install VS 2022 BuildTools to unblock potential whisper-rs C++17 needs (VS 2019 currently on PATH) |
-| 5 | CLI harness + criterion bench + 3 new judges + `phase-2-complete` tag | depends on Wave 4 |
+| 5 | 3 new judges (`stt-cpu-fallback`, `prompt-cap-224`, `perf-stt`) + `phase-2-complete` tag + retrospective | none — code complete; needs judge wiring + LLM run |
 
-Resume Wave 4 in a fresh session with `/agent code-puppy` → `/phase2-goal`. Wave 4 brief lives at `docs/phases/phase2-wave4-brief.md`.
+Resume Wave 5 in a fresh session with `/agent code-puppy` → `/phase2-goal`. Wave 5 brief should live at `docs/phases/phase2-wave5-brief.md` (write at end of Wave 4 session).
 
 Carry-forward from Phase 1 (full list in LESSONS retrospective):
 - **Brief pattern is the default.** Write `docs/phases/phase2-waveN-brief.md` at the end of each wave with the next wave's full context. Pattern has shipped ~100% first-run test pass rates.

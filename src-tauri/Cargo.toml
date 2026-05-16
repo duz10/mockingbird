@@ -31,8 +31,11 @@ cpal               = { workspace = true }
 ringbuf            = { workspace = true }
 hound              = { workspace = true }
 
-# Phase 2 Wave 3 — VAD dep (whisper-rs staged to Wave 4 — cmake/CUDA gate).
+# Phase 2 Wave 3 — VAD dep.
 ort                = { workspace = true }
+
+# Phase 2 Wave 4 — STT dep.
+whisper-rs         = { workspace = true }
 chrono             = { workspace = true }
 uuid               = { workspace = true }
 thiserror          = { workspace = true }
@@ -47,7 +50,11 @@ proptest  = { workspace = true }
 mockall   = { workspace = true }
 criterion = { workspace = true }
 
+[[bench]]
+name    = "whisper_latency"
+harness = false
+
 # Notes:
-# - Phase 2 will add `whisper-rs` (with CUDA feature), `cpal`, `ort`.
+# - Phase 2 Wave 4 added `whisper-rs` (currently CPU-only; see bd mb-ltq).
 # - Phase 3 will add `enigo` for SendInput fallback.
 # - `tauri-plugin-sql` deliberately NOT included — see ADR 0004.
