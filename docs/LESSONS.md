@@ -88,3 +88,33 @@ Format:
   the `param()` block. Also: `Join-Path` is two-arg only —
   `[IO.Path]::Combine(...)` is the n-arg version.
 - **Action:** Pattern: `param([string]$X = "")` + `if (-not $X) { $X = ... }`.
+
+## 2026-05-15 [phase-1] cargo fmt fights git autocrlf on Windows
+- **Context:** Phase 1 Wave 1 first `cargo fmt --check` failed:
+  `Incorrect newline style in src-tauri/src/lib.rs` even though the files
+  were written with LF.
+- **Finding:** Git's Windows default `core.autocrlf=true` converts LF to
+  CRLF on checkout. rustfmt with `newline_style = "Unix"` then reads back
+  CRLF and fails. The two settings fight each other.
+- **Action:** Drop `newline_style` from `.rustfmt.toml` (default = Auto,
+  accepts file as-is). Add `.gitattributes` with `*.rs text eol=lf` to
+  pin LF cross-platform on next checkout. gitattributes is the single
+  source of truth; rustfmt becomes ending-agnostic.
+
+## 2026-05-15 [phase-1] rustup minimal toolchains do not include rustfmt or clippy
+- **Context:** Fresh Rust install attempting `cargo fmt` produced
+  `cargo-fmt.exe is not installed for the toolchain stable-x86_64-pc-windows-msvc`.
+- **Finding:** rustup ships only the compiler by default; rustfmt and
+  clippy are components, not bundled.
+- **Action:** Always `rustup component add rustfmt clippy` as part of
+  dev setup. Phase 1 Wave 5 task `p1-lefthook-verify` should add this
+  to `setup-dev.ps1`.
+
+## 2026-05-15 [phase-1] First cargo check with rusqlite-bundled takes ~4 minutes
+- **Context:** First `cargo check --workspace` after Phase 1 Wave 1.
+- **Finding:** 247 seconds (4m07s) cold-cache. `rusqlite` features=["bundled"]
+  compiles SQLite from C source (~150k lines). One-time cost; incremental
+  builds are seconds.
+- **Action:** Budget the cold compile when planning iterations on a
+  fresh checkout. CI should cache `target/` aggressively. Do NOT panic
+  when cargo check appears to hang for 3-4 minutes on a fresh clone.

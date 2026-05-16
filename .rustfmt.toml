@@ -2,4 +2,6 @@ edition = "2021"
 max_width = 100
 use_field_init_shorthand = true
 use_try_shorthand = true
-newline_style = "Unix"
+# Line-endings: defer to .gitattributes (`*.rs text eol=lf`).
+# rustfmt's "Auto" accepts whatever's in the file; gitattributes
+# pins it cross-platform on the next checkout.

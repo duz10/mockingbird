@@ -1,9 +1,9 @@
 # Mockingbird — STATUS
 
-**Current phase:** Phase 0 → Phase 1 (queued)
-**Last updated:** 2026-05-15
-**Last successful judge run:** _Phase-0 structural self-check, 2026-05-15 (see judge-run notes at bottom)_
-**Cost line (cumulative):** _Track from first /goal run — Phase 0 + bootstrap consumed roughly TBD tokens; record when judges run._
+**Current phase:** Phase 1 — Wave 1 ✅ landed; Waves 2-5 queued for fresh-context iterations
+**Last updated:** 2026-05-15 (end of session containing bootstrap + Phase 0 + Phase 1 Wave 1)
+**Last successful judge run:** _Phase-0 structural self-check + Phase-1 Wave-1 cargo gate (fmt/clippy/test/check all green), 2026-05-15_
+**Cost line (cumulative):** _Track from first /goal run — bootstrap + Phase 0 + Phase 1 Wave 1 in one session; record when LLM judges run._
 
 ---
 
@@ -69,24 +69,60 @@ Install before kicking off `/phase2-goal`.
 
 ---
 
-## Phase 1 (queued)
+## Phase 1 — Foundation: IN PROGRESS (Wave 1 ✅)
 
-Per PLAN §10 Phase 1: Tauri v2 app opens to tray, SQLite migrations
-001–003 applied, settings round-trip, FTS5 search smoke test passes.
+Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks across 5 waves).
 
-Next step (when ready):
+### Wave 1 — Decisions, scaffolding, prompt stubs ✅
 
-1. `/agent planning-agent`
-2. `/plan-phase 1`
-3. `/agent code-puppy`
-4. `/phase1-goal`
+| File | What it does |
+|------|--------------|
+| `docs/adr/0004-rusqlite-over-sqlx.md` | ADR: rusqlite (bundled) over sqlx; tauri-plugin-sql dropped |
+| `Cargo.toml` (workspace) | Phase-1 deps pinned; `whisper-rs`/`cpal`/`ort`/`enigo` DEFERRED to Phase 2 |
+| `src-tauri/Cargo.toml` | Member crate, `staticlib`+`cdylib`+`rlib`, Windows-only `windows` dep |
+| `src-tauri/build.rs` | `tauri_build::build()` |
+| `src-tauri/tauri.conf.json` | Main window (visible:false), tray, CSP allowing `localhost:11434` for Phase-4 ollama, updater configured (active:false until Phase 7) |
+| `src-tauri/src/{main,lib,error}.rs` | Skeleton; `AppError` via thiserror; 2 unit tests pass |
+| `src-tauri/src/cleanup/prompts/{normal,verbose,fragment}.md` | Phase-1 stubs (~200 words each, Phase 4 refines) |
+| `docs/DATA_MODEL.md` | Reference copy of PLAN §7 |
+| `.gitattributes` | Cross-platform line-ending pinning (LF for source, CRLF for .ps1) |
 
-The implementor (code-puppy) will continue unattended into Phase 1
-and Phase 2 per Dustin's kickoff instruction.
+**Cargo quality gate green** (all four):
+- `cargo check --workspace` ✅ (cold: 4m07s; rusqlite-bundled compiles SQLite from C)
+- `cargo clippy --workspace --all-targets -- -D warnings` ✅ (35s)
+- `cargo test --workspace --quiet` ✅ (2/2 unit tests in `error.rs`)
+- `cargo fmt --check` ✅ (after dropping `newline_style=Unix` in `.rustfmt.toml`; see LESSONS)
+
+### Waves 2-5 — queued for next iteration
+
+| Wave | Scope | Notes |
+|------|-------|-------|
+| 2 | Migrations 001/002/003 + runner + integration tests | **Migrations are SEALED forever once `phase-1-complete` tag lands** — wants a fresh full-context iteration. Delegated to `migration-author` project agent. |
+| 3 | DB repository modules (7 files in `src-tauri/src/db/`) | Depends on Wave 2 runner. |
+| 4 | App shell: logging, settings, tray, commands, app wire | Parallel after Wave 2 runner. |
+| 5 | Docs flesh-out, lefthook live-fire verify, judges, seal + tag | Final iteration before phase-1-complete. |
+
+### How to resume Phase 1 in a fresh session
+
+1. `/agent code-puppy`
+2. `/phase1-goal`
+3. The slash command tells code-puppy to read `docs/phases/phase1.md` and `bd ready` — Wave 2 tasks will be top of the queue (`mb-4qg`, `mb-l6d`, `mb-7u9`, `mb-o0d`, `mb-rzf`).
+4. Wave 2 starts by invoking `migration-author` for migration 001.
 
 ---
 
-## Judge-run notes (Phase-0 structural self-check, 2026-05-15)
+## Judge-run notes
+
+### Phase 1 Wave 1 (2026-05-15)
+
+Mechanically verified (real LLM judges run at phase exit, not per-wave):
+
+- **`build-passes`** (cargo gate): ✅ check + clippy + fmt + test all green.
+- **`adr-recorded`**: ADR 0004 present, Status=Accepted, follows 0000-template.md schema.
+- **`plan-aligned`** (partial): Cargo.toml deps match PLAN §5 minus the deferred CUDA-coupled crates (documented deviation).
+- LLM-judged full pass: at end of Phase 1 Wave 5 per `docs/phases/phase1.md` §C.
+
+### Phase 0 structural self-check (2026-05-15)
 
 Real judges (`phase0-structure`, `adr-format`, `status-initialized`,
 `setup-script-runs`) need a separate orchestrator pass that hands the
@@ -108,10 +144,13 @@ of the regular `/goal` flow.
 
 ## Notes for the next agent (post context-clear)
 
-1. Read this file first, then `docs/LESSONS.md` (7 entries — search before
-   doing PowerShell or beads work).
+1. Read this file first, then `docs/LESSONS.md` (10 entries now — search before
+   doing PowerShell, rustfmt, beads, or hook work).
 2. PLAN-mockingbird-v2.md and `.code_puppy/AGENTS.md` are binding.
-3. `bd ready` shows the queue. Phase 0 leaves only the deferred
-   pre-Phase-2/4 build-prereq tasks open; everything else closed.
-4. Phase 1 needs planning-agent to decompose first → produces
-   `docs/phases/phase1.md`. Follow the same workflow as Phase 0.
+3. `bd ready` shows the queue. Phase 1 Wave 1 is done; Wave 2 tasks
+   (`mb-4qg`, `mb-l6d`, `mb-7u9`, `mb-o0d`, `mb-rzf`) are now ready.
+4. Phase 1 plan is at `docs/phases/phase1.md`. Wave 2 = migrations,
+   delegated to `migration-author` project agent.
+5. **Migrations 001-003 are SEALED forever once `phase-1-complete`
+   tag lands.** Hook `block-migration-edit-after-phase-1` enforces.
+   Triple-check 001/002/003 before that commit + tag.

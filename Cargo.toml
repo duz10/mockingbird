@@ -1,0 +1,58 @@
+[workspace]
+resolver = "2"
+members = ["src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT"
+authors = ["Dustin Boyd"]
+repository = "TODO(repo-url)"  # Resolve pre-Phase-7 (Section -1 item 3)
+
+[workspace.dependencies]
+# Tauri v2 — desktop application shell.
+tauri          = { version = "2", features = ["tray-icon"] }
+tauri-build    = { version = "2" }
+
+# Database — see ADR 0004 (rusqlite over sqlx).
+rusqlite       = { version = "0.31", features = ["bundled", "chrono", "uuid"] }
+
+# Serialization.
+serde          = { version = "1", features = ["derive"] }
+serde_json     = "1"
+
+# Async runtime — kept minimal in Phase 1 (no full multi-thread runtime yet).
+tokio          = { version = "1", features = ["rt", "macros", "sync"] }
+
+# Observability.
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender   = "0.2"
+
+# Std-adjacent.
+chrono         = { version = "0.4", features = ["serde"] }
+uuid           = { version = "1", features = ["v4", "serde"] }
+thiserror      = "1"
+
+# Windows-only OS surface (path/registry helpers).
+windows        = { version = "0.56", features = [
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+] }
+
+# Dev / test helpers.
+tempfile       = "3"
+rstest         = "0.18"
+proptest       = "1"
+mockall        = "0.12"
+
+[profile.release]
+opt-level     = 3
+lto           = true
+codegen-units = 1
+strip         = "symbols"
+
+[profile.dev]
+opt-level = 0
+debug     = true
