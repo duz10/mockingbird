@@ -26,10 +26,13 @@ tracing-subscriber = { workspace = true }
 tracing-appender   = { workspace = true }
 regex              = { workspace = true }
 
-# Phase 2 Wave 1 — Audio capture deps (whisper-rs + ort staged to their waves).
+# Phase 2 Wave 1 — Audio capture deps.
 cpal               = { workspace = true }
 ringbuf            = { workspace = true }
 hound              = { workspace = true }
+
+# Phase 2 Wave 3 — VAD dep (whisper-rs staged to Wave 4 — cmake/CUDA gate).
+ort                = { workspace = true }
 chrono             = { workspace = true }
 uuid               = { workspace = true }
 thiserror          = { workspace = true }

@@ -42,11 +42,23 @@ ringbuf        = "0.4"
 hound          = "3"
 
 # Phase 2 — STT + VAD (heavy deps).
-# `ort` added in Wave 3 — ONNX runtime for Silero VAD. Pin minor.
+# `ort` is the ONNX runtime for Silero VAD (ADR 0012). Default features
+# include `download-binaries` which bundles the ONNX Runtime DLLs.
+# ort 2 is still in release-candidate. Pin explicitly to ride patch
+# RCs but block surprise major bumps.
+#
+# `load-dynamic`: skip static link of libonnxruntime.lib. That lib is
+# built with MSVC 2022 STL symbols (__std_find_trivial_*) and won't
+# link against VS 2019 BuildTools toolchains. With load-dynamic, we
+# `dlopen` onnxruntime.dll at runtime instead — works with any MSVC.
+#
+# Use `default-features = false` to drop `download-binaries` (which
+# fetches the static lib) and add `ndarray` back explicitly.
+ort            = { version = "=2.0.0-rc.10", default-features = false, features = ["load-dynamic", "ndarray"] }
+
 # `whisper-rs` added in Wave 4 — requires cmake + CUDA Toolkit on PATH
 #   at build time (ADR 0011). Adding it earlier breaks `cargo check`
 #   on machines without the C toolchain.
-# ort         = "2"
 # whisper-rs  = { version = "0.13", features = ["cuda"] }
 
 # Phase 2 — Benchmarks.

@@ -166,7 +166,7 @@ Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks a
 - Phase 1 retrospective in LESSONS.md (~100 lines: delivered/test count/what worked/what surprised us/what we deferred/carry-forward/numbers).
 - Lefthook live-fire DEFERRED — binary not on dev PATH. Note in LESSONS for follow-up after install.
 
-## Phase 2 — Audio capture & STT: IN PROGRESS (Waves 1 + 2 ✅; Waves 3-5 queued)
+## Phase 2 — Audio capture & STT: IN PROGRESS (Waves 1 + 2 + 3 ✅; Waves 4-5 queued)
 
 **Plan:** `docs/phases/phase2.md` (planning-agent session, 5 waves, 26 tasks).
 
@@ -209,15 +209,36 @@ Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks a
 - `cargo test --workspace` ✅ — **120/120** PASS (99 unit + 8 audio_capture + 7 db_migrations + 6 db_repos)
 - `cargo fmt --check` ✅
 
-### Waves 3-5 — queued
+### Wave 3 — Silero VAD via ort + vad_trim helper ✅
+
+| File | Notes |
+|------|-------|
+| `Cargo.toml` | `ort = "=2.0.0-rc.10", default-features=false, features=["load-dynamic","ndarray"]` — sidesteps MSVC 2022 STL static-link requirement |
+| `src-tauri/src/audio/vad.rs` | `SileroVad` impl: 512-sample frames, LSTM state carry-through, `reset()`-zeros, threshold 0.5; `locate_model()` honors `SILERO_VAD_PATH` then `models_dir()`. 4 unit tests (3 require runtime; skip gracefully) |
+| `src-tauri/src/audio/vad_trim.rs` | `vad_trim(audio, &mut detector, &cfg)` with `lead_in_ms`/`hangover_ms`/`min_speech_ms`. Pure helper; tested via `AmplitudeVad` fake without loading Silero. 6 unit tests |
+| `src-tauri/tests/vad.rs` | 4 integration tests over `silent.wav`/`mixed.wav` with `silero_runtime_available()` catch-unwind skip guard |
+| `scripts/download-onnxruntime.ps1` | Fetches ONNX Runtime 1.22.0 zip + extracts `onnxruntime.dll` + prints `ORT_DYLIB_PATH` value to set |
+| `scripts/model-manifest.json` | Silero entry: real SHA-256 pinned (`1a153a22…`), URL fixed (`src/silero_vad/data/` not `files/`), real size (2,327,524 bytes) |
+| `docs/LESSONS.md` | +5 entries: ort RC-only + MSVC 2022 STL escape via load-dynamic, Silero URL move, Box<dyn Trait>, cpal !Send, cpal::Host !Clone |
+
+**Runtime preconditions for full Wave-3 test green-light:**
+- `$env:SILERO_VAD_PATH` → path to `silero_vad.onnx` (or place it in `models_dir()`)
+- `$env:ORT_DYLIB_PATH` → path to `onnxruntime.dll` v1.22.x (run `scripts/download-onnxruntime.ps1`)
+
+**Cargo quality gate all four green (with env vars set):**
+- `cargo check --workspace` ✅
+- `cargo clippy --workspace --all-targets -- -D warnings` ✅ (1 trivial fix: `2*1*128` → `2*128`)
+- `cargo test --workspace` ✅ — **134/134** PASS (109 unit + 8 audio_capture + 4 vad + 7 db_migrations + 6 db_repos)
+- `cargo fmt --check` ✅
+
+### Waves 4-5 — queued
 
 | Wave | Scope | Blocker |
 |------|-------|---------|
-| 3 | Silero VAD via `ort` v2 + VAD trim helper | needs `silero_vad.onnx` (~1.8 MB) downloaded — run `pwsh scripts/download-models.ps1 -OutputDir <dir>` once |
-| 4 | whisper-rs CUDA init + 224-token prompt builder | **HARD BLOCKER:** install cmake + CUDA Toolkit 12.x; `pwsh` (PowerShell 7+) also not on PATH, only `powershell` 5.1 — script works on both |
+| **4** | whisper-rs CUDA init + 224-token prompt builder + TTS speech fixtures (via Helios) | **HARD BLOCKER:** install cmake + CUDA Toolkit 12.x. **Recommended:** also install VS 2022 BuildTools to unblock potential whisper-rs C++17 needs (VS 2019 currently on PATH) |
 | 5 | CLI harness + criterion bench + 3 new judges + `phase-2-complete` tag | depends on Wave 4 |
 
-Resume Wave 3 in a fresh session with `/agent code-puppy` → `/phase2-goal`. Wave 3 brief lives at `docs/phases/phase2-wave3-brief.md`.
+Resume Wave 4 in a fresh session with `/agent code-puppy` → `/phase2-goal`. Wave 4 brief lives at `docs/phases/phase2-wave4-brief.md`.
 
 Carry-forward from Phase 1 (full list in LESSONS retrospective):
 - **Brief pattern is the default.** Write `docs/phases/phase2-waveN-brief.md` at the end of each wave with the next wave's full context. Pattern has shipped ~100% first-run test pass rates.

@@ -15,11 +15,12 @@
     {
       "name": "silero-vad",
       "filename": "silero_vad.onnx",
-      "size_bytes": 1810000,
-      "sha256": "TBD-pin-when-downloaded",
-      "url": "https://github.com/snakers4/silero-vad/raw/master/files/silero_vad.onnx",
+      "size_bytes": 2327524,
+      "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+      "url": "https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx",
       "phase": "2",
-      "wave": 3
+      "wave": 3,
+      "notes": "Path updated 2026-05-16 — the snakers4 repo moved files/silero_vad.onnx to src/silero_vad/data/. Old URL returns truncated response."
     }
   ]
 }

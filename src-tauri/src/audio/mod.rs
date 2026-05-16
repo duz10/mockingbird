@@ -10,6 +10,9 @@
 
 pub mod capture;
 pub mod vad;
+pub mod vad_trim;
+
+pub use vad_trim::{vad_trim as trim_speech, TrimConfig};
 
 #[cfg(not(target_os = "windows"))]
 use crate::error::AppError;
