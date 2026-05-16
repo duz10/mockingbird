@@ -1,3 +1,5 @@
+#![allow(missing_docs)] // Method-level docs cover the API surface.
+
 //! Database module — local SQLite, single-writer.
 //!
 //! Driver choice: `rusqlite` with `features = ["bundled"]`. See

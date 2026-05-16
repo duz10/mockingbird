@@ -4,9 +4,13 @@
 //! linked into the Tauri shell. See `PLAN-mockingbird-v2.md` for the
 //! full design and `docs/phases/phase1.md` for the current phase plan.
 
-// `#![warn(missing_docs)]` is intentionally NOT set yet. Wave 5 polish
-// will enable it once every public item has a doc comment; until then
-// it would drown clippy in noise about self-explanatory struct fields.
+#![warn(missing_docs)]
+
+//! Mockingbird — local-first voice dictation for Windows.
+//!
+//! Library crate. Binary entry point lives in `main.rs`. See
+//! `PLAN-mockingbird-v2.md` for the design and `docs/phases/` for
+//! per-phase implementation plans.
 
 pub mod commands;
 pub mod db;

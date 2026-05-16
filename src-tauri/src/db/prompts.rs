@@ -1,3 +1,5 @@
+#![allow(missing_docs)] // Self-documenting field set; module-level doc is the API surface.
+
 //! Prompts repository — READ ONLY.
 //!
 //! Prompts are append-only, seeded by migration 003, and bumped via

@@ -19,10 +19,12 @@ use crate::settings::{model::SettingKey, Settings};
 /// not `Sync`, so we wrap the `Database` in a `Mutex` to satisfy
 /// `tauri::State<T>`'s `Sync` requirement.
 pub struct AppState {
+    /// Database connection, behind a Mutex to provide `Sync`.
     pub db: Mutex<Database>,
 }
 
 impl AppState {
+    /// Wrap an open `Database` in the managed-state shape.
     pub fn new(db: Database) -> Self {
         Self { db: Mutex::new(db) }
     }
@@ -32,6 +34,8 @@ pub(crate) fn into_command_err(e: AppError) -> String {
     e.to_string()
 }
 
+/// IPC: read a setting by key. Returns the stored JSON value, or the
+/// key's default if unset / corrupted.
 #[tauri::command]
 pub async fn get_setting(
     state: State<'_, AppState>,
@@ -46,6 +50,8 @@ pub async fn get_setting(
     settings.get_raw(key).map_err(into_command_err)
 }
 
+/// IPC: write a setting by key. UPSERT semantics — overwrites if
+/// present, inserts if missing.
 #[tauri::command]
 pub async fn set_setting(
     state: State<'_, AppState>,
@@ -61,6 +67,8 @@ pub async fn set_setting(
     settings.set_raw(key, &value).map_err(into_command_err)
 }
 
+/// IPC: smoke-test the FTS5 wiring. Returns the count of transcript
+/// hits for `query`. Used by the Wave-5 `fts5-smoke` judge.
 #[tauri::command]
 pub async fn fts_smoke_test(state: State<'_, AppState>, query: String) -> Result<usize, String> {
     let guard = state

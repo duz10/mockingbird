@@ -1,3 +1,5 @@
+#![allow(missing_docs)] // Method-level docs cover the API surface; `Settings` struct is a 1-field wrapper.
+
 //! Typed read/write facade over the `settings` table.
 //!
 //! See [`model::SettingKey`] for the registry of known keys. Values

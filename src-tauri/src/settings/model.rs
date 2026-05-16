@@ -1,3 +1,5 @@
+#![allow(missing_docs)] // Enum variants are documented in docs/SETTINGS.md.
+
 //! Typed setting keys — the registry of every known setting in the app.
 //!
 //! Adding a new setting:

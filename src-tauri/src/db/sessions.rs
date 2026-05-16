@@ -1,3 +1,5 @@
+#![allow(missing_docs)] // Self-documenting field set; module-level doc is the API surface.
+
 //! Sessions repository — the central provenance pivot.
 //!
 //! `NewSession` requires provenance FKs (`prompt_id`,

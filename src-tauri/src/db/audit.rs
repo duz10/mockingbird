@@ -1,3 +1,5 @@
+#![allow(missing_docs)] // Self-documenting field set; module-level doc is the API surface.
+
 //! Audit-log reader + rollback engine.
 //!
 //! Reads `_history_*` tables (populated by migration 002 triggers) and

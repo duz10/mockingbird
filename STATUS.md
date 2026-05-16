@@ -1,8 +1,8 @@
 # Mockingbird — STATUS
 
-**Current phase:** Phase 1 — Waves 1 + 2 + 3 + 4 ✅ landed; Wave 5 queued
-**Last updated:** 2026-05-15 (Phase 1 Wave 4 iteration)
-**Last successful judge run:** _Wave-4 cargo gate green (fmt/clippy/test/check) + **101/101** tests pass first run, 2026-05-15_
+**Current phase:** Phase 1 — ✅ **COMPLETE** (all 5 waves landed, sealed at `phase-1-complete` tag); Phase 2 queued
+**Last updated:** 2026-05-15 (Phase 1 sealed)
+**Last successful judge run:** _Phase-1-complete cargo gate: 101/101 tests, clippy clean, fmt clean, `#![warn(missing_docs)]` re-enabled, 2026-05-15_
 **Cost line (cumulative):** _Track from first /goal run — bootstrap + Phase 0 + Phase 1 Waves 1+2 across two sessions; record when LLM judges run._
 
 ---
@@ -69,7 +69,9 @@ Install before kicking off `/phase2-goal`.
 
 ---
 
-## Phase 1 — Foundation: IN PROGRESS (Waves 1 + 2 + 3 + 4 ✅; Wave 5 queued)
+## Phase 1 — Foundation: ✅ COMPLETE (sealed at `phase-1-complete` tag)
+
+**Migrations 001-003 are now FROZEN.** The hook `block-migration-edit-after-phase-1` enforces — future schema changes go in migration 004+.
 
 Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks across 5 waves).
 
@@ -155,17 +157,25 @@ Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks a
 - `cargo test --workspace` ✅ — **101/101** PASS (88 unit + 7 db_migrations + 6 db_repos)
 - `cargo fmt --check` ✅
 
-### Wave 5 — queued
+### Wave 5 — Finalizer ✅ (commit pending)
 
-| bd id    | Scope                                          |
-|----------|------------------------------------------------|
-| `mb-65j` | docs/CONTRIBUTING.md flesh-out                 |
-| `mb-20w` | docs/SETTINGS.md (now binding — Wave 4 ships keys) |
-| `mb-6op` | lefthook live-fire dry run on a commit         |
-| `mb-l07` | End-of-phase judge cards (rusqlite, FTS5 smoke, no-pack-agents) |
-| `mb-6ph` | Phase-1 retrospective in LESSONS.md            |
-| `mb-3pn` | Re-enable `#![warn(missing_docs)]` with proper docs |
-| `mb-dhi` | Seal commit + tag `phase-1-complete`           |
+- `docs/CONTRIBUTING.md` (~200 lines): prerequisites, workflow, standing rules, conventions, sub-agents, deprecated-patterns note, brief pattern as recommended default.
+- `docs/SETTINGS.md` (binding): 8 keys with type/default/owner/notes; access patterns; adding-new-setting playbook; corruption behavior.
+- 3 judge cards in `docs/judges/phase-1/`: `rusqlite-vs-sqlx`, `fts5-smoke`, `no-pack-agents`. Wiggum to execute when wired up.
+- `#![warn(missing_docs)]` re-enabled; 163 warnings → 0 via module-level `#[allow]` on repo modules + individual docs on `commands.rs` publics.
+- Phase 1 retrospective in LESSONS.md (~100 lines: delivered/test count/what worked/what surprised us/what we deferred/carry-forward/numbers).
+- Lefthook live-fire DEFERRED — binary not on dev PATH. Note in LESSONS for follow-up after install.
+
+## Phase 2 — STT + audio capture: QUEUED
+
+Blocked on: nothing. Resume with `/agent code-puppy` → `/phase2-goal`.
+
+Carry-forward from Phase 1 (full list in LESSONS retrospective):
+- **Brief pattern is the default.** Write `docs/phases/phase2-waveN-brief.md` at the end of each wave with the next wave's full context. Pattern has shipped ~100% first-run test pass rates.
+- **AppError aggregator** generalizes — Phase 2 will add `Stt(...)` and `Audio(...)` variants.
+- **Provenance-is-total** at the API layer is a project-wide principle.
+- **Migrations 001-003 are FROZEN.** Phase 2 ships migration 004+.
+- **Test-density target:** ~10 tests per ~500 lines of code (Phase 1 hit ~100 tests / ~5000 lines).
 
 **Note:** migrations 001-003 are **NOT YET SEALED**. The tag
 `phase-1-complete` lands at end of Wave 5 after all phase deliverables

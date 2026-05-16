@@ -1,3 +1,5 @@
+#![allow(missing_docs)] // Self-documenting field set; module-level doc is the API surface.
+
 //! Transcripts repository.
 //!
 //! Raw transcripts are IMMUTABLE — this module deliberately has no

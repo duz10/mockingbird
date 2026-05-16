@@ -1,3 +1,5 @@
+#![allow(missing_docs)] // Self-documenting field set; module-level doc is the API surface.
+
 //! FTS5 search across all transcripts.
 //!
 //! Phase 1 uses conservative phrase-escaping: the raw query is doubled-

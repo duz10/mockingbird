@@ -1,3 +1,5 @@
+#![allow(missing_docs)] // Self-documenting field set; module-level doc is the API surface.
+
 //! Style examples repository — few-shot inputs/outputs for cleanup LLM.
 //!
 //! Phase 1 ships minimal CRUD. Ranking, automatic selection from

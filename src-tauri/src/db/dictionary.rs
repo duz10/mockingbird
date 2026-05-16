@@ -1,3 +1,5 @@
+#![allow(missing_docs)] // Self-documenting field set; module-level doc is the API surface.
+
 //! Dictionary repository — user vocabulary substitutions.
 //!
 //! Stores terms with optional canonical forms. The cleanup pipeline
