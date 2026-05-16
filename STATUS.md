@@ -1,10 +1,10 @@
 # Mockingbird — STATUS
 
-**Current phase:** Phase 3 — Wave 1 ✅ **COMPLETE**; Wave 2 IN PROGRESS
-**Last updated:** 2026-05-17 (Phase 3 Wave 1 finished)
-**Last successful judge run:** _Phase-3 Wave-1 cargo gate: 164/164 tests on GPU (`--release`), clippy `--release --all-targets -- -D warnings` clean, fmt clean, 2026-05-17._
+**Current phase:** Phase 3 — Waves 1 + 2 ✅ **COMPLETE**; Wave 3 IN PROGRESS
+**Last updated:** 2026-05-17 (Phase 3 Wave 2 finished)
+**Last successful judge run:** _Phase-3 Wave-2 cargo gate: 213/213 tests on GPU (`--release`), clippy `--release --all-targets -- -D warnings` clean, fmt clean, 2026-05-17._
 
-**Blocked on:** nothing — Wave 2 ready to start (mb-dl2, mb-pux, mb-tye, mb-7xs all unblocked).
+**Blocked on:** nothing — Wave 3 ready to start (mb-7mp, mb-vrl, mb-cef, mb-q9e all unblocked). NOTE: Wave 4 needs Dustin at the keyboard for the cross-app injection checklist; code-puppy will STOP at end of Wave 3.
 
 ---
 
@@ -13,8 +13,8 @@
 | Wave | Deliverables                                                                                                                                                                                                                                                       | Status |
 |------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|
 | 1    | ADRs 0015–0019 (low-level hook, injection strategy, secure-input guard, clipboard save/restore, hotkey conflict probe), `AppError::Hotkey/Injection` variants, `phf` dep, broader `windows-rs` feature set, 16 module scaffolds across `hotkey/` `injection/` `window_context/`, `scripts/cargo-with-cuda.ps1` wrapper, 164/164 tests | ✅ |
-| 2    | `window_context/windows.rs`, `hotkey/state.rs` (pure §6.1), `injection/secure_guard.rs`, `injection/strategy.rs` (phf table)                                                                                                                                       | 🚧 |
-| 3    | `hotkey/windows.rs` (`WH_KEYBOARD_LL` hook), synthetic-event integration tests, conflict probe, tray pause toggle                                                                                                                                                  | ⏳ |
+| 2    | `window_context/windows.rs` (real `GetForegroundWindow` + `K32GetModuleBaseNameW` + `OwnedHandle` RAII), `hotkey/state.rs` (pure §6.1, 26 tests), `injection/secure_guard.rs` (`WinSecureInputGuard` with class allowlist + `ES_PASSWORD`; ADR 0017 amended), `injection/strategy.rs` (`phf::phf_map!` 12-entry override table + case-insensitive `resolve()`), 213/213 tests | ✅ |
+| 3    | `hotkey/windows.rs` (`WH_KEYBOARD_LL` hook on dedicated thread), state-machine driver with 20 ms tick cadence, ADR 0019 conflict probe with F23/F24/Ctrl+Shift+Space fallback, tray pause-toggle, watchdog log                                                       | 🚧 |
 | 4    | `injection/paste.rs` clipboard save/restore, `injection/windows.rs` SendInput, orchestrator `dictation.rs`, DB persistence, recording-window stub, cross-app QA matrix                                                                                              | ⏳ |
 | 5    | 4 new judges + retrospective + seal `phase-3-complete`                                                                                                                                                                                                             | ⏳ |
 

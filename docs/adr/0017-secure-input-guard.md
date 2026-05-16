@@ -1,6 +1,6 @@
 # ADR-0017: Secure-input guard policy
 
-- **Status:** Accepted
+- **Status:** Accepted (amended 2026-05-17 Wave 2 — see "Update" below)
 - **Date:** 2026-05-17
 - **Deciders:** Dustin (project lead), code-puppy (implementor), planning-agent
 
@@ -108,6 +108,43 @@ first.
 - **Heuristic: focused control's text matches password-mask regex.**
   We have no access to control text — would need accessibility APIs
   that themselves require trust. Rejected as security theatre.
+
+## Update — 2026-05-17 (Wave 2 implementation)
+
+While wiring `injection/secure_guard.rs` in Wave 2, code-puppy went to
+look up the `GUI_SECUREINPUT` flag value in `windows-rs` 0.56 and
+discovered the constant doesn't exist — not in the crate and not in
+the official Win32 SDK (`winuser.h`). The full set of
+`GUITHREADINFO_FLAGS` is `GUI_CARETBLINKING` (0x1), `GUI_INMOVESIZE`
+(0x2), `GUI_INMENUMODE` (0x4), `GUI_SYSTEMMENUMODE` (0x8),
+`GUI_POPUPMENUMODE` (0x10). The original ADR conflated this with
+macOS's `IsSecureEventInputEnabled()` (a real API).
+
+**Amendment:** Signal 1 (`GUI_SECUREINPUT` check) is dropped. Signals
+2 (class-name allowlist) and 3 (`ES_PASSWORD` on focused edit) remain
+and are sufficient because:
+
+- UAC consent prompts run on a separate **secure desktop** that our
+  process cannot enumerate. During an active UAC prompt,
+  `GetForegroundWindow()` returns NULL, which already causes
+  `WindowContext::foreground()` (Wave 2) to error before any
+  injection path is reached. The same applies to the Windows Hello
+  PIN prompt, BitLocker recovery, and `Ctrl+Alt+Del`.
+- The Credential UI (`CredentialDialogXamlHost`) runs on the normal
+  desktop and is caught by signal 2 (class-name allowlist).
+- Win32 password edits (legacy domain login dialogs, classic apps)
+  are caught by signal 3 (`ES_PASSWORD`).
+- WebView2 / modern-web password fields remain the documented gap
+  ("Negative" §). Mitigation: per-app `Abort` overrides via ADR 0016
+  for `1password.exe`, `bitwarden.exe`, etc.
+
+Net effect on behaviour: zero regressions versus the originally-
+imagined three-signal design. Two signals OR-combined still gives
+defence in depth for every concrete attack scenario.
+
+Follow-up: Section "Alternatives considered" reference to
+`GUI_SECUREINPUT only` is now historical context — left in place so
+future readers can see the reasoning trail without rewriting history.
 
 ## Cross-references
 

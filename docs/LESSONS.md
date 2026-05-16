@@ -15,6 +15,28 @@ Format:
 ---
 
 
+## 2026-05-17 [phase-3-wave-2] windows-rs 0.56 HWND is isize, not pointer
+
+- **Context:** Implementing `window_context/windows.rs` + `injection/secure_guard.rs`. First attempt used `.is_null()` and `*mut c_void` patterns that work in newer `windows-rs` releases.
+- **Finding:** In `windows-rs 0.56` (our pinned version per ADR 0011 + Cargo.lock), `HWND` is `pub struct HWND(pub isize);` and `HANDLE` is `pub struct HANDLE(pub isize);`. Null check is `hwnd.0 == 0`, not `hwnd.0.is_null()`. Conversion to/from `ForegroundWindow.hwnd: isize` is the trivial `.0` access. **`windows-rs 0.61+` switched to `*mut c_void`-backed pointer types** for HWND/HANDLE — but we're not on 0.61+ and won't be in Phase 3.
+- **Action:** Established pattern: pass `isize` across thread boundaries (in `ForegroundWindow.hwnd`), wrap as `HWND(isize_value)` at the OS boundary, compare against zero for null. If we ever upgrade `windows-rs`, this is one of the breaking points to watch.
+
+## 2026-05-17 [phase-3-wave-2] GUI_SECUREINPUT is not a real Win32 constant
+
+- **Context:** ADR 0017 specified three signals for `SecureInputGuard`, including `GetGUIThreadInfo(GUI_SECUREINPUT)`. Wave 2 implementor went to look up the constant value in `windows-rs 0.56` to use it.
+- **Finding:** `GUI_SECUREINPUT` does not exist in `windows-rs` AND does not exist in the official Win32 SDK `winuser.h`. The full list of `GUITHREADINFO_FLAGS` is `GUI_CARETBLINKING (0x1)`, `GUI_INMOVESIZE (0x2)`, `GUI_INMENUMODE (0x4)`, `GUI_SYSTEMMENUMODE (0x8)`, `GUI_POPUPMENUMODE (0x10)`. The ADR author (me) conflated this with macOS's `IsSecureEventInputEnabled()` which IS a real API. The Windows reality is different: UAC consent prompts run on a separate **secure desktop** that our process can't enumerate; `GetForegroundWindow()` returns NULL during them, which trips the null-foreground guard in `window_context/windows.rs` BEFORE we ever reach the secure-input check.
+- **Action:** Amended ADR 0017 with an "Update — 2026-05-17 (Wave 2)" section dropping signal 1. The remaining two signals (class-name allowlist + `ES_PASSWORD` on focused edit) are sufficient because: (a) UAC / Hello / BitLocker / Ctrl-Alt-Del trip the null-foreground guard, (b) Credential UI is caught by class name, (c) Win32 password edits are caught by `ES_PASSWORD`. WebView2 password fields remain documented as out-of-scope and are mitigated via per-app `Abort` overrides in ADR 0016.
+- **Carry-forward:** When an ADR references an API, **the implementor MUST validate the API exists in our pinned dep version before sealing the ADR**. Add this to the planning-agent's "ADR review checklist".
+
+## 2026-05-17 [phase-3-wave-2] State-machine precedence: hard stop wins
+
+- **Context:** `HotkeyStateMachine::handle` for `(ConfirmingCancel, Tick)` originally checked `confirm_timeout` first, then `max_session`. A unit test (`max_session_overrides_confirm_cancel`) caught the latent bug.
+- **Finding:** When two timeouts fire on the same tick, the precedence matters. The 300 s `max_session` is a HARD ceiling per PLAN §6.1 — without it a user who sits on the confirm-cancel toast past 300 s would have their recording grow indefinitely. The 3 s `confirm_timeout` is a SOFT revert. Hard stops must always win.
+- **Action:** Reordered the branches; added a code comment explaining the precedence + a test that explicitly hits both timeouts simultaneously. **Generalisation:** state-machine code with multiple time-dependent transitions out of one state should always order the branches by "severity" — hard stops first, soft transitions after.
+
+---
+
+
 ## 2026-05-17 [phase-3-wave-1] Build env, parallelism, and PowerShell stream/arg parsing
 
 - **Context:** Phase 3 Wave 1 — five ADRs + module scaffolds + first cargo gate post-Phase-2. Hit six separate Windows toolchain papercuts before the gate went green.
