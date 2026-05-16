@@ -1,8 +1,28 @@
 # Mockingbird — STATUS
 
-**Current phase:** Phase 2 — IN PROGRESS (Waves 1 + 2 + 3 + 4 ✅; Wave 5 queued)
-**Last updated:** 2026-05-16 (Phase 2 Wave 4 landed)
-**Last successful judge run:** _Phase-2-Wave-4 cargo gate: 151/151 tests, clippy clean, fmt clean, 2026-05-16. Whisper integration tests skip gracefully until model download completes — they exercise once `WHISPER_MODEL_PATH` or `%LOCALAPPDATA%\Mockingbird\models\whisper-large-v3-turbo-q5_0.bin` is present._
+**Current phase:** Phase 2 — Waves 1+2+3+4+5 code ✅; **NOT YET SEALED — see GPU requirement below**
+**Last updated:** 2026-05-16 (Phase 2 Wave 5 — judges + retrospective; no seal tag)
+**Last successful judge run:** _Phase-2-Wave-5 cargo gate: 151/151 tests, clippy clean, fmt clean, 2026-05-16. Three new judges (`mb-stt-correct`, `mb-cuda-verified`, `mb-perf-stt`) wired into `.code_puppy/judges-template.json` and `docs/judges/phase-2/`._
+
+---
+
+## 🚨 PHASE 2 IS NOT SEALED — GPU VERIFICATION REQUIRED
+
+The `phase-2-complete` git tag is **deliberately not applied**. Per PLAN line 1362 ("CUDA path verified on RTX 2060"), Phase 2 is not complete until Whisper actually runs on the GPU on this device. Wave 4 currently ships **CPU-only** because CUDA 13.2 (the only version chocolatey publishes) is incompatible with whisper-rs 0.16's bundled ggml (deprecated CUDA archs + empty `CudaToolkitDir` integration variable). ADR 0011's runtime CPU fallback covers correctness gracefully, but the latency budget (< 1 s for 10 s audio) is unmet.
+
+**Seal-blocker:** `bd mb-ltq` (P0). Steps to clear:
+
+1. Manually install CUDA Toolkit 12.6 or 12.8 from developer.nvidia.com (~3 GB). CUDA toolkits coexist — each version lives in its own `v12.x` subdir alongside `v13.x`.
+2. Set `CUDA_PATH` to the 12.x install path (or leave Windows to pick newest).
+3. In `Cargo.toml` (workspace), change `whisper-rs = { version = "0.16" }` back to `whisper-rs = { version = "0.16", features = ["cuda"] }`.
+4. `cargo clean -p whisper-rs-sys && cargo build --release --bin stt_test`.
+5. Run: `target\release\stt_test.exe tests/fixtures/audio/<real-speech>.wav --json` — `gpu_used` field must be `true`.
+6. Run the three Phase-2 judges (`mb-stt-correct`, `mb-cuda-verified`, `mb-perf-stt`) — all three must pass.
+7. Then apply the seal: `git tag phase-2-complete && git push origin phase-2-complete`.
+
+Until all 7 steps are done, Phase 2 is **incomplete** even though Wave 5 code work is shipped. Phase 3 can begin in parallel (cross-app injection is GPU-independent), but the project does not advance to "Phase 2 ✅" in retrospectives or the README until GPU is verified.
+
+---",
 **Cost line (cumulative):** _Track from first /goal run — bootstrap + Phase 0 + Phase 1 Waves 1+2 across two sessions; record when LLM judges run._
 
 ---
@@ -252,13 +272,26 @@ Binding plan: `docs/phases/phase1.md` (planning-agent session 1b10a8, 25 tasks a
 
 **Wave 4 surprise: CUDA shipped CPU-only.** Installed CUDA Toolkit 13.2.1 (the only version on chocolatey). ggml's hard-coded CUDA architectures `52;61;70;75` are deprecated in CUDA 13, AND MSBuild's `CudaToolkitDir` integration variable comes up empty against CUDA 13's targets file. Manually downloading CUDA 12.x from developer.nvidia.com (~3 GB) was deemed not worth the time when **ADR 0011's runtime CPU fallback exists for exactly this scenario**. The `WhisperStt::new` code path still tries GPU first; without the cuda feature compiled in, the GPU attempt fails immediately and the CPU path runs. When CUDA 12.x is later installed side-by-side, flipping `features=["cuda"]` back on in `Cargo.toml` re-enables the GPU path with no code changes. bd `mb-ltq` tracks the re-enable task.
 
-### Wave 5 — queued
+### Wave 5 — judges + retrospective + (deferred) seal ✅ (code) / 🟨 (seal)
 
-| Wave | Scope | Blocker |
-|------|-------|---------|
-| 5 | 3 new judges (`stt-cpu-fallback`, `prompt-cap-224`, `perf-stt`) + `phase-2-complete` tag + retrospective | none — code complete; needs judge wiring + LLM run |
+| File | Notes |
+|------|-------|
+| `docs/judges/phase-2/stt-correct.md` | Judge card: edit-distance ≤ 25% on real-speech fixture; non-fabrication on silent.wav (PLAN line 1752 "non-negotiable"); model_id + latency assertions |
+| `docs/judges/phase-2/cuda-verified.md` | Judge card: cuda feature ON in Cargo.toml + build succeeds + runtime stderr contains `CUDA\|cuBLAS\|gpu_device\|cudart` + `gpu_used:true` in JSON output. **Currently RED** by design |
+| `docs/judges/phase-2/perf-stt.md` | Judge card: mean < 1000 ms, p95 < 1500 ms on 10 s speech fixture (gated on cuda-verified) |
+| `.code_puppy/judges-template.json` | +3 entries (`mb-stt-correct`, `mb-cuda-verified`, `mb-perf-stt`); JSON-validated (8 total judges) |
+| `docs/LESSONS.md` | +Phase 2 retrospective entry: delivered, surprised, deferred, carry-forward, numbers |
+| **No `phase-2-complete` tag** | Per GPU-required directive — see callout at top of this file |
 
-Resume Wave 5 in a fresh session with `/agent code-puppy` → `/phase2-goal`. Wave 5 brief should live at `docs/phases/phase2-wave5-brief.md` (write at end of Wave 4 session).
+**Wave 5 code is complete.** The phase-tag step is deferred until `bd mb-ltq` (GPU verification) clears. The 3 judges are wired and would pass `mb-stt-correct` today; `mb-cuda-verified` and `mb-perf-stt` are RED by design until GPU is back online.
+
+**Why no Wave 5 brief?** Wave 5 IS the brief — it's the seal-prep wave. Phase 3 gets its own `docs/phases/phase3-wave1-brief.md` at the start of Phase 3 work, not at the end of Phase 2.
+
+### Cargo gate (Wave 5) — all four green
+- `cargo check --workspace` ✅
+- `cargo clippy --workspace --all-targets -- -D warnings` ✅
+- `cargo test --workspace` ✅ — **151/151** PASS (same as Wave 4 — no new tests in Wave 5; this wave is judges + docs)
+- `cargo fmt --check` ✅
 
 Carry-forward from Phase 1 (full list in LESSONS retrospective):
 - **Brief pattern is the default.** Write `docs/phases/phase2-waveN-brief.md` at the end of each wave with the next wave's full context. Pattern has shipped ~100% first-run test pass rates.

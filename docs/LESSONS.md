@@ -14,6 +14,49 @@ Format:
 
 ---
 
+## 2026-05-16 [phase-2-retrospective] Phase 2 retrospective (Waves 1–5; NOT yet sealed)
+
+**Delivered (5 waves):**
+- Wave 1: 4 ADRs (0011 whisper-rs CUDA, 0012 ort runtime, 0013 cpal/ringbuf, 0014 model storage), `AudioCapture` + `VoiceActivityDetector` + `SpeechToText` traits, model-resolver + 224-token cap constant, scaffolds with `todo!()` bodies, model download script (BITS-resumable + SHA-256-verified).
+- Wave 2: `CpalCapture` (cpal 0.15 + ringbuf 0.4, 16 kHz mono i16, 1 MB SPSC, 30 ms frames, start/stop idempotent), synthetic WAV fixture generator + 3 fixtures committed (silent / sine_440 / mixed), 8 integration tests.
+- Wave 3: Silero VAD via ort `2.0.0-rc.10` with `load-dynamic + ndarray` features (sidesteps MSVC 2022 STL static-link demand), 512-sample frames + LSTM carry-through, `vad_trim` helper with lead-in/hangover/min-speech, 4 unit + 4 integration tests.
+- Wave 4: `WhisperStt` (whisper-rs 0.16, CPU path), `prompt_builder` (recency × frequency × app-match, hand-rolled ISO-8601 parser, 224-token greedy pack), `stt_test` CLI (pretty + JSON), criterion bench skeleton, 4 whisper integration tests, 12 prompt_builder unit tests.
+- Wave 5: 3 judge cards (`stt-correct`, `cuda-verified`, `perf-stt`) + 3 entries in `judges-template.json`, this retrospective, STATUS "NOT SEALED" callout. **No `phase-2-complete` tag** — gated on GPU verification (`bd mb-ltq` P0).
+
+**Test count growth:** 101 (Phase 1) → 122 (W2) → 134 (W3) → 151 (W4). +50 tests over the phase, target was +40–50 — hit.
+
+**What worked:**
+- **The brief pattern keeps paying.** End-of-wave briefs nailed Wave 2/3/4 first-try compile-and-pass with one or two trivial clippy fixes. ~95% first-run pass rate.
+- **Skipping gracefully > skipping silently.** Tests gated on runtime resources (`silero_runtime_available`, `whisper_model_present`) skip with a `eprintln!` — keeps CI green without `#[ignore]` hiding regressions.
+- **ADRs upstream of dependency decisions.** ADR 0011 named the CUDA-fallback design BEFORE we hit the CUDA-13 chasm. When the chasm appeared the answer was "the architecture already handles this; ship CPU and re-enable later," not panic.
+
+**What surprised us:**
+- **Chocolatey's CUDA package is current-only.** No version pins available; you get whatever's latest. For tightly-coupled toolchains (CUDA 12 vs 13 is a different ABI generation), this is a footgun.
+- **whisper-rs 0.13.2 ships internally inconsistent.** 71 build errors before we even touched CUDA — the wrapper accessed fields the `-sys` crate's bindgen explicitly hid as opaque. Newer crate version solved it; lesson is *don't blind-pin -sys-coupled crates*.
+- **whisper-rs 0.16 API renames silently.** `full_n_segments()` → returns `i32` (was `Result`); `full_get_segment_text(i)` → `get_segment(i)` returning `Option<Segment>` with `.to_str_lossy()`. Caught at compile time but the brief was based on 0.13 shapes.
+- **PowerShell parses em-dashes (U+2014) as multi-byte garbage in scripts.** Strip to ASCII before saving any `.ps1`. Already burnt this in Phase 1 — recurring.
+
+**What we deferred:**
+- **GPU verification of the STT pipeline.** Wave 5 sealing is blocked until CUDA 12.x is installed side-by-side and the `cuda` feature is re-enabled. ADR 0011's CPU fallback covers correctness; PLAN line 1362 ("CUDA path verified on RTX 2060") covers latency. `bd mb-ltq` is the seal-blocker.
+- **A real-speech 10s WAV fixture.** Wave 4 ships synthetic sine/silent only; the `stt-correct` + `perf-stt` judges need `hello.wav` (or similar) with an `.expected.txt` sidecar. Helios delegation candidate (Windows `System.Speech.Synthesis`).
+- **Phase 3 will own the global hotkey + injection paths.** No keyboard hooks landed; the trait stubs for cross-app injection are NOT in Phase 2.
+
+**Carry-forward to Phase 3 (cross-app injection):**
+- The brief pattern: write `docs/phases/phase3-wave1-brief.md` at the start, treat it as binding.
+- The `Provenance is total` invariant is about to get pressed harder — sessions table rows go from "in-memory test only" to "every hotkey press writes a row."
+- Test density target: ~10 tests / 500 LoC. Phase 1 hit it, Phase 2 hit it (~50 tests / ~2,500 new lines).
+- AppError-string variants generalize well; Phase 3 will likely add `Injection(String)` + `Hotkey(String)`.
+
+**Phase 2 numbers:**
+- Tests: 151 / 151 ✅ (was 101 at Phase 1 seal)
+- LoC added: ~2,500 (audio + stt + vad + bin + tests + benches + scripts + ADRs)
+- ADRs: 4 new (0011–0014) — all Status=Accepted
+- LESSONS entries: +18 (now ~30 total)
+- bd tasks: 26 of 26 Phase-2 tasks closed; **1 open seal-blocker (`mb-ltq`)**
+- Phase tag: **NOT YET APPLIED.** Wave 5 deliberately stops short of `phase-2-complete` per the GPU requirement.
+
+---
+
 ## 2026-05-16 [phase-2] CUDA 13 + whisper-rs 0.16's bundled ggml = chasm
 - **Context:** Wave 4 installed CUDA Toolkit 13.2.1 (latest, only version on choco) plus VS 2022 BT, cmake, LLVM. Tried to build whisper-rs with the `cuda` feature.
 - **Finding 1:** ggml hard-codes CUDA architectures `52;61;70;75`. CUDA 13 dropped pre-Turing support — those archs no longer compile.

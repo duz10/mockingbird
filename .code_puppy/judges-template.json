@@ -36,6 +36,33 @@
       "trigger": "iteration_end"
     },
     {
+      "id": "mb-stt-correct",
+      "name": "STT correctness (Phase 2)",
+      "description": "Verifies the Whisper STT pipeline produces a non-fabricated transcript that matches expected output within edit-distance tolerance on a known speech fixture. Hard-blocks the phase-2-complete tag.",
+      "model": "anthropic/claude-sonnet-4-5",
+      "prompt": "Open docs/judges/phase-2/stt-correct.md and follow its pass criteria. Run `cargo test --workspace -- whisper::` and check the three integration tests pass. If a real-speech fixture exists at tests/fixtures/audio/hello.wav with a .expected.txt sidecar, run `target\\release\\stt_test.exe tests/fixtures/audio/hello.wav --json`, parse the JSON, lowercase + whitespace-normalise the .text field, and compute Levenshtein edit distance against the sidecar. Pass if distance <= 25% of expected length AND model_id == 'whisper-large-v3-turbo-q5_0' AND latency_ms > 0. Reply in JSON: {tests_pass, fixture_match, edit_distance, expected_length, model_id_ok, latency_ok, verdict, notes}.",
+      "trigger": "phase_end",
+      "applies_when": "phase == 2"
+    },
+    {
+      "id": "mb-cuda-verified",
+      "name": "CUDA verified (Phase 2)",
+      "description": "Verifies that Whisper actually uses GPU (cuBLAS / CUDA) on this device — not silently falling back to CPU. Hard-blocks the phase-2-complete tag per PLAN line 1362.",
+      "model": "anthropic/claude-haiku-4",
+      "prompt": "Open docs/judges/phase-2/cuda-verified.md. Verify ALL of: (1) Cargo.toml has whisper-rs with features=[\"cuda\"] active (not commented out); (2) `cargo build --release --bin stt_test` succeeds with cuda backend; (3) Running the binary on a speech WAV emits a stderr line matching /CUDA|cuBLAS|gpu_device|cudart/ AND does NOT emit 'use gpu = 0' or 'no GPU found'; (4) The --json output has gpu_used:true. Each criterion is binary pass/fail. Reply in JSON: {cargo_feature_on, build_ok, runtime_cuda_lines:[...], gpu_used_json, verdict, blocker_reason}.",
+      "trigger": "phase_end",
+      "applies_when": "phase == 2"
+    },
+    {
+      "id": "mb-perf-stt",
+      "name": "STT performance budget (Phase 2)",
+      "description": "Verifies end-to-end transcribe latency < 1000 ms for 10s of speech audio on GPU. PLAN line 1376 budget. Gated behind cuda-verified — CPU runs are informational only.",
+      "model": "anthropic/claude-haiku-4",
+      "prompt": "Open docs/judges/phase-2/perf-stt.md. If the cuda-verified judge passed in this iteration, run `cargo bench --bench whisper_latency` and parse the criterion JSON output at target/criterion/whisper_latency_*/new/estimates.json. Pass if mean point_estimate (in ns, divide by 1_000_000 for ms) is < 1000 AND p95 < 1500 on a 10-second speech fixture. If only the synthetic sine fixture exists, report 'fixture-missing' and mark NOT_RUN (not FAIL). If cuda-verified did NOT pass, mark NOT_RUN and explain the gating. Reply in JSON: {cuda_gate_ok, mean_ms, p95_ms, fixture_used, verdict}.",
+      "trigger": "phase_end",
+      "applies_when": "phase == 2"
+    },
+    {
       "id": "mb-supply-chain",
       "name": "Supply-chain hygiene",
       "description": "If package.json, package-lock.json, Cargo.toml, or Cargo.lock changed, audits the new deps against the IOC list and the project's banned-namespace rules.",
