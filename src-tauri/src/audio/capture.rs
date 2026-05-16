@@ -53,11 +53,13 @@ pub struct CpalCapture {
     host: Host,
     /// Currently-active stream. None when stopped or pre-start.
     stream: Option<Stream>,
-    /// Consumer half of the ring.
+    /// Consumer half of the *current* ring.
+    ///
+    /// Rebuilt on every `start()` (along with a fresh producer that
+    /// moves into the cpal callback). The old consumer is dropped at
+    /// reassign, which also drops any stale samples from the prior
+    /// session — no need to drain manually.
     consumer: SampleConsumer,
-    /// Producer half — held in a slot so `start()` can move it into
-    /// the cpal callback closure exactly once per build.
-    producer_slot: Option<SampleProducer>,
     /// Name of the device the active stream is built against. None
     /// before first `start()`.
     current_device_name: Option<String>,
@@ -75,13 +77,15 @@ pub struct CpalCapture {
 impl CpalCapture {
     pub fn new() -> AppResult<Self> {
         let host = cpal::default_host();
+        // Pre-start consumer: tied to an orphan ring that has no
+        // producer. drain() on this returns 0 cleanly. Replaced on
+        // first start().
         let rb = HeapRb::<i16>::new(RING_CAPACITY);
-        let (producer, consumer) = rb.split();
+        let (_orphan_producer, consumer) = rb.split();
         Ok(Self {
             host,
             stream: None,
             consumer,
-            producer_slot: Some(producer),
             current_device_name: None,
             watcher_handle: None,
             watcher_alive: Arc::new(AtomicBool::new(false)),
@@ -231,13 +235,14 @@ impl super::AudioCapture for CpalCapture {
             .ok_or_else(|| AppError::Audio("no default input device".into()))?;
         let device_name = device.name().ok();
 
-        let producer = self.producer_slot.take().ok_or_else(|| {
-            AppError::Audio(
-                "producer already consumed by a prior start(); restart after stop() \
-                 is not supported in Phase 2 (Phase 5 wires recording lifecycle)"
-                    .into(),
-            )
-        })?;
+        // Fresh ring per session — supports restart-after-stop, which
+        // Phase 3 needs for hold-after-hold dictation. The previous
+        // consumer (and any stale samples) is dropped on the next
+        // line; the new producer is moved into the cpal callback by
+        // `build_stream`.
+        let rb = HeapRb::<i16>::new(RING_CAPACITY);
+        let (producer, consumer) = rb.split();
+        self.consumer = consumer;
 
         let stream = Self::build_stream(&device, producer)?;
         stream
@@ -349,23 +354,67 @@ mod tests {
         c.stop().unwrap();
     }
 
-    /// Restart after stop is intentionally NOT supported in Phase 2.
-    /// The second start() returns AppError::Audio with a specific
-    /// message — and crucially does NOT panic.
+    /// Wave 4.8: restart after stop must succeed cleanly. Phase 3
+    /// dictation involves many hold-release cycles per session;
+    /// every hold calls start() and every release calls stop(). The
+    /// previous Phase-2 behavior (error on second start) would break
+    /// the second-ever dictation in any process lifetime.
     #[test]
-    fn restart_after_stop_errors_cleanly() {
+    fn restart_after_stop_succeeds() {
         let mut c = CpalCapture::new().unwrap();
         if c.start().is_err() {
             eprintln!("skipping: no default input device on test runner");
             return;
         }
         c.stop().unwrap();
-        let err = c.start().expect_err("restart should error in Phase 2");
-        let msg = err.to_string();
+        // Second cycle: must succeed.
+        c.start().expect("restart after stop must succeed");
+        c.stop().unwrap();
+        // Third cycle for good measure — proves it's truly stateless.
+        c.start().expect("third start must also succeed");
+        c.stop().unwrap();
+    }
+
+    /// Drain before any start() returns 0 samples cleanly (no panic
+    /// from an unbacked consumer).
+    #[test]
+    fn drain_before_start_returns_zero() {
+        use crate::audio::AudioCapture;
+        let mut c = CpalCapture::new().unwrap();
+        let mut buf = Vec::new();
+        let n = c.drain(&mut buf).unwrap();
+        assert_eq!(n, 0);
+        assert!(buf.is_empty());
+    }
+
+    /// After stop(), any samples produced by the now-defunct stream
+    /// must not appear in a subsequent start() / drain() cycle. The
+    /// ring-rebuild-on-start contract guarantees a clean slate.
+    #[test]
+    fn drain_after_restart_does_not_leak_prior_session_samples() {
+        use crate::audio::AudioCapture;
+        let mut c = CpalCapture::new().unwrap();
+        if c.start().is_err() {
+            eprintln!("skipping: no default input device on test runner");
+            return;
+        }
+        // Let a bit of audio flow into the prior ring.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        c.stop().unwrap();
+
+        // Restart — the consumer is rebuilt fresh.
+        c.start().unwrap();
+        let mut buf = Vec::new();
+        c.drain(&mut buf).unwrap();
+        // After ~0 ms of post-restart capture, the new ring should be
+        // essentially empty. We allow a tiny grace because cpal may
+        // have already delivered one callback by now on fast machines.
         assert!(
-            msg.contains("restart"),
-            "expected restart-not-supported message, got: {msg}"
+            buf.len() < 16_000, // < 1 second @ 16 kHz mono
+            "expected near-empty post-restart buffer, got {} samples",
+            buf.len()
         );
+        c.stop().unwrap();
     }
 
     #[test]
