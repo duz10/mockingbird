@@ -15,6 +15,33 @@ Format:
 ---
 
 
+## 2026-05-17 [phase-3-wave-4] ADR scope ≠ task brief scope
+
+- **Context:** The Wave 4 brief said "no migration 004 — ADR 0010 binding." Implementation discovered the orchestrator needs per-row `injection_status` persistence — without storage, the cross-app QA matrix can't be objectively verified after the fact.
+- **Finding:** Re-read ADR 0010. It says raw-`transcripts` rows are immutable; says NOTHING about migration count. The "no migration 004" line in the brief was the brief author (me) conflating two different bindings: "raw transcripts immutable" (real) + "migrations append-only" (real but means "don't EDIT existing migrations, new ones fine"). Asked Dustin via `ask_user_question`; he picked (A) "add migration 004."
+- **Action:** Migration 004 lands the nullable `injection_status` column. Brief discipline TODO: when writing a brief that cites an ADR as binding, **paste the binding sentence verbatim from the ADR into the brief**. Paraphrasing introduces drift.
+
+## 2026-05-17 [phase-3-wave-4] `windows-rs` import names drift between consts
+
+- **Context:** Implementing `paste.rs` test for `CF_UNICODETEXT`. First attempt: `use windows::Win32::System::DataExchange::CLIPBOARD_FORMAT;` to wrap our constant in the typed newtype. Build broke.
+- **Finding:** In `windows-rs 0.56`, `CLIPBOARD_FORMAT` lives in `Win32::System::DataExchange` as a `pub struct CLIPBOARD_FORMAT(pub u16)` — but it's NOT re-exported at the module's top level for direct `use`. You have to import via its enclosing alias path or just use raw u32. For internal-only test usage, a raw `u32` constant + a comment-encoded invariant is simpler.
+- **Action:** Dropped the typed wrapper test; kept `CF_UNICODETEXT_ID: u32 = 13` as a plain constant with a comment locking in the Win32 ABI guarantee (CF_UNICODETEXT has been 13 since NT 3.51). **Generalisation:** when a windows-rs type ISN'T at the top-level of its module, don't fight it for one test — fall back to documented raw values.
+
+## 2026-05-17 [phase-3-wave-4] `&mut dyn Trait` arguments are easy to miss in trait composition
+
+- **Context:** Orchestrator `complete()` first attempted `trim_speech(&samples, self.audio.sample_rate(), &TrimConfig::default())`. Build failed: `trim_speech` takes `&mut dyn VoiceActivityDetector`, not `u32 (sample_rate)`.
+- **Finding:** I had glossed the VAD shape based on partial recall. The orchestrator needs to own a `Box<dyn VoiceActivityDetector>` AS A SEPARATE FIELD from the audio capture. The two are independent traits that happen to share a `sample_rate` constant (16 kHz). Conflating them was a category error.
+- **Action:** Added `vad: Box<dyn VoiceActivityDetector>` to `DictationOrchestrator`. **Generalisation:** when composing multiple traits in an orchestrator, list them as bullet points in a docstring BEFORE writing the struct fields — forces clear thinking about which trait owns what.
+
+## 2026-05-17 [phase-3-wave-4] Hard-coded timestamps in tests are guaranteed wrong
+
+- **Context:** Wrote `assert_eq!(format_secs_as_iso(1_779_926_400), "2026-05-17T00:00:00Z")`. Test failed; my arithmetic was off by 11 days.
+- **Finding:** Mental arithmetic on Unix epoch seconds is reliably wrong. Even careful pen-and-paper attempts miscount leap years (especially the 2000 case).
+- **Action:** Corrected the value (1_778_976_000) by deriving from a known anchor (2024-01-01 = 1_704_067_200) plus precisely-counted intervening days. Added a second test using 2024-02-29 to catch leap-year regressions specifically. **Generalisation:** when a pure-math test fails, the test is the bug 90% of the time. Derive expected values from KNOWN anchors + arithmetic; never from "I think it's around…"
+
+---
+
+
 ## 2026-05-17 [phase-3-wave-3] WH_KEYBOARD_LL thread-local discipline
 
 - **Context:** Implementing `hotkey/windows.rs` real `SetWindowsHookEx(WH_KEYBOARD_LL, ...)` per ADR 0015. The callback is `unsafe extern "system" fn` — no captures, no closures, no `&self`. State has to live in a `static` somewhere.

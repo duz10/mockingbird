@@ -15,7 +15,9 @@ fn fresh_db() -> Database {
 }
 
 #[test]
-fn schema_version_is_3_after_apply() {
+fn schema_version_is_4_after_apply() {
+    // Bumped from 3 → 4 by migration 004 (injection_status column;
+    // Phase 3 Wave 4 bd mb-vs3).
     let db = fresh_db();
     let v: String = db
         .conn
@@ -25,7 +27,7 @@ fn schema_version_is_3_after_apply() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(v, "3");
+    assert_eq!(v, "4");
 }
 
 #[test]
@@ -183,7 +185,7 @@ fn fts5_round_trip_finds_inserted_transcript() {
 #[test]
 fn apply_all_is_idempotent() {
     let db = fresh_db();
-    // Second call must be a no-op (assertion: doesn't panic, schema_version still 3).
+    // Second call must be a no-op (assertion: doesn't panic, schema_version still 4).
     mockingbird_lib::db::apply_migrations(&db.conn).expect("second apply_migrations should be Ok");
     let v: String = db
         .conn
@@ -193,5 +195,5 @@ fn apply_all_is_idempotent() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(v, "3");
+    assert_eq!(v, "4");
 }

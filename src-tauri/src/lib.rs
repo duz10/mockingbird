@@ -13,12 +13,15 @@
 //! per-phase implementation plans.
 
 pub mod audio;
+pub mod cleanup;
 pub mod commands;
 pub mod db;
+pub mod dictation;
 pub mod error;
 pub mod hotkey;
 pub mod injection;
 pub mod logging;
+pub mod recording_window;
 pub mod settings;
 pub mod stt;
 pub mod tray;

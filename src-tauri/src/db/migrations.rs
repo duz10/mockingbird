@@ -13,6 +13,7 @@ use crate::error::{AppError, AppResult};
 const MIGRATION_001: &str = include_str!("migrations/001_initial.sql");
 const MIGRATION_002: &str = include_str!("migrations/002_audit_triggers.sql");
 const MIGRATION_003: &str = include_str!("migrations/003_seed_modes.sql");
+const MIGRATION_004: &str = include_str!("migrations/004_injection_status.sql");
 
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
@@ -32,6 +33,9 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
     if current < 3 {
         let prepared = substitute_prompt_bodies(MIGRATION_003);
         conn.execute_batch(&prepared)?;
+    }
+    if current < 4 {
+        conn.execute_batch(MIGRATION_004)?;
     }
     Ok(())
 }
@@ -77,7 +81,7 @@ mod tests {
     /// must leave `schema_version = 3`. (Smoke-level; the integration
     /// test suite covers full table/trigger/FTS5 assertions.)
     #[test]
-    fn apply_all_brings_fresh_db_to_version_3() {
+    fn apply_all_brings_fresh_db_to_version_4() {
         let conn = Connection::open_in_memory().expect("open in-memory");
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .expect("pragma fk");
@@ -89,7 +93,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "3");
+        assert_eq!(v, "4");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -107,6 +111,25 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "3");
+        assert_eq!(v, "4");
+    }
+
+    /// Migration 004 actually adds the column it claims to add.
+    #[test]
+    fn migration_004_adds_injection_status_column() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+        // `PRAGMA table_info` enumerates columns; check the injection_status one is there.
+        let mut stmt = conn.prepare("PRAGMA table_info(sessions)").unwrap();
+        let names: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(|n| n.unwrap())
+            .collect();
+        assert!(
+            names.iter().any(|n| n == "injection_status"),
+            "injection_status column missing; got {names:?}"
+        );
     }
 }

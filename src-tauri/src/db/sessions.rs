@@ -86,6 +86,9 @@ pub struct Session {
     pub stt_latency_ms: Option<i64>,
     pub cleanup_latency_ms: Option<i64>,
     pub injection_latency_ms: Option<i64>,
+    /// Canonical injection outcome string. NULL on legacy rows and
+    /// on currently-in-flight sessions. See migration 004.
+    pub injection_status: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -95,6 +98,10 @@ pub struct ProcessingCompletion {
     pub stt_latency_ms: Option<i64>,
     pub cleanup_latency_ms: Option<i64>,
     pub injection_latency_ms: Option<i64>,
+    /// Canonical injection outcome string (matches
+    /// `InjectionOutcome::as_db_str`). `None` means "not applicable"
+    /// — e.g. processing failed before the injector ran.
+    pub injection_status: Option<String>,
 }
 
 /// Insert a new session row. All provenance FKs must point at real
@@ -157,14 +164,16 @@ pub fn update_processing_complete(
             status = ?2, \
             stt_latency_ms = ?3, \
             cleanup_latency_ms = ?4, \
-            injection_latency_ms = ?5 \
-         WHERE id = ?6",
+            injection_latency_ms = ?5, \
+            injection_status = ?6 \
+         WHERE id = ?7",
         params![
             completion.completed_at,
             completion.status.as_str(),
             completion.stt_latency_ms,
             completion.cleanup_latency_ms,
             completion.injection_latency_ms,
+            completion.injection_status,
             id,
         ],
     )?;
@@ -184,7 +193,8 @@ const SELECT_ALL: &str =
             processing_completed_at, status, error_message, foreground_app, \
             foreground_window_title, audio_duration_ms, audio_blob_path, \
             prompt_id, dictionary_snapshot_id, example_set_id, \
-            stt_latency_ms, cleanup_latency_ms, injection_latency_ms \
+            stt_latency_ms, cleanup_latency_ms, injection_latency_ms, \
+            injection_status \
      FROM sessions";
 
 fn fetch_one(
@@ -230,6 +240,7 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
         stt_latency_ms: row.get(16)?,
         cleanup_latency_ms: row.get(17)?,
         injection_latency_ms: row.get(18)?,
+        injection_status: row.get(19)?,
     })
 }
 
@@ -328,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn update_processing_complete_sets_latencies() {
+    fn update_processing_complete_sets_latencies_and_injection_status() {
         let db = Database::open_in_memory().unwrap();
         let new = fresh_new_session(&db.conn);
         let id = insert(&db.conn, &new).unwrap();
@@ -341,6 +352,7 @@ mod tests {
                 stt_latency_ms: Some(150),
                 cleanup_latency_ms: Some(800),
                 injection_latency_ms: Some(20),
+                injection_status: Some("ok".into()),
             },
         )
         .unwrap();
@@ -349,6 +361,40 @@ mod tests {
         assert_eq!(got.stt_latency_ms, Some(150));
         assert_eq!(got.cleanup_latency_ms, Some(800));
         assert_eq!(got.injection_latency_ms, Some(20));
+        assert_eq!(got.injection_status.as_deref(), Some("ok"));
+    }
+
+    #[test]
+    fn injection_status_persists_aborted_secure() {
+        // Provenance check: a secure-input abort must round-trip.
+        let db = Database::open_in_memory().unwrap();
+        let new = fresh_new_session(&db.conn);
+        let id = insert(&db.conn, &new).unwrap();
+        update_processing_complete(
+            &db.conn,
+            id,
+            &ProcessingCompletion {
+                completed_at: "2026-05-15T00:00:10Z".into(),
+                status: SessionStatus::Complete,
+                stt_latency_ms: Some(100),
+                cleanup_latency_ms: Some(50),
+                injection_latency_ms: None, // never tried
+                injection_status: Some("aborted_secure".into()),
+            },
+        )
+        .unwrap();
+        let got = get_by_id(&db.conn, id).unwrap().unwrap();
+        assert_eq!(got.injection_status.as_deref(), Some("aborted_secure"));
+        assert_eq!(got.injection_latency_ms, None);
+    }
+
+    #[test]
+    fn injection_status_starts_null_until_processing_completes() {
+        let db = Database::open_in_memory().unwrap();
+        let new = fresh_new_session(&db.conn);
+        let id = insert(&db.conn, &new).unwrap();
+        let got = get_by_id(&db.conn, id).unwrap().unwrap();
+        assert_eq!(got.injection_status, None);
     }
 
     #[test]

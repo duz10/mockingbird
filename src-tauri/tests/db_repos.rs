@@ -90,6 +90,7 @@ fn full_dictation_flow_end_to_end() {
             stt_latency_ms: Some(150),
             cleanup_latency_ms: Some(700),
             injection_latency_ms: Some(15),
+            injection_status: Some("ok".into()),
         },
     )
     .unwrap();

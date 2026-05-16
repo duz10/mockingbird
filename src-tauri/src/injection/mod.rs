@@ -31,6 +31,7 @@
 pub mod paste;
 pub mod secure_guard;
 pub mod strategy;
+pub mod strategy_wiring;
 
 #[cfg(target_os = "windows")]
 pub mod windows;
