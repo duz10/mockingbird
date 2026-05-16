@@ -135,12 +135,18 @@ are green and judges pass. Until then, fixes to 001-003 are permitted
 3. **Required reading for Wave 3** (in this order):
    1. `.code_puppy/AGENTS.md`
    2. `docs/phases/phase1.md` (phase plan)
-   3. **`docs/phases/phase1-wave3-brief.md`** ← if it exists, BINDING; if not, code-puppy should write one at start of iteration before authoring DB repos
-   4. `docs/LESSONS.md` (now 14 entries; the brief-pattern lesson is the meta-lesson worth honoring)
+   3. **`docs/phases/phase1-wave3-brief.md`** ← THIS IS BINDING for Wave 3 (~580 lines; written end-of-Wave-2 with fresh context)
+   4. `docs/LESSONS.md` (now 15 entries; check for `[phase-1]` and any rusqlite/FTS5 entries)
    5. `bd ready` (Wave 3 tasks `mb-7oi mb-4f8 mb-9pn mb-91x mb-d5z mb-z4k mb-344` are top)
-4. **What Wave 3 implements:** repository modules over the migrations Wave 2 sealed-in-spirit. Each module is a thin typed wrapper around `rusqlite::Connection` for one table family. **No `update_raw` method on transcripts** (hook scans for it). Mockall trait boundaries so unit tests don't need a real DB. `db::search.rs` is on the FTS5 smoke-test critical path.
-5. **Wave 3 is NOT migrations**, so no SEAL concerns. But the brief-pattern from Wave 2 worked beautifully (15/15 tests first try) — apply it again: write `docs/phases/phase1-wave3-brief.md` end-of-Wave-3 OR start-of-Wave-3 with the function signatures and test specs for each repo module.
+4. **Implementation plan, codified in the Wave 3 brief**:
+   - **DO NOT re-decide** type shapes (`NewSession`, `Stage`, `AuditedTable`, etc.) — the brief specifies every type with serde derives, fields, and enum variants.
+   - **DO NOT re-decide** function signatures — every public function is specified including parameter types and return types.
+   - **DO NOT re-decide** the integration-test set — the brief specifies `db_repos.rs` with 6 cross-repo scenarios.
+   - **DO NOT add `Repository` traits / mockall** — explicitly out of scope for Wave 3 per cross-cutting decision #1. Wave 4 may introduce them if a command actually needs to mock.
+   - **DO** author all 7 modules + `db_repos.rs` directly as code-puppy (no project agent — no db-repo-author exists; migration-author's scope is migrations, not repos).
+5. Wave 3 is **mechanical**. Deviations from the brief require a LESSONS.md note explaining why.
 6. **DO NOT tag `phase-1-complete` at end of Wave 3.** Tag lands at Wave 5 after DB repos + app shell + judges run.
+7. **End of Wave 3:** write `docs/phases/phase1-wave4-brief.md` while context is loaded (proven 100%-test-pass pattern, recorded in LESSONS).
 
 ---
 

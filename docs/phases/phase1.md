@@ -167,10 +167,13 @@ part of `p1-judges-run`: `migrations-applied`, `fts5-smoke`,
 ## Wave-specific briefs
 
 - **Wave 2:** `docs/phases/phase1-wave2-brief.md` — exhaustive
-  implementation brief: full audit-trigger SQL for all 4 tables
-  (extrapolated from PLAN's dictionary-only example), runner file
-  layout (`db/mod.rs` + `db/migrations.rs` + `db/prompt_loader.rs`)
-  with function signatures, token-substitution strategy for migration
-  003, integration-test specs (7 tests), known PLAN bugs flagged
-  (dictionary trigger references non-existent `enabled` column),
-  deviations recorded. Read BEFORE invoking `migration-author`.
+  implementation brief for migrations + runner + integration tests.
+  Result: 15/15 tests passed first run.
+- **Wave 3:** `docs/phases/phase1-wave3-brief.md` — full type
+  definitions, function signatures, unit-test specs, and integration-
+  test scenarios for all 7 repository modules + `db_repos.rs` end-to-end
+  tests. Cross-cutting decisions pinned: no trait abstractions (YAGNI),
+  `&Connection` everywhere, `NewX`/`X` type pattern, ISO-8601 timestamps
+  as `String`, hardcoded column lists in `audit.rs` mirror migration 002
+  projections. Known risks enumerated (FTS5 ORDER BY, `Option<Option<T>>`
+  in updates, audit triggers fire on rollback's own UPDATE).
