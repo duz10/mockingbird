@@ -1,12 +1,16 @@
 # Mockingbird — STATUS
 
-**Current phase:** Phase 3 — Waves 1 + 2 + 3 + 4 ✅ **COMPLETE**; Wave 5 (judges + seal) READY
-**Last updated:** 2026-05-17 (Phase 3 Wave 4 finished; awaiting Dustin's QA-matrix pass on mb-up3)
-**Last successful judge run:** _Phase-3 Wave-4 cargo gate: 303/303 tests on GPU (`--release`), clippy `--release --all-targets -- -D warnings` clean, fmt clean, 2026-05-17. +7 ignored live tests (run with `cargo test -- --ignored`)._
+**Current phase:** Phase 3 — Waves 1 + 2 + 3 + 4 + 4.5 ✅ **COMPLETE**; Wave 5 (judges + seal) READY
+**Last updated:** 2026-05-17 (Phase 3 Wave 4.5 finished — app boots end-to-end, dictation runtime live)
+**Last successful judge run:** _Phase-3 Wave-4.5 cargo gate: 306/306 tests on GPU (`--release`), clippy `--release --all-targets -- -D warnings` clean, fmt clean, 2026-05-17. +8 ignored live tests. **Live boot verified:** `mockingbird.exe` runs, DB created, orchestrator config resolved, dictation runtime spawned, Whisper loaded with GPU._
 
-**Blocked on:** 🛑 **Dustin** — Wave 4 mechanical work is committed. Cross-app QA matrix `mb-up3` (12 rows: Notepad, VSCode, Terminal cmd, Terminal PowerShell, Chrome address bar, Chrome page input, 1Password, Bitwarden, UAC, ES_PASSWORD edit, transient fg, focus-loss mid-hold) still needs you at the keyboard. Once you've run it:
-1. Mark `mb-up3` closed (with notes on any rows that misbehaved).
-2. Tell code-puppy "go on Wave 5" — judges + retrospective + `phase-3-complete` tag.
+**Blocked on:** 🛑 **Dustin** — the dictation pipeline is wired and runs. To do the QA matrix:
+
+1. **Launch:** `pwsh scripts/run-mockingbird.ps1` (sets CUDA + ORT env, starts in background).
+2. **Drive the 12-row matrix** in `docs/phases/phase3-wave4-brief.md` §"QA matrix". Hold RightAlt → speak → release → observe.
+3. **Inspect:** logs at `%APPDATA%\com.dustin.mockingbird\logs\mockingbird.log.YYYY-MM-DD`, DB at `%APPDATA%\com.dustin.mockingbird\mockingbird.db`.
+4. **Stop:** `taskkill /F /IM mockingbird.exe`.
+5. **Mark `mb-up3` closed** with row-by-row notes; then say "go on Wave 5".
 
 Ready tasks waiting: mb-idy (Wave 5 — judges + seal).
 
@@ -20,9 +24,8 @@ Ready tasks waiting: mb-idy (Wave 5 — judges + seal).
 | 2    | `window_context/windows.rs` (real `GetForegroundWindow` + `K32GetModuleBaseNameW` + `OwnedHandle` RAII), `hotkey/state.rs` (pure §6.1, 26 tests), `injection/secure_guard.rs` (`WinSecureInputGuard` with class allowlist + `ES_PASSWORD`; ADR 0017 amended), `injection/strategy.rs` (`phf::phf_map!` 12-entry override table + case-insensitive `resolve()`), 213/213 tests | ✅ |
 | 3    | `hotkey/windows.rs` (`WH_KEYBOARD_LL` on dedicated `mockingbird-hotkey` thread, pure `classify_keystroke` helper with 9 tests), `hotkey/driver.rs` (20 ms tick cadence, 6 tests), `hotkey/probe.rs` (ADR 0019 fallback chain, 7 tests), `hotkey/pause.rs` (Arc<AtomicBool>+channel `PauseHandle`, 6 tests), 244/244 tests + 4 ignored live | ✅ |
 | 4    | `injection/paste.rs` (ADR 0018 four-step dance), `injection/windows.rs` (`SendInputInjector` Paste/Keystroke/Abort), `injection/strategy_wiring.rs` (focus-loss + resolver glue), `cleanup/mod.rs` (Cleaner trait + Passthrough), `dictation.rs` (orchestrator + pure `pipeline::decide`), `recording_window.rs` stub, **migration 004** (injection_status column), 303/303 tests + 7 ignored | ✅ |
+| 4.5  | `dictation/runtime.rs` (DictationRuntime spawn glue: hook install + state driver + dictation thread with !Send deps built in-thread), `models_dir()` 4th fallback for `%USERPROFILE%\mockingbird_models\`, `ORT_DYLIB_PATH` autodiscovery, `bootstrap_provenance_rows()` for first-run dict + example_set, `AppState` refactored to `Arc<Mutex<Connection>>` shared with dictation thread, `lib.rs::run()` wired end-to-end, `scripts/run-mockingbird.ps1` launch script, **live boot verified**, 306/306 tests + 8 ignored | ✅ |
 | 5    | 4 judges (e2e-injection, db-provenance, clipboard-restored, secure-input-respected), Phase 3 retrospective, `phase-3-complete` tag                                                              | ⏳ |
-| 4    | `injection/paste.rs` clipboard save/restore, `injection/windows.rs` SendInput, orchestrator `dictation.rs`, DB persistence, recording-window stub, cross-app QA matrix                                                                                              | ⏳ |
-| 5    | 4 new judges + retrospective + seal `phase-3-complete`                                                                                                                                                                                                             | ⏳ |
 
 bd: 24 tasks seeded; 6 closed (Wave 1 done), 5 ready (Wave 2), 13 blocked downstream.
 

@@ -44,6 +44,13 @@
 //!
 //! This is the same pattern Wave 3 established for `hotkey::windows`
 //! (pure `classify_keystroke` + thin OS shim).
+//!
+//! ## Submodules
+//!
+//! - [`runtime`]: Wave 4.5 spawn glue that wires the orchestrator
+//!   into `lib.rs::run()` with the platform-default traits.
+
+pub mod runtime;
 
 use std::collections::HashMap;
 use std::sync::mpsc::Receiver;

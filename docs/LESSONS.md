@@ -14,6 +14,23 @@ Format:
 
 ---
 
+## 2026-05-17 [phase-3-wave-4.5] `target/release/mockingbird.exe` fails with `STATUS_DLL_NOT_FOUND` from any cwd that isn't the build dir
+
+- **Context:** Wave 4.5 smoke-tested the wired-up binary by running it directly. Got exit code `0xC0000135` (DLL_NOT_FOUND) within 100 ms, no logs, no panic message.
+- **Finding 1:** `[lib] crate-type = ["staticlib", "cdylib", "rlib"]` means the exe links against `mockingbird_lib.dll` (cdylib), which Windows looks for via standard DLL search order. Running the exe from any cwd other than `target\release\` fails the load — the cdylib isn't on PATH.
+- **Finding 2:** Even with cwd = `target\release\`, the binary still failed because `whisper-rs = { features = ["cuda"] }` (root `Cargo.toml` line 66) makes the build dlopen `cudart64_*.dll` at process start. CUDA 12.8 is installed at `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\` but its `bin\` is NOT on system PATH — only the `cargo-with-cuda.ps1` wrapper adds it for cargo invocations.
+- **Finding 3:** The diagnostic was painful because `windows_subsystem = "windows"` (set in `main.rs` for release builds) suppresses console output. Loader-time failures show only the exit code, with no stderr text.
+- **Action:** Created `scripts/run-mockingbird.ps1` that (a) sets cwd to `target\release`, (b) prepends CUDA 12.8 `bin\` to PATH, (c) sets `ORT_DYLIB_PATH`, (d) sets `SILERO_VAD_PATH` + `WHISPER_MODEL_PATH` for log clarity. Phase 6 packaging will copy the CUDA + ONNX DLLs next to the exe so this is moot in the installer; for dev workflow, use the launch script.
+- **Generalisation:** When diagnosing `STATUS_DLL_NOT_FOUND` on a Tauri-cdylib release binary, the suspect order is: (1) the cdylib next to the exe, (2) any `features = ["cuda"]` deps, (3) `ORT_DYLIB_PATH` for `ort` crate, (4) Visual C++ runtime. Loader Snaps (`gflags /i mockingbird.exe +sls`) would print each DLL probe to a debugger — overkill for dev but invaluable if (1)-(4) don't explain it.
+
+## 2026-05-17 [phase-3-wave-4.5] `cargo test --lib` doesn't see `ensure_ort_dylib_set()` so VAD tests need explicit env
+
+- **Context:** After Wave 4.5 patches, 3 VAD tests failed with `ort 2.0.0-rc.10 is not compatible with the ONNX Runtime binary found at \`onnxruntime.dll\`; expected GetVersionString to return '1.22.x', but got '1.17.1'`.
+- **Finding:** `dictation::runtime::ensure_ort_dylib_set()` only runs from `lib.rs::run()` (the Tauri entry point). `cargo test` is a separate binary that links `mockingbird_lib` directly and exercises `audio::vad::tests::*` without going through `run()`. So the env autodiscovery doesn't fire and Windows resolves `onnxruntime.dll` via default search order — finding a stale 1.17.1 DLL somewhere on the system.
+- **Action:** Document the env requirement: `cargo test` needs `ORT_DYLIB_PATH` set explicitly. Wave 5 (or Phase 6) should either add a `#[ctor]`-style init for tests OR mark the affected VAD tests as `#[ignore]` to keep `cargo test` clean. For now: the launch script + cargo wrapper both set the env; bare `cargo test` is the only caller that needs manual setup.
+- **Generalisation:** Env-var autodiscovery in `lib.rs::run()` covers the production path but creates a silent test-only gap. If a runtime env var is required, it should be enforced uniformly — either via a shared `init_runtime_env()` function called from both `run()` and a test-init hook, or via test attributes (`#[ignore]` for env-dependent tests).
+
+
 
 ## 2026-05-17 [phase-3-wave-4] ADR scope ≠ task brief scope
 

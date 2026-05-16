@@ -7,26 +7,29 @@
 //! cross the IPC boundary cleanly. `into_command_err` does the
 //! `AppError → String` conversion.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
+use rusqlite::Connection;
 use tauri::State;
 
-use crate::db::Database;
 use crate::error::AppError;
 use crate::settings::{model::SettingKey, Settings};
 
 /// Managed state held by Tauri. `rusqlite::Connection` is `Send` but
-/// not `Sync`, so we wrap the `Database` in a `Mutex` to satisfy
-/// `tauri::State<T>`'s `Sync` requirement.
+/// not `Sync`, so we wrap it in a `Mutex` to satisfy `tauri::State<T>`'s
+/// `Sync` requirement. The connection is shared via `Arc` with the
+/// dictation runtime (Wave 4.5), so the IPC handlers and the
+/// orchestrator hit the same DB through serialized access.
 pub struct AppState {
-    /// Database connection, behind a Mutex to provide `Sync`.
-    pub db: Mutex<Database>,
+    /// Shared, locked connection. `Arc` because the dictation runtime
+    /// holds a clone of the same handle.
+    pub db: Arc<Mutex<Connection>>,
 }
 
 impl AppState {
-    /// Wrap an open `Database` in the managed-state shape.
-    pub fn new(db: Database) -> Self {
-        Self { db: Mutex::new(db) }
+    /// Build with a pre-shared connection handle.
+    pub fn new(db: Arc<Mutex<Connection>>) -> Self {
+        Self { db }
     }
 }
 
@@ -46,7 +49,7 @@ pub async fn get_setting(
         .db
         .lock()
         .map_err(|e| format!("db lock poisoned: {e}"))?;
-    let settings = Settings::new(&guard.conn);
+    let settings = Settings::new(&guard);
     settings.get_raw(key).map_err(into_command_err)
 }
 
@@ -63,7 +66,7 @@ pub async fn set_setting(
         .db
         .lock()
         .map_err(|e| format!("db lock poisoned: {e}"))?;
-    let settings = Settings::new(&guard.conn);
+    let settings = Settings::new(&guard);
     settings.set_raw(key, &value).map_err(into_command_err)
 }
 
@@ -75,7 +78,7 @@ pub async fn fts_smoke_test(state: State<'_, AppState>, query: String) -> Result
         .db
         .lock()
         .map_err(|e| format!("db lock poisoned: {e}"))?;
-    crate::db::search::smoke_test_count(&guard.conn, &query).map_err(into_command_err)
+    crate::db::search::smoke_test_count(&guard, &query).map_err(into_command_err)
 }
 
 #[cfg(test)]
@@ -90,11 +93,13 @@ mod tests {
 
     #[test]
     fn app_state_wraps_database() {
+        use crate::db::Database;
         let db = Database::open_in_memory().unwrap();
-        let state = AppState::new(db);
+        let conn = Arc::new(Mutex::new(db.conn));
+        let state = AppState::new(conn);
         // Smoke: we can lock + access the connection.
         let guard = state.db.lock().unwrap();
-        let one: i64 = guard.conn.query_row("SELECT 1", [], |r| r.get(0)).unwrap();
+        let one: i64 = guard.query_row("SELECT 1", [], |r| r.get(0)).unwrap();
         assert_eq!(one, 1);
     }
 }

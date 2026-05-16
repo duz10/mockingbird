@@ -67,6 +67,7 @@ pub fn make_default_stt() -> AppResult<Box<dyn SpeechToText>> {
 ///   1. `MODEL_PATH` env var (absolute path; dev override)
 ///   2. `<exe_dir>/models/` (portable install)
 ///   3. `%LOCALAPPDATA%\Mockingbird\models\` (release default; Windows)
+///   4. `%USERPROFILE%\mockingbird_models\` (Phase 2 dev convention; Windows)
 ///
 /// Returns `Err(AppError::Stt)` if none resolve. Caller is responsible
 /// for verifying the directory actually contains the model it wants —
@@ -88,7 +89,20 @@ pub fn models_dir() -> AppResult<PathBuf> {
         let path = PathBuf::from(localappdata)
             .join("Mockingbird")
             .join("models");
-        return Ok(path);
+        if path.is_dir() {
+            return Ok(path);
+        }
+    }
+    // Phase 2 convention: developers download models to
+    // `%USERPROFILE%\mockingbird_models\` via
+    // `scripts/download-models.ps1`. This fallback makes the dev
+    // experience zero-config; release builds prefer (3) above.
+    #[cfg(target_os = "windows")]
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        let path = PathBuf::from(profile).join("mockingbird_models");
+        if path.is_dir() {
+            return Ok(path);
+        }
     }
     Err(AppError::Stt(
         "could not resolve models directory (set MODEL_PATH or run on Windows)".into(),
