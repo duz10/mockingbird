@@ -14,6 +14,86 @@ Format:
 
 ---
 
+## 2026-05-17 [phase5-postship-7] clipboard snapshot crashed the process when a bitmap was on the clipboard (STATUS_HEAP_CORRUPTION)
+
+- **Context:** First dictation after `phase5-postship-6` ship. User
+  said "it crashed when recording the test vtt". Process gone. Log
+  ended mid-paste with `inject begin decision=Proceed(Paste)
+  text_len=73 focus_drifted=false` and no matching `inject end`.
+  No Rust-level error — process died beneath the tracing layer.
+- **Diagnosis:** Windows Event Log Application Error showed
+  `Faulting module name: ntdll.dll, Exception code: 0xc0000374`.
+  That's `STATUS_HEAP_CORRUPTION` — ntdll's heap-validation
+  tripwire fires when something has scribbled on the process heap
+  metadata. Process death is immediate; tracing never gets to log
+  it.
+- **Root cause:** `injection/paste.rs::copy_format_bytes` iterated
+  every format `EnumClipboardFormats` returned and called
+  `GlobalSize(handle)` / `GlobalLock(handle)` on each one. The
+  comment in the code claimed "GlobalSize returns 0 if not
+  HGLOBAL" — **that's wrong**. Per MS docs, calling `GlobalSize` on
+  a handle that wasn't allocated by `GlobalAlloc` is undefined
+  behaviour. `CF_BITMAP` returns an `HBITMAP`, `CF_ENHMETAFILE`
+  returns an `HENHMETAFILE`, etc. `GlobalSize` reads what it
+  THINKS is the moveable-memory header at handle's address; on a
+  GDI object that's other GDI metadata, and the call either
+  scribbles or returns garbage that the next `GlobalLock` writes
+  through.
+- **Reproduction:** between the user's last successful paste at
+  16:18 and the crashing one at 16:47, they took a screenshot for
+  the bug report. The clipboard now held `CF_BITMAP` + `CF_DIB`
+  alongside the text. Snapshot enumeration tried `CF_BITMAP`,
+  passed its `HBITMAP` to `GlobalSize`, corrupted the heap. Next
+  allocation tripped the tripwire and ntdll killed the process.
+  Verified reproducer: place a bitmap on the clipboard via
+  `[System.Windows.Forms.Clipboard]::SetImage`, trigger any paste
+  dictation → immediate process death.
+- **Fix:** allowlist. New `is_hglobal_format(fmt: u32) -> bool` is
+  the gatekeeper for the snapshot loop. Anything not on the
+  allowlist is logged at debug + skipped without EVER passing the
+  handle to `GlobalSize` or `GlobalLock`. Allowlisted formats are
+  the ones MS documents as HGLOBAL-backed: `CF_TEXT`, `CF_SYLK`,
+  `CF_DIF`, `CF_TIFF`, `CF_OEMTEXT`, `CF_DIB`, `CF_UNICODETEXT`,
+  `CF_HDROP`, `CF_LOCALE`, `CF_DIBV5`. Notably, `CF_DIB` IS
+  HGLOBAL (header + pixels in moveable memory) while `CF_BITMAP`
+  is NOT (HBITMAP) — they look related but live in different
+  storage worlds. Registered formats (`>= 0xC000`) are
+  app-defined; docs RECOMMEND HGLOBAL but don't require it, so
+  we're conservative until a Phase 9 per-app deny list lands. Net
+  effect: user temporarily loses round-trip of bitmaps + custom
+  formats around a paste dictation. That's a paper cut; heap
+  corruption is a project-ender.
+- **Patterns burned in:**
+  - **"It returns 0 if X" is a load-bearing claim that needs an
+    MSDN citation, not a comment.** The old code had the comment
+    `// GlobalSize returns 0 if handle isn't an HGLOBAL` directly
+    above the UB call. The comment was wrong and lived for months
+    because nobody had a screenshot on their clipboard during a
+    dictation. Heap-corruption bugs are silent until they aren't.
+  - **Allowlist > sniff-and-skip for FFI handles.** You cannot
+    safely "try and recover" with raw Win32 handles — the act of
+    asking "are you an HGLOBAL?" requires already treating you as
+    one. The only safe move is to know up front. Allowlists are
+    the right primitive whenever a wrong guess crashes the
+    process.
+  - **Crash logs > error logs for diagnosing process death.**
+    Standard reflex (`Get-Content app.log -Tail`) doesn't help
+    when the kernel kills the process; tracing buffers never get
+    flushed. `Get-WinEvent -LogName Application | Where ProviderName
+    -like '*Application Error*'` is the right tool. Pinning this
+    in the project's smoketest runbook would have saved 10 minutes
+    of head-scratching.
+  - **A user-friendly bug-report workflow is itself a fuzzer.**
+    The crash trigger was a screenshot taken to file the previous
+    bug — i.e., the user's act of helping us hit a latent UB the
+    test suite never tickled. The interactive-desktop ignored
+    tests in `paste.rs` only exercise the happy text-text path;
+    they never plant a bitmap and re-enumerate. New unit tests
+    pin the full GDI-handle-rejection table so a regression here
+    is caught without needing live Win32.
+
+---
+
 ## 2026-05-17 [phase5-postship-6] active-mode selector + prompt v3 (preserve list context)
 
 - **Context:** Sixth Dustin smoketest pass. Three pieces of feedback:

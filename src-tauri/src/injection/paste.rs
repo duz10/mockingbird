@@ -49,6 +49,73 @@ use crate::error::{AppError, AppResult};
 /// helpers + tests.
 pub const CF_UNICODETEXT_ID: u32 = 13;
 
+// ──────────────────────────────────────────────────────────────────────
+// Format allowlist (heap-corruption defence)
+// ──────────────────────────────────────────────────────────────────────
+//
+// **Background.** Calling `GlobalSize` / `GlobalLock` on a clipboard
+// handle that is NOT actually an `HGLOBAL` (e.g. `CF_BITMAP` returns
+// an `HBITMAP`, `CF_ENHMETAFILE` returns an `HENHMETAFILE`) is
+// undefined behaviour on Windows. The two functions assume their
+// argument points into a moveable-memory header; passing a GDI
+// object handle scribbles on whichever heap block happens to live
+// at the matching offset.
+//
+// Real-world symptom: 2026-05-17 user-reported crash, exception
+// code `0xC0000374` (STATUS_HEAP_CORRUPTION) faulting in
+// `ntdll.dll`, reproduced by taking a screenshot before triggering
+// a paste-strategy dictation. `EnumClipboardFormats` enumerated
+// `CF_DIB` + `CF_BITMAP` left over from the screenshot, the
+// snapshot path called `GlobalSize` on the `HBITMAP`, and the
+// process died with no Rust-level error.
+//
+// **Fix.** Restrict the snapshot path to formats we KNOW are stored
+// as `HGLOBAL` per the Win32 documentation. Everything else is
+// logged at debug + skipped — the user temporarily loses non-text
+// clipboard contents around a dictation, which is a far better
+// failure mode than process death.
+//
+// We intentionally include `CF_DIB` / `CF_DIBV5` here because they
+// ARE `HGLOBAL` per docs (a `BITMAPINFOHEADER` followed by pixel
+// bytes in moveable memory), even though they look bitmap-shaped.
+// `CF_BITMAP` is the dangerous one — it's an `HBITMAP`.
+//
+// Registered formats (`>= 0xC000`) are app-defined and the docs
+// recommend (but don't require) `HGLOBAL`. Since a misbehaving app
+// registering a non-HGLOBAL format would crash us the same way,
+// we play conservative: include them only after Phase 9 when we
+// can build a per-app deny list. For now Wisprflow-style apps that
+// register custom formats lose those formats around dictation.
+// That's a paper cut we'll fix later; heap corruption is not.
+const CF_TEXT: u32 = 1;
+const CF_SYLK: u32 = 4;
+const CF_DIF: u32 = 5;
+const CF_TIFF: u32 = 6;
+const CF_OEMTEXT: u32 = 7;
+const CF_DIB: u32 = 8;
+const CF_HDROP: u32 = 15;
+const CF_LOCALE: u32 = 16;
+const CF_DIBV5: u32 = 17;
+
+/// Returns true iff the given clipboard format is documented to be
+/// stored as an `HGLOBAL` (→ safe to pass to `GlobalSize` /
+/// `GlobalLock`). See module-level comment above for rationale.
+pub fn is_hglobal_format(fmt: u32) -> bool {
+    matches!(
+        fmt,
+        CF_TEXT
+            | CF_SYLK
+            | CF_DIF
+            | CF_TIFF
+            | CF_OEMTEXT
+            | CF_DIB
+            | CF_UNICODETEXT_ID
+            | CF_HDROP
+            | CF_LOCALE
+            | CF_DIBV5
+    )
+}
+
 /// Number of `OpenClipboard` retries before giving up. ADR 0018 §"Decision".
 pub const OPEN_RETRIES: u32 = 3;
 
@@ -345,12 +412,24 @@ mod win {
             if fmt == 0 {
                 break;
             }
+            // CRITICAL: only HGLOBAL-backed formats may be passed to
+            // GlobalSize/GlobalLock. Passing a GDI handle
+            // (CF_BITMAP, CF_ENHMETAFILE, registered custom formats,
+            // …) corrupts the heap (STATUS_HEAP_CORRUPTION /
+            // 0xC0000374). See module-level allowlist comment.
+            if !is_hglobal_format(fmt) {
+                tracing::debug!(
+                    "clipboard snapshot: skipping non-HGLOBAL format {fmt:#x} (not in allowlist)"
+                );
+                continue;
+            }
             match copy_format_bytes(fmt) {
                 Ok(Some(bytes)) => formats.push((fmt, bytes)),
                 Ok(None) => {
-                    // Non-HGLOBAL format (e.g., CF_BITMAP). Skip with
-                    // a log; system synthesises common conversions.
-                    tracing::debug!("skipping non-HGLOBAL clipboard format {fmt:#x}");
+                    // Allowlisted but somehow returned zero size —
+                    // shouldn't happen for the formats we accept,
+                    // but log so we know if it does.
+                    tracing::debug!("skipping zero-size clipboard format {fmt:#x}");
                 }
                 Err(e) => {
                     // Per ADR 0018: don't abort the whole snapshot on
@@ -672,6 +751,83 @@ mod tests {
         // These map 1:1 to InjectionOutcome variants the orchestrator
         // surfaces; keep them distinct.
         assert_ne!(PasteOutcome::Ok, PasteOutcome::OkClipboardNotRestored);
+    }
+
+    // -----------------------------------------------------------------
+    // is_hglobal_format — the allowlist that prevents heap corruption
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn unicode_text_is_hglobal() {
+        // The format we ALWAYS write — if this ever returns false the
+        // write path would refuse the very format it just planted.
+        assert!(is_hglobal_format(CF_UNICODETEXT_ID));
+    }
+
+    #[test]
+    fn text_formats_are_hglobal() {
+        for fmt in [CF_TEXT, CF_OEMTEXT, CF_LOCALE] {
+            assert!(is_hglobal_format(fmt), "text format {fmt:#x} should be allowlisted");
+        }
+    }
+
+    #[test]
+    fn dib_formats_are_hglobal_but_cf_bitmap_is_not() {
+        // CF_DIB / CF_DIBV5 are documented as HGLOBAL (header +
+        // pixels in moveable memory). CF_BITMAP is an HBITMAP —
+        // calling GlobalSize on it is the exact bug that crashed
+        // 0xC0000374. This test pins the distinction.
+        assert!(is_hglobal_format(CF_DIB));
+        assert!(is_hglobal_format(CF_DIBV5));
+        const CF_BITMAP: u32 = 2;
+        assert!(
+            !is_hglobal_format(CF_BITMAP),
+            "CF_BITMAP is HBITMAP, NOT HGLOBAL — calling GlobalSize on it corrupts the heap"
+        );
+    }
+
+    #[test]
+    fn gdi_handle_formats_are_rejected() {
+        // Every Win32 format that returns a GDI handle instead of an
+        // HGLOBAL. Each one would crash the process if we passed it
+        // to GlobalSize. Pinning all of them in one test so future
+        // edits to is_hglobal_format can't accidentally let one
+        // through.
+        const CF_BITMAP: u32 = 2;
+        const CF_METAFILEPICT: u32 = 3;
+        const CF_PALETTE: u32 = 9;
+        const CF_ENHMETAFILE: u32 = 14;
+        const CF_OWNERDISPLAY: u32 = 0x0080;
+        const CF_DSPBITMAP: u32 = 0x0082;
+        const CF_DSPMETAFILEPICT: u32 = 0x0083;
+        const CF_DSPENHMETAFILE: u32 = 0x008E;
+        for fmt in [
+            CF_BITMAP,
+            CF_METAFILEPICT,
+            CF_PALETTE,
+            CF_ENHMETAFILE,
+            CF_OWNERDISPLAY,
+            CF_DSPBITMAP,
+            CF_DSPMETAFILEPICT,
+            CF_DSPENHMETAFILE,
+        ] {
+            assert!(
+                !is_hglobal_format(fmt),
+                "format {fmt:#x} returns a GDI handle, NOT HGLOBAL — must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn registered_formats_are_rejected_for_now() {
+        // Custom registered formats (>= 0xC000) are app-defined.
+        // Docs RECOMMEND HGLOBAL but don't require it; we play
+        // conservative until Phase 9 per-app deny-list lands. The
+        // user temporarily loses round-trip of these formats around
+        // a dictation; that's a paper cut, not a crash.
+        assert!(!is_hglobal_format(0xC000));
+        assert!(!is_hglobal_format(0xC123));
+        assert!(!is_hglobal_format(0xFFFF));
     }
 
     // -----------------------------------------------------------------
