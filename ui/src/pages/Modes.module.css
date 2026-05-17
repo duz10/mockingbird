@@ -257,3 +257,38 @@
   word-break: break-word;
   color: var(--on-surf-muted);
 }
+
+
+/* ════════════════════════════════════════════════════════════════
+ * Design Language v1 (v2) overrides — Modes page.
+ * Mode cards become glass surfaces; active card keeps the
+ * left-accent stripe pattern but in terracotta. Wave 4. ADR 0023.
+ * ════════════════════════════════════════════════════════════════ */
+
+:global([data-design="v2"]) .modeCard {
+  background: linear-gradient(180deg,
+    var(--glass-tint-regular) 0%,
+    var(--glass-tint-thin) 100%);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--shape-xl);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+    var(--glass-shadow);
+  padding: var(--space-5);
+  gap: var(--space-4);
+}
+
+:global([data-design="v2"]) .modeCard.activeCard {
+  /* --mode-normal is bridged to --md-sys-primary in v2 */
+  border-color: var(--md-sys-primary);
+  box-shadow:
+    inset 4px 0 0 var(--md-sys-primary),
+    inset 0 1px 0 var(--glass-highlight),
+    var(--glass-shadow);
+  background: linear-gradient(180deg,
+    color-mix(in oklch, var(--md-sys-primary) 12%, var(--glass-tint-regular)) 0%,
+    var(--glass-tint-thin) 100%);
+}

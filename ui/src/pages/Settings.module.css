@@ -215,3 +215,40 @@
 }
 .learningRunCommitted { color: var(--status-ok); font-weight: 600; }
 .learningRunRolled    { color: var(--status-error); font-weight: 600; }
+
+
+/* ════════════════════════════════════════════════════════════════
+ * Design Language v1 (v2) overrides — Settings page.
+ * Wave 4 of the Design Language Phase. ADR 0023.
+ * ════════════════════════════════════════════════════════════════ */
+
+:global([data-design="v2"]) .tabs {
+  background: var(--glass-tint-thin);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--shape-lg);
+}
+
+:global([data-design="v2"]) .tab {
+  font-family: "DM Sans", sans-serif;
+  color: var(--md-sys-on-surface-variant);
+  border-radius: var(--shape-md);
+}
+:global([data-design="v2"]) .tab:hover {
+  background: var(--md-sys-surface-container-high);
+  color: var(--md-sys-on-surface);
+}
+:global([data-design="v2"]) .tabActive {
+  background: var(--md-sys-primary-container);
+  color: var(--md-sys-on-primary-container);
+}
+
+:global([data-design="v2"]) .rowLabel {
+  font-family: "DM Sans", sans-serif;
+  color: var(--md-sys-on-surface);
+}
+:global([data-design="v2"]) .rowHelp {
+  font-family: "DM Sans", sans-serif;
+  color: var(--md-sys-on-surface-variant);
+}

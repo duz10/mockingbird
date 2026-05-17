@@ -156,3 +156,60 @@
     padding: var(--s-1) var(--s-2) var(--s-3);
   }
 }
+
+
+/* ════════════════════════════════════════════════════════════════
+ * Design Language v1 (v2) overrides — Sidebar.
+ *
+ * Sidebar reads as a thin glass column floated over the ambient bg.
+ * Brand text stays DM Sans (per design doc — brand name is sans;
+ * Fraunces is reserved for headlines/taglines).
+ *
+ * Wave 4 of the Design Language Phase. ADR 0023.
+ * ════════════════════════════════════════════════════════════════ */
+
+:global([data-design="v2"]) .sidebar {
+  background: var(--glass-tint-thin);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border-right: 1px solid var(--glass-border);
+}
+
+:global([data-design="v2"]) .brand {
+  padding: var(--space-3) var(--space-4) var(--space-2);
+}
+
+:global([data-design="v2"]) .brandText {
+  font-family: "DM Sans", sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--md-sys-on-surface);
+}
+
+:global([data-design="v2"]) .link {
+  font-family: "DM Sans", sans-serif;
+  border-radius: var(--shape-md);
+  color: var(--md-sys-on-surface-variant);
+}
+:global([data-design="v2"]) .link:hover {
+  background: var(--md-sys-surface-container-high);
+  color: var(--md-sys-on-surface);
+}
+:global([data-design="v2"]) .link.active {
+  background: var(--md-sys-primary-container);
+  color: var(--md-sys-on-primary-container);
+}
+
+:global([data-design="v2"]) .activeModeLabel {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--md-sys-on-surface-variant);
+}
+
+:global([data-design="v2"]) .version {
+  font-family: "IBM Plex Mono", monospace;
+  color: var(--md-sys-outline);
+}

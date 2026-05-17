@@ -217,8 +217,21 @@
   --status-ok:         var(--md-sys-success);
   --status-error:      var(--md-sys-error);
 
-  /* Mode palette — keep the legacy hues for the bridge; migration
-     of each page in W4 will replace these with proper M3 accents. */
+  /* Mode palette — bridge legacy --mode-* names to warm M3 accents.
+     Cool cyans/blues/magentas from the v1 palette read foreign
+     against the warm-earth background; warm tonal swaps make the
+     same chart bars + status dots feel like they belong. Pages that
+     still reference --mode-normal etc (Insights chart bars, History
+     mode badges, Modes accent dots, Dictionary import badge, etc.)
+     pick these up automatically without any per-page change. */
+  --mode-casual:    var(--md-sys-success);                  /* warm green */
+  --mode-normal:    var(--md-sys-primary);                  /* terracotta */
+  --mode-formal:    var(--md-sys-secondary);                /* sand — warm-neutral, plays well next to casual+normal */
+  --mode-verbose:   var(--md-sys-tertiary);                 /* blue-grey — legacy; the one place a cool accent is OK */
+  --mode-fragment:  var(--md-sys-warning);                  /* amber */
+  --mode-rewrite:   var(--md-sys-tertiary-container);       /* deeper blue-grey */
+  --mode-expand:    var(--md-sys-secondary-container);      /* deeper sand */
+  --mode-summarize: var(--md-sys-primary-container);        /* deeper terra */
 }
 
 /* ════════════════════════════════════════════════════════════════

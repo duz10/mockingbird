@@ -19,3 +19,24 @@
     padding: var(--s-4);
   }
 }
+
+
+/* ════════════════════════════════════════════════════════════════
+ * Design Language v1 (v2) overrides — App shell.
+ *
+ * In v2 we want the ambient warm-blob (body::before + body::after)
+ * to be visible behind the content, so the shell + content drop
+ * their solid backgrounds. The sidebar gets a thin glass treatment
+ * so it reads as floated chrome over the bg.
+ *
+ * Wave 4 of the Design Language Phase. ADR 0023.
+ * ════════════════════════════════════════════════════════════════ */
+
+:global([data-design="v2"]) .shell {
+  background: transparent;
+}
+
+:global([data-design="v2"]) .content {
+  background: transparent;
+  padding: var(--space-7);
+}

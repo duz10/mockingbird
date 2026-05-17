@@ -190,3 +190,142 @@
 @media (prefers-reduced-motion: reduce) {
   .spinner { animation: none; }
 }
+
+
+
+/* ════════════════════════════════════════════════════════════════
+ * Design Language v1 (v2 system) overrides for legacy primitives.
+ *
+ * The :global([data-design="v2"]) wrapper bypasses CSS Modules' class
+ * hashing for the attribute selector, then chains a locally-hashed
+ * class to keep specificity tight. Result: every page that uses
+ * PageHeader / Card / Button / EmptyState / Pill / Spinner gets the
+ * v2 look for free without any TSX changes.
+ *
+ * Wave 4 of the Design Language Phase. Deleted at W6 cutover
+ * alongside the rest of this file. ADR 0023.
+ * ════════════════════════════════════════════════════════════════ */
+
+:global([data-design="v2"]) .pageHeader {
+  border-bottom-color: var(--glass-border);
+  margin-bottom: var(--space-7);
+  padding-bottom: var(--space-5);
+}
+
+:global([data-design="v2"]) .pageTitle {
+  font-family: "Fraunces", serif;
+  font-size: 36px;
+  line-height: 44px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  font-variation-settings: "opsz" 144, "SOFT" 100;
+  color: var(--md-sys-on-surface);
+}
+
+:global([data-design="v2"]) .pageSubtitle {
+  font-family: "DM Sans", sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--md-sys-on-surface-variant);
+}
+
+/* Cards become glass surfaces — backdrop-filter + ambient-tint
+ * background + hairline edge + interior highlight. Padding stays
+ * the same so existing layouts don't shift. */
+:global([data-design="v2"]) .card {
+  background: linear-gradient(180deg,
+    var(--glass-tint-regular) 0%,
+    var(--glass-tint-thin) 100%);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--shape-xl);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+    var(--glass-shadow);
+  padding: var(--space-5);
+  gap: var(--space-4);
+}
+
+:global([data-design="v2"]) .cardTitle {
+  font-family: "DM Sans", sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--md-sys-on-surface);
+}
+
+/* EmptyState — quiet, generous spacing, Fraunces title. */
+:global([data-design="v2"]) .emptyTitle {
+  font-family: "Fraunces", serif;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 500;
+  font-variation-settings: "opsz" 36, "SOFT" 60;
+  color: var(--md-sys-on-surface);
+}
+
+/* Button overrides — map the 3 legacy variants onto v2 equivalents.
+ * primary  → filled with --md-sys-primary
+ * ghost    → outlined with --md-sys-outline
+ * danger   → text on --md-sys-error
+ * Shape becomes pill-full to match the v2 button family. */
+:global([data-design="v2"]) .btn {
+  border-radius: var(--shape-full);
+  font-family: "DM Sans", sans-serif;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+:global([data-design="v2"]) .btn_sm {
+  padding: 6px 14px;
+  font-size: 13px;
+}
+:global([data-design="v2"]) .btn_md {
+  padding: 8px 20px;
+  font-size: 14px;
+  height: 40px;
+}
+:global([data-design="v2"]) .btn_primary {
+  background: var(--md-sys-primary);
+  color: var(--md-sys-on-primary);
+  border-color: var(--md-sys-primary);
+}
+:global([data-design="v2"]) .btn_primary:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--md-sys-primary) 88%, white);
+}
+:global([data-design="v2"]) .btn_ghost {
+  background: transparent;
+  color: var(--md-sys-on-surface);
+  border-color: var(--md-sys-outline);
+}
+:global([data-design="v2"]) .btn_ghost:hover:not(:disabled) {
+  background: var(--md-sys-surface-container-low);
+}
+:global([data-design="v2"]) .btn_danger {
+  background: transparent;
+  color: var(--md-sys-error);
+  border-color: var(--md-sys-outline-variant);
+}
+:global([data-design="v2"]) .btn_danger:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--md-sys-error) 12%, transparent);
+  border-color: var(--md-sys-error);
+}
+
+/* Pill — pure label, no border, IBM Plex Mono treatment. */
+:global([data-design="v2"]) .pill {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: var(--shape-full);
+}
+
+/* Spinner — terracotta accent. */
+:global([data-design="v2"]) .spinner {
+  border-color: var(--md-sys-surface-container-high);
+  border-top-color: var(--md-sys-primary);
+}
