@@ -22,9 +22,13 @@ pub struct ModePatch {
 #[tauri::command]
 pub fn list_modes(db: State<'_, AppStateHandle>) -> Result<Vec<ModeDto>, String> {
     let conn = lock_db(&db)?;
+    // The DTO field is `label`; the schema column is `display_name`
+    // (per migrations/001_initial.sql). Alias here so we don't have to
+    // rename either side. Renaming the column post-Phase-1-seal is
+    // forbidden (migrations are append-only).
     let mut stmt = conn
         .prepare(
-            "SELECT m.slug, m.label, m.enabled, m.model_id, m.provider, \
+            "SELECT m.slug, m.display_name AS label, m.enabled, m.model_id, m.provider, \
                     m.temperature, m.max_tokens, m.hotkey, COALESCE(p.version, 'v1') \
              FROM modes m \
              LEFT JOIN prompts p ON p.id = m.prompt_id \

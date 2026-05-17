@@ -12,9 +12,16 @@
   width: 100vw;
   height: 100vh;
   background: transparent;
-  /* Tauri's frameless windows render the OS resize border around our
-   * transparent area; padding gives the pill some breathing room. */
-  padding: 8px;
+  /* No padding — prior 8px gap appeared as a black ring on Windows 11
+   * because the compositor doesn't always honor `transparent: true`
+   * cleanly for the area outside the visible content. We now fill the
+   * window edge-to-edge and let the pill's own rounded background be
+   * the visible boundary. (LESSONS 2026-05-17 phase5-smoketest.)
+   *
+   * The window is sized in tauri.conf.json to exactly fit the pill
+   * (440×64) — if you add wider content (longer status string,
+   * extra icons), bump the window width to match. */
+  padding: 0;
   user-select: none;
 }
 

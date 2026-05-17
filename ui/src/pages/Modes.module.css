@@ -147,3 +147,28 @@
   font: var(--type-xs);
   color: var(--status-ok);
 }
+
+
+.errorBox {
+  margin-top: var(--s-4);
+  padding: var(--s-4);
+  border-radius: var(--r-2);
+  border: 1px solid var(--status-error);
+  background: color-mix(in oklab, var(--status-error) 12%, transparent);
+  color: var(--on-surf);
+}
+
+.errorBox strong {
+  display: block;
+  margin-bottom: var(--s-2);
+  color: var(--status-error);
+}
+
+.errorBox pre {
+  margin: 0;
+  font: var(--type-sm);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--on-surf-muted);
+}

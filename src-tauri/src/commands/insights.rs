@@ -141,8 +141,12 @@ fn streak_days(conn: &Connection) -> rusqlite::Result<i64> {
 }
 
 fn mode_mix_7d(conn: &Connection) -> rusqlite::Result<Vec<ModeMixEntry>> {
+    // Schema column is `display_name` (migrations/001_initial.sql).
+    // The DTO field is `label` — alias here so neither side has to
+    // change. Migrations are append-only post-Phase-1-seal, so we
+    // can't rename the column even if we wanted to.
     let mut stmt = conn.prepare(
-        "SELECT m.slug, m.label, COUNT(s.id) \
+        "SELECT m.slug, m.display_name AS label, COUNT(s.id) \
          FROM modes m \
          LEFT JOIN sessions s ON s.mode_id = m.id \
             AND s.started_at >= datetime('now', '-7 days') \

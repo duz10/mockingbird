@@ -24,12 +24,19 @@ export function ModesPage() {
 
   // Local copy keyed by slug so per-mode edits don't re-render siblings.
   const [savedSlug, setSavedSlug] = useState<string | null>(null);
+  // Surface IPC errors instead of leaving the user staring at a
+  // forever-spinner — caught us out during Phase 5 smoketest when
+  // list_modes was throwing a SQL error and the empty-state path
+  // looked identical to the loading-state path.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // First-load: the App boot already populates the store, but if the
   // user lands directly on this page (e.g., refresh), we re-fetch.
   useEffect(() => {
     if (modes.length === 0) {
-      void api.list_modes().then(setModes);
+      void api.list_modes().then(setModes).catch((err: unknown) => {
+        setLoadError(err instanceof Error ? err.message : String(err));
+      });
     }
   }, [modes.length, setModes]);
 
@@ -54,7 +61,14 @@ export function ModesPage() {
           title={t("modes.title")}
           subtitle={t("modes.subtitle")}
         />
-        <Spinner />
+        {loadError ? (
+          <div className={styles.errorBox} role="alert">
+            <strong>Couldn't load modes.</strong>
+            <pre>{loadError}</pre>
+          </div>
+        ) : (
+          <Spinner />
+        )}
       </>
     );
   }
