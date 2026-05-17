@@ -42,7 +42,15 @@
   background: var(--surf-2);
   color: var(--on-surf);
   border-radius: 999px;
-  box-shadow: var(--shadow-3);
+  /* NO box-shadow here. The pill IS the window now (fills 100% ×
+   * 100%); any box-shadow extends OUTSIDE the pill's rounded shape
+   * but INSIDE the rectangular window. On Windows 11 transparent
+   * windows that produces a sharp-cornered dark halo around the
+   * rounded pill — exactly the artifact the previous fix tried to
+   * eliminate. The OS-level shadow comes from Tauri's `shadow: true`
+   * in tauri.conf.json, which renders as a real DWM shadow OUTSIDE
+   * the window bounds (the only place shadows belong on a frameless
+   * popup). (LESSONS 2026-05-17 phase5-smoketest, third pass.) */
   /* Subtle 1px stroke so the pill has a defined edge on bright
    * backgrounds (transparent windows have no real border). */
   border: 1px solid color-mix(in oklab, var(--on-surf) 8%, transparent);

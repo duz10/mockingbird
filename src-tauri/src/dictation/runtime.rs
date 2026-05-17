@@ -294,6 +294,17 @@ fn make_default_cleaner(
                 max_tokens,
                 "cleaner: Ollama reachable; using LlmCleaner"
             );
+            // **Warm-up shot.** Ollama loads the model into VRAM on
+            // the first /api/chat request — a cold qwen2.5:3b can
+            // take 30-60s, which is right at our 30s REQUEST_TIMEOUT.
+            // First real dictation reliably times out. Pay the cost
+            // here in the background: fire one minimal /api/chat
+            // while the user is still reading the splash / opening
+            // their target app. Errors are ignored — worst case the
+            // first real dictation still times out, which is no
+            // worse than today's behavior. (LESSONS 2026-05-17
+            // phase5-smoketest, third pass.)
+            spawn_ollama_warmup(model_id.clone(), temperature as f32);
             Box::new(LlmCleaner::new(
                 Box::new(provider),
                 Arc::clone(db),
@@ -311,6 +322,51 @@ fn make_default_cleaner(
             Box::new(PassthroughCleaner::new())
         }
     }
+}
+
+/// Fire-and-forget thread that sends one minimal `/api/chat` request
+/// to Ollama to pay the cold model-load cost before the user's first
+/// dictation. Errors are logged at debug-level and never surface to
+/// the caller — a failed warm-up is no worse than not warming up.
+///
+/// Uses a fresh [`OllamaProvider`] (cheap; just a ureq::Agent + a
+/// base-URL string) so we don't have to thread a clone of the
+/// cleaner's provider through. The model_id + temperature match the
+/// configured mode so the warm-up populates the SAME VRAM slot the
+/// first real request will hit.
+fn spawn_ollama_warmup(model_id: String, temperature: f32) {
+    std::thread::Builder::new()
+        .name("ollama-warmup".into())
+        .spawn(move || {
+            use crate::cleanup::provider::{CleanupProvider, CleanupRequest};
+            let provider = OllamaProvider::new();
+            // Minimal prompt: enough tokens to force a real forward
+            // pass (= VRAM load) but tiny enough to return quickly
+            // on a warm model. `num_predict: 1` caps generation at
+            // a single token; we throw the result away.
+            let req = CleanupRequest {
+                prompt: "Respond with the single word: ok",
+                raw_transcript: "hi",
+                model_id: &model_id,
+                temperature,
+                max_tokens: 1,
+                mode_slug: "warmup",
+            };
+            let start = std::time::Instant::now();
+            match provider.cleanup(req) {
+                Ok(_) => tracing::info!(
+                    model = %model_id,
+                    warmup_ms = start.elapsed().as_millis() as u64,
+                    "ollama warmup complete; first real dictation will hit a hot model"
+                ),
+                Err(e) => tracing::debug!(
+                    error = %e,
+                    model = %model_id,
+                    "ollama warmup failed (non-fatal); first real cleanup may cold-load"
+                ),
+            }
+        })
+        .ok(); // If we can't even spawn a thread, the app has bigger problems.
 }
 
 /// Bootstrap default provenance rows (dictionary_snapshot + example_set)

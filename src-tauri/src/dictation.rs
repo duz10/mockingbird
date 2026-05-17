@@ -396,6 +396,39 @@ impl DictationOrchestrator {
             "dictation: cleanup end"
         );
 
+        // **Post-cleanup focus-drift check.**
+        //
+        // ADR 0020 covers focus changes BETWEEN key-down and key-up
+        // (permissive: inject into the key-up app). It does NOT
+        // cover focus changes BETWEEN key-up and inject — which is
+        // exactly what happens when cleanup hangs for 30 seconds on
+        // a cold Ollama model load and the user, bored, clicks over
+        // to look at Mockingbird's History window. The injector
+        // happily pastes into whatever's CURRENTLY focused (the
+        // History window, which eats Ctrl+V as a no-op) and reports
+        // `outcome=Ok`. Result: a successful-looking session row
+        // with no visible paste — the worst kind of silent failure.
+        //
+        // Defense: re-snapshot the foreground right before inject.
+        // If the process name has changed from fg_keyup, abort with
+        // `AbortedFocusChanged` (raw + cleaned still persist, only
+        // the `final` stage is skipped). User can retry; better
+        // than pasting into the wrong window.
+        let fg_now = self.window_ctx.foreground().ok();
+        let focus_drifted = match &fg_now {
+            Some(now) => !same_process(now, &fg_keyup),
+            None => true, // null foreground == drifted away from everything
+        };
+        if focus_drifted {
+            tracing::warn!(
+                fg_keyup = ?fg_keyup.process_name,
+                fg_now = ?fg_now.as_ref().map(|f| &f.process_name),
+                cleanup_latency_ms,
+                "focus drifted between key-up and inject (likely slow cleanup + \
+                 user navigated away); aborting to avoid pasting into wrong window"
+            );
+        }
+
         // Secure-input check + focus-loss + strategy resolution.
         let is_secure = self.secure_guard.is_secure(&fg_keyup);
         let inputs = pipeline::Inputs {
@@ -406,26 +439,35 @@ impl DictationOrchestrator {
         };
         let decision = pipeline::decide(&inputs);
 
-        // Inject (or skip per decision).
+        // Inject (or skip per decision + focus drift).
         self.recording_window
             .set_state(crate::recording_window::state::PASTING, Some(&mode_slug));
         let inject_start = Instant::now();
         tracing::info!(
             decision = ?decision,
             text_len = cleaned_text.len(),
+            focus_drifted,
             "dictation: inject begin"
         );
-        let outcome = match decision {
-            pipeline::Decision::Proceed(strategy) => {
-                match self.injector.inject(&cleaned_text, strategy) {
-                    Ok(o) => o,
-                    Err(e) => {
-                        tracing::warn!(error = ?e, "injector returned error");
-                        InjectionOutcome::FailedSendInput
+        let outcome = if focus_drifted {
+            // Reuse the existing legacy variant: semantically "focus
+            // changed and we declined to paste". The DB CHECK
+            // constraint already allows `aborted_focus_changed`
+            // (migrations/004) so no schema change needed.
+            InjectionOutcome::AbortedFocusChanged
+        } else {
+            match decision {
+                pipeline::Decision::Proceed(strategy) => {
+                    match self.injector.inject(&cleaned_text, strategy) {
+                        Ok(o) => o,
+                        Err(e) => {
+                            tracing::warn!(error = ?e, "injector returned error");
+                            InjectionOutcome::FailedSendInput
+                        }
                     }
                 }
+                pipeline::Decision::Abort(o) => o,
             }
-            pipeline::Decision::Abort(o) => o,
         };
         let injection_latency_ms = inject_start.elapsed().as_millis() as i64;
         tracing::info!(
@@ -745,6 +787,22 @@ impl Drop for PillHideGuard {
 
 fn new_uuid() -> String {
     uuid::Uuid::new_v4().to_string()
+}
+
+/// Case-insensitive `process_name` equality for two foreground
+/// snapshots. Used by the post-cleanup focus-drift check in
+/// [`DictationOrchestrator::complete`] to decide whether the user
+/// has navigated away from their dictation target during a slow
+/// cleanup (typically a cold-load Ollama call).
+///
+/// We match on process basename only — not HWND or title — because:
+///   - HWND changes when an app cycles between document windows but
+///     the user's mental model is "I'm still in Notepad".
+///   - Title changes constantly (`*The quick brown fox - Notepad`
+///     vs `The quick brown fox - Notepad`) and would trip false
+///     drift alarms on every keystroke.
+fn same_process(a: &ForegroundWindow, b: &ForegroundWindow) -> bool {
+    a.process_name.eq_ignore_ascii_case(&b.process_name)
 }
 
 /// Dump the post-resample drained audio to a WAV file at

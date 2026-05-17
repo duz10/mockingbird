@@ -14,6 +14,99 @@ Format:
 
 ---
 
+## 2026-05-17 [phase5-postship-3] inject reported `outcome=Ok` but nothing pasted into Notepad
+
+- **Context:** Third Dustin smoketest. Pipeline ran end-to-end. New
+  inject-lifecycle logs (added in postship-2) showed clean handshake:
+  `inject begin decision=Proceed(Paste) text_len=23` →
+  `inject end injection_latency_ms=67 outcome=Ok`. History row
+  persisted with the correct raw + cleaned + injected text. App
+  metadata showed `App: Notepad`. But Notepad was empty — no paste.
+- **Finding:** ADR 0020 covers focus changes BETWEEN key-down and
+  key-up (permissive: inject into key-up app). It does NOT cover
+  focus changes BETWEEN key-up and inject. Sequence:
+  1. Hold RightAlt with Notepad focused → fg_keydown = Notepad.
+  2. Release RightAlt → fg_keyup snapshot captures Notepad.
+  3. Cleanup hangs 30s on cold-load Ollama → user gets bored, clicks
+     on Mockingbird's main History window to see if anything's
+     happening. Mockingbird is now the foreground.
+  4. Cleanup finally returns. Injector runs SetClipboardData +
+     SendInput(Ctrl+V) against the CURRENT foreground = Mockingbird
+     main window. Ctrl+V in our React UI is a no-op (no input field
+     focused). Clipboard ops returned success, SendInput returned
+     success → outcome=Ok. Nothing actually appeared anywhere
+     visible. The injector has NO concept of "the target was
+     Notepad; verify before pasting."
+- **Action (three layers, all in this commit):**
+  1. **Re-snapshot foreground before inject.** New post-cleanup
+     check in `dictation::complete()`: re-call `window_ctx.foreground()`
+     right before the inject step. If `process_name` differs from
+     `fg_keyup.process_name` (case-insensitive, basename only —
+     ignore HWND and title to avoid false alarms from window cycles
+     and title edits), set `outcome = AbortedFocusChanged` and skip
+     the injector call entirely. Raw + cleaned still persist for
+     provenance; only the `final` transcript stage is omitted. User
+     gets a clear History row showing "aborted, you navigated away"
+     instead of a silent wrong-window paste.
+  2. **Reused the existing `AbortedFocusChanged` variant** rather
+     than minting a new `AbortedFocusDrift`. Semantics are close
+     enough ("focus changed, we declined to paste") and the DB
+     CHECK constraint in migrations/004 already allows the string.
+     A new variant would require a migration AND a DB constraint
+     update AND a UI badge, which is out of scope for the bugfix.
+     Future: if we want to disambiguate "focus changed between
+     key-down and key-up" (legacy, never emitted under ADR 0020)
+     from "focus drifted during slow cleanup" (this fix), mint a
+     new variant in Phase 6 polish.
+  3. **Warm Ollama on boot** to make the slow-cleanup case rare.
+     `dictation/runtime.rs::spawn_ollama_warmup` fires a tiny
+     `/api/chat` (num_predict=1) on a dedicated thread right after
+     the health-check succeeds. Pays the 30-60s cold-load cost
+     while the user is opening their target app. First real
+     dictation hits a warm model. Errors ignored — worst case the
+     first real cleanup still cold-loads, which is just today's
+     behavior.
+- **Pattern:** ANY OS-targeted side effect (paste, click, focus,
+  hotkey-grab) that runs AFTER an unbounded asynchronous step must
+  re-validate its target before firing. The captured-at-key-up
+  snapshot is stale the moment the next async op runs. Re-validation
+  is cheap (one GetForegroundWindow + GetWindowThreadProcessId +
+  K32GetModuleBaseNameW); silent wrong-target action is expensive
+  (user trust + maybe a security-sensitive paste into the wrong app).
+
+---
+
+## 2026-05-17 [phase5-postship-3] pill still had a dark rectangular halo even after filling the window
+
+- **Context:** Third smoketest. Postship-2 made the pill fill the
+  entire window (`width:100%`, `height:100%`), which fixed the
+  "transparent corners showing dark" issue. Pill is now a proper
+  capsule. BUT — there's STILL a dark rectangle visible around the
+  pill in the screenshot. Sharp corners. Hugs the pill on all four
+  sides like a halo.
+- **Finding:** The `.pill` rule still had `box-shadow: var(--shadow-3)`
+  from the original design (when the pill was a smaller centered
+  child of the window). Since the pill now fills 100%×100% of the
+  window, the box-shadow extends OUTWARD from the rounded pill — but
+  the area outside the pill is INSIDE the window's rectangular
+  bounds. WebView2 happily paints the shadow there. Result: a sharp-
+  cornered dark rectangle of shadow, hugging the rounded pill, that
+  the previous fixes couldn't eliminate because they were targeting
+  the wrong artifact (we kept blaming WebView2 transparency).
+- **Action:** Remove the pill's `box-shadow`. Tauri's `shadow: true`
+  on the recording window (already set in tauri.conf.json) gives a
+  real OS-level DWM shadow that renders OUTSIDE the window bounds —
+  the only place a shadow belongs on a frameless popup. CSS shadows
+  are for elements with breathing room around them.
+- **Reusable rule:** When a CSS element fills 100% of its container,
+  it can't have a CSS `box-shadow` that extends outward — the shadow
+  will clip to the container's bounds and produce a sharp-cornered
+  artifact that looks NOTHING like a shadow. Either give the element
+  margin/padding inside the container, or move the shadow to the
+  container (OR, for windows, to the OS shadow API).
+
+---
+
 ## 2026-05-17 [phase5-postship-2] pill stayed up + app crashed when Ollama cold-loaded a model past our 30s timeout
 
 - **Context:** Phase 5 second smoketest. Right Alt + dictate. Capture
