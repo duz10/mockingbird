@@ -1,0 +1,156 @@
+/* The recording overlay is a frameless transparent Tauri window. We
+ * render a pill that ignores the full viewport (background is
+ * transparent in `recording.html`) and sits at the bottom of the
+ * screen. The window itself handles positioning + click-through-on-
+ * empty-areas (Phase 4 will set that up); this CSS only styles the
+ * visible pill. */
+
+.shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100vw;
+  height: 100vh;
+  background: transparent;
+  /* Tauri's frameless windows render the OS resize border around our
+   * transparent area; padding gives the pill some breathing room. */
+  padding: 8px;
+  user-select: none;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px 10px 14px;
+  background: var(--surf-2);
+  color: var(--on-surf);
+  border-radius: 999px;
+  box-shadow: var(--shadow-3);
+  /* Subtle 1px stroke so the pill has a defined edge on bright
+   * backgrounds (transparent windows have no real border). */
+  border: 1px solid color-mix(in oklab, var(--on-surf) 8%, transparent);
+  /* Tauri's data-tauri-drag-region trick — let the user drag the
+   * whole window by grabbing the pill. Excluded by the dot+button
+   * which `pointer-events: auto` themselves below. */
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+/* State dot — animated halo that color-shifts with phase. */
+.dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--rec-bg);
+  box-shadow: 0 0 0 0 var(--rec-glow);
+  animation: pulse 1.4s infinite cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+}
+
+/* Per-state color tokens. Defined inline (not in tokens.css) because
+ * they only apply inside the recording overlay. */
+.stateListening   { --rec-bg: var(--status-recording);  --rec-glow: var(--status-recording); }
+.stateTranscribing { --rec-bg: var(--status-processing); --rec-glow: var(--status-processing); }
+.stateCleaning    { --rec-bg: var(--status-processing); --rec-glow: var(--status-processing); }
+.statePasting     { --rec-bg: var(--status-ok);         --rec-glow: var(--status-ok); }
+.stateDone        { --rec-bg: var(--status-ok);         --rec-glow: transparent; }
+.stateAborted     { --rec-bg: var(--status-error);      --rec-glow: var(--status-error); }
+.stateIdle        { --rec-bg: var(--status-idle);       --rec-glow: transparent; }
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--rec-glow) 60%, transparent); }
+  70% { box-shadow: 0 0 0 10px color-mix(in oklab, var(--rec-glow) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--rec-glow) 0%, transparent); }
+}
+
+/* Reduced motion: kill the halo + bar animation. The dot stays
+ * solid; bars become a flat line. */
+@media (prefers-reduced-motion: reduce) {
+  .dot { animation: none; }
+  .bars { display: none; }
+  .barsStatic { display: block; }
+}
+
+/* Waveform — 24 thin vertical bars driven by rAF. Heights are set
+ * via inline styles in the component (no per-frame class swap). */
+.bars {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 96px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.bar {
+  flex: 1;
+  background: var(--on-surf-muted);
+  border-radius: 1px;
+  min-height: 2px;
+  transition: height 60ms linear, background-color 200ms;
+}
+
+.barActive {
+  background: var(--status-recording);
+}
+
+.barsStatic {
+  display: none;
+  width: 96px;
+  height: 2px;
+  background: var(--on-surf-muted);
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.statusText {
+  font: var(--type-sm);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  color: var(--on-surf-muted);
+  min-width: 7ch;
+  text-align: left;
+  /* Don't drag when clicking the status label. */
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.modeBadge {
+  font: var(--type-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: var(--r-1);
+  /* Colored per mode via inline style — see RecordingWindow.tsx. */
+  background: color-mix(in oklab, var(--mode-color, var(--mode-normal)) 18%, transparent);
+  color: var(--mode-color, var(--mode-normal));
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.cancel {
+  /* Reset native button. */
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--on-surf-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.cancel:hover {
+  color: var(--status-error);
+  background: color-mix(in oklab, var(--status-error) 12%, transparent);
+}
+.cancel:focus-visible {
+  outline: 2px solid var(--mode-normal);
+  outline-offset: 2px;
+}
