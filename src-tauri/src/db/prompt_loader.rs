@@ -41,35 +41,113 @@ pub fn substitute_prompt_bodies(sql: &str) -> String {
         .replace("__PROMPT_EXPAND_BODY__", &sql_escape(PROMPT_EXPAND))
         .replace("__PROMPT_SUMMARIZE_BODY__", &sql_escape(PROMPT_SUMMARIZE));
 
-    // **Leftover-token guard.** If any `__PROMPT_..._BODY__` marker
-    // survived substitution, fail HARD and LOUDLY at boot rather than
-    // shipping the malformed SQL to SQLite (which gives cryptic
-    // "syntax error near 'voice'" messages that take an hour to
-    // diagnose — see LESSONS 2026-05-17 phase5-postship-5).
+    // **Leftover-token guard.** If a real `__PROMPT_<NAME>_BODY__`
+    // marker survived substitution, fail HARD at boot rather than
+    // shipping malformed SQL to SQLite (cryptic "syntax error near
+    // 'voice'" — see LESSONS 2026-05-17 phase5-postship-5).
     //
-    // This catches two distinct mistakes:
-    //   1. New migration uses a token we forgot to wire here.
-    //   2. New migration writes the literal token in a `--` comment
-    //      AND the comment line is short enough that the body's first
-    //      newline doesn't break out of the comment — in that case
-    //      the body sits inside a `--` line, no syntax error, but the
-    //      v2 prompt content gets thrown away (no row in DB).
-    // The guard takes ~microseconds; cost is negligible vs. the
-    // multi-hour debugging session it prevents.
-    if let Some(idx) = substituted.find("__PROMPT_") {
-        let snippet_end = substituted[idx..]
-            .find("__")
-            .and_then(|rel| substituted[idx + rel + 2..].find("__").map(|r2| idx + rel + 2 + r2 + 2))
-            .unwrap_or_else(|| (idx + 60).min(substituted.len()));
+    // Tokens are recognised by shape: `__PROMPT_` + one-or-more chars
+    // from `[A-Z0-9_]` + `_BODY__`. The prose convention
+    // `__PROMPT_*_BODY__` (literal asterisk) is intentionally NOT
+    // matched — it's the safe-comment-reference form documented in
+    // migrations 003/005. If you write the EXACT name of a real
+    // substitution token in a `--` comment, the prompt body gets
+    // injected into the comment line, the body's first `\n`
+    // terminates the comment, and havoc ensues. Use `*` for prose.
+    if let Some(token) = find_unsubstituted_prompt_token(&substituted) {
         panic!(
-            "prompt_loader: unsubstituted token survived in migration SQL at offset {idx}: \
-             `{}`. Either (a) add the matching include_str! + .replace() in prompt_loader.rs, \
-             or (b) if the token appears in a SQL comment, paraphrase to `__PROMPT_*_BODY__` \
-             (literal asterisk) so it doesn't match the replacer.",
-            &substituted[idx..snippet_end]
+            "prompt_loader: unsubstituted token `{token}` survived in migration SQL. \
+             Either (a) add the matching include_str! + .replace() in prompt_loader.rs, \
+             or (b) if the token appears in a `--` comment, paraphrase to `__PROMPT_*_BODY__` \
+             (literal asterisk) so the blanket replacer doesn't match it."
         );
     }
     substituted
+}
+
+/// Scan `sql` for any `__PROMPT_<NAME>_BODY__` token where `<NAME>` is
+/// one or more uppercase ASCII letters, digits, or underscores. Returns
+/// the first such token (including the framing `__...__`), or `None`
+/// if only the safe asterisk-prose form (or no tokens at all) remain.
+///
+/// Intentionally tolerant: we don't try to skip over `--` comments
+/// when scanning. The whole point of the guard is that comments are
+/// NOT a safe place to write the literal token — a real token sitting
+/// in a comment is still a bug.
+fn find_unsubstituted_prompt_token(sql: &str) -> Option<String> {
+    const PREFIX: &str = "__PROMPT_";
+    const SUFFIX: &str = "_BODY__";
+    let bytes = sql.as_bytes();
+    let mut search_from = 0;
+    while let Some(rel) = sql[search_from..].find(PREFIX) {
+        let start = search_from + rel;
+        // The name runs from `start + PREFIX.len()` up to the next
+        // occurrence of `_BODY__`. If none found, give up on this
+        // occurrence — it's prose, not a token.
+        let name_start = start + PREFIX.len();
+        if let Some(suf_rel) = sql[name_start..].find(SUFFIX) {
+            let name_end = name_start + suf_rel;
+            let name = &bytes[name_start..name_end];
+            // Real substitution names are `[A-Z0-9_]+`. The prose
+            // `*` form (or anything containing other chars) is
+            // skipped — advance one byte past PREFIX and keep looking.
+            let looks_like_token = !name.is_empty()
+                && name
+                    .iter()
+                    .all(|&b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_');
+            if looks_like_token {
+                let token_end = name_end + SUFFIX.len();
+                return Some(sql[start..token_end].to_string());
+            }
+        }
+        // Advance past this PREFIX so we don't loop forever.
+        search_from = start + PREFIX.len();
+    }
+    None
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::find_unsubstituted_prompt_token;
+
+    #[test]
+    fn safe_asterisk_prose_is_ignored() {
+        // Both 003 and 005 use this exact form in their `--` comments.
+        let sql = "-- the runner substitutes the `__PROMPT_*_BODY__` token\nINSERT INTO x VALUES (1);";
+        assert_eq!(find_unsubstituted_prompt_token(sql), None);
+    }
+
+    #[test]
+    fn real_unsubstituted_token_is_caught() {
+        let sql = "INSERT INTO prompts VALUES ('x', 1, '__PROMPT_NORMAL_V2_BODY__');";
+        assert_eq!(
+            find_unsubstituted_prompt_token(sql).as_deref(),
+            Some("__PROMPT_NORMAL_V2_BODY__")
+        );
+    }
+
+    #[test]
+    fn unrelated_text_is_ignored() {
+        let sql = "-- no tokens here at all\nCREATE TABLE t (id INTEGER);";
+        assert_eq!(find_unsubstituted_prompt_token(sql), None);
+    }
+
+    #[test]
+    fn token_in_comment_is_still_caught() {
+        // The original 006 bug: real token in a `--` comment.
+        let sql = "-- see __PROMPT_NORMAL_BODY__ for the body\nSELECT 1;";
+        assert!(find_unsubstituted_prompt_token(sql).is_some());
+    }
+
+    #[test]
+    fn prose_followed_by_real_token_finds_real_one() {
+        // Mixed case: prose reference + a forgotten real one.
+        let sql = "-- __PROMPT_*_BODY__ is the convention\n-- but __PROMPT_SOMETHING_BODY__ leaked";
+        assert_eq!(
+            find_unsubstituted_prompt_token(sql).as_deref(),
+            Some("__PROMPT_SOMETHING_BODY__")
+        );
+    }
 }
 
 /// Double single-quotes so the body can sit inside a SQL string
