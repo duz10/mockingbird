@@ -55,11 +55,20 @@ pub const OPEN_RETRIES: u32 = 3;
 /// Backoff between `OpenClipboard` retries.
 pub const OPEN_BACKOFF: std::time::Duration = std::time::Duration::from_millis(10);
 
-/// How long to poll the sequence number for the paste sentinel.
-pub const PASTE_SENTINEL_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(250);
-
-/// Polling interval inside [`PASTE_SENTINEL_TIMEOUT`].
-pub const PASTE_SENTINEL_POLL: std::time::Duration = std::time::Duration::from_millis(5);
+/// How long to wait after `SendInput(Ctrl+V)` for the focused app to
+/// process `WM_PASTE` and read `CF_UNICODETEXT` before we restore the
+/// caller's clipboard. Restoring too fast races the target's read
+/// → target ends up pasting the RESTORED bytes (old clipboard)
+/// instead of our dictation text. 30 ms is comfortably above the
+/// worst-case message-pump latency on modern Windows + leaves Wave-5
+/// total injection latency well under 100 ms.
+///
+/// Why a fixed sleep instead of polling the sequence number for an
+/// advance: most apps perform read-only paste (no clipboard write
+/// → no sequence advance), so an advance-poll would just time out
+/// and burn the full timeout regardless. The fixed sleep gives
+/// determinism + worst-case bound.
+pub const PASTE_CONSUME_GRACE: std::time::Duration = std::time::Duration::from_millis(30);
 
 /// Outcome of a single `with_saved_clipboard` invocation — surfaced to
 /// the orchestrator so the DB `injection_status` column can record
@@ -112,20 +121,35 @@ pub enum SequenceAnalysis {
 }
 
 impl SequenceAnalysis {
-    /// Decide based on the sequence numbers measured before our write
-    /// (`seq_before_set`) and just before restore (`seq_after_paste`).
+    /// Decide based on the sequence number measured **immediately after
+    /// our `write_unicode_text` returns** (`seq_after_set`) and the
+    /// number measured just before restore (`seq_after_paste`).
     ///
-    /// - `seq_after_paste == seq_before_set + 1` → only our `SetClipboardData` happened.
-    /// - `seq_after_paste == seq_before_set + 2` → our set + the target read+wrote during paste.
-    /// - Anything else → diverged, skip restore.
+    /// Baselining off `seq_after_set` (not `seq_before_set`) is
+    /// essential: `EmptyClipboard + SetClipboardData` together
+    /// advance the sequence by an OS-dependent amount (Windows may
+    /// fold consecutive ops into one bump, or count them separately).
+    /// Baselining before the write makes the classifier brittle to
+    /// that fold; baselining AFTER the write makes it depend only on
+    /// what the *target* does during paste, which is the actual
+    /// question we care about.
+    ///
+    /// - `seq_after_paste == seq_after_set` → target performed a
+    ///   read-only paste (the common case). Safe to restore.
+    /// - `seq_after_paste == seq_after_set + 1` → target also wrote
+    ///   the clipboard during paste (some clipboard managers /
+    ///   apps with their own dedupe logic). Safe to restore — only
+    ///   one extra writer, which we'd be overwriting deliberately.
+    /// - Any larger advance → some OTHER process wrote in our
+    ///   window. Skip the restore (better to lose the user's
+    ///   pre-existing clip than to overwrite a newer intentional
+    ///   copy).
     ///
     /// Wrap-around on `u32` is handled by `wrapping_add`; the
-    /// clipboard sequence number is a u32 that wraps every ~4 billion
-    /// changes (decades of real-world use).
-    pub fn classify(seq_before_set: u32, seq_after_paste: u32) -> Self {
-        if seq_after_paste == seq_before_set.wrapping_add(1)
-            || seq_after_paste == seq_before_set.wrapping_add(2)
-        {
+    /// clipboard sequence number wraps every ~4 billion changes
+    /// (decades of real-world use).
+    pub fn classify(seq_after_set: u32, seq_after_paste: u32) -> Self {
+        if seq_after_paste == seq_after_set || seq_after_paste == seq_after_set.wrapping_add(1) {
             Self::SafeToRestore
         } else {
             Self::Diverged
@@ -202,20 +226,25 @@ where
     F: FnOnce() -> AppResult<()>,
 {
     let snapshot = win::snapshot()?;
-    let seq_before_set = win::current_sequence_number();
 
     // Plant the payload.
     win::write_unicode_text(payload)?;
 
+    // Measure the sequence number AFTER our write. This is the
+    // baseline against which post-paste drift is judged. See
+    // [`SequenceAnalysis::classify`] for the rationale.
+    let seq_after_set = win::current_sequence_number();
+
     // Run caller-supplied paste. Errors here still need to restore.
     let paste_result = paste_fn();
 
-    // Wait for the paste sentinel — best-effort, never fatal.
-    let _ = win::wait_for_paste_sentinel(seq_before_set);
+    // Block while the target consumes `CF_UNICODETEXT`. Fixed sleep,
+    // not a poll loop — see [`PASTE_CONSUME_GRACE`].
+    std::thread::sleep(PASTE_CONSUME_GRACE);
 
     // Decide whether to restore.
     let seq_after = win::current_sequence_number();
-    let analysis = SequenceAnalysis::classify(seq_before_set, seq_after);
+    let analysis = SequenceAnalysis::classify(seq_after_set, seq_after);
 
     let outcome = match analysis {
         SequenceAnalysis::SafeToRestore => {
@@ -229,7 +258,7 @@ where
         SequenceAnalysis::Diverged => {
             tracing::info!(
                 "clipboard sequence diverged ({} → {}), skipping restore",
-                seq_before_set,
+                seq_after_set,
                 seq_after
             );
             PasteOutcome::OkClipboardNotRestored
@@ -258,7 +287,7 @@ where
 #[cfg(target_os = "windows")]
 mod win {
     use super::*;
-    use std::time::Instant;
+
     use windows::Win32::Foundation::{HANDLE, HGLOBAL, HWND};
     use windows::Win32::System::DataExchange::{
         CloseClipboard, EmptyClipboard, EnumClipboardFormats, GetClipboardData,
@@ -454,27 +483,6 @@ mod win {
         // SAFETY: no parameters, no lifetimes; pure Win32 read.
         unsafe { GetClipboardSequenceNumber() }
     }
-
-    /// Poll the sequence number until it advances past `seq_before_set + 1`
-    /// or [`PASTE_SENTINEL_TIMEOUT`] elapses. Returns Ok regardless;
-    /// the caller still classifies via [`SequenceAnalysis`] afterwards.
-    pub fn wait_for_paste_sentinel(seq_before_set: u32) -> AppResult<()> {
-        let deadline = Instant::now() + PASTE_SENTINEL_TIMEOUT;
-        let target = seq_before_set.wrapping_add(1);
-        while Instant::now() < deadline {
-            let seq = current_sequence_number();
-            // Advanced past our SetClipboardData? Paste likely consumed it.
-            if seq != target && seq != seq_before_set {
-                return Ok(());
-            }
-            std::thread::sleep(PASTE_SENTINEL_POLL);
-        }
-        tracing::debug!(
-            "paste sentinel did not advance within {:?}",
-            PASTE_SENTINEL_TIMEOUT
-        );
-        Ok(())
-    }
 }
 
 // --------------------------------------------------------------------
@@ -539,8 +547,20 @@ mod tests {
     // -----------------------------------------------------------------
 
     #[test]
-    fn sequence_safe_when_only_our_set_happened() {
-        // After our SetClipboardData (no paste-side write yet).
+    fn sequence_safe_when_target_read_only_paste() {
+        // Baseline is post-set. Target reads, doesn't write → seq
+        // unchanged. This is the common case (notepad, browsers,
+        // most input fields).
+        assert_eq!(
+            SequenceAnalysis::classify(100, 100),
+            SequenceAnalysis::SafeToRestore
+        );
+    }
+
+    #[test]
+    fn sequence_safe_when_paste_target_also_wrote() {
+        // Some apps re-write the clipboard during paste (clipboard
+        // managers, apps with internal dedupe). +1 advance is safe.
         assert_eq!(
             SequenceAnalysis::classify(100, 101),
             SequenceAnalysis::SafeToRestore
@@ -548,19 +568,12 @@ mod tests {
     }
 
     #[test]
-    fn sequence_safe_when_paste_target_also_wrote() {
-        // Some apps re-write the clipboard during paste.
+    fn sequence_diverged_when_third_party_wrote() {
+        // 2+ advance past baseline → at least one OTHER process
+        // intentionally wrote; skip restore so we don't trample
+        // them.
         assert_eq!(
             SequenceAnalysis::classify(100, 102),
-            SequenceAnalysis::SafeToRestore
-        );
-    }
-
-    #[test]
-    fn sequence_diverged_when_third_party_wrote() {
-        // 3+ advance → someone else is involved; bail.
-        assert_eq!(
-            SequenceAnalysis::classify(100, 103),
             SequenceAnalysis::Diverged
         );
         assert_eq!(
@@ -570,28 +583,49 @@ mod tests {
     }
 
     #[test]
-    fn sequence_diverged_when_no_advance() {
-        // Our SetClipboardData didn't even take? Diverged.
+    fn sequence_diverged_when_seq_went_backwards() {
+        // Should never happen in practice (seq is monotonic
+        // modulo wrap) but the classifier must reject it cleanly
+        // rather than treating it as a small advance.
         assert_eq!(
-            SequenceAnalysis::classify(100, 100),
+            SequenceAnalysis::classify(100, 99),
             SequenceAnalysis::Diverged
         );
     }
 
     #[test]
     fn sequence_handles_u32_wrap_around() {
-        // Right at the wrap boundary — still safe.
+        // Permissive deltas (0, +1) must work correctly across the
+        // u32 wrap boundary. Wave 4.9 baseline-post-set semantics:
+        //   - baseline u32::MAX → safe outcomes are u32::MAX (read-only)
+        //     and 0 (write-during-paste, after wrap).
+        //   - baseline u32::MAX - 1 → safe outcomes are u32::MAX - 1
+        //     and u32::MAX. (0 would be a +2 advance after wrap →
+        //     Diverged, third-party wrote.)
+        assert_eq!(
+            SequenceAnalysis::classify(u32::MAX, u32::MAX),
+            SequenceAnalysis::SafeToRestore,
+            "read-only paste at wrap boundary"
+        );
         assert_eq!(
             SequenceAnalysis::classify(u32::MAX, 0),
-            SequenceAnalysis::SafeToRestore
+            SequenceAnalysis::SafeToRestore,
+            "target wrote during paste; seq wrapped from u32::MAX → 0"
+        );
+        assert_eq!(
+            SequenceAnalysis::classify(u32::MAX - 1, u32::MAX),
+            SequenceAnalysis::SafeToRestore,
+            "target wrote during paste; seq advanced by 1 just before wrap"
         );
         assert_eq!(
             SequenceAnalysis::classify(u32::MAX, 1),
-            SequenceAnalysis::SafeToRestore
+            SequenceAnalysis::Diverged,
+            "+2 across wrap = third-party writer; skip restore"
         );
         assert_eq!(
             SequenceAnalysis::classify(u32::MAX - 1, 0),
-            SequenceAnalysis::SafeToRestore
+            SequenceAnalysis::Diverged,
+            "+2 across wrap = third-party writer; skip restore"
         );
     }
 

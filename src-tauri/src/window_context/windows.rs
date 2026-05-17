@@ -11,11 +11,18 @@
 //!     processes (svchost, csrss). Regular query returns
 //!     `ERROR_ACCESS_DENIED`. Limited-info has been the recommended
 //!     access right for non-debugging callers since Windows Vista.
-//! - `K32GetModuleBaseNameW(hproc, None, &mut [u16; 256])` → process
-//!   basename (e.g. `"notepad.exe"`).
 //! - `QueryFullProcessImageNameW(hproc, PROCESS_NAME_WIN32, ...)` → full
 //!   exe path. Falls back to `None` on failure (rare; protected
 //!   processes again).
+//! - `process_name` (e.g. `"notepad.exe"`) is derived from the full
+//!   exe path's file-name component. **Important:** the obvious-looking
+//!   `K32GetModuleBaseNameW` is NOT used — it requires
+//!   `PROCESS_QUERY_INFORMATION + PROCESS_VM_READ` access, while we
+//!   open with the lighter `PROCESS_QUERY_LIMITED_INFORMATION`
+//!   (needed for protected processes). `K32GetModuleBaseNameW`
+//!   silently returns 0 on insufficient access → empty string → all
+//!   downstream strategy resolution / per-app overrides / judges
+//!   silently break. Wave 4.9 bug-fix; see `docs/LESSONS.md`.
 //!
 //! Handles are wrapped in [`OwnedHandle`] so they're closed
 //! deterministically on `Drop`, including on the error/panic paths.
@@ -32,7 +39,6 @@
 //!   focus-loss detection ADR 0016 §7 requires.
 
 use windows::Win32::Foundation::{CloseHandle, FALSE, HANDLE, HWND};
-use windows::Win32::System::ProcessStatus::K32GetModuleBaseNameW;
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
@@ -77,8 +83,11 @@ impl WindowContext for WinWindowContext {
             ))
         })?;
 
-        let process_name = read_module_base_name(hproc.0).unwrap_or_default();
         let exe_path = read_full_image_name(hproc.0);
+        let process_name = exe_path
+            .as_deref()
+            .and_then(basename_from_path)
+            .unwrap_or_default();
 
         Ok(ForegroundWindow {
             hwnd: hwnd.0,
@@ -154,15 +163,17 @@ fn read_pid(hwnd: HWND) -> Option<u32> {
     }
 }
 
-fn read_module_base_name(hproc: HANDLE) -> Option<String> {
-    let mut buf = [0u16; 256];
-    // K32GetModuleBaseNameW returns the number of TCHARs copied,
-    // not including the trailing NUL. Zero indicates failure.
-    let n = unsafe { K32GetModuleBaseNameW(hproc, None, &mut buf) } as usize;
-    if n == 0 {
-        return None;
-    }
-    Some(decode_utf16_to_nul(&buf[..n.min(buf.len())]))
+/// Extract the file-name component of a full Win32 path.
+///
+/// Pure helper — no OS calls. Returns `None` on empty input or paths
+/// that consist only of directory separators (`\\\\?\\C:\\`). Uses
+/// `std::path::Path::file_name` semantics, which handle both `\` and
+/// `/` separators correctly on Windows.
+fn basename_from_path(path: &str) -> Option<String> {
+    std::path::Path::new(path)
+        .file_name()
+        .map(|os| os.to_string_lossy().into_owned())
+        .filter(|s| !s.is_empty())
 }
 
 fn read_full_image_name(hproc: HANDLE) -> Option<String> {
@@ -248,6 +259,47 @@ mod tests {
     }
 
     // -----------------------------------------------------------------
+    // basename_from_path — pure, deterministic
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn basename_extracts_exe_from_typical_win32_path() {
+        assert_eq!(
+            basename_from_path(r"C:\Windows\System32\notepad.exe").as_deref(),
+            Some("notepad.exe")
+        );
+        assert_eq!(
+            basename_from_path(r"C:\Program Files\Microsoft VS Code\Code.exe").as_deref(),
+            Some("Code.exe")
+        );
+    }
+
+    #[test]
+    fn basename_handles_long_path_prefix() {
+        // Windows long-path prefix `\\?\`. file_name() ignores it.
+        assert_eq!(
+            basename_from_path(r"\\?\C:\very\deep\path\app.exe").as_deref(),
+            Some("app.exe")
+        );
+    }
+
+    #[test]
+    fn basename_returns_none_for_empty_or_root_only() {
+        assert_eq!(basename_from_path(""), None);
+        assert_eq!(basename_from_path(r"C:\"), None);
+    }
+
+    #[test]
+    fn basename_handles_forward_slashes() {
+        // Some Win32 APIs return paths with forward slashes (mixed
+        // mode). Path::file_name handles both on Windows.
+        assert_eq!(
+            basename_from_path("C:/Users/dustin/app.exe").as_deref(),
+            Some("app.exe")
+        );
+    }
+
+    // -----------------------------------------------------------------
     // Live foreground snapshot — runs against the host's actual desktop
     // -----------------------------------------------------------------
     //
@@ -266,10 +318,18 @@ mod tests {
         match ctx.foreground() {
             Ok(fg) => {
                 assert!(fg.hwnd != 0, "hwnd should be non-zero when Ok");
-                // process_name may be empty on protected processes
-                // even when we got past OpenProcess (rare). We only
-                // assert it doesn't panic.
-                let _ = (&fg.title, &fg.process_name, &fg.exe_path);
+                // process_name is derived from exe_path.file_name().
+                // For protected processes both may be None/empty —
+                // we only assert internal consistency: if exe_path
+                // is Some(p), process_name must equal p's basename.
+                if let Some(exe) = &fg.exe_path {
+                    let expected = basename_from_path(exe).unwrap_or_default();
+                    assert_eq!(
+                        fg.process_name, expected,
+                        "process_name must equal basename(exe_path)"
+                    );
+                }
+                let _ = &fg.title;
             }
             Err(AppError::Other(msg)) => {
                 // Acceptable error on headless / between-window

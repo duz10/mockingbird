@@ -58,6 +58,13 @@ criterion = { workspace = true }
 name    = "whisper_latency"
 harness = false
 
+# Wave 4.9 verification probe — reads the user's mockingbird.db via
+# the same rusqlite we ship with, so QA verification doesn't require
+# a system sqlite3.exe install.
+[[example]]
+name = "verify_wave49"
+path = "examples/verify_wave49.rs"
+
 # Notes:
 # - Phase 2 Wave 4 added `whisper-rs` (currently CPU-only; see bd mb-ltq).
 # - Phase 3 adds `phf` for the injection-strategy override table (ADR 0016)

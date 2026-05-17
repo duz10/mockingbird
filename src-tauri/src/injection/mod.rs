@@ -63,9 +63,15 @@ pub enum InjectionOutcome {
     /// Per-app strategy table or user override said "do not paste
     /// into this app" (password managers, anti-cheat).
     AbortedUserOptOut,
-    /// Focus changed between key-down and key-up; we did not paste
-    /// into the wrong window. Text may have been copied to the
-    /// clipboard as a recovery affordance (skipping restore).
+    /// Focus changed between key-down and key-up — **legacy** variant.
+    ///
+    /// Per ADR 0020 (Wave 4.9) the default pipeline no longer emits
+    /// this outcome: focus change is permissive and injection
+    /// proceeds into the key-up app. The variant + DB string
+    /// `"aborted_focus_changed"` are retained because pre-4.9
+    /// session rows in users' databases use it, and the schema's
+    /// CHECK constraint still lists it. A future opt-in "strict"
+    /// focus mode could re-emit it.
     AbortedFocusChanged,
     /// Clipboard was locked by another process for >3 retries.
     FailedClipboardLocked,

@@ -43,9 +43,6 @@ use crate::window_context::ForegroundWindow;
 pub enum InjectionDecision {
     /// Proceed with the given strategy.
     Proceed(InjectionStrategy),
-    /// Skip injection; persist as `aborted_focus_changed` (user
-    /// alt-tabbed mid-session).
-    AbortFocusChanged,
     /// Skip injection; persist as `aborted_user_opt_out` (strategy
     /// resolved to [`InjectionStrategy::Abort`] — password manager,
     /// anti-cheat, etc.).
@@ -61,7 +58,6 @@ impl InjectionDecision {
     pub fn final_outcome(&self) -> Option<InjectionOutcome> {
         match self {
             Self::Proceed(_) => None,
-            Self::AbortFocusChanged => Some(InjectionOutcome::AbortedFocusChanged),
             Self::AbortUserOptOut => Some(InjectionOutcome::AbortedUserOptOut),
         }
     }
@@ -70,25 +66,38 @@ impl InjectionDecision {
 /// Decide what to do given the two foreground snapshots and the user's
 /// per-app strategy overrides.
 ///
-/// `fg_keydown` may be `None` if the orchestrator missed the snapshot
-/// (transient null-foreground state at key-down — rare). In that
-/// case we conservatively allow the injection — the user clearly
-/// intended SOMETHING; missing provenance shouldn't block their work.
+/// Per ADR 0020 (Wave 4.9), focus change between key-down and key-up
+/// is **permissive**: the injection proceeds into whatever app is
+/// focused at key-up, with full provenance recorded in the DB.
+/// Rationale: users frequently alt-tab during dictation as part of
+/// their workflow ("start the recording in Notepad, finish it in
+/// the actual target"). Aborting on focus change was friction
+/// without a corresponding safety benefit — password fields are
+/// still independently caught by the secure-input guard (ADR 0017),
+/// which runs on `fg_keyup` regardless of `fg_keydown`.
 ///
-/// `fg_keyup` is required — if there's no foreground at key-up,
-/// there's nothing to inject into and the caller should `AbortFocusChanged`.
+/// `fg_keydown` is still accepted (and logged when it diverges from
+/// `fg_keyup`) for provenance + telemetry, but no longer gates the
+/// decision.
+///
+/// `fg_keyup` is required — if there's no foreground at key-up the
+/// orchestrator handles that BEFORE calling here.
 pub fn decide_injection(
     fg_keydown: Option<&ForegroundWindow>,
     fg_keyup: &ForegroundWindow,
     user_overrides: &HashMap<String, InjectionStrategy>,
 ) -> InjectionDecision {
-    // 1. Focus-loss check.
+    // Log focus changes for audit; do not abort.
     if let Some(prev) = fg_keydown {
         if !same_process(prev, fg_keyup) {
-            return InjectionDecision::AbortFocusChanged;
+            tracing::info!(
+                fg_keydown = %prev.process_name,
+                fg_keyup = %fg_keyup.process_name,
+                "focus changed during dictation; proceeding into key-up app (ADR 0020 permissive policy)"
+            );
         }
     }
-    // 2. Strategy resolution.
+    // Strategy resolution.
     match resolve(&fg_keyup.process_name, user_overrides) {
         InjectionStrategy::Abort => InjectionDecision::AbortUserOptOut,
         other @ (InjectionStrategy::Paste | InjectionStrategy::Keystroke) => {
@@ -151,15 +160,29 @@ mod tests {
     }
 
     #[test]
-    fn abort_focus_changed_when_process_differs() {
+    fn proceed_into_keyup_app_when_focus_changed_permissive_policy() {
+        // ADR 0020: focus change is permissive — we inject into
+        // whatever app is focused at key-up, not abort. The new
+        // app's strategy (chrome.exe → Paste) wins.
         let prev = fg("notepad.exe");
         let now = fg("chrome.exe");
         let overrides = HashMap::new();
         let d = decide_injection(Some(&prev), &now, &overrides);
-        assert_eq!(d, InjectionDecision::AbortFocusChanged);
+        assert_eq!(d, InjectionDecision::Proceed(InjectionStrategy::Paste));
+    }
+
+    #[test]
+    fn focus_change_into_password_manager_still_aborts_via_strategy() {
+        // The keyup-app's strategy still gets resolved — focus
+        // change doesn't bypass per-app abort entries. (Belt and
+        // suspenders: secure-input guard catches this independently
+        // at the orchestrator layer.)
+        let prev = fg("notepad.exe");
+        let now = fg("1Password.exe");
+        let overrides = HashMap::new();
         assert_eq!(
-            d.final_outcome(),
-            Some(InjectionOutcome::AbortedFocusChanged)
+            decide_injection(Some(&prev), &now, &overrides),
+            InjectionDecision::AbortUserOptOut
         );
     }
 

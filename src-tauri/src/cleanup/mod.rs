@@ -21,6 +21,16 @@ pub trait Cleaner: Send {
     /// `"fragment"`, `"verbose"`) — the LLM impl selects its prompt
     /// file based on this. The passthrough impl ignores it.
     fn clean(&mut self, raw: &str, mode_slug: &str) -> AppResult<String>;
+
+    /// Identifier for the model that produced the cleaned text,
+    /// persisted in `transcripts.model_used` for provenance.
+    ///
+    /// Default returns `"passthrough"`. The Phase-4 LLM cleaner
+    /// overrides this with its actual model identifier (e.g.
+    /// `"qwen2.5-7b-instruct-q5_k_m"`).
+    fn model_name(&self) -> &str {
+        "passthrough"
+    }
 }
 
 /// Default cleaner — returns the input verbatim.

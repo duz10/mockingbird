@@ -14,6 +14,73 @@ Format:
 
 ---
 
+## 2026-05-17 [phase3-wave4.8] Silero v5 ONNX needs an UNDOCUMENTED 64-sample context buffer
+
+- **Context:** End-to-end dictation produced empty Whisper output. Tracing
+  showed the audio pipeline was healthy (capture worked, resampler worked,
+  WAV-dump of the post-resample buffer sounded perfect to a human), but
+  `vad_trim` kept returning zero samples because Silero VAD scored every
+  frame as non-speech (max confidence ~0.0031 across 155 frames of clear
+  speech vs. the 0.5 threshold).
+- **Finding:** The Silero v5 ONNX model published at
+  `snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx`
+  requires the caller to maintain a 64-sample "context" buffer (last 64
+  samples of the previous frame, initialised to zeros) and **prepend it
+  to every 512-sample frame before inference**, making the actual model
+  input shape `[1, 576]`, not `[1, 512]`. Without this:
+  - The model still runs (no error)
+  - The output tensor still has the right shape `[1, 1]`
+  - The output is essentially CONSTANT regardless of input: silence,
+    speech, pure tones, and white noise all score ~0.001–0.003. The
+    sigmoid output sits permanently at "definitely silence."
+  This is **not in the ONNX schema metadata**. The schema declares
+  `input: Float32 [-1, -1]` (any batch, any samples) — accepts 512
+  samples without complaint. The requirement lives only in
+  `silero-vad/src/silero_vad/utils_vad.py`'s `__call__` method:
+  ```python
+  context_size = 64 if sr == 16000 else 32
+  if not len(self._context):
+      self._context = torch.zeros(batch_size, context_size)
+  x = torch.cat([self._context, x], dim=1)   # PREPEND
+  ort_inputs = {'input': x.numpy(), ...}
+  self._context = x[..., -context_size:]     # SAVE LAST 64 FOR NEXT CALL
+  ```
+  Misleading red herrings on the path here:
+  - The `sr` input is declared `Tensor { ty: Int64, shape: [] }` (scalar).
+    Both `ort 2.0.0-rc.10` and ONNX Runtime accept shape `[1]` (1-d,
+    1-element) silently. The `silero-rs` Rust crate also uses `[1]`.
+    Trying "true" scalar shapes (`()`, `[0_usize; 0]`) actually made the
+    output WORSE, not better — these paths through ort + onnxruntime
+    appear to mis-handle 0-d Int64 scalars. Stick with `[1]`.
+  - ORT `GraphOptimizationLevel::Level3` vs `Level1` makes no difference
+    once the context buffer is correct.
+  - The model file hash matched the official upstream — it wasn't
+    corrupted, just being called wrong.
+- **Action:**
+  1. Always maintain a `context: Vec<f32>` of size 64 in any Silero v5
+     wrapper. Init to zeros, update with the last 64 samples of every
+     new frame, reset in `reset()`.
+  2. **When integrating a vendor ONNX model, find and read the
+     reference Python `__call__` end-to-end** before trusting the
+     schema. Schemas describe tensor shapes, not protocol semantics.
+     The schema cannot tell you "this model expects to be called with
+     overlapping windows."
+  3. **Test models against KNOWN INPUTS with known expected outputs.**
+     Our test suite only asserted "silence scores low" — which the
+     broken impl still satisfied. Now we have a regression test
+     (`silero_output_has_dynamic_range`) that asserts the model
+     produces *meaningfully different* outputs for structurally
+     different signals (silence vs. swept sine). Without the context
+     buffer, all confidences collapse to ~0.001 and the test fails.
+  4. **Add a `last_capture.wav` dump on every dictation** (single-slot
+     overwrite) — this was the diagnostic that proved the audio was
+     fine and isolated the bug to Silero. Cheap, low-overhead, and
+     pays for itself the first time you need it.
+  5. ORT `Tensor::from_array` silently accepts wrong-shape inputs for
+     scalar parameters. Don't trust "no error" as "correct config" —
+     verify behaviour with end-to-end output assertions.
+
+
 ## 2026-05-17 [phase-3-wave-4.5] `target/release/mockingbird.exe` fails with `STATUS_DLL_NOT_FOUND` from any cwd that isn't the build dir
 
 - **Context:** Wave 4.5 smoke-tested the wired-up binary by running it directly. Got exit code `0xC0000135` (DLL_NOT_FOUND) within 100 ms, no logs, no panic message.
@@ -600,3 +667,121 @@ driver, so the machine never transitioned.
    actually transitioned out of Processing. Lucky-ish that both
    showed at once — could have been a long debugging session if
    they'd shown up sequentially.
+
+---
+
+## 2026-05-17 [phase3-wave4.9] K32GetModuleBaseNameW silently returns 0 under PROCESS_QUERY_LIMITED_INFORMATION
+
+- **Context:** Bug B in the Wave-4 QA matrix — `sessions.foreground_app`
+  was always empty string. Tracing showed `OpenProcess` succeeded,
+  `QueryFullProcessImageNameW` returned the full exe path correctly,
+  but `K32GetModuleBaseNameW` returned 0 → empty string → all
+  downstream strategy resolution, per-app overrides, and audit
+  joins silently broke.
+- **Finding:** `K32GetModuleBaseNameW` (and the older
+  `GetModuleBaseNameW`) require `PROCESS_QUERY_INFORMATION +
+  PROCESS_VM_READ` on the process handle. Mockingbird opens with
+  the lighter `PROCESS_QUERY_LIMITED_INFORMATION` (necessary to
+  read protected processes — System, csrss, anti-cheat-protected
+  game windows). Under that mask, `K32GetModuleBaseNameW` does
+  NOT error — it returns 0 (= "0 chars copied") and sets nothing.
+  The MSDN page mentions the access requirement only in passing
+  and most online examples show `OpenProcess(PROCESS_ALL_ACCESS, ...)`
+  which masks the issue. Stack Overflow answers that recommend
+  the function rarely flag the access-mask trap.
+- **Action:** Derive process basename from
+  `QueryFullProcessImageNameW`'s output via
+  `std::path::Path::file_name` instead. Same information, one
+  fewer Win32 call, no access-mask surprises. The
+  `basename_from_path` helper is pure + trivially unit-testable.
+  Lesson generalises: any Win32 helper that returns "0 = failure"
+  with no error-code path is suspect — assume access-mask
+  sensitivity until proven otherwise.
+
+## 2026-05-17 [phase3-wave4.9] Clipboard sequence baseline must be measured AFTER our write, not before
+
+- **Context:** Bug C in the Wave-4 QA matrix — after a successful
+  paste, the user's pre-dictation clipboard contents were lost
+  (the dictation text remained). The
+  `SequenceAnalysis::classify(seq_before_set, seq_after_paste)`
+  classifier treated `seq_after_paste == seq_before_set + 1` or
+  `+ 2` as "safe to restore". In practice we observed `+ 2` after
+  our own writes (no target write yet) and `+ 3` after a normal
+  paste → classifier returned `Diverged` → restore skipped.
+- **Finding:** `EmptyClipboard` + `SetClipboardData` together
+  advance the sequence number by an OS-dependent amount. Windows
+  may fold consecutive ops into a single bump or count them
+  separately; the count appears to vary across builds and
+  possibly across clipboard-format-list state. Baselining off
+  `seq_before_set` made the classifier brittle to that fold.
+  Baselining off `seq_after_set` (measured immediately AFTER
+  `write_unicode_text` returns) eliminates the dependency entirely
+  — the classifier now answers only the question we actually care
+  about: "did anything OTHER than our write happen?"
+- **Action:** Always baseline post-mutation, not pre-mutation, when
+  the mutation's own sequence cost is OS-internal. The classifier
+  is correspondingly simpler:
+  - `seq_after == seq_after_set` → target read-only paste (common).
+  - `seq_after == seq_after_set + 1` → target also wrote (clipboard
+    managers, dedupe).
+  - Anything else → another writer; skip restore.
+
+  Also: dropped the `wait_for_paste_sentinel` polling loop in
+  favour of a fixed `PASTE_CONSUME_GRACE` (30 ms) sleep before
+  the post-paste seq read. Read-only paste never advances seq,
+  so the poll could only ever time out on the common case —
+  burning 250 ms instead of 30. Deterministic sleep > clever
+  poll when the "clever" signal is absent for the dominant path.
+
+## 2026-05-17 [phase3-wave4.9] Hard-coded test count is a bad smoke test for "did the refactor work"
+
+- **Context:** During Wave-4.9 I almost grepped for "303 passed"
+  as the success criterion after refactoring transcripts +
+  classifier + permissive focus. The refactor changed the test
+  count (removed 5 tests, added 9 → net +4) so a count match
+  would have been a false negative.
+- **Finding:** `cargo test`'s "N passed; 0 failed" line is the
+  real gate. The count is only meaningful when compared against
+  the expected delta for the iteration. A grep for "0 failed"
+  is correct; a grep for a specific passed count is brittle.
+- **Action:** Smoke commands should grep `FAILED|panicked|0 failed`
+  (the first two are negative checks, the third confirms the
+  test runner finished), never a hard-coded `N passed` literal.
+
+## 2026-05-17 [phase3-wave4.9] Running mockingbird.exe locks itself; `cargo build --release` fails with os error 5
+
+- **Context:** During Wave-4.9 verification I asked Dustin to re-launch
+  after a release rebuild. He hit
+  `error: failed to remove file ... mockingbird.exe / Caused by:
+  Access is denied. (os error 5)` on cargo's pre-link cleanup.
+- **Finding:** Windows holds an exclusive lock on a running .exe's
+  image file. cargo's link step tries to overwrite
+  `target/release/mockingbird.exe` in-place, which fails until the
+  running process exits. Unix devs are surprised by this because
+  Linux allows overwriting open files via inode swap (the running
+  process keeps its open inode; new file gets a fresh one). The
+  Windows error message doesn't mention "running process" — it
+  just says "Access is denied", which is a misleadingly generic
+  diagnostic for what is fundamentally a per-OS semantic
+  difference.
+- **Action:** `scripts/run-mockingbird.ps1` now accepts a `-Force`
+  flag that kills any running `mockingbird.exe` before launching,
+  with a 300 ms sleep to let Windows release the file lock.
+  Canonical rebuild-and-relaunch dance is now:
+  1. `pwsh scripts/cargo-with-cuda.ps1 build --release`
+  2. `pwsh scripts/run-mockingbird.ps1 -Force`
+
+  If step 1 fails with os error 5, that's the signal a previous
+  instance is still running — `taskkill /F /IM mockingbird.exe`
+  and retry, or just use `-Force` on the next `run-mockingbird`
+  invocation. Generalises: any Rust binary that does `dlopen` of
+  cudart / onnxruntime / etc. hits this on rebuild; the
+  `-Force`-style kill is the standard Windows answer.
+
+## 2026-05-18 [phase-3-wave-5] Orchestrator integration tests want stubbed traits, not a real `DictationRuntime` spawn
+
+- **Context:** Wave 5 needed end-to-end tests that drive `DictationOrchestrator::run` through a full `StartCapture → StopCapture` cycle so the new judges (`e2e-injection`, `db-provenance`, `secure-input-respected`) had real CI targets instead of just wrapping the pure `pipeline::decide` unit tests.
+- **First instinct (wrong):** spawn the real `DictationRuntime` from `dictation/runtime.rs` and use `HotkeyEvent::PipelineComplete` for synchronisation. That pulls in a real low-level keyboard hook, a real `WinSecureInputGuard`, and a real `GetForegroundWindow` — none of which work on a headless test runner.
+- **What actually works:** put the test in `src-tauri/tests/dictation_orchestrator.rs` (separate crate, depends on `mockingbird_lib` like any consumer). Stub every trait the orchestrator takes (`AudioCapture` / `VoiceActivityDetector` / `SpeechToText` / `Cleaner` / `Injector` / `WindowContext` / `SecureInputGuard`). Use `Database::open_in_memory()` for SQLite + `default_normal_config` for FK seeding. Use a plain `std::sync::mpsc` pair for `StateAction`. The orchestrator's `run(rx)` iterates `rx.iter()` and terminates when the sender drops — so the test pushes its two actions, drops `tx`, then calls `run(rx)` inline. No threads, no synchronisation primitives beyond the channels the orchestrator already owns.
+- **Generalisation:** when an orchestrator has `Box<dyn Trait>` deps for every I/O surface, integration tests should mirror the pattern: in-memory DB + stub traits + drop-the-sender to terminate the loop. The Phase 4 `LlmCleaner` integration test should follow the same recipe, swapping `PassthroughCleaner` for a `StubLlmCleaner` that returns a deterministic transformation, so the e2e-injection judge can prove the LLM is actually in the loop.
+- **Gotcha:** `rustfmt` rewrites long `assert_eq!` lines aggressively. Always run `pwsh scripts/cargo-with-cuda.ps1 fmt` (no `--check`) before pushing — a fmt-check failure blocks the `mb-quality-bar` judge AND surfaces noise about unrelated files (e.g. Wave 4.9's `examples/verify_wave49.rs` was already not-clean and got swept up in Wave 5's pre-tag check).

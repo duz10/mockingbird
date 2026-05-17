@@ -18,19 +18,42 @@
 #
 # Flags:
 #   -Foreground            # run attached, see stdout/stderr live
+#   -Force                 # kill any running mockingbird.exe before launching
+#                          # (also unblocks `cargo build --release`, which can't
+#                          #  overwrite the .exe while it's loaded → "Access is
+#                          #  denied. (os error 5)")
 #   -ModelsDir D:\models   # override the default %USERPROFILE%\mockingbird_models
 #   -CudaRoot 'C:\...\v12.8'
 #
-# To stop: right-click tray → Quit, OR `taskkill /F /IM mockingbird.exe`.
+# To stop: right-click tray → Quit, OR `taskkill /F /IM mockingbird.exe`,
+#          OR `pwsh scripts/run-mockingbird.ps1 -Force` (kills + relaunches).
 
 [CmdletBinding()]
 param(
     [string]$ModelsDir   = (Join-Path $env:USERPROFILE 'mockingbird_models'),
     [string]$CudaRoot    = 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8',
-    [switch]$Foreground
+    [switch]$Foreground,
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
+
+# 0. Optionally kill any previous instance. -Force is opt-in because
+#    auto-killing on every launch would be a surprise (you might be
+#    debugging a live session). With the flag, this is the canonical
+#    "rebuild-and-relaunch" shortcut.
+if ($Force) {
+    $existing = Get-Process -Name 'mockingbird' -ErrorAction SilentlyContinue
+    if ($existing) {
+        Write-Host "Killing $($existing.Count) running mockingbird process(es) ..."
+        $existing | Stop-Process -Force
+        # Give Windows a moment to release the .exe file lock before any
+        # subsequent caller (or this script's own launch) touches it.
+        Start-Sleep -Milliseconds 300
+    } else {
+        Write-Host "No running mockingbird to kill."
+    }
+}
 
 # 1. Resolve binary location.
 $repoRoot = Split-Path -Parent $PSScriptRoot

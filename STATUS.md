@@ -1,18 +1,12 @@
 # Mockingbird — STATUS
 
-**Current phase:** Phase 3 — Waves 1 + 2 + 3 + 4 + 4.5 ✅ **COMPLETE**; Wave 5 (judges + seal) READY
-**Last updated:** 2026-05-17 (Phase 3 Wave 4.5 finished — app boots end-to-end, dictation runtime live)
-**Last successful judge run:** _Phase-3 Wave-4.5 cargo gate: 306/306 tests on GPU (`--release`), clippy `--release --all-targets -- -D warnings` clean, fmt clean, 2026-05-17. +8 ignored live tests. **Live boot verified:** `mockingbird.exe` runs, DB created, orchestrator config resolved, dictation runtime spawned, Whisper loaded with GPU._
+**Current phase:** Phase 3 — Waves 1 + 2 + 3 + 4 + 4.5 + 4.8 + 4.9 + **5 (judges + retrospective)** ✅ **COMPLETE**; **`phase-3-complete` tag ready to push**. Phase 4 (LLM cleanup integration) is the next unblocked phase.
+**Last updated:** 2026-05-17 (Wave 5 — 4 Phase-3 judges authored + JSON entries, 3 new orchestrator integration tests landed green, retrospective appended to `docs/phases/phase3.md`. Tag is the final step.)
+**Last successful judge run:** _Wave 5 — pure decision tests + new orchestrator integration tests all green. `pwsh scripts/cargo-with-cuda.ps1 test --release --test dictation_orchestrator` reports `3 passed; 0 failed; 0 ignored` in 0.15 s. The 4 new judges (`mb-e2e-injection`, `mb-db-provenance`, `mb-clipboard-restored`, `mb-secure-input-respected`) live in `.code_puppy/judges.json` and `docs/judges/phase-3/`; each one's CI-eligible test targets are confirmed green. The `mb-clipboard-restored` `#[ignore]`d live test must be run manually before pushing the seal tag (one-shot: `pwsh scripts/cargo-with-cuda.ps1 test --release --workspace --lib -- injection::paste::tests::live_snapshot_then_write_then_restore_preserves_text --ignored --exact`)._
 
-**Blocked on:** 🛑 **Dustin** — the dictation pipeline is wired and runs. To do the QA matrix:
+**Blocked on:** 🟢 **Nothing.** Wave 5 deliverables are in. Final actions for Dustin: (1) run the `#[ignore]`d clipboard live test once to confirm the seal evidence; (2) `bd close mb-idy` with the judge-run summary; (3) `git tag -a phase-3-complete -m "Phase 3 sealed. Dictation pipeline live."`; (4) hand off to `/agent planning-agent` for Phase 4 plan-phase 4. `bd mb-up3` should also close (its conditions were satisfied by Wave 4.9 verification).
 
-1. **Launch:** `pwsh scripts/run-mockingbird.ps1` (sets CUDA + ORT env, starts in background).
-2. **Drive the 12-row matrix** in `docs/phases/phase3-wave4-brief.md` §"QA matrix". Hold RightAlt → speak → release → observe.
-3. **Inspect:** logs at `%APPDATA%\com.dustin.mockingbird\logs\mockingbird.log.YYYY-MM-DD`, DB at `%APPDATA%\com.dustin.mockingbird\mockingbird.db`.
-4. **Stop:** `taskkill /F /IM mockingbird.exe`.
-5. **Mark `mb-up3` closed** with row-by-row notes; then say "go on Wave 5".
-
-Ready tasks waiting: mb-idy (Wave 5 — judges + seal).
+Ready tasks waiting: nothing until Phase 4 is planned. Phase 4 implementor seed: see the "Carry-forward to Phase 4" section in `docs/phases/phase3.md` retrospective.
 
 ---
 
@@ -25,7 +19,9 @@ Ready tasks waiting: mb-idy (Wave 5 — judges + seal).
 | 3    | `hotkey/windows.rs` (`WH_KEYBOARD_LL` on dedicated `mockingbird-hotkey` thread, pure `classify_keystroke` helper with 9 tests), `hotkey/driver.rs` (20 ms tick cadence, 6 tests), `hotkey/probe.rs` (ADR 0019 fallback chain, 7 tests), `hotkey/pause.rs` (Arc<AtomicBool>+channel `PauseHandle`, 6 tests), 244/244 tests + 4 ignored live | ✅ |
 | 4    | `injection/paste.rs` (ADR 0018 four-step dance), `injection/windows.rs` (`SendInputInjector` Paste/Keystroke/Abort), `injection/strategy_wiring.rs` (focus-loss + resolver glue), `cleanup/mod.rs` (Cleaner trait + Passthrough), `dictation.rs` (orchestrator + pure `pipeline::decide`), `recording_window.rs` stub, **migration 004** (injection_status column), 303/303 tests + 7 ignored | ✅ |
 | 4.5  | `dictation/runtime.rs` (DictationRuntime spawn glue: hook install + state driver + dictation thread with !Send deps built in-thread), `models_dir()` 4th fallback for `%USERPROFILE%\mockingbird_models\`, `ORT_DYLIB_PATH` autodiscovery, `bootstrap_provenance_rows()` for first-run dict + example_set, `AppState` refactored to `Arc<Mutex<Connection>>` shared with dictation thread, `lib.rs::run()` wired end-to-end, `scripts/run-mockingbird.ps1` launch script, **live boot verified**, 306/306 tests + 8 ignored | ✅ |
-| 5    | 4 judges (e2e-injection, db-provenance, clipboard-restored, secure-input-respected), Phase 3 retrospective, `phase-3-complete` tag                                                              | ⏳ |
+| 4.8  | **Silero v5 context-buffer fix** — root-caused empty-Whisper-output bug to a missing 64-sample audio context buffer that the Silero v5 ONNX model requires (prepended to each 512-sample frame, making real input shape `[1, 576]` not `[1, 512]`). Requirement is UNDOCUMENTED in the ONNX schema — only visible in the reference Python `__call__`. Without it the model produces ≈constant near-zero output for any input. Also added: `vad.reset()` between captures, `debug_dump_wav` of post-resample audio for fast bug-hunt iteration, new regression test `silero_output_has_dynamic_range`. **End-to-end dictation now produces accurate text into focused app.** Full lesson in `docs/LESSONS.md`. 300/300 lib tests, 5/5 vad tests | ✅ |
+| 4.9  | **Provenance + clipboard hardening** — three P0 bug fixes from Dustin's QA matrix on Wave 4 + ADR 0020 (permissive focus change). (A) `db::transcripts::insert_{raw,cleaned,final}` now wired into `persist_complete` (raw + cleaned always; final only on injected outcomes). Added `Cleaner::model_name()` for provenance. (B) `process_name` derived from `Path::file_name(exe_path)` instead of `K32GetModuleBaseNameW` (which silently returns 0 under `PROCESS_QUERY_LIMITED_INFORMATION`). (C) Clipboard `SequenceAnalysis::classify` rebaselined off `seq_after_set`; `wait_for_paste_sentinel` poll replaced with fixed 30 ms `PASTE_CONSUME_GRACE` sleep. (D) Focus change is now permissive — `InjectionDecision::AbortFocusChanged` removed from the default pipeline; `InjectionOutcome::AbortedFocusChanged` enum + DB string retained for legacy DB compat. New ADR 0020 documents the rationale. 121/121 tests passing on touched modules; cargo build clean. | ✅ |
+| 5    | 4 judges in `docs/judges/phase-3/` + entries in `.code_puppy/judges.json` (e2e-injection, db-provenance, clipboard-restored, secure-input-respected), Phase 3 retrospective in `docs/phases/phase3.md`, **new `src-tauri/tests/dictation_orchestrator.rs` with 3 stubbed-trait integration tests** giving the judges real teeth (happy path + secure-input abort + text-fidelity round-trip), 305 → 308 tests total, `phase-3-complete` tag PENDING manual push | ✅ |
 
 bd: 24 tasks seeded; 6 closed (Wave 1 done), 5 ready (Wave 2), 13 blocked downstream.
 
@@ -389,8 +385,8 @@ of the regular `/goal` flow.
 
 ## Notes for the next agent (post context-clear)
 
-1. Read this file first, then `docs/LESSONS.md` (10 entries now — search before
-   doing PowerShell, rustfmt, beads, or hook work).
+1. Read this file first, then `docs/LESSONS.md` (13 entries now — search before
+   doing PowerShell, rustfmt, beads, hook, Win32-access-mask, or clipboard work).
 2. PLAN-mockingbird-v2.md and `.code_puppy/AGENTS.md` are binding.
 3. `bd ready` shows the queue. Phase 1 Wave 1 is done; Wave 2 tasks
    (`mb-4qg`, `mb-l6d`, `mb-7u9`, `mb-o0d`, `mb-rzf`) are now ready.
@@ -399,3 +395,26 @@ of the regular `/goal` flow.
 5. **Migrations 001-003 are SEALED forever once `phase-1-complete`
    tag lands.** Hook `block-migration-edit-after-phase-1` enforces.
    Triple-check 001/002/003 before that commit + tag.
+6. **Wave 4.9 (this iteration)** added ADR 0020 (permissive focus
+   change) and rewired transcripts persistence + foreground-name
+   derivation + clipboard sequence baseline. Brief at
+   `docs/phases/phase3-wave4.9-brief.md`. Wave 5's judges can now
+   assert a transcripts-table invariant that wasn't possible before
+   (see brief's "Handoff to Wave 5").
+7. `docs/LESSONS.md` is now 630 lines (just past the 600 soft limit).
+   It's an append-only log so splitting is artificial — but if it
+   grows another 30%, consider rotating pre-Phase-3 entries into
+   `docs/LESSONS-archive-phase1-2.md`. Not urgent.
+8. **`InjectionOutcome::AbortedFocusChanged`** is legacy as of 4.9 —
+   the default pipeline no longer emits it but the variant + DB
+   string remain because pre-4.9 user DBs use them and the schema
+   CHECK constraint still lists the string. Don't "clean it up".
+
+---
+
+## Cost line
+
+- Wave 4.9 (this iteration): no judge runs, no helios delegations,
+  no agent-creator invocations. Pure implementor work — 3 bug
+  fixes + 1 ADR + 1 brief + LESSONS append + STATUS update.
+  Sub-agent cost: $0.

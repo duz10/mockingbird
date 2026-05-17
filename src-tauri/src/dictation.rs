@@ -63,6 +63,7 @@ use crate::audio::vad::VoiceActivityDetector;
 use crate::audio::{trim_speech, AudioCapture, TrimConfig};
 use crate::cleanup::Cleaner;
 use crate::db::sessions::{self, NewSession, ProcessingCompletion, SessionStatus};
+use crate::db::transcripts;
 use crate::error::{AppError, AppResult};
 use crate::hotkey::state::StateAction;
 use crate::hotkey::HotkeyEvent;
@@ -121,6 +122,35 @@ pub struct DictationOrchestrator {
 
     // Per-session transient state.
     state: SessionState,
+}
+
+/// All inputs `persist_complete` needs to write one fully-provenanced
+/// session row + its `raw` / `cleaned` / `final` transcript stages.
+///
+/// Lives on its own struct (rather than 11 method params) so adding
+/// new provenance fields in later waves doesn't ripple through the
+/// call site as another positional argument. Borrowed lifetime `'a`
+/// keeps text strings as `&str` slices — no clones on the hot path.
+struct PersistCompleteParams<'a> {
+    recording_ended_iso: String,
+    /// Reserved for Wave 5 — currently written to `_` because
+    /// `audio_duration_ms` is filled at the VAD-trim step.
+    recording_duration_ms: i64,
+    fg_keyup: &'a ForegroundWindow,
+    outcome: InjectionOutcome,
+    stt_latency_ms: Option<i64>,
+    cleanup_latency_ms: Option<i64>,
+    injection_latency_ms: Option<i64>,
+    /// Raw STT output — IMMUTABLE per ADR 0010.
+    raw_text: &'a str,
+    /// Post-cleanup text. Equal to `raw_text` when the passthrough
+    /// cleaner is used (Wave 4 default).
+    cleaned_text: &'a str,
+    /// What was actually injected. `None` when injection was aborted
+    /// (secure input, user opt-out) → no `final` row.
+    injected_text: Option<&'a str>,
+    /// Cleanup model identifier for `transcripts.model_used`.
+    cleanup_model: &'a str,
 }
 
 #[derive(Default)]
@@ -265,6 +295,21 @@ impl DictationOrchestrator {
             .map(|s| stop_at.duration_since(s).as_millis() as i64)
             .unwrap_or(0);
 
+        tracing::debug!(
+            target: "audio",
+            drained_samples = samples.len(),
+            recording_duration_ms,
+            "complete(): drained audio from ring"
+        );
+
+        // Dump the post-resample buffer to a WAV file so a human
+        // can listen to it on demand. Single-slot (overwrites every
+        // session). Wave 5 will gate this behind a tray-menu "debug
+        // capture" toggle; for now it's always-on (cheap).
+        if let Err(e) = debug_dump_wav(&samples) {
+            tracing::warn!(error = ?e, "debug WAV dump failed");
+        }
+
         // Pull key-up snapshot. None == nothing focused (e.g. between
         // desktops) — treat as focus-changed abort.
         let fg_keyup = match self.window_ctx.foreground() {
@@ -277,6 +322,12 @@ impl DictationOrchestrator {
 
         // Trim with VAD. Errors here fall back to the raw audio —
         // it's better to STT the whole clip than to abort.
+        //
+        // Reset Silero LSTM state at the start of every utterance.
+        // Each dictation is a self-contained clip — there's no
+        // streaming context to preserve, and state poisoning from
+        // prior captures would bias the model.
+        self.vad.reset();
         let trim_start = Instant::now();
         let trimmed: Vec<i16> = trim_speech(&samples, self.vad.as_mut(), &TrimConfig::default())
             .unwrap_or_else(|e| {
@@ -284,6 +335,14 @@ impl DictationOrchestrator {
                 samples.clone()
             });
         let _vad_ms = trim_start.elapsed().as_millis() as i64;
+
+        tracing::debug!(
+            target: "audio",
+            raw_samples = samples.len(),
+            trimmed_samples = trimmed.len(),
+            vad_ms = _vad_ms,
+            "complete(): VAD trim result"
+        );
 
         // STT.
         let stt_start = Instant::now();
@@ -337,16 +396,30 @@ impl DictationOrchestrator {
         };
         let injection_latency_ms = inject_start.elapsed().as_millis() as i64;
 
-        // Persist.
-        self.persist_complete(
-            stop_iso,
+        // Persist. Whether the `final` transcript stage gets a row
+        // depends on whether we actually injected something: an
+        // aborted-secure or aborted-user-opt-out session has NO
+        // final stage (nothing was injected), but raw + cleaned
+        // must always be persisted (provenance > shortcuts).
+        let injected_text = match outcome {
+            InjectionOutcome::Ok | InjectionOutcome::OkClipboardNotRestored => {
+                Some(cleaned_text.as_str())
+            }
+            _ => None,
+        };
+        self.persist_complete(PersistCompleteParams {
+            recording_ended_iso: stop_iso,
             recording_duration_ms,
-            &fg_keyup,
+            fg_keyup: &fg_keyup,
             outcome,
-            Some(stt_latency_ms),
-            Some(cleanup_latency_ms),
-            Some(injection_latency_ms),
-        )?;
+            stt_latency_ms: Some(stt_latency_ms),
+            cleanup_latency_ms: Some(cleanup_latency_ms),
+            injection_latency_ms: Some(injection_latency_ms),
+            raw_text: &raw_text,
+            cleaned_text: &cleaned_text,
+            injected_text,
+            cleanup_model: self.cleaner.model_name(),
+        })?;
         // Reset transient state.
         self.state = SessionState::default();
         Ok(())
@@ -364,35 +437,40 @@ impl DictationOrchestrator {
 
     // ----- persistence helpers -----
 
-    // 8 args is just outside clippy's default of 7. Splitting into a
-    // struct would add a typename for marginal readability gain;
-    // the call site is local + comments explain each field.
-    #[allow(clippy::too_many_arguments)]
-    fn persist_complete(
-        &self,
-        recording_ended_iso: String,
-        _recording_duration_ms: i64,
-        fg_keyup: &ForegroundWindow,
-        outcome: InjectionOutcome,
-        stt_latency_ms: Option<i64>,
-        cleanup_latency_ms: Option<i64>,
-        injection_latency_ms: Option<i64>,
-    ) -> AppResult<()> {
+    fn persist_complete(&self, p: PersistCompleteParams<'_>) -> AppResult<()> {
+        let _ = p.recording_duration_ms; // Wave 5 fills `audio_duration_ms`.
         let conn = self
             .db
             .lock()
             .map_err(|_| AppError::Other("orchestrator: db mutex poisoned".into()))?;
-        let id = self.insert_session_row(&conn, &recording_ended_iso, fg_keyup)?;
+        let id = self.insert_session_row(&conn, &p.recording_ended_iso, p.fg_keyup)?;
+
+        // Transcripts: ALWAYS write raw + cleaned (provenance > shortcuts).
+        // Write final only if something was actually injected. Errors
+        // are non-fatal — log + continue so the session row at least
+        // gets its terminal status update.
+        if let Err(e) = transcripts::insert_raw(&conn, id, p.raw_text) {
+            tracing::warn!(error = ?e, session_id = id, "persist raw transcript failed");
+        }
+        if let Err(e) = transcripts::insert_cleaned(&conn, id, p.cleaned_text, p.cleanup_model) {
+            tracing::warn!(error = ?e, session_id = id, "persist cleaned transcript failed");
+        }
+        if let Some(injected) = p.injected_text {
+            if let Err(e) = transcripts::insert_final(&conn, id, injected, Some(p.cleanup_model)) {
+                tracing::warn!(error = ?e, session_id = id, "persist final transcript failed");
+            }
+        }
+
         sessions::update_processing_complete(
             &conn,
             id,
             &ProcessingCompletion {
                 completed_at: now_iso(),
                 status: SessionStatus::Complete,
-                stt_latency_ms,
-                cleanup_latency_ms,
-                injection_latency_ms,
-                injection_status: Some(outcome.as_db_str().to_string()),
+                stt_latency_ms: p.stt_latency_ms,
+                cleanup_latency_ms: p.cleanup_latency_ms,
+                injection_latency_ms: p.injection_latency_ms,
+                injection_status: Some(p.outcome.as_db_str().to_string()),
             },
         )
     }
@@ -522,27 +600,22 @@ pub mod pipeline {
     /// Decide what to do. Pure.
     ///
     /// Precedence (top wins):
-    ///   1. Secure-input → `Abort(AbortedSecure)`.
-    ///   2. Focus-loss double-snapshot → `Abort(AbortedFocusChanged)`.
-    ///   3. Strategy resolution → either `Proceed(...)` or
-    ///      `Abort(AbortedUserOptOut)`.
+    ///   1. Secure-input on `fg_keyup` → `Abort(AbortedSecure)`.
+    ///   2. Strategy resolution on `fg_keyup` → either `Proceed(...)`
+    ///      or `Abort(AbortedUserOptOut)`.
     ///
-    /// Rationale for #1 above #2: secure-input is a HARD safety
-    /// constraint (we never want to leak typed-then-cleaned text into
-    /// a password field). Focus-loss is a SOFT safety constraint
-    /// (the user just lost their target, not a privacy boundary).
-    /// In practice they're mutually exclusive — a secure-input target
-    /// IS a focus situation — but the explicit ordering matters for
-    /// the audit log.
+    /// **No focus-change abort.** Per ADR 0020 (Wave 4.9), focus
+    /// change between key-down and key-up is permissive: injection
+    /// proceeds into whatever is focused at key-up, with full
+    /// provenance recorded. The secure-input guard above runs on
+    /// `fg_keyup` so password fields are still independently caught
+    /// regardless of which app held focus at key-down.
     pub fn decide(inputs: &Inputs<'_>) -> Decision {
         if inputs.is_secure {
             return Decision::Abort(InjectionOutcome::AbortedSecure);
         }
         match decide_injection(inputs.fg_keydown, inputs.fg_keyup, inputs.user_overrides) {
             InjectionDecision::Proceed(s) => Decision::Proceed(s),
-            InjectionDecision::AbortFocusChanged => {
-                Decision::Abort(InjectionOutcome::AbortedFocusChanged)
-            }
             InjectionDecision::AbortUserOptOut => {
                 Decision::Abort(InjectionOutcome::AbortedUserOptOut)
             }
@@ -556,6 +629,43 @@ pub mod pipeline {
 
 fn new_uuid() -> String {
     uuid::Uuid::new_v4().to_string()
+}
+
+/// Dump the post-resample drained audio to a WAV file at
+/// `%APPDATA%/com.dustin.mockingbird/last_capture.wav`.
+///
+/// Single-slot (overwrites every session). Useful for debugging
+/// audio-pipeline issues — open the file in any audio player to
+/// verify what we're handing to Silero + Whisper. Wave 5 will gate
+/// behind a tray-menu toggle.
+fn debug_dump_wav(samples: &[i16]) -> AppResult<()> {
+    // Resolve %APPDATA%\com.dustin.mockingbird directly — this is
+    // diagnostic-only code so we accept the cross-cutting env lookup
+    // rather than threading an app_data_dir down through the
+    // orchestrator's constructor (Wave 5 will gate this behind a CLI
+    // flag and revisit the path-resolution story).
+    let app_data =
+        std::env::var("APPDATA").map_err(|e| AppError::Audio(format!("APPDATA env: {e}")))?;
+    let dir = std::path::PathBuf::from(app_data).join("com.dustin.mockingbird");
+    let path = dir.join("last_capture.wav");
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 16_000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(&path, spec)
+        .map_err(|e| AppError::Audio(format!("WAV create: {e}")))?;
+    for &s in samples {
+        writer
+            .write_sample(s)
+            .map_err(|e| AppError::Audio(format!("WAV write_sample: {e}")))?;
+    }
+    writer
+        .finalize()
+        .map_err(|e| AppError::Audio(format!("WAV finalize: {e}")))?;
+    tracing::info!(target: "audio", path = %path.display(), "debug WAV dumped");
+    Ok(())
 }
 
 fn now_iso() -> String {
@@ -647,8 +757,27 @@ mod tests {
     }
 
     #[test]
-    fn secure_input_wins_over_focus_loss() {
-        // Both true; secure takes precedence.
+    fn focus_change_proceeds_into_keyup_app_per_adr_0020() {
+        // ADR 0020 permissive policy: user dictates into notepad,
+        // alt-tabs to chrome before releasing the hotkey, text
+        // lands in chrome. chrome.exe → Paste strategy.
+        let prev = fg("notepad.exe");
+        let now = fg("chrome.exe");
+        let overrides = HashMap::new();
+        let d = pipeline::decide(&pipeline::Inputs {
+            fg_keydown: Some(&prev),
+            fg_keyup: &now,
+            is_secure: false,
+            user_overrides: &overrides,
+        });
+        assert_eq!(d, pipeline::Decision::Proceed(InjectionStrategy::Paste));
+    }
+
+    #[test]
+    fn focus_change_into_secure_input_still_aborts() {
+        // Secure-input guard runs on fg_keyup regardless of where
+        // focus was at key-down — belt-and-suspenders for the
+        // permissive focus-change policy.
         let prev = fg("notepad.exe");
         let now = fg("chrome.exe");
         let overrides = HashMap::new();
@@ -661,23 +790,6 @@ mod tests {
         assert_eq!(
             d,
             pipeline::Decision::Abort(InjectionOutcome::AbortedSecure)
-        );
-    }
-
-    #[test]
-    fn focus_loss_aborts_when_processes_differ() {
-        let prev = fg("notepad.exe");
-        let now = fg("chrome.exe");
-        let overrides = HashMap::new();
-        let d = pipeline::decide(&pipeline::Inputs {
-            fg_keydown: Some(&prev),
-            fg_keyup: &now,
-            is_secure: false,
-            user_overrides: &overrides,
-        });
-        assert_eq!(
-            d,
-            pipeline::Decision::Abort(InjectionOutcome::AbortedFocusChanged)
         );
     }
 

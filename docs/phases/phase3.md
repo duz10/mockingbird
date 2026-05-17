@@ -285,4 +285,47 @@ Four NEW judge prompts authored in Wave 5; cards live under `docs/judges/phase-3
 - **Real macOS/Linux impls** → Phase 9. Stubs only in Phase 3.
 - **Code signing** → Phase 7 (per ADR 0005).
 - **Learning loop** → Phase 8.
-- **Telemetry of any kind** → never (principle #4).
+- **Telemetry of any kind** ─→ never (principle #4).
+
+---
+
+## Retrospective (Wave 5)
+
+Authored at Phase 3 seal — Wave 5 closeout. Snapshots what the phase actually shipped vs the original brief and pins the lessons that Phase 4 needs to carry forward.
+
+### What went well
+
+- **Pure-vs-OS split paid for itself.** `dictation::pipeline::decide` and `injection::paste::SequenceAnalysis` are both pure decision layers wrapped by thin OS-side shims. This is why the Wave 5 judges had unit-test targets to point at in CI — `pipeline::decide` is exercised by 7 exhaustive case tests that run on every push without touching `WH_KEYBOARD_LL`, `GetForegroundWindow`, or the clipboard. The orchestrator integration tests in `src-tauri/tests/dictation_orchestrator.rs` extend that pattern: real `DictationOrchestrator::run` loop, fully stubbed trait deps, in-memory SQLite — `cargo test --release --test dictation_orchestrator` runs in ~150 ms.
+- **ADR-first discipline caught the GUI_SECUREINPUT mistake before it shipped.** ADR 0017 was amended in-flight after the original spec turned out to depend on a kernel signal that didn't exist as documented. The allowlist + `ES_PASSWORD` approach landed instead — covered by 3 separate tests (pure decision, belt-and-suspenders focus-change, orchestrator end-to-end).
+- **305/305 lib tests + 3/3 orchestrator integration tests + 8 ignored at the gate.** Highest test:LOC ratio of any phase so far. The Wave 4.9 hardening lifted the bar; Wave 5 then added the integration tests that prove the wiring stays intact under refactor.
+- **Provenance > shortcuts** is the rule that survived the most pressure. Aborted-secure sessions still get raw + cleaned transcript rows, full FK chain to prompt/dictionary/example set, foreground app captured — exactly so the History viewer (Phase 6) and the learning loop (Phase 8) have clean data even from sessions where nothing was injected.
+
+### What went sideways
+
+- **ADR 0017 had to be amended in-flight.** The original draft assumed a kernel-side signal (`GUI_SECUREINPUT`) that the Win32 API surfaces differently than the docs suggested. The allowlist approach is correct but the brief shipped the wrong signal first. Lesson: when an ADR cites a Win32 API by name, validate the API exists + behaves as docs claim before sealing the ADR.
+- **Wave 2's brief named bd IDs (`mb-7mp/vrl/cef/q9e`) that didn't match real bd state.** Cosmetic but added friction when readers tried to look them up. Discipline TODO baked into Wave 5: brief authors query `bd list` before naming.
+- **Wave 4.9 was unbriefed.** The provenance + clipboard hardening came out of Dustin's manual QA matrix on Wave 4 and was real bug-fix work, but it wasn't in the Wave 4 brief or the Wave 5 brief — it landed as a sub-iteration between them. Lesson for Phase 4: when QA finds P0s mid-phase, add a numbered sub-wave (4.9, 4.8 were both like this) and document it in the phase doc the same day.
+
+### Surprises
+
+- **`windows-rs 0.56` HWND is `isize`, not a pointer type.** Wave 4 code that assumed `windows::Win32::Foundation::HWND` was opaque-pointer-shaped had to be re-shimmed to read `.0` as an integer. Any future `windows-rs` upgrade needs to re-check this — the crate has been shifting field types between releases.
+- **Migration 004 had to land despite the brief saying "no schema changes in Phase 3."** Wave 4 implementor read ADR 0010 as "no schema changes after phase-1-complete," noticed `sessions.injection_status` didn't exist, asked. Dustin OK'd the migration because provenance demanded it. Lesson: ADR 0010's "migrations append-only after Phase 1" rule means **appending new columns/migrations is allowed**; what's forbidden is editing existing 001–003 migrations. The Wave 4 brief's "no schema changes" was an over-interpretation.
+- **`STATUS_DLL_NOT_FOUND` on `cargo test` is not always the obvious DLL.** It can be the ONNX Runtime dylib (load-dynamic via `ort`), the cuBLAS DLL (whisper-rs `cuda` feature), or the Visual C++ runtime. The fix is `pwsh scripts/cargo-with-cuda.ps1 test ...` + `$env:ORT_DYLIB_PATH = "$env:USERPROFILE\mockingbird_models\onnxruntime.dll"`. The 4 `audio::vad::tests::*` are the canaries — they're the first to fail when the env isn't set right.
+
+### Carry-forward to Phase 4
+
+- **`Cleaner` trait shape is locked.** `fn clean(&mut self, raw: &str, mode_slug: &str) -> AppResult<String>` + `fn model_name(&self) -> &str`. Phase 4's `LlmCleaner` impl wires in via the same `DictationOrchestrator::new(...)` constructor that takes `Box<dyn Cleaner>` today. The orchestrator integration tests in `tests/dictation_orchestrator.rs` use `PassthroughCleaner` — Phase 4 should add an analogous `StubLlmCleaner` that returns a deterministic transformation so the e2e-injection judge can prove the LLM is actually in the loop.
+- **Prompt files at `src-tauri/src/cleanup/prompts/*.md`** are already in-repo, loaded at startup, but not yet used. Phase 4 wires them through a `prompt_builder` analogous to `src-tauri/src/stt/prompt_builder.rs` (which already exists for the STT-side `initial_prompt`).
+- **Audio metadata still placeholders.** `sessions.audio_duration_ms = 0` and `audio_blob_path = None` are TODOs from Wave 4. Phase 4 (or a Phase 3.x patch wave) should fill `audio_duration_ms` from the VAD-trimmed buffer length and write the trimmed WAV to `<appdata>/audio_blobs/<session-uuid>.wav` when the user has the "save audio" toggle on (toggle UI is Phase 5; the persistence path can land sooner).
+- **Live `clipboard-restored` judge stays `#[ignore]`d in CI.** Phase 4 should NOT promote it to a CI-always test — the live test is correct as a manual gate. The pure sequence-analysis tests are sufficient day-to-day; the live test runs at every phase-seal.
+- **Test count: 305 → 308.** Wave 5 added 3 orchestrator integration tests (no source-side changes). Test:LOC ratio went up.
+
+### Wave 5 deliverables (cost line)
+
+- 4 judge MDs under `docs/judges/phase-3/`: `e2e-injection.md`, `db-provenance.md`, `clipboard-restored.md`, `secure-input-respected.md`.
+- `.code_puppy/judges.json` created from `judges-template.json` + 4 new Phase-3 entries (12 judges total).
+- `src-tauri/tests/dictation_orchestrator.rs` — 3 orchestrator integration tests using in-memory stubs for every trait dep + in-memory SQLite. ~370 lines including doc comments.
+- This retrospective appended.
+- `STATUS.md` flipped to "Phase 4 ready".
+
+No source-side files modified (only the new test file + docs + judges). The `phase-3-complete` git tag is the final Wave 5 step.

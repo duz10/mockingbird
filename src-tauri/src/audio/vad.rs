@@ -59,12 +59,28 @@ const SILERO_STATE_LEN: usize = 2 * 128; // (h+c stacked, batch=1, hidden=128)
 const SILERO_SR: i64 = 16_000;
 #[cfg(target_os = "windows")]
 const SPEECH_THRESHOLD: f32 = 0.5;
+/// Silero v5 at 16 kHz requires 64 samples of context (last 64 of
+/// the previous frame) prepended to each new 512-sample frame.
+/// Total model input is therefore 576 samples per inference. Without
+/// this, the model's STFT windowing is incoherent and it produces
+/// essentially constant output regardless of input content. The
+/// official Python reference (`silero-vad/src/silero_vad/utils_vad.py`)
+/// makes this implicit — only readable by tracing the `_context`
+/// buffer through `__call__`. Wave 4.8 finding.
+#[cfg(target_os = "windows")]
+const SILERO_CONTEXT_SAMPLES: usize = 64;
+#[cfg(target_os = "windows")]
+const SILERO_INPUT_SAMPLES: usize = SILERO_CONTEXT_SAMPLES + SILERO_FRAME_SAMPLES;
 
 #[cfg(target_os = "windows")]
 pub struct SileroVad {
     session: ort::session::Session,
     /// LSTM hidden+cell stacked flat as [2 * 1 * 128].
     state: Vec<f32>,
+    /// Last 64 audio samples (f32 in `[-1, 1]`) from the previous
+    /// frame, prepended to the next frame before inference. Required
+    /// by Silero v5 — see [`SILERO_CONTEXT_SAMPLES`] for the why.
+    context: Vec<f32>,
 }
 
 #[cfg(target_os = "windows")]
@@ -92,6 +108,7 @@ impl SileroVad {
         Ok(Self {
             session,
             state: vec![0.0f32; SILERO_STATE_LEN],
+            context: vec![0.0f32; SILERO_CONTEXT_SAMPLES],
         })
     }
 }
@@ -125,17 +142,41 @@ impl VoiceActivityDetector for SileroVad {
 
         // i16 → f32 in [-1.0, 1.0]. Divide by 32768.0 (i16::MIN.abs())
         // for symmetric mapping; the +1 asymmetry of i16::MAX is fine.
-        let audio_f32: Vec<f32> = frame.iter().map(|&s| s as f32 / 32768.0).collect();
+        let new_audio_f32: Vec<f32> = frame.iter().map(|&s| s as f32 / 32768.0).collect();
 
-        // Build input tensors. ort rc.12: ort::value::Tensor::from_array
-        // takes (shape, Vec<T>) where shape is `Vec<i64>` or `[usize; N]`.
-        let input_t = ort::value::Tensor::from_array(([1_usize, SILERO_FRAME_SAMPLES], audio_f32))
+        // Silero v5: prepend 64-sample context (last 64 of previous
+        // frame, init zeros) to the new 512 samples. Total input is
+        // 576 samples. The model uses the context to make the
+        // internal STFT window contiguous across frame boundaries.
+        let mut audio_f32: Vec<f32> = Vec::with_capacity(SILERO_INPUT_SAMPLES);
+        audio_f32.extend_from_slice(&self.context);
+        audio_f32.extend_from_slice(&new_audio_f32);
+        debug_assert_eq!(audio_f32.len(), SILERO_INPUT_SAMPLES);
+
+        // Update context buffer for the NEXT call: the last 64
+        // samples of THIS frame's new audio. We do this before
+        // moving `audio_f32` into the tensor.
+        let new_context_start = SILERO_FRAME_SAMPLES - SILERO_CONTEXT_SAMPLES;
+        self.context.clear();
+        self.context
+            .extend_from_slice(&new_audio_f32[new_context_start..]);
+
+        // Build input tensor with the combined context+new shape.
+        // ort 2.0.0-rc.10: `Tensor::from_array((shape, Vec<T>))`.
+        let input_t = ort::value::Tensor::from_array(([1_usize, SILERO_INPUT_SAMPLES], audio_f32))
             .map_err(|e| AppError::Audio(format!("build input tensor: {e}")))?;
 
         let state_t =
             ort::value::Tensor::from_array(([2_usize, 1_usize, 128_usize], self.state.clone()))
                 .map_err(|e| AppError::Audio(format!("build state tensor: {e}")))?;
 
+        // Silero v5: pass sr as a 1-d tensor of length 1 — matches
+        // the `silero-rs` reference impl. The model declares the
+        // input as scalar shape `[]`, but ort + ONNX Runtime accept
+        // `[1]` (single-element 1-d) transparently. We tried both
+        // `()` and `[0_usize; 0]` for true 0-d — both produced WORSE
+        // confidence, suggesting some ort path silently miscompiles
+        // them. Stick with `[1]`.
         let sr_t = ort::value::Tensor::from_array(([1_usize], vec![SILERO_SR]))
             .map_err(|e| AppError::Audio(format!("build sr tensor: {e}")))?;
 
@@ -179,6 +220,8 @@ impl VoiceActivityDetector for SileroVad {
 
     fn reset(&mut self) {
         self.state.iter_mut().for_each(|x| *x = 0.0);
+        self.context.clear();
+        self.context.resize(SILERO_CONTEXT_SAMPLES, 0.0);
     }
 
     fn frame_samples(&self) -> usize {
@@ -197,6 +240,211 @@ mod tests {
     #[test]
     fn frame_samples_constant_is_512() {
         assert_eq!(SILERO_FRAME_SAMPLES, 512);
+    }
+
+    /// Regression guard: ensures Silero v5 produces meaningfully
+    /// different outputs for differently-structured inputs.
+    ///
+    /// Before Wave 4.8 the [`SILERO_CONTEXT_SAMPLES`] context buffer
+    /// wasn't prepended to the per-frame input. The model still
+    /// ran, but produced ~constant near-zero output for ANY input
+    /// (silence, speech, tone, noise — all scored ≈0.001). The
+    /// per-frame confidence had no dynamic range.
+    ///
+    /// This test feeds three structurally distinct synthetic
+    /// signals (silence, white noise, loud sweep) and asserts the
+    /// max confidence varies across them by at least an order of
+    /// magnitude. A regression that drops the context buffer fails
+    /// this immediately — outputs collapse to a flat ~0.001.
+    ///
+    /// We deliberately do NOT assert exact confidence values: the
+    /// model is what it is, and we don't want to lock its specific
+    /// numerical behaviour. We only assert it's ALIVE.
+    #[test]
+    fn silero_output_has_dynamic_range() {
+        let Some(path) = silero_path() else {
+            eprintln!("SKIP: silero_vad.onnx not on disk");
+            return;
+        };
+        let mut vad = SileroVad::from_path(&path).unwrap();
+
+        let max_for_signal = |vad: &mut SileroVad, mut gen: Box<dyn FnMut(usize) -> i16>| -> f32 {
+            vad.reset();
+            let mut max = 0.0_f32;
+            for _ in 0..30 {
+                let frame: Vec<i16> = (0..SILERO_FRAME_SAMPLES).map(&mut *gen).collect();
+                let f = vad.process_frame(&frame).unwrap();
+                if f.confidence > max {
+                    max = f.confidence;
+                }
+            }
+            max
+        };
+
+        let silence_max = max_for_signal(&mut vad, Box::new(|_| 0));
+        let mut x = 12345_i32;
+        let noise_max = max_for_signal(
+            &mut vad,
+            Box::new(move |_| {
+                x = x.wrapping_mul(1103515245).wrapping_add(12345);
+                ((x >> 16) as i16).saturating_mul(8)
+            }),
+        );
+        let mut phase = 0.0_f32;
+        let sweep_max = max_for_signal(
+            &mut vad,
+            Box::new(move |i| {
+                // Frequency-swept sine: low → mid-band. Loud.
+                let f = 200.0 + (i as f32 * 4.0);
+                phase += 2.0 * std::f32::consts::PI * f / 16_000.0;
+                (phase.sin() * 20_000.0) as i16
+            }),
+        );
+
+        eprintln!("silence_max={silence_max:.4} noise_max={noise_max:.4} sweep_max={sweep_max:.4}");
+
+        // Sanity: silence should score near-zero.
+        assert!(
+            silence_max < 0.1,
+            "silence should score low; got {silence_max}"
+        );
+        // The real assertion: the model has dynamic range. Without
+        // the context-buffer fix all three would collapse to ~0.001
+        // (max diff ~0.003 < 0.05). With the fix, structured signals
+        // produce visibly higher confidence than silence.
+        let max_dynamic_range = (noise_max - silence_max)
+            .abs()
+            .max((sweep_max - silence_max).abs());
+        assert!(
+            max_dynamic_range > 0.05,
+            "Silero output appears stuck — dynamic range {max_dynamic_range:.4} is \
+             too small (silence={silence_max}, noise={noise_max}, sweep={sweep_max}). \
+             Probable cause: SILERO_CONTEXT_SAMPLES context buffer is not being \
+             prepended to per-frame input. See `process_frame` impl."
+        );
+    }
+
+    /// Manual-only: load the most recent `last_capture.wav` dumped by
+    /// the running app and run Silero on it. Reports the full
+    /// per-frame confidence distribution.
+    ///
+    /// Useful when debugging: run the app, dictate a phrase, then:
+    ///   `cargo test --release silero_dumped_wav -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn silero_dumped_wav() {
+        let appdata = std::env::var("APPDATA").expect("APPDATA");
+        let wav_path = std::path::PathBuf::from(appdata)
+            .join("com.dustin.mockingbird")
+            .join("last_capture.wav");
+        let mut reader = hound::WavReader::open(&wav_path)
+            .unwrap_or_else(|e| panic!("open {}: {e}", wav_path.display()));
+        let spec = reader.spec();
+        eprintln!(
+            "WAV: rate={} channels={} bits={} format={:?} len={}",
+            spec.sample_rate,
+            spec.channels,
+            spec.bits_per_sample,
+            spec.sample_format,
+            reader.duration()
+        );
+        let samples: Vec<i16> = reader.samples::<i16>().filter_map(|s| s.ok()).collect();
+        eprintln!("loaded {} samples", samples.len());
+
+        // Sanity-check amplitude.
+        let peak = samples
+            .iter()
+            .map(|s| (*s as i32).unsigned_abs())
+            .max()
+            .unwrap_or(0);
+        let rms = {
+            let sum_sq: u64 = samples.iter().map(|s| (*s as i64 * *s as i64) as u64).sum();
+            ((sum_sq / samples.len() as u64) as f64).sqrt() as u32
+        };
+        eprintln!("peak_abs={peak} rms={rms}");
+
+        let Some(path) = silero_path() else {
+            panic!("no silero model");
+        };
+        let mut vad = SileroVad::from_path(&path).unwrap();
+
+        let mut confs = Vec::new();
+        for chunk in samples.chunks_exact(SILERO_FRAME_SAMPLES) {
+            let f = vad.process_frame(chunk).unwrap();
+            confs.push(f.confidence);
+        }
+
+        let max = confs.iter().cloned().fold(0.0_f32, f32::max);
+        let avg = confs.iter().sum::<f32>() / confs.len() as f32;
+        let speech_frames = confs.iter().filter(|c| **c >= SPEECH_THRESHOLD).count();
+        eprintln!(
+            "\nSPEECH: {} frames | max={:.4} | avg={:.4} | speech_frames={}",
+            confs.len(),
+            max,
+            avg,
+            speech_frames
+        );
+
+        // Compare against pure silence (all zeros).
+        vad.reset();
+        let silent_frame = vec![0i16; SILERO_FRAME_SAMPLES];
+        let mut silent_confs = Vec::new();
+        for _ in 0..20 {
+            let f = vad.process_frame(&silent_frame).unwrap();
+            silent_confs.push(f.confidence);
+        }
+        eprintln!(
+            "SILENCE: 20 frames | first={:.4} last={:.4} max={:.4}",
+            silent_confs[0],
+            silent_confs[19],
+            silent_confs.iter().cloned().fold(0.0_f32, f32::max)
+        );
+
+        // Compare against a strong synthesized 440 Hz tone (not
+        // speech, but loud + structured — should NOT score as speech
+        // but should differ from silence).
+        vad.reset();
+        let mut tone_confs = Vec::new();
+        let mut phase = 0.0_f32;
+        let phase_inc = 2.0 * std::f32::consts::PI * 440.0 / 16_000.0;
+        for _ in 0..20 {
+            let frame: Vec<i16> = (0..SILERO_FRAME_SAMPLES)
+                .map(|_| {
+                    let v = (phase.sin() * 16_000.0) as i16;
+                    phase += phase_inc;
+                    v
+                })
+                .collect();
+            let f = vad.process_frame(&frame).unwrap();
+            tone_confs.push(f.confidence);
+        }
+        eprintln!(
+            "TONE (440Hz): 20 frames | first={:.4} last={:.4} max={:.4}",
+            tone_confs[0],
+            tone_confs[19],
+            tone_confs.iter().cloned().fold(0.0_f32, f32::max)
+        );
+
+        // Compare against synthesized noise (random-ish PCM).
+        vad.reset();
+        let mut noise_confs = Vec::new();
+        let mut x = 12345_i32;
+        for _ in 0..20 {
+            let frame: Vec<i16> = (0..SILERO_FRAME_SAMPLES)
+                .map(|_| {
+                    x = x.wrapping_mul(1103515245).wrapping_add(12345);
+                    ((x >> 16) as i16).saturating_mul(2)
+                })
+                .collect();
+            let f = vad.process_frame(&frame).unwrap();
+            noise_confs.push(f.confidence);
+        }
+        eprintln!(
+            "NOISE: 20 frames | first={:.4} last={:.4} max={:.4}",
+            noise_confs[0],
+            noise_confs[19],
+            noise_confs.iter().cloned().fold(0.0_f32, f32::max)
+        );
     }
 
     #[test]
