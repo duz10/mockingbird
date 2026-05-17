@@ -1,5 +1,92 @@
 ## UI sprint progress (2026-05-18 — this iteration)
 
+**Status:** Phase 5 Waves A through J **complete**. UI is end-to-end
+renderable + wired to the orchestrator state events. App is launchable.
+Visual baselines captured. **STOP-before-Phase-3 gate hit** — awaiting
+Dustin's eyes-on review before polish.
+
+### Wave C — Insights dashboard ✅ (commit `7562f7e`)
+- `ui/src/pages/Insights.{tsx,module.css}` (~360 LoC + ~180 LoC CSS).
+- 5 metric tiles (words, sessions, recording, time-saved, streak with gold accent).
+- 7-day canvas sparkline (no chart library; DPR-aware bars with rounded caps).
+- Mode-mix segmented bar + legend; top-apps horizontal bars; latency block
+  with fast/slow color-coding; learning-loop card with recent-terms chips.
+- Empty state when zero activity today AND zero across the 7-day window.
+
+### Wave D — History page ✅ (commit `7562f7e`)
+- Two-pane: 360px list + flex detail; collapses to single column under 900px.
+- 200ms-debounced FTS5 search via `search_transcripts`; snippet `<mark>`
+  highlighting rendered (server-trusted HTML — comes from SQL `snippet()`).
+- Session row: mode pill + 2-line clamp preview + app + duration + injection-status pill.
+- Detail view: 3-stage transcript (raw monospace muted / cleaned / final
+  with status-ok left border) + metadata grid + action bar (Copy with
+  check-swap, Mark example, Delete with confirm). Selection mirrored
+  to `useAppStore.selectedSession` for Phase 6 correction UX.
+
+### Wave E — Dictionary CRUD ✅ (commit `8751b61`)
+- Full table: inline add-row at top, in-place edit (term/canonical/app-context),
+  source badge (user/learned/import) with confidence bar for non-user,
+  client-side search, delete-with-confirm.
+- TS `upsert_dictionary_entry` helper now exposes optional `id` for both
+  insert + update paths (Rust side already handled both).
+
+### Wave F — Modes editor ✅ (commit `8751b61`)
+- One card per mode with mode-colored dot + label, hotkey badge,
+  pill-switch enabled toggle, field grid (provider select, model text,
+  temperature, max-tokens).
+- 400ms-debounced per-field auto-save with optimistic store update.
+  No global Save button (in-flow editing only).
+- Hotkey is read-only for v1 — live chord capture is Phase 5 polish.
+
+### Wave G — Settings (4 tabs) ✅ (commit `8751b61`)
+- Sticky left-rail tabs collapse to horizontal row under 720px.
+- General: theme picker (segmented), sound/autostart/reduced-motion toggles.
+- Models: Ollama explainer + Claude API key add/remove (window.prompt for
+  v1; DPAPI modal lands in Phase 6 polish).
+- History & data: retention dropdown, audio toggle, purge with PURGE-typed confirm.
+- Advanced: learning loop toggle + Run now + recent runs list, data/logs/models
+  folder shortcuts with Open buttons, privacy/telemetry callout.
+- Rust settings allowlist (8 keys) prevents arbitrary writes.
+
+### Wave H — Recording window shell config ✅ (commit `b42fec0` + this iteration)
+- `tauri.conf.json` recording window: 320×80, transparent, no decorations,
+  alwaysOnTop, `focus: false` (non-activating per ADR 0016 §7),
+  skipTaskbar, shadow, `center: true` (Wave H final addition).
+
+### Wave I — Orchestrator → overlay wiring ✅ (commit `b42fec0`)
+- `RecordingWindow` (Rust) now drives the real Tauri webview AND emits
+  `dictation:state` events the React overlay subscribes to.
+- AppHandle wired lazily via `Arc<Mutex<Option<AppHandle>>>` (unit tests
+  still construct without one).
+- Pipeline emits listening → transcribing → cleaning → pasting → done
+  (200ms hold) → idle. Error paths call `set_error` + `hide`.
+- Kernel32 beep gated behind new `audible-beeps` cargo feature (default off).
+
+### Wave J — Playwright visual baselines ✅ (this iteration)
+- 12 screenshots in `playwright-results/phase5-baselines/` covering every
+  page, every settings tab, light/dark theme, and the recording overlay.
+- Zero console errors / warnings across the sweep.
+- qa-kitten flagged 5 non-blocker polish items (default theme behaviour,
+  Dictionary placeholder truncation, Settings → Models card sparseness,
+  redundant Purge label, Settings tabs missing `role="tab"`).
+
+### Phase 5 polish backlog (post-review)
+- Default theme: ship Dark or document System-on-light intent.
+- Dictionary Add-row inputs: widen or shorten placeholders.
+- Settings → Models: detect installed Ollama models + reachability ping.
+- Settings tabs: ARIA `tablist` / `tab` parity with Theme picker radio group.
+- De-dupe "Purge all history" row + button label.
+- Live hotkey chord capture in Modes (instead of read-only badge).
+- DPAPI-backed Claude API key modal (replacing `window.prompt`).
+- Real RMS waveform feed from orchestrator (currently rAF sine + noise).
+- `purge_all_history` IPC handler (UI wired; backend is a TODO).
+
+---
+
+## (prior iteration summary preserved below)
+
+## UI sprint progress (2026-05-18 — first session)
+
 **Status:** Phase 5 Wave A.5 + Wave B landed in one session. UI sprint
 continues — see the wave checklist below.
 
@@ -68,9 +155,12 @@ continues — see the wave checklist below.
   (small Phase 5 Rust ticket; will pair with Wave I).
 
 ### Last-judge line
-- `cargo test --release --lib` → **409 passed, 0 failed, 12 ignored.**
-- `npm run build` (ui/) → green, no TS errors, no warnings.
-- No formal Phase 5 judges run yet (Playwright visual baselines come in Wave J).
+- `cargo build --lib` → green (release run blocked by pre-existing env issue;
+  see LESSONS.md 2026-05-17 phase5-wave-I entry — affects all lib tests, not a regression).
+- `npm run build` (ui/) → green, no TS errors. Main 119 kB / 36 kB gz
+  (vs 250 kB budget). 13/13 vitest tests pass.
+- Wave J visual baselines: 12/12 captures, zero console errors.
+- Cost line (this iteration): 0 LLM-judge dollars (no judges run this session).
 
 ---
 
