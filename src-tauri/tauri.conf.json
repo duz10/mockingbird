@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../ui/dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "",
-    "beforeBuildCommand": ""
+    "beforeDevCommand": "npm --prefix ../ui run dev",
+    "beforeBuildCommand": "npm --prefix ../ui run build"
   },
   "app": {
     "withGlobalTauri": false,
@@ -15,6 +15,7 @@
       {
         "label": "main",
         "title": "Mockingbird",
+        "url": "index.html",
         "width": 1024,
         "height": 720,
         "minWidth": 720,
@@ -26,6 +27,22 @@
         "transparent": false,
         "alwaysOnTop": false,
         "skipTaskbar": false
+      },
+      {
+        "label": "recording",
+        "title": "Mockingbird Recording",
+        "url": "recording.html",
+        "width": 320,
+        "height": 80,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "focus": false,
+        "skipTaskbar": true,
+        "acceptFirstMouse": false,
+        "shadow": true,
+        "visible": false
       }
     ],
     "security": {

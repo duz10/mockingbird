@@ -1,0 +1,135 @@
+/* Mockingbird design tokens — single source of truth.
+ *
+ * Per PLAN §9.1. Editing this file changes the look of every surface
+ * (main window + recording overlay). Adding a token? Document it in
+ * docs/DESIGN.md and add a Playwright visual baseline so regressions
+ * surface in CI.
+ *
+ * OKLCH chosen for perceptual uniformity — color steps look like
+ * even steps to the eye, which is the only way the status palette
+ * stays legible across the four states.
+ */
+
+:root {
+  /* Surfaces (dark by default; light overrides below). */
+  --surf-0: oklch(0.16 0.01 240);                /* deepest dark — sidebar bg */
+  --surf-1: oklch(0.20 0.01 240 / 0.92);         /* recording window bg */
+  --surf-2: oklch(0.24 0.01 240);                /* card */
+  --surf-3: oklch(0.30 0.01 240);                /* hover */
+  --on-surf: oklch(0.96 0.01 240);
+  --on-surf-muted: oklch(0.78 0.01 240);
+  --on-surf-faint: oklch(0.58 0.01 240);
+  --border: oklch(0.30 0.01 240 / 0.4);
+  --border-strong: oklch(0.40 0.01 240 / 0.6);
+
+  /* Status palette. */
+  --status-idle:       oklch(0.65 0.01 240);     /* grey */
+  --status-recording:  oklch(0.66 0.18 25);      /* red */
+  --status-processing: oklch(0.78 0.16 75);      /* amber */
+  --status-ok:         oklch(0.72 0.18 145);     /* green */
+  --status-error:      oklch(0.62 0.22 25);      /* red-flash */
+
+  /* Mode palette. */
+  --mode-normal:    oklch(0.70 0.14 230);        /* blue */
+  --mode-verbose:   oklch(0.72 0.16 285);        /* violet */
+  --mode-fragment:  oklch(0.78 0.14 95);         /* yellow-green */
+  --mode-rewrite:   oklch(0.74 0.15 200);        /* cyan — AI command */
+  --mode-expand:    oklch(0.72 0.14 320);        /* magenta — AI command */
+  --mode-summarize: oklch(0.74 0.14 60);         /* orange — AI command */
+
+  /* Radii. */
+  --r-1: 4px;
+  --r-2: 8px;
+  --r-3: 12px;
+  --r-pill: 999px;
+
+  /* Spacing scale (4-pt). */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+
+  /* Type. */
+  --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
+  --type-xs:  11px/14px var(--font-sans);
+  --type-sm:  13px/18px var(--font-sans);
+  --type-md:  15px/22px var(--font-sans);
+  --type-lg:  18px/26px var(--font-sans);
+  --type-xl:  24px/32px var(--font-sans);
+  --type-2xl: 32px/40px var(--font-sans);
+
+  /* Elevation. */
+  --shadow-1: 0 1px 2px oklch(0 0 0 / 0.20);
+  --shadow-2: 0 4px 12px oklch(0 0 0 / 0.28);
+  --shadow-3: 0 12px 32px oklch(0 0 0 / 0.40);   /* recording window */
+
+  /* Motion. */
+  --ease-out:    cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-1: 120ms;
+  --dur-2: 220ms;
+  --dur-3: 400ms;
+  --dur-fade-out: 800ms;
+}
+
+/* Light-mode overrides — auto-applied based on system preference.
+ * The user can override in Settings → General (Phase 7); the override
+ * adds `data-theme="light"` to <html>, which beats this media query
+ * by specificity. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --surf-0: oklch(0.98 0.005 240);
+    --surf-1: oklch(0.96 0.005 240 / 0.96);
+    --surf-2: oklch(0.94 0.005 240);
+    --surf-3: oklch(0.88 0.005 240);
+    --on-surf: oklch(0.15 0.005 240);
+    --on-surf-muted: oklch(0.40 0.005 240);
+    --on-surf-faint: oklch(0.60 0.005 240);
+    --border: oklch(0.70 0.005 240 / 0.4);
+    --border-strong: oklch(0.50 0.005 240 / 0.6);
+    --shadow-1: 0 1px 2px oklch(0 0 0 / 0.08);
+    --shadow-2: 0 4px 12px oklch(0 0 0 / 0.10);
+    --shadow-3: 0 12px 32px oklch(0 0 0 / 0.16);
+  }
+}
+
+[data-theme="light"] {
+  --surf-0: oklch(0.98 0.005 240);
+  --surf-1: oklch(0.96 0.005 240 / 0.96);
+  --surf-2: oklch(0.94 0.005 240);
+  --surf-3: oklch(0.88 0.005 240);
+  --on-surf: oklch(0.15 0.005 240);
+  --on-surf-muted: oklch(0.40 0.005 240);
+  --on-surf-faint: oklch(0.60 0.005 240);
+  --border: oklch(0.70 0.005 240 / 0.4);
+  --border-strong: oklch(0.50 0.005 240 / 0.6);
+}
+
+/* Reduced motion — zeros all durations. PLAN §9.1. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 0ms;
+    --dur-2: 0ms;
+    --dur-3: 0ms;
+    --dur-fade-out: 0ms;
+  }
+}
+
+/* High contrast — defer to system colors. */
+@media (forced-colors: active) {
+  :root {
+    --surf-0: Canvas;
+    --surf-1: Canvas;
+    --surf-2: Canvas;
+    --surf-3: Canvas;
+    --on-surf: CanvasText;
+    --on-surf-muted: GrayText;
+    --on-surf-faint: GrayText;
+    --border: ButtonBorder;
+    --border-strong: ButtonBorder;
+  }
+}

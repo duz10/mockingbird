@@ -1,0 +1,21 @@
+.shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+  background: var(--surf-0);
+}
+
+.content {
+  overflow-y: auto;
+  padding: var(--s-6);
+  background: var(--surf-0);
+}
+
+@media (max-width: 720px) {
+  .shell {
+    grid-template-columns: 64px 1fr;
+  }
+  .content {
+    padding: var(--s-4);
+  }
+}
