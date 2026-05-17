@@ -14,6 +14,118 @@ Format:
 
 ---
 
+## 2026-05-17 [phase5-postship-4] History metadata showed `—` for Model / Prompt / Dictionary even though all three were populated in the DB
+
+- **Context:** Fourth Dustin smoketest. Ollama-cleaned dictation worked
+  cleanly (Cleaned=689ms, Inject=63ms). History row had different Raw
+  vs Cleaned text — proof that LlmCleaner ran. But the Metadata panel
+  showed `Model: —`, `Prompt: —`, `Dictionary: —` for all sessions,
+  old and new.
+- **Finding (instrumented via Python sqlite3 on the live DB):** The
+  data WAS in the DB. `transcripts.model_used` = `'qwen2.5:3b-instruct-q4_K_M'`.
+  `sessions.prompt_id` = 1. `sessions.dictionary_snapshot_id` = 1.
+  Running the EXACT backend query manually in sqlite3 returned
+  `('qwen2.5:3b-instruct-q4_K_M', 1, 1)`. So the bug was in how Rust
+  read the row, not in what was written.
+
+  Looked at the rusqlite visitor:
+  ```rust
+  r.get::<_, Option<String>>(0)?,  // model_used: TEXT  → fine
+  r.get::<_, Option<String>>(1)?,  // p.version: INTEGER → ERROR
+  r.get::<_, Option<i64>>(2)?,     // dict_id: INTEGER  → fine
+  ```
+
+  `prompts.version` is INTEGER (schema in migration 003), not TEXT.
+  Asking rusqlite to read INTEGER as `Option<String>` returns
+  `Err(InvalidColumnType)`. The visitor uses `?`, so the WHOLE
+  closure returns Err. The outer code was `.unwrap_or((None, None,
+  None))` — silently swallowing the error and returning a tuple of
+  all-NULLs. THREE pieces of metadata vanished from the UI because
+  of ONE type mismatch in ONE column, and the swallow-the-error
+  pattern made it invisible to logs.
+
+  Worst part: `commands/modes.rs` had a five-line comment WARNING
+  about this exact pitfall (with the same column!), and used
+  `'v' || p.version` in its SQL to force TEXT affinity. The author
+  of `commands/sessions.rs` (also me) didn't know about that
+  precedent, didn't search for it, and re-introduced the same bug.
+- **Action (two fixes):**
+  1. **SQL-side:** changed `p.version` → `'v' || p.version` in the
+     sessions query. Matches the modes.rs precedent. Produces "v1",
+     "v2", … — same shape the UI shows.
+  2. **Rust-side:** replaced `.unwrap_or((None, None, None))` with
+     `.unwrap_or_else(|e| { tracing::warn!(...); (None, None, None) })`.
+     Same fallback behaviour for the user, but the error surfaces in
+     logs within seconds instead of producing a mystery UI bug that
+     survives three smoketest rounds.
+- **Patterns burned in:**
+  - `unwrap_or((None, None, None))` for ANY multi-column SQL result
+     is a footgun: a single column-type error silently corrupts every
+     field in the tuple. Always `unwrap_or_else` with a log.
+  - When the same gotcha bites you twice (modes.rs comment, then
+     sessions.rs query), the comment is in the wrong place. The fix
+     belongs at the boundary that produces the gotcha (DTO/serde
+     layer), not at each call site. Future Phase 6 polish: write a
+     `Stringy<T>` newtype that auto-stringifies INTEGER columns into
+     Option<String>, OR migrate prompts.version to TEXT in a v3
+     migration.
+  - When the symptom is "backend looks right but UI shows —", the
+     bug is almost always in the visitor closure, not the SQL.
+     Reproduce the query in `sqlite3` first — if it returns data,
+     skip straight to inspecting the row decode.
+
+---
+
+## 2026-05-17 [phase5-postship-4] normal-mode prompt didn't render lists when user said "make a list"
+
+- **Context:** Same smoketest. User dictated "...make a list here.
+  First thing is apples and then eggs and then berries." Cleaned
+  output was "Here's a list: first thing is apples, then eggs, and
+  then berries." — reasonable English but NOT a list. Wisprflow
+  (competitor) would render bullets.
+- **Finding:** v1 of normal.md was deliberately structure-averse
+  ("do not invent structure that isn't implied by the speech"). The
+  rule is right for ambiguous cases but too strict when the speaker
+  EXPLICITLY says "make a list". Dustin's expectation is "my words
+  produce the structure I asked for, in markdown if needed."
+- **Action (ADR 0008 compliant):**
+  - Did NOT edit `normal.md` in place (initial reflex — caught
+     myself before commit). ADR 0008 binds prompts to append-only
+     versioning. Editing v1's source file would silently change what
+     gets seeded into fresh-install DBs WITHOUT bumping a version,
+     breaking provenance for any user whose existing session row
+     points to prompt_id=1 with the OLD body.
+  - Created `cleanup/prompts/normal_v2.md` with the new body
+     (structure cues + 4 worked examples). v1 file stays frozen as
+     the on-disk record of what shipped.
+  - Added `PROMPT_NORMAL_V2` const + `__PROMPT_NORMAL_V2_BODY__`
+     substitution token in `db/prompt_loader.rs`.
+  - Created `db/migrations/006_prompt_normal_v2.sql` that INSERTs
+     a new prompts row (mode_slug='normal', version=2) and UPDATEs
+     modes.normal.prompt_id to point at v2. v1 row stays in the
+     prompts table forever; existing session rows pointing at
+     prompt_id=1 still resolve to the v1 body for provenance.
+  - Registered migration in `db/migrations.rs`; bumped expected
+     `schema_version` from "5" to "6" in tests.
+- **Pattern (reusable):** the file-naming convention `{mode}.md` for
+  v1, `{mode}_v2.md` for v2, etc., scales linearly with prompt edits.
+  For phase 6+ when prompt iteration accelerates, consider switching
+  to a directory layout: `prompts/normal/v1.md`, `prompts/normal/v2.md`,
+  with a build-script that auto-generates the include_str! const list.
+  Not worth it for 1-2 edits per phase; revisit at 5+.
+- **Whisper aside:** Dustin also noted "I said ums and filler, raw
+  doesn't show them at all." Whisper-large-v3 auto-suppresses
+  disfluencies before producing the raw transcript — a model-level
+  behavior we can't fully disable without switching models. Knobs to
+  explore in Phase 6 if requested: `condition_on_prev_tokens=False`,
+  smaller model size (medium/small suppresses less), or a custom
+  initial prompt. For now: the "raw" we persist is Whisper's output,
+  which is already lightly cleaned. The user-facing concept "raw"
+  matches Whisper-raw, not microphone-raw. Documented here for
+  future me when someone files this as a bug.
+
+---
+
 ## 2026-05-17 [phase5-postship-3] inject reported `outcome=Ok` but nothing pasted into Notepad
 
 - **Context:** Third Dustin smoketest. Pipeline ran end-to-end. New

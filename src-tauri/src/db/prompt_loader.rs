@@ -14,6 +14,7 @@
 //! in-place Markdown file).
 
 const PROMPT_NORMAL: &str = include_str!("../cleanup/prompts/normal.md");
+const PROMPT_NORMAL_V2: &str = include_str!("../cleanup/prompts/normal_v2.md");
 const PROMPT_VERBOSE: &str = include_str!("../cleanup/prompts/verbose.md");
 const PROMPT_FRAGMENT: &str = include_str!("../cleanup/prompts/fragment.md");
 const PROMPT_REWRITE: &str = include_str!("../cleanup/prompts/rewrite.md");
@@ -27,7 +28,12 @@ const PROMPT_SUMMARIZE: &str = include_str!("../cleanup/prompts/summarize.md");
 /// SAME commit as the migration SQL. Order doesn't matter — these
 /// are simple non-overlapping replacements.
 pub fn substitute_prompt_bodies(sql: &str) -> String {
+    // Distinct tokens — `__PROMPT_NORMAL_V2_BODY__` is not a prefix or
+    // suffix of `__PROMPT_NORMAL_BODY__`, so the chained replace() is
+    // non-overlapping regardless of order. v1 stays addressable for
+    // historical session rows; v2 ships in migration 006.
     sql.replace("__PROMPT_NORMAL_BODY__", &sql_escape(PROMPT_NORMAL))
+        .replace("__PROMPT_NORMAL_V2_BODY__", &sql_escape(PROMPT_NORMAL_V2))
         .replace("__PROMPT_VERBOSE_BODY__", &sql_escape(PROMPT_VERBOSE))
         .replace("__PROMPT_FRAGMENT_BODY__", &sql_escape(PROMPT_FRAGMENT))
         .replace("__PROMPT_REWRITE_BODY__", &sql_escape(PROMPT_REWRITE))

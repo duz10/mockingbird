@@ -15,6 +15,7 @@ const MIGRATION_002: &str = include_str!("migrations/002_audit_triggers.sql");
 const MIGRATION_003: &str = include_str!("migrations/003_seed_modes.sql");
 const MIGRATION_004: &str = include_str!("migrations/004_injection_status.sql");
 const MIGRATION_005: &str = include_str!("migrations/005_ai_command_modes.sql");
+const MIGRATION_006: &str = include_str!("migrations/006_prompt_normal_v2.sql");
 
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
@@ -40,6 +41,10 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
     }
     if current < 5 {
         let prepared = substitute_prompt_bodies(MIGRATION_005);
+        conn.execute_batch(&prepared)?;
+    }
+    if current < 6 {
+        let prepared = substitute_prompt_bodies(MIGRATION_006);
         conn.execute_batch(&prepared)?;
     }
     Ok(())
@@ -82,11 +87,13 @@ mod tests {
         assert_eq!(read_current_version(&conn).expect("read version"), 0);
     }
 
-    /// Applying all three migrations against a fresh in-memory DB
-    /// must leave `schema_version = 3`. (Smoke-level; the integration
-    /// test suite covers full table/trigger/FTS5 assertions.)
+    /// Applying all migrations against a fresh in-memory DB must
+    /// leave `schema_version` at the current latest. Bump the
+    /// expected string here when you add a migration; the migration
+    /// `if current < N` block in `apply_all` plus this assert are the
+    /// two coupled spots.
     #[test]
-    fn apply_all_brings_fresh_db_to_version_5() {
+    fn apply_all_brings_fresh_db_to_version_6() {
         let conn = Connection::open_in_memory().expect("open in-memory");
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .expect("pragma fk");
@@ -98,7 +105,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "5");
+        assert_eq!(v, "6");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -116,7 +123,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "5");
+        assert_eq!(v, "6");
     }
 
     /// Migration 005 seeds the AI command modes (disabled by default).

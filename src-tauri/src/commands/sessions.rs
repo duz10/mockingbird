@@ -124,9 +124,31 @@ pub fn get_session_detail(
     let final_text = stage_text(&conn, id, transcripts::Stage::Final)?;
 
     // Pull the model_used + prompt_version off the cleaned transcript row.
+    //
+    // **TYPE-AFFINITY GOTCHA (was a silent bug pre-2026-05-17):**
+    // `prompts.version` is `INTEGER` in the schema (migrations/003),
+    // not `TEXT`. The DTO field `prompt_version` is `Option<String>`,
+    // matching what the UI shows ("v1"). If we ask rusqlite to read
+    // the integer column straight into `Option<String>`, the row
+    // visitor returns `Err(InvalidColumnType)` — and because the
+    // outer call used to be `.unwrap_or((None, None, None))`, ALL
+    // THREE fields silently became NULL on the UI. Three pieces of
+    // metadata vanished because of one type mismatch. Classic
+    // swallow-the-error anti-pattern.
+    //
+    // Two fixes applied here:
+    //   1. SQL-side: `'v' || p.version` forces TEXT affinity and
+    //      produces the human-readable form ("v1", "v2", …) — same
+    //      pattern already used by `commands::modes::list_modes`
+    //      (which left a comment about this exact pitfall).
+    //   2. Rust-side: log the error instead of silently nuking the
+    //      tuple. A future column-type drift will surface in logs
+    //      within seconds instead of producing a mystery UI bug that
+    //      survives three smoketest rounds. (LESSONS 2026-05-17
+    //      phase5-smoketest, fourth pass.)
     let (model_used, prompt_version, dictionary_version) = conn
         .query_row(
-            "SELECT t.model_used, p.version, s.dictionary_snapshot_id \
+            "SELECT t.model_used, 'v' || p.version, s.dictionary_snapshot_id \
              FROM transcripts t \
              JOIN sessions s ON s.id = t.session_id \
              LEFT JOIN prompts p ON p.id = s.prompt_id \
@@ -140,7 +162,14 @@ pub fn get_session_detail(
                 ))
             },
         )
-        .unwrap_or((None, None, None));
+        .unwrap_or_else(|e| {
+            tracing::warn!(
+                session_id = id,
+                error = ?e,
+                "session metadata lookup failed; UI will show — for model/prompt/dict"
+            );
+            (None, None, None)
+        });
 
     Ok(SessionDetail {
         session: summary,

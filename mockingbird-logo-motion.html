@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockingbird · Logo Motion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=DM+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --neutral-04: #0F0B08;
+  --neutral-06: #14100C;
+  --neutral-08: #1A1511;
+  --neutral-10: #211B15;
+  --neutral-12: #2A231D;
+  --neutral-17: #3A312A;
+  --neutral-50: #8A7A6E;
+  --neutral-70: #B8A89A;
+  --neutral-95: #F5EAE0;
+  --terra-30: #6B3A22;
+  --terra-50: #B85C38;
+  --terra-70: #D89060;
+  --terra-95: #F8DCC2;
+  --success:  #7FB890;
+
+  --glass-tint: rgba(255, 240, 225, 0.08);
+  --glass-tint-thick: rgba(255, 240, 225, 0.12);
+  --glass-border: rgba(255, 245, 230, 0.10);
+  --glass-border-bright: rgba(255, 245, 230, 0.18);
+  --glass-highlight: rgba(255, 250, 240, 0.18);
+
+  --motion-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --motion-wave:       cubic-bezier(0.45, 0, 0.55, 1);
+}
+
+* { box-sizing: border-box; }
+html { -webkit-font-smoothing: antialiased; }
+body {
+  margin: 0;
+  background: var(--neutral-04);
+  color: var(--neutral-95);
+  font-family: "DM Sans", system-ui, sans-serif;
+  line-height: 1.5;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: -20%;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 50% at 18% 22%, rgba(216, 144, 96, 0.18), transparent 60%),
+    radial-gradient(50% 50% at 82% 68%, rgba(148, 71, 48, 0.16), transparent 60%),
+    radial-gradient(40% 40% at 50% 100%, rgba(184, 92, 56, 0.12), transparent 60%);
+  filter: blur(40px);
+}
+
+main { max-width: 920px; margin: 0 auto; padding: 64px 32px 96px; }
+header.page { margin-bottom: 64px; }
+.eyebrow { font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--terra-70); margin-bottom: 12px; }
+h1 { font-family: "Fraunces", serif; font-size: 48px; font-weight: 500; line-height: 1.1; letter-spacing: -0.02em; font-variation-settings: "opsz" 144, "SOFT" 80; margin: 0 0 16px; }
+.lede { color: var(--neutral-70); font-size: 17px; max-width: 60ch; margin: 0; }
+
+section { margin-bottom: 56px; }
+section header.section-head { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--neutral-17); }
+.section-num { font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--terra-70); margin-bottom: 6px; }
+.section-title { font-family: "Fraunces", serif; font-size: 28px; font-weight: 500; line-height: 1.2; letter-spacing: -0.005em; font-variation-settings: "opsz" 72, "SOFT" 60; margin: 0 0 8px; }
+.section-desc { color: var(--neutral-70); font-size: 15px; margin: 0; max-width: 70ch; }
+
+.stage {
+  position: relative;
+  border-radius: 24px;
+  padding: 64px 32px;
+  background:
+    radial-gradient(circle at 25% 30%, rgba(216, 144, 96, 0.4), transparent 55%),
+    radial-gradient(circle at 75% 70%, rgba(148, 71, 48, 0.32), transparent 55%),
+    var(--neutral-08);
+  overflow: hidden;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 280px;
+  margin-bottom: 16px;
+}
+
+.controls {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px 16px;
+  background: var(--neutral-06);
+  border: 1px solid var(--neutral-17);
+  border-radius: 12px;
+  flex-wrap: wrap;
+}
+.controls-meta { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--neutral-50); }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 20px;
+  border-radius: 9999px;
+  font-family: "DM Sans", sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  transition: all 200ms var(--motion-emphasized);
+}
+.btn-filled { background: var(--terra-70); color: #4A2515; }
+.btn-filled:hover { box-shadow: 0 4px 12px rgba(216, 144, 96, 0.3); transform: translateY(-1px); }
+.btn-tonal { background: var(--neutral-17); color: var(--neutral-95); }
+.btn-tonal:hover { background: var(--neutral-12); }
+.btn svg { width: 16px; height: 16px; stroke-width: 2; fill: none; }
+
+/* ════════════════════════════════════════════════════════
+   THE LOGO — base + transform setup
+   ════════════════════════════════════════════════════════ */
+.mb-logo {
+  display: block;
+}
+.mb-logo ellipse,
+.mb-logo path {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* ════════════════════════════════════════════════════════
+   ANIMATION 1 — SPLASH ENTRY
+   Ellipses expand vertically from center, staggered L→R.
+   Triangle scales in last as the "anchor."
+   ════════════════════════════════════════════════════════ */
+@keyframes splash-ellipse {
+  0%   { transform: scaleY(0); opacity: 0; }
+  55%  { transform: scaleY(1.08); opacity: 1; }
+  100% { transform: scaleY(1); opacity: 1; }
+}
+@keyframes splash-triangle {
+  0%   { transform: scale(0); opacity: 0; }
+  60%  { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.mb-logo--splash ellipse:nth-of-type(1) { animation: splash-ellipse 700ms 100ms var(--motion-emphasized) both; }
+.mb-logo--splash ellipse:nth-of-type(2) { animation: splash-ellipse 750ms 200ms var(--motion-emphasized) both; }
+.mb-logo--splash ellipse:nth-of-type(3) { animation: splash-ellipse 650ms 320ms var(--motion-emphasized) both; }
+.mb-logo--splash path                    { animation: splash-triangle 500ms 480ms var(--motion-emphasized) both; }
+
+/* Splash exit — reverse */
+@keyframes splash-ellipse-out {
+  0%   { transform: scaleY(1); opacity: 1; }
+  100% { transform: scaleY(0); opacity: 0; }
+}
+@keyframes splash-triangle-out {
+  0%   { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0); opacity: 0; }
+}
+.mb-logo--exit path                    { animation: splash-triangle-out 350ms 0ms var(--motion-emphasized) both; }
+.mb-logo--exit ellipse:nth-of-type(3) { animation: splash-ellipse-out 500ms 100ms var(--motion-emphasized) both; }
+.mb-logo--exit ellipse:nth-of-type(2) { animation: splash-ellipse-out 550ms 200ms var(--motion-emphasized) both; }
+.mb-logo--exit ellipse:nth-of-type(1) { animation: splash-ellipse-out 500ms 320ms var(--motion-emphasized) both; }
+
+/* ════════════════════════════════════════════════════════
+   ANIMATION 2 — ACTIVE LOOP (replaces waveform bars)
+   Each ellipse oscillates scaleY at a different period & phase.
+   Triangle stays static.
+   ════════════════════════════════════════════════════════ */
+@keyframes wave-1 {
+  0%, 100% { transform: scaleY(0.38); }
+  50%      { transform: scaleY(1); }
+}
+@keyframes wave-2 {
+  0%, 100% { transform: scaleY(0.30); }
+  50%      { transform: scaleY(1.04); }
+}
+@keyframes wave-3 {
+  0%, 100% { transform: scaleY(0.50); }
+  50%      { transform: scaleY(0.92); }
+}
+
+.mb-logo--active ellipse:nth-of-type(1) { animation: wave-1 1.35s var(--motion-wave) infinite; }
+.mb-logo--active ellipse:nth-of-type(2) { animation: wave-2 1.65s var(--motion-wave) infinite -0.4s; }
+.mb-logo--active ellipse:nth-of-type(3) { animation: wave-3 1.15s var(--motion-wave) infinite -0.7s; }
+
+/* ════════════════════════════════════════════════════════
+   STATE — IDLE
+   Ellipses collapsed to ~circle proportions (scaleY ≈ rx/ry).
+   The play triangle stays full size.
+   ════════════════════════════════════════════════════════ */
+.mb-logo--idle ellipse:nth-of-type(1) { transform: scaleY(0.28); transition: transform 500ms var(--motion-emphasized); }
+.mb-logo--idle ellipse:nth-of-type(2) { transform: scaleY(0.26); transition: transform 500ms var(--motion-emphasized); }
+.mb-logo--idle ellipse:nth-of-type(3) { transform: scaleY(0.38); transition: transform 500ms var(--motion-emphasized); }
+
+/* Idle → active transition: when the active class is added FROM idle,
+   the existing scale transitions smoothly out, then the animation kicks in. */
+
+/* ════════════════════════════════════════════════════════
+   STAGE-SPECIFIC SIZING
+   ════════════════════════════════════════════════════════ */
+.logo-xl  { width: 200px; height: 200px; }
+.logo-lg  { width: 140px; height: 140px; }
+.logo-md  { width: 96px;  height: 96px;  }
+.logo-pill { width: 32px; height: 32px;  }
+
+/* ════════════════════════════════════════════════════════
+   LISTENING PILL — integrated version (no separate waveform)
+   ════════════════════════════════════════════════════════ */
+.pill {
+  display: inline-flex; align-items: center; gap: 16px;
+  padding: 14px 22px;
+  border-radius: 9999px;
+  min-width: 320px;
+  background: linear-gradient(180deg, var(--glass-tint) 0%, rgba(255, 240, 225, 0.04) 100%);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+    0 12px 40px rgba(0, 0, 0, 0.45);
+}
+.pill-status { font-family: "DM Sans", sans-serif; font-size: 14px; font-weight: 500; color: var(--neutral-95); flex: 1; }
+.pill-status.muted { color: var(--neutral-70); font-weight: 400; }
+.pill-time { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--neutral-70); }
+.pill-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--success);
+  flex-shrink: 0;
+  animation: pulse 2s var(--motion-emphasized) infinite;
+}
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(127, 184, 144, 0.6); }
+  100% { box-shadow: 0 0 0 12px rgba(127, 184, 144, 0); }
+}
+
+/* ════════════════════════════════════════════════════════
+   CODE BLOCKS
+   ════════════════════════════════════════════════════════ */
+.code {
+  background: var(--neutral-06);
+  border: 1px solid var(--neutral-17);
+  border-radius: 12px;
+  padding: 16px 18px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--neutral-70);
+  overflow-x: auto;
+  margin-top: 16px;
+}
+.code .k { color: var(--terra-70); }
+.code .v { color: #88B5C5; }
+.code .c { color: var(--neutral-50); font-style: italic; }
+.code .n { color: var(--neutral-95); }
+
+/* ════════════════════════════════════════════════════════
+   TIMING DIAGRAM
+   ════════════════════════════════════════════════════════ */
+.timing { display: grid; grid-template-columns: 80px 1fr; gap: 12px; align-items: center; margin-top: 16px; }
+.timing-row { display: contents; }
+.timing-label { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--neutral-50); letter-spacing: 0.08em; text-transform: uppercase; }
+.timing-bar {
+  position: relative;
+  height: 14px;
+  background: var(--neutral-08);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.timing-bar .fill {
+  position: absolute;
+  top: 0; bottom: 0;
+  background: linear-gradient(90deg, var(--terra-70), var(--terra-50));
+  border-radius: 7px;
+}
+.timing-scale {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: repeat(11, 1fr);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  color: var(--neutral-50);
+}
+.timing-scale span { text-align: left; }
+
+@media (max-width: 720px) {
+  main { padding: 32px 20px; }
+  h1 { font-size: 36px; }
+  .stage { padding: 40px 20px; min-height: 220px; }
+  .logo-xl { width: 140px; height: 140px; }
+  .logo-lg { width: 100px; height: 100px; }
+}
+</style>
+</head>
+<body>
+
+<main>
+
+  <header class="page">
+    <div class="eyebrow">Mockingbird · Motion · v1.0</div>
+    <h1>Logo motion</h1>
+    <p class="lede">Three motion states for the Mockingbird mark. The ellipses are the living element — they expand into being, oscillate while listening, collapse into stillness. The play triangle stays still as the anchor.</p>
+  </header>
+
+  <!-- ════════════════════════════════════════════════
+       §01 SPLASH ENTRY
+       ════════════════════════════════════════════════ -->
+  <section>
+    <header class="section-head">
+      <div class="section-num">§ 01 — Splash</div>
+      <h2 class="section-title">Entry &amp; exit</h2>
+      <p class="section-desc">Ellipses expand vertically from their centers, staggered left to right — voice traveling toward the output. The play triangle scales in last, settling the composition. Use on app launch, login load, and any "voice is now active" moment.</p>
+    </header>
+
+    <div class="stage" id="stage-splash">
+      <svg class="mb-logo mb-logo--splash logo-xl" viewBox="0 0 256 256" id="splash-logo">
+        <defs>
+          <linearGradient id="g-splash" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#DDA17A"/>
+            <stop offset="100%" stop-color="#944730"/>
+          </linearGradient>
+        </defs>
+        <g fill="url(#g-splash)">
+          <ellipse cx="42" cy="128" rx="18" ry="72"/>
+          <ellipse cx="104" cy="128" rx="26" ry="100"/>
+          <ellipse cx="163" cy="128" rx="15" ry="40"/>
+          <path d="M196 105 L196 151 Q196 157 201 153 L229 132 Q234 128 229 124 L201 103 Q196 99 196 105 Z"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="controls">
+      <span class="controls-meta">Total · 980ms · emphasized</span>
+      <div style="display: flex; gap: 8px">
+        <button class="btn btn-tonal" onclick="playSplash('in')">
+          <svg viewBox="0 0 24 24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          Replay entry
+        </button>
+        <button class="btn btn-tonal" onclick="playSplash('out')">Play exit</button>
+      </div>
+    </div>
+
+    <div class="timing">
+      <div class="timing-row">
+        <span class="timing-label">Ellipse 1</span>
+        <div class="timing-bar"><div class="fill" style="left: 10%; width: 70%"></div></div>
+      </div>
+      <div class="timing-row">
+        <span class="timing-label">Ellipse 2</span>
+        <div class="timing-bar"><div class="fill" style="left: 20%; width: 75%"></div></div>
+      </div>
+      <div class="timing-row">
+        <span class="timing-label">Ellipse 3</span>
+        <div class="timing-bar"><div class="fill" style="left: 32%; width: 65%"></div></div>
+      </div>
+      <div class="timing-row">
+        <span class="timing-label">Triangle</span>
+        <div class="timing-bar"><div class="fill" style="left: 48%; width: 50%"></div></div>
+      </div>
+    </div>
+    <div class="timing-scale" style="margin-left: 92px">
+      <span>0ms</span><span></span><span>200</span><span></span><span>400</span><span></span><span>600</span><span></span><span>800</span><span></span><span>1000</span>
+    </div>
+
+<div class="code"><span class="c">/* Splash entry — staggered scaleY, triangle scales in last */</span>
+<span class="k">@keyframes</span> splash-ellipse {
+  <span class="v">0%</span>   { transform: scaleY(0);    opacity: 0; }
+  <span class="v">55%</span>  { transform: scaleY(1.08); opacity: 1; }
+  <span class="v">100%</span> { transform: scaleY(1);    opacity: 1; }
+}
+<span class="k">@keyframes</span> splash-triangle {
+  <span class="v">0%</span>   { transform: scale(0);    opacity: 0; }
+  <span class="v">60%</span>  { transform: scale(1.15); opacity: 1; }
+  <span class="v">100%</span> { transform: scale(1);    opacity: 1; }
+}
+.mb-logo--splash <span class="n">ellipse:nth-of-type(1)</span> { animation: splash-ellipse  <span class="v">700ms 100ms</span> var(--motion-emphasized) both; }
+.mb-logo--splash <span class="n">ellipse:nth-of-type(2)</span> { animation: splash-ellipse  <span class="v">750ms 200ms</span> var(--motion-emphasized) both; }
+.mb-logo--splash <span class="n">ellipse:nth-of-type(3)</span> { animation: splash-ellipse  <span class="v">650ms 320ms</span> var(--motion-emphasized) both; }
+.mb-logo--splash <span class="n">path</span>                   { animation: splash-triangle <span class="v">500ms 480ms</span> var(--motion-emphasized) both; }</div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════
+       §02 IDLE ↔ ACTIVE
+       ════════════════════════════════════════════════ -->
+  <section>
+    <header class="section-head">
+      <div class="section-num">§ 02 — State</div>
+      <h2 class="section-title">Idle ↔ active</h2>
+      <p class="section-desc">When Mockingbird is idle, the three ellipses collapse to circles — quiet, waiting. The play triangle stays as the anchor. When recording begins, the ellipses extend vertically and start oscillating: the logo becomes the waveform.</p>
+    </header>
+
+    <div class="stage">
+      <svg class="mb-logo mb-logo--idle logo-lg" viewBox="0 0 256 256" id="toggle-logo">
+        <defs>
+          <linearGradient id="g-toggle" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#DDA17A"/>
+            <stop offset="100%" stop-color="#944730"/>
+          </linearGradient>
+        </defs>
+        <g fill="url(#g-toggle)">
+          <ellipse cx="42" cy="128" rx="18" ry="72"/>
+          <ellipse cx="104" cy="128" rx="26" ry="100"/>
+          <ellipse cx="163" cy="128" rx="15" ry="40"/>
+          <path d="M196 105 L196 151 Q196 157 201 153 L229 132 Q234 128 229 124 L201 103 Q196 99 196 105 Z"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="controls">
+      <span class="controls-meta" id="toggle-state-label">State · Idle</span>
+      <div style="display: flex; gap: 8px">
+        <button class="btn btn-filled" onclick="toggleState()" id="toggle-btn">
+          <svg viewBox="0 0 24 24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/></svg>
+          <span id="toggle-btn-text">Start listening</span>
+        </button>
+      </div>
+    </div>
+
+<div class="code"><span class="c">/* Idle — collapsed to ~circle proportions, triangle stays full */</span>
+.mb-logo--idle <span class="n">ellipse:nth-of-type(1)</span> { transform: scaleY(<span class="v">0.28</span>); transition: transform 500ms var(--motion-emphasized); }
+.mb-logo--idle <span class="n">ellipse:nth-of-type(2)</span> { transform: scaleY(<span class="v">0.26</span>); transition: transform 500ms var(--motion-emphasized); }
+.mb-logo--idle <span class="n">ellipse:nth-of-type(3)</span> { transform: scaleY(<span class="v">0.38</span>); transition: transform 500ms var(--motion-emphasized); }
+
+<span class="c">/* Active — toggling the class removes the static transform, animation takes over */</span></div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════
+       §03 ACTIVE LOOP
+       ════════════════════════════════════════════════ -->
+  <section>
+    <header class="section-head">
+      <div class="section-num">§ 03 — Active loop</div>
+      <h2 class="section-title">The voice, alive</h2>
+      <p class="section-desc">Each ellipse oscillates on its own period — 1.35s, 1.65s, 1.15s — and starts at a different phase. The mismatched timings prevent a synchronized pulse and create the irregular "this is real voice" feel. The triangle stays still; it's the steady output the energy is flowing toward.</p>
+    </header>
+
+    <div class="stage">
+      <svg class="mb-logo mb-logo--active logo-xl" viewBox="0 0 256 256">
+        <defs>
+          <linearGradient id="g-active" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#DDA17A"/>
+            <stop offset="100%" stop-color="#944730"/>
+          </linearGradient>
+        </defs>
+        <g fill="url(#g-active)">
+          <ellipse cx="42" cy="128" rx="18" ry="72"/>
+          <ellipse cx="104" cy="128" rx="26" ry="100"/>
+          <ellipse cx="163" cy="128" rx="15" ry="40"/>
+          <path d="M196 105 L196 151 Q196 157 201 153 L229 132 Q234 128 229 124 L201 103 Q196 99 196 105 Z"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="controls">
+      <span class="controls-meta">Looping · ease-in-out · 1.15–1.65s</span>
+      <span class="controls-meta" style="color: var(--success)">● Live</span>
+    </div>
+
+<div class="code"><span class="c">/* Active loop — mismatched periods + offset phases = organic motion */</span>
+<span class="k">@keyframes</span> wave-1 { <span class="v">0%, 100%</span> { transform: scaleY(0.38); } <span class="v">50%</span> { transform: scaleY(1);    } }
+<span class="k">@keyframes</span> wave-2 { <span class="v">0%, 100%</span> { transform: scaleY(0.30); } <span class="v">50%</span> { transform: scaleY(1.04); } }
+<span class="k">@keyframes</span> wave-3 { <span class="v">0%, 100%</span> { transform: scaleY(0.50); } <span class="v">50%</span> { transform: scaleY(0.92); } }
+
+.mb-logo--active <span class="n">ellipse:nth-of-type(1)</span> { animation: wave-1 <span class="v">1.35s</span> var(--motion-wave) infinite;        }
+.mb-logo--active <span class="n">ellipse:nth-of-type(2)</span> { animation: wave-2 <span class="v">1.65s</span> var(--motion-wave) infinite <span class="v">-0.4s</span>; }
+.mb-logo--active <span class="n">ellipse:nth-of-type(3)</span> { animation: wave-3 <span class="v">1.15s</span> var(--motion-wave) infinite <span class="v">-0.7s</span>; }</div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════
+       §04 INTEGRATED PILL
+       ════════════════════════════════════════════════ -->
+  <section>
+    <header class="section-head">
+      <div class="section-num">§ 04 — In context</div>
+      <h2 class="section-title">The listening pill, revisited</h2>
+      <p class="section-desc">The previous version had a separate waveform indicator next to a static logo. Now the logo <em>is</em> the waveform. Cleaner, more coherent, and the brand mark works harder.</p>
+    </header>
+
+    <div class="stage">
+      <div class="pill">
+        <svg class="mb-logo mb-logo--idle logo-pill" viewBox="0 0 256 256" id="pill-idle">
+          <defs>
+            <linearGradient id="g-pill-idle" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#8A7A6E"/>
+              <stop offset="100%" stop-color="#6B5A4E"/>
+            </linearGradient>
+          </defs>
+          <g fill="url(#g-pill-idle)">
+            <ellipse cx="42" cy="128" rx="18" ry="72"/>
+            <ellipse cx="104" cy="128" rx="26" ry="100"/>
+            <ellipse cx="163" cy="128" rx="15" ry="40"/>
+            <path d="M196 105 L196 151 Q196 157 201 153 L229 132 Q234 128 229 124 L201 103 Q196 99 196 105 Z"/>
+          </g>
+        </svg>
+        <span class="pill-status muted">Idle · tap to start</span>
+        <span class="pill-time">—:—</span>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="pill">
+        <svg class="mb-logo mb-logo--active logo-pill" viewBox="0 0 256 256">
+          <defs>
+            <linearGradient id="g-pill-active" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#DDA17A"/>
+              <stop offset="100%" stop-color="#944730"/>
+            </linearGradient>
+          </defs>
+          <g fill="url(#g-pill-active)">
+            <ellipse cx="42" cy="128" rx="18" ry="72"/>
+            <ellipse cx="104" cy="128" rx="26" ry="100"/>
+            <ellipse cx="163" cy="128" rx="15" ry="40"/>
+            <path d="M196 105 L196 151 Q196 157 201 153 L229 132 Q234 128 229 124 L201 103 Q196 99 196 105 Z"/>
+          </g>
+        </svg>
+        <span class="pill-dot"></span>
+        <span class="pill-status">Listening</span>
+        <span class="pill-time">00:14</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════
+       §05 USAGE
+       ════════════════════════════════════════════════ -->
+  <section>
+    <header class="section-head">
+      <div class="section-num">§ 05 — Usage</div>
+      <h2 class="section-title">When to use each</h2>
+    </header>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+      <div style="padding: 20px; background: var(--neutral-08); border: 1px solid var(--neutral-17); border-radius: 12px;">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--terra-70); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px;">Splash entry</div>
+        <p style="margin: 0; color: var(--neutral-70); font-size: 14px; line-height: 1.6;">App launch · Login completion · Onboarding step transitions · "Voice is now ready" moments. Once per session; not for ambient state changes.</p>
+      </div>
+      <div style="padding: 20px; background: var(--neutral-08); border: 1px solid var(--neutral-17); border-radius: 12px;">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--terra-70); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px;">Idle state</div>
+        <p style="margin: 0; color: var(--neutral-70); font-size: 14px; line-height: 1.6;">Listening pill at rest · Menu bar icon · Anywhere the logo appears in an interactive surface that <em>could</em> become active.</p>
+      </div>
+      <div style="padding: 20px; background: var(--neutral-08); border: 1px solid var(--neutral-17); border-radius: 12px;">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--terra-70); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px;">Active loop</div>
+        <p style="margin: 0; color: var(--neutral-70); font-size: 14px; line-height: 1.6;">While recording · Real-time transcription in progress · Wherever the user needs unambiguous "yes, audio is being captured right now" confirmation.</p>
+      </div>
+      <div style="padding: 20px; background: var(--neutral-08); border: 1px solid var(--neutral-17); border-radius: 12px;">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--terra-70); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px;">Static</div>
+        <p style="margin: 0; color: var(--neutral-70); font-size: 14px; line-height: 1.6;">Marketing surfaces · Documentation · App icon · Anywhere the logo represents the brand rather than a state. Static is the default — animate with intent.</p>
+      </div>
+    </div>
+
+    <div style="margin-top: 24px; padding: 16px 20px; background: rgba(216, 144, 96, 0.06); border: 1px solid rgba(216, 144, 96, 0.2); border-radius: 12px;">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--terra-70); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 6px;">Note · accessibility</div>
+      <p style="margin: 0; color: var(--neutral-70); font-size: 14px; line-height: 1.6;">All three motions respect <code style="font-family: 'IBM Plex Mono', monospace; color: var(--terra-70);">prefers-reduced-motion</code>. When reduced-motion is on, splash collapses to a 200ms fade and the active loop stops oscillating — the listening pill instead shows the green dot pulsing alone.</p>
+    </div>
+  </section>
+
+</main>
+
+<script>
+function playSplash(direction) {
+  const svg = document.getElementById('splash-logo');
+  // Strip both classes, force reflow, re-add the right one
+  svg.classList.remove('mb-logo--splash', 'mb-logo--exit');
+  void svg.offsetWidth; // force reflow to restart animation
+  if (direction === 'in') {
+    svg.classList.add('mb-logo--splash');
+  } else {
+    svg.classList.add('mb-logo--exit');
+  }
+}
+
+let isActive = false;
+function toggleState() {
+  const svg = document.getElementById('toggle-logo');
+  const label = document.getElementById('toggle-state-label');
+  const btnText = document.getElementById('toggle-btn-text');
+  const btn = document.getElementById('toggle-btn');
+
+  isActive = !isActive;
+  if (isActive) {
+    svg.classList.remove('mb-logo--idle');
+    svg.classList.add('mb-logo--active');
+    label.textContent = 'State · Active · listening';
+    btnText.textContent = 'Stop listening';
+    btn.classList.remove('btn-filled');
+    btn.classList.add('btn-tonal');
+  } else {
+    svg.classList.remove('mb-logo--active');
+    svg.classList.add('mb-logo--idle');
+    label.textContent = 'State · Idle';
+    btnText.textContent = 'Start listening';
+    btn.classList.remove('btn-tonal');
+    btn.classList.add('btn-filled');
+  }
+}
+</script>
+
+</body>
+</html>
