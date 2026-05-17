@@ -18,6 +18,7 @@ pub mod claude;
 pub mod few_shot;
 pub mod llm_cleaner;
 pub mod ollama;
+pub mod preprocessor;
 pub mod prompt_builder;
 pub mod provider;
 pub mod token_budget;
@@ -25,6 +26,7 @@ pub mod token_budget;
 pub use claude::ClaudeProvider;
 pub use llm_cleaner::LlmCleaner;
 pub use ollama::OllamaProvider;
+pub use preprocessor::{Preprocessor, Processed, ProcessedNotes, PREPROCESSOR_VERSION};
 pub use provider::{CleanupProvider, CleanupRequest, CleanupResult, StubCleanupProvider};
 
 use crate::error::AppResult;

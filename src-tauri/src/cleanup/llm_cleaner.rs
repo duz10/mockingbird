@@ -32,7 +32,7 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
 
-use crate::cleanup::{few_shot, prompt_builder, Cleaner};
+use crate::cleanup::{few_shot, preprocessor::Preprocessor, prompt_builder, Cleaner, PREPROCESSOR_VERSION};
 use crate::db::{dictionary, prompts};
 use crate::error::{AppError, AppResult};
 
@@ -46,6 +46,10 @@ pub struct LlmCleaner {
     temperature: f32,
     max_tokens: u32,
     last_model_used: Mutex<String>,
+    /// Deterministic pre-pass that runs BEFORE the LLM call. Stateless;
+    /// see [`super::preprocessor`] module docs + ADR 0022 for the
+    /// pipeline rationale.
+    preprocessor: Preprocessor,
 }
 
 impl LlmCleaner {
@@ -69,6 +73,7 @@ impl LlmCleaner {
             temperature,
             max_tokens,
             last_model_used: Mutex::new(provider_name.to_string()),
+            preprocessor: Preprocessor::new(),
         }
     }
 
@@ -76,6 +81,17 @@ impl LlmCleaner {
     /// so `clean()` can swallow errors + log them while keeping the
     /// happy path readable.
     fn run_cleanup(&mut self, raw: &str, mode_slug: &str) -> AppResult<String> {
+        // 0. Deterministic pre-pass. Strips fillers, collapses
+        //    stutters, stitches self-corrections, renders verbal
+        //    cues ("period", "new paragraph", …), capitalises
+        //    sentence starts, and adds terminal punctuation.
+        //    All ~5 ms cost; output is what the LLM actually sees.
+        //    See [`super::preprocessor`] + ADR 0022.
+        let pre_started = std::time::Instant::now();
+        let pre = self.preprocessor.process(raw);
+        let pre_ms = pre_started.elapsed().as_millis() as u64;
+        let pre_text = pre.text;
+
         // 1-2. Prompt body for this mode.
         let conn = self
             .db
@@ -93,26 +109,27 @@ impl LlmCleaner {
         let examples = few_shot::fit_to_budget(candidates);
         drop(conn); // release lock before the HTTP call.
 
-        // 4. Assemble.
+        // 4. Assemble. The LLM sees the pre-processed transcript, not
+        //    the raw STT. The raw row in the DB is untouched (ADR 0010).
         let built = prompt_builder::build(prompt_builder::PromptInputs {
             system_prompt: &prompt.body,
             dictionary: &dict,
             examples: &examples,
             foreground_app: None,
             foreground_window_title: None,
-            raw_transcript: raw,
+            raw_transcript: &pre_text,
         })?;
         if built.raw_was_truncated {
             tracing::warn!(
-                raw_len = raw.len(),
-                "raw transcript was truncated to fit cleanup budget"
+                raw_len = pre_text.len(),
+                "pre-processed transcript was truncated to fit cleanup budget"
             );
         }
 
         // 5. Provider call.
         let req = CleanupRequest {
             prompt: &built.prompt,
-            raw_transcript: raw,
+            raw_transcript: &pre_text,
             model_id: &self.model_id,
             temperature: self.temperature,
             max_tokens: self.max_tokens,
@@ -121,17 +138,28 @@ impl LlmCleaner {
         let result = self.provider.cleanup(req)?;
 
         // Record the model the provider actually used for the next
-        // `model_name()` call.
+        // `model_name()` call. Suffix with the preprocessor version
+        // so provenance captures BOTH stages in one string — no
+        // schema change needed (ADR 0008 satisfied via the existing
+        // model_used column).
+        let stamped_model = format!("{}+{}", result.model_used, PREPROCESSOR_VERSION);
         if let Ok(mut slot) = self.last_model_used.lock() {
-            *slot = result.model_used.clone();
+            *slot = stamped_model.clone();
         }
 
         tracing::info!(
             provider = self.provider.provider_name(),
-            model = %result.model_used,
+            model = %stamped_model,
             input_tokens = ?result.input_tokens,
             output_tokens = ?result.output_tokens,
-            latency_ms = result.latency_ms,
+            preprocessor_ms = pre_ms,
+            fillers_stripped = pre.notes.fillers_stripped,
+            stutters_collapsed = pre.notes.stutters_collapsed,
+            self_corrections = pre.notes.self_corrections,
+            cues_rendered = pre.notes.punctuation_cues_rendered
+                + pre.notes.layout_cues_rendered
+                + pre.notes.quote_bracket_cues_rendered,
+            llm_ms = result.latency_ms,
             "cleanup completed"
         );
 

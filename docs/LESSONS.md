@@ -14,6 +14,80 @@ Format:
 
 ---
 
+## 2026-05-17 [phase5-postship-8] deterministic preprocessor — Wave 1 of ADR 0022
+
+- **Context:** sixth-smoketest screenshot showed the LLM emitting
+  `` ```ery keyboard supplies: `` (hallucinated intro), wrapping
+  output in fences explicitly forbidden by the prompt, and dropping
+  the speaker's framing. Cleanup latency was 3198 ms — 70 % of
+  end-to-end. Root cause: asking a 3B-q4 model to do 100 % of
+  cleanup inside a 5 KB prompt blows its attention budget.
+- **Architectural fix:** new `cleanup/preprocessor.rs` runs BEFORE
+  the LLM call. Handles the rule-shaped 80 % (fillers, stutters,
+  self-corrections, verbal punctuation/quote/layout cues,
+  capitalisation, terminal punctuation) in ~5 ms. The LLM now sees
+  pre-cleaned text and is asked only to do judgment work in later
+  waves. See ADR 0022 for the full pipeline rationale.
+- **The `regex` crate trapped me twice** while porting the rule
+  table from a 'this is just regexes' first pass:
+  - **No lookaround.** I'd written `(?:^|\s)cue(?=\s|$|[.,!?])`
+    for standalone-token matching of multi-word verbal cues. Rust's
+    `regex` is the safe non-backtracking implementation and
+    explicitly rejects `(?=...)` / `(?<=...)`. Fix: consume the
+    boundary instead of looking past it — `(?:^|\s)cue\b\s?`. \b
+    IS supported because it's zero-width-but-not-backtracking-y.
+    Use `fancy-regex` only if you genuinely need lookaround; the
+    safe crate is faster and you can usually refactor.
+  - **No backreferences.** Stutter collapse ("the the the" → "the")
+    naturally wants `\b(\w{1,4})(?:\s+\1\b){1,}` — match a word,
+    then re-match the same word. `\1` isn't supported by `regex`
+    either. Fix: do it as a manual `split_whitespace` token walk
+    with last-token-comparison. O(n), comparable cost to a regex
+    pass, and arguably more readable.
+- **The ordering trap.** First version put layout-cue rendering
+  (which inserts `\n\n`) BEFORE stutter collapse (which calls
+  `split_whitespace`). `split_whitespace` eats newlines, so every
+  inserted paragraph break vanished. Two tests failed loudly with
+  `"first thought second thought"` where I expected the break. The
+  invariant is now pinned in the `process()` docstring: **any pass
+  that injects newlines MUST run AFTER any pass that uses
+  `split_whitespace`.** Subtle, easy to violate, worth a comment.
+- **Tier-2 filler stripping is load-bearing on prosody.** First
+  version of the regex stripped "you know" at any sentence start.
+  That broke `keeps_you_know_when_not_bounded` ("You know nothing
+  about it" → "Nothing about it"). The fix: ONLY strip when the
+  speaker also said a comma ("You know, it's true" has the
+  prosodic marker; "You know nothing" doesn't). The trailing comma
+  is the SOLE differentiator between filler and content. Same
+  rule for `like`, `basically`, etc. — strip only when prosody
+  (STT-rendered commas) flags them.
+- **DLL-load issue forced a workaround:** `cargo test --lib` on
+  this box dies with STATUS_ENTRYPOINT_NOT_FOUND in ntdll because
+  ORT/CUDA DLLs aren't on the test binary's PATH at process load.
+  Setting PATH + ORT_DYLIB_PATH env vars didn't help (the wrong
+  ABI version was being picked up). Workaround: created a tiny
+  throwaway crate at `C:\Users\dboyd\AppData\Local\Temp\preproc_test\`
+  containing only the preprocessor source + regex dep, and ran
+  `cargo test --lib` there. Found two real bugs in two iterations.
+  Worth keeping the recipe documented for future pure-rust modules.
+- **Patterns burned in:**
+  - **"Move the load-bearing work out of the LLM, into the
+    deterministic layer."** Every byte of prompt the LLM doesn't
+    have to attend to is attention freed up for the actual
+    judgment. Wisprflow's 'just-knows' magic is almost certainly
+    not a better model; it's a fatter rule layer in front of it.
+  - **Provenance suffix > new column.** Encoding the preprocessor
+    version into the existing `model_used` string
+    (`qwen2.5:3b-q4+preproc@v1`) gives full provenance without a
+    migration. ADR 0008's append-only-migration invariant prefers
+    schema stability over schema purity.
+  - **Test rigs beat test runners when the runner is broken.**
+    The throwaway-crate trick is a 5-minute reliable test loop
+    even when the main crate's test infrastructure is unwell. If
+    the module under test has bounded dependencies it's worth it.
+
+---
+
 ## 2026-05-17 [phase5-postship-7] clipboard snapshot crashed the process when a bitmap was on the clipboard (STATUS_HEAP_CORRUPTION)
 
 - **Context:** First dictation after `phase5-postship-6` ship. User

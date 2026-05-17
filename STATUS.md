@@ -1,3 +1,47 @@
+## 2026-05-17 — Postship Wave 8: deterministic preprocessor (ADR 0022 Wave 1)
+
+**Status:** Shipped. Live as of PID 39876.
+
+### What
+New `src-tauri/src/cleanup/preprocessor.rs`. Stateless, ~5 ms,
+runs BEFORE the LLM call. Strips Tier-1/2 fillers, collapses
+stutters, stitches self-corrections, renders verbal punctuation /
+quotes / layout cues, capitalises sentence starts, adds terminal
+punctuation. 34 unit tests passing (run via temp-cargo workaround
+at `C:\Users\dboyd\AppData\Local\Temp\preproc_test\` because the
+ORT/CUDA DLL-load issue blocks cargo test on this box).
+
+### Why
+ADR 0022 — the 'ery' bug + 4.5 s cleanup latency proved a 3B-q4
+model can't reliably handle 5 KB of rules + few-shots + dictionary.
+Offloading the rule-shaped 80 % of cleanup to deterministic code
+frees the LLM to do only the judgment work in Waves 2-3.
+
+### Provenance
+No schema change. Preprocessor version (`preproc@v1`) suffixed onto
+the existing `transcripts.model_used` column (e.g.
+`qwen2.5:3b-q4+preproc@v1`). ADR 0008 invariant preserved.
+
+### Cost
+- Implementation: 540 LoC (preprocessor + tests) + ~30 LoC in cleaner wiring
+- Cargo build: 4m38s release
+- Latency win expected: ~30 % off cleanup time even with current
+  prompts (LLM gets cleaner input → shorter generation)
+
+### Blocked-on / Next
+- **You** to live-test current Wave 1 build. The 'ery' bug should
+  be gone or at least different now (the preprocessor will produce
+  a clean intro before handing to the LLM). Hold RightAlt and try
+  the keyboard-supplies utterance again.
+- Then Wave 2: three modes (normal, casual, formal) + per-mode
+  prompts + per-mode model dropdown in UI + smart-default seeding
+  for this RTX-2060/6GB hardware.
+- Then Wave 3: LLM-skip for short casual utterances (~300 ms target).
+
+### Last-judge: Bernard self-assessed; deferred to user smoketest.
+
+---
+
 ## UI sprint progress (2026-05-18 — this iteration)
 
 **Status:** Phase 5 Waves A through J **complete**. UI is end-to-end
