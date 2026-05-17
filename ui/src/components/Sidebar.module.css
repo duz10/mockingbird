@@ -14,8 +14,36 @@
   align-items: center;
   gap: var(--s-2);
   padding: var(--s-2) var(--s-3);
-  margin-bottom: var(--s-5);
+  margin-bottom: var(--s-2);
   color: var(--on-surf);
+}
+
+/* Active-mode breadcrumb under the brand. Quiet by default — it's
+ * status info, not a control. The colored dot mirrors the per-mode
+ * accent used in the Modes page header + recording overlay. */
+.activeMode {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-1) var(--s-3) var(--s-4);
+  color: var(--on-surf-muted);
+}
+.activeModeDot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.activeModeLabel {
+  font: var(--type-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.activeModeLabel strong {
+  color: var(--on-surf);
+  font-weight: 600;
 }
 
 .brandText {
@@ -74,12 +102,17 @@
 @media (max-width: 720px) {
   .brandText,
   .linkLabel,
-  .version {
+  .version,
+  .activeModeLabel {
     display: none;
   }
   .brand,
   .link {
     justify-content: center;
     padding: var(--s-2);
+  }
+  .activeMode {
+    justify-content: center;
+    padding: var(--s-1) var(--s-2) var(--s-3);
   }
 }

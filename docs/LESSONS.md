@@ -14,6 +14,106 @@ Format:
 
 ---
 
+## 2026-05-17 [phase5-postship-6] active-mode selector + prompt v3 (preserve list context)
+
+- **Context:** Sixth Dustin smoketest pass. Three pieces of feedback:
+  (a) "Everything seems to default to normal mode and I don't know
+  how I can change it", (b) the v2 prompt rendered bullets but
+  dropped the introductory framing ("list of keyboard supplies" →
+  three bare bullets), (c) per-mode hotkey chords (Ctrl+Win,
+  Ctrl+Shift+Win, etc.) shown on the Modes page were confusing
+  noise — the user wanted to just pick a mode and have Right-Alt
+  use it.
+- **Two-class mode model.** Mockingbird has two distinct mode
+  classes that needed different UX treatments:
+   - *Transcription modes* (`normal`, `verbose`, `fragment`): exactly
+     ONE is active at a time. Right-Alt always uses the active one.
+     The Modes page now shows them as a radio-style selector — each
+     card has a "Use this mode" button, the active card gets an
+     accent border + "Active" pill, and the per-mode hotkey badge is
+     hidden (Right-Alt is global).
+   - *AI command modes* (`rewrite`, `expand`, `summarize`): act on
+     existing clipboard/selection text via their OWN hotkeys when
+     enabled. They keep the legacy enable/disable toggle + hotkey
+     badge. They are NOT eligible to be set as the active mode —
+     there's no audio input concept to attach them to.
+  The categorisation lives in `ui/src/lib/types.ts` as a fixed
+  `TRANSCRIPTION_SLUGS` const + an `isTranscriptionSlug` predicate,
+  mirrored on the Rust side in
+  `src-tauri/src/commands/active_mode.rs`. The Rust
+  `set_active_mode` IPC rejects any slug outside that list — the UI
+  can't accidentally point Right-Alt at `summarize`.
+- **Storage: settings table, not a new schema column.** The active
+  mode is a single string under `settings.dictation.active_mode_slug`.
+  No migration needed (the orchestrator falls back to `"normal"` if
+  the row is missing). One source of truth, no cache to invalidate.
+  Per-session lookup is one indexed-PK query — negligible vs.
+  STT/cleanup latency. **Net effect: a `set_active_mode` call takes
+  effect on the NEXT Right-Alt hold with zero restart/signalling/
+  refcount dance.** This is the simplest possible mechanism that
+  satisfies the user requirement.
+- **Orchestrator: session-pinned mode, not config-time mode.** The
+  old `OrchestratorConfig` set `mode_id` / `mode_slug` / `prompt_id`
+  once at boot. I added `ResolvedMode { mode_id, slug, prompt_id }`
+  plus `SessionState.active_mode: Option<ResolvedMode>`. At
+  `start_capture` we resolve fresh and pin for the whole session;
+  `complete()` + both `insert_session_row` helpers read from
+  `current_mode()` which falls back to `self.config` if no session
+  is active. Pinning AT `start_capture` (not at insert) means a
+  `set_active_mode` call mid-dictation can't split one session
+  across two modes (the cleanup prompt would mismatch the DB-
+  recorded `mode_id` and we'd violate provenance). Resolution has
+  two graceful fallbacks (poisoned mutex → config; missing settings
+  row OR modes lookup fails → config) so the user never loses a
+  dictation to a flaky DB read.
+- **Prompt v3: "preserve framing" rule.** v2 was too eager to strip
+  introductory phrases. The example I shipped in v2 — `"um so make
+  a list first thing is apples"` → bare bullets — set the wrong
+  precedent. v3 keeps that example (no intro spoken → no intro
+  rendered) but adds three NEW examples where the speaker DID name
+  the list ("I'm going to put together a list of keyboard supplies")
+  and the cleaned output keeps that as a one-line lead-in followed
+  by a blank line, then the bullets. ADR 0008 compliant: new file
+  `normal_v3.md`, new migration 007 that INSERTs `prompts` row v3
+  and repoints `modes.normal.prompt_id` — v1 + v2 stay addressable
+  for every historical session that referenced them.
+- **Migration test rig.** Added `scripts/test_migrations.py` because
+  the Rust test runner has the pre-existing STATUS_ENTRYPOINT_NOT_FOUND
+  DLL-load issue (ORT/CUDA path) and won't run unit tests at all on
+  this box. The Python rig substitutes prompt-body tokens the same
+  way `prompt_loader.rs` does (including the apostrophe escape and
+  the leftover-token guard regex), applies every migration
+  sequentially to a `:memory:` SQLite, and prints the resulting
+  `prompts` + `modes` rows. Reproduced the working state in <1 s.
+  Worth keeping in the repo for future migration iteration; pays
+  for itself the first time you don't have to wait on a 4-minute
+  release build to know whether your SQL is valid.
+- **Patterns burned in:**
+  - **"Active selection" is a UX problem, not a permissions problem.**
+     Enable/disable toggles imply "on means this mode runs in the
+     background" — which makes no sense for a transcription mode
+     that runs on user-initiated hotkey. Radio-style selection makes
+     the contract obvious: ONE is in use, click to switch. Reach
+     for the right primitive; don't bend toggles to a single-select
+     job.
+  - **Resolve config per-session, not per-process.** Boot-time
+     config is great for things that physically can't change without
+     restart (audio device, model files). For anything the user can
+     change from the UI, lookup fresh at use-time + pin for the
+     duration of a single in-flight operation. Settings table +
+     one indexed query is enough; no need for shared `Arc<RwLock<_>>`
+     state or event broadcasters.
+  - **The first example in a prompt sets the tone for everything
+     the model generates.** v2's only list-example was the
+     bare-bullet case. The model interpreted that as "strip
+     EVERYTHING and emit bullets". v3 leads with the intro-preserving
+     example and demotes the bare-bullet case to example three with
+     an explicit "no intro phrase was spoken, so no lead-in is
+     invented" annotation. Order + emphasis in few-shot examples
+     matter as much as the rule prose.
+
+---
+
 ## 2026-05-17 [phase5-postship-5] migration 006 crashed the entire app at boot with cryptic `near 'voice': syntax error`
 
 - **Context:** Fifth Dustin smoketest (sigh). User ran `run-mockingbird.ps1`,

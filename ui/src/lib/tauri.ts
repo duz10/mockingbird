@@ -14,6 +14,7 @@
 // Every command name here must match a `#[tauri::command]` over there.
 
 import type {
+  ActiveMode,
   DictionaryEntry,
   InsightsSnapshot,
   LearningRun,
@@ -104,6 +105,8 @@ export const api = {
   list_modes: () => invoke<ModeRow[]>("list_modes"),
   update_mode: (slug: string, patch: Partial<ModeRow>) =>
     invoke<void>("update_mode", { slug, patch }),
+  get_active_mode: () => invoke<ActiveMode>("get_active_mode"),
+  set_active_mode: (slug: string) => invoke<void>("set_active_mode", { slug }),
 
   // Settings
   get_settings: () => invoke<SettingsSnapshot>("get_settings"),
@@ -145,6 +148,8 @@ function fixtureFor<T>(command: string, args?: object): T {
       return fixture(command, FIXTURES.dictionary) as T;
     case "list_modes":
       return fixture(command, FIXTURES.modes) as T;
+    case "get_active_mode":
+      return fixture(command, FIXTURES.activeMode) as T;
     case "get_settings":
       return fixture(command, FIXTURES.settings) as T;
     case "list_learning_runs":
@@ -161,6 +166,7 @@ function fixtureFor<T>(command: string, args?: object): T {
     case "upsert_dictionary_entry":
     case "delete_dictionary_entry":
     case "update_mode":
+    case "set_active_mode":
     case "update_setting":
     case "report_correction":
     case "trigger_learning_run":
@@ -179,9 +185,11 @@ export const FIXTURES: {
   searchHits: TranscriptSearchHit[];
   dictionary: DictionaryEntry[];
   modes: ModeRow[];
+  activeMode: ActiveMode;
   settings: SettingsSnapshot;
   learningRuns: LearningRun[];
 } = {
+  activeMode: { slug: "normal" },
   insights: {
     today: {
       words: 1842,

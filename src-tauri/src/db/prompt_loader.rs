@@ -15,6 +15,7 @@
 
 const PROMPT_NORMAL: &str = include_str!("../cleanup/prompts/normal.md");
 const PROMPT_NORMAL_V2: &str = include_str!("../cleanup/prompts/normal_v2.md");
+const PROMPT_NORMAL_V3: &str = include_str!("../cleanup/prompts/normal_v3.md");
 const PROMPT_VERBOSE: &str = include_str!("../cleanup/prompts/verbose.md");
 const PROMPT_FRAGMENT: &str = include_str!("../cleanup/prompts/fragment.md");
 const PROMPT_REWRITE: &str = include_str!("../cleanup/prompts/rewrite.md");
@@ -35,6 +36,7 @@ pub fn substitute_prompt_bodies(sql: &str) -> String {
     let substituted = sql
         .replace("__PROMPT_NORMAL_BODY__", &sql_escape(PROMPT_NORMAL))
         .replace("__PROMPT_NORMAL_V2_BODY__", &sql_escape(PROMPT_NORMAL_V2))
+        .replace("__PROMPT_NORMAL_V3_BODY__", &sql_escape(PROMPT_NORMAL_V3))
         .replace("__PROMPT_VERBOSE_BODY__", &sql_escape(PROMPT_VERBOSE))
         .replace("__PROMPT_FRAGMENT_BODY__", &sql_escape(PROMPT_FRAGMENT))
         .replace("__PROMPT_REWRITE_BODY__", &sql_escape(PROMPT_REWRITE))

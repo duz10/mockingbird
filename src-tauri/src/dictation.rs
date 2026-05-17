@@ -162,6 +162,28 @@ struct SessionState {
     started_at: Option<Instant>,
     /// ISO-8601 string for DB persistence.
     started_at_iso: Option<String>,
+    /// Mode resolved at `start_capture` from the active-mode setting.
+    /// Pinned for the duration of the session so a `set_active_mode`
+    /// call mid-dictation can't split a session across two modes
+    /// (the cleanup prompt would mismatch the DB-recorded mode_id).
+    /// `None` until `start_capture`; callers fall back to
+    /// `self.config` defensively.
+    active_mode: Option<ResolvedMode>,
+}
+
+/// The mode identifiers a single dictation session uses end-to-end:
+/// recording-window colour, cleanup prompt lookup, and the
+/// `sessions.mode_id` / `sessions.prompt_id` FKs.
+///
+/// Resolved fresh at the start of each session from the
+/// `dictation.active_mode_slug` setting + the `modes` table. This is
+/// what makes the Modes-page active selector take effect on the
+/// NEXT dictation without restart / cache-invalidation dance.
+#[derive(Debug, Clone)]
+struct ResolvedMode {
+    mode_id: i64,
+    slug: String,
+    prompt_id: i64,
 }
 
 impl DictationOrchestrator {
@@ -270,15 +292,89 @@ impl DictationOrchestrator {
         self.state.fg_keydown = self.window_ctx.foreground().ok();
         self.state.started_at = Some(Instant::now());
         self.state.started_at_iso = Some(now_iso());
+        // Pin the active mode for this whole session BEFORE we open
+        // the mic. Single resolution per session: recording-window
+        // colour, cleanup prompt, and DB FKs all see the same mode.
+        let resolved = self.resolve_active_mode();
         self.audio.start()?;
         // show() handles both the OS-level window display + emitting
         // the initial `listening` state to the React overlay.
-        self.recording_window.show(&self.config.mode_slug)?;
+        self.recording_window.show(&resolved.slug)?;
         tracing::info!(
             fg = ?self.state.fg_keydown.as_ref().map(|f| &f.process_name),
+            mode = %resolved.slug,
             "dictation: start_capture"
         );
+        self.state.active_mode = Some(resolved);
         Ok(())
+    }
+
+    /// Read the active transcription mode from the settings table
+    /// and look up the corresponding `modes` row.
+    ///
+    /// This is the bridge between the Modes-page UI selector and the
+    /// orchestrator pipeline. Called once per session at
+    /// `start_capture`. Two graceful fallbacks for the unhappy paths:
+    ///
+    ///   1. DB mutex poisoned → use the boot-time `self.config`. A
+    ///      poisoned mutex means a panic crossed a thread boundary,
+    ///      and the user's best bet is "keep going on the last good
+    ///      config" rather than "silently lose the dictation".
+    ///   2. Settings row missing OR modes lookup fails → same
+    ///      fallback. Covers fresh installs (settings row not yet
+    ///      seeded) and corrupt-DB edge cases.
+    ///
+    /// Both fallbacks log at WARN so the issue is visible without
+    /// killing the dictation. Cost: one indexed-PK lookup per
+    /// session — negligible vs. STT/cleanup latency.
+    fn resolve_active_mode(&self) -> ResolvedMode {
+        let fallback = || ResolvedMode {
+            mode_id: self.config.mode_id,
+            slug: self.config.mode_slug.clone(),
+            prompt_id: self.config.prompt_id,
+        };
+        let conn = match self.db.lock() {
+            Ok(g) => g,
+            Err(_) => {
+                tracing::warn!("active-mode: db mutex poisoned; using boot-time config");
+                return fallback();
+            }
+        };
+        let slug: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                [crate::commands::active_mode::ACTIVE_MODE_KEY],
+                |r| r.get(0),
+            )
+            .unwrap_or_else(|_| self.config.mode_slug.clone());
+        match conn.query_row(
+            "SELECT id, prompt_id FROM modes WHERE slug = ?1",
+            [&slug],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+        ) {
+            Ok((mode_id, prompt_id)) => ResolvedMode {
+                mode_id,
+                slug,
+                prompt_id,
+            },
+            Err(e) => {
+                tracing::warn!(error = ?e, mode = %slug,
+                    "active-mode: modes-table lookup failed; using boot-time config");
+                fallback()
+            }
+        }
+    }
+
+    /// Return the session-pinned mode, or fall back to the boot-time
+    /// config when no session is active. Used by the DB-insert
+    /// helpers, which may be called from error paths that bypass
+    /// `start_capture`.
+    fn current_mode(&self) -> ResolvedMode {
+        self.state.active_mode.clone().unwrap_or_else(|| ResolvedMode {
+            mode_id: self.config.mode_id,
+            slug: self.config.mode_slug.clone(),
+            prompt_id: self.config.prompt_id,
+        })
     }
 
     fn complete(&mut self) -> AppResult<()> {
@@ -300,7 +396,10 @@ impl DictationOrchestrator {
         // Phase 5 smoketest 2026-05-17. Guard is disarmed right
         // before the explicit DONE-flash hide() at the bottom.
         let mut pill_guard = PillHideGuard::arm(self.recording_window.clone());
-        let mode_slug = self.config.mode_slug.clone();
+        // Use the session-pinned mode (resolved at start_capture).
+        // Cloning is cheap — ResolvedMode is one i64 + a short String.
+        let active = self.current_mode();
+        let mode_slug = active.slug.clone();
 
         // Drain the audio.
         let mut samples: Vec<i16> = Vec::new();
@@ -382,7 +481,7 @@ impl DictationOrchestrator {
             .set_state(crate::recording_window::state::CLEANING, Some(&mode_slug));
         let cleanup_start = Instant::now();
         tracing::info!(mode = %mode_slug, "dictation: cleanup begin");
-        let cleaned_text = match self.cleaner.clean(&raw_text, &self.config.mode_slug) {
+        let cleaned_text = match self.cleaner.clean(&raw_text, &mode_slug) {
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!(error = ?e, "cleaner failed; falling back to raw text");
@@ -615,9 +714,10 @@ impl DictationOrchestrator {
         fg_keyup: &ForegroundWindow,
     ) -> AppResult<i64> {
         let started_at = self.state.started_at_iso.clone().unwrap_or_else(now_iso);
+        let active = self.current_mode();
         let new = NewSession {
             uuid: new_uuid(),
-            mode_id: self.config.mode_id,
+            mode_id: active.mode_id,
             hotkey_pressed: self.config.hotkey_label.clone(),
             started_at,
             recording_ended_at: recording_ended_iso.to_string(),
@@ -626,7 +726,7 @@ impl DictationOrchestrator {
             foreground_window_title: Some(fg_keyup.title.clone()),
             audio_duration_ms: 0, // Wave 5 fills from VAD-trimmed length
             audio_blob_path: None,
-            prompt_id: self.config.prompt_id,
+            prompt_id: active.prompt_id,
             dictionary_snapshot_id: self.config.dictionary_snapshot_id,
             example_set_id: self.config.example_set_id,
         };
@@ -639,9 +739,10 @@ impl DictationOrchestrator {
         recording_ended_iso: &str,
     ) -> AppResult<i64> {
         let started_at = self.state.started_at_iso.clone().unwrap_or_else(now_iso);
+        let active = self.current_mode();
         let new = NewSession {
             uuid: new_uuid(),
-            mode_id: self.config.mode_id,
+            mode_id: active.mode_id,
             hotkey_pressed: self.config.hotkey_label.clone(),
             started_at,
             recording_ended_at: recording_ended_iso.to_string(),
@@ -650,7 +751,7 @@ impl DictationOrchestrator {
             foreground_window_title: None,
             audio_duration_ms: 0,
             audio_blob_path: None,
-            prompt_id: self.config.prompt_id,
+            prompt_id: active.prompt_id,
             dictionary_snapshot_id: self.config.dictionary_snapshot_id,
             example_set_id: self.config.example_set_id,
         };

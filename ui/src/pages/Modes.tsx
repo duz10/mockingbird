@@ -1,10 +1,22 @@
-// Modes editor. One card per mode; edits are debounced + auto-saved
-// per field. No global "Save" button — that's a category of UX bug
-// (changes lost on tab-away). Auto-save keeps the user in flow.
+// Modes editor with two distinct sections:
 //
-// Hotkey is rendered as a non-editable badge for v1: capturing live
-// key chords cleanly in a browser is a rabbit hole, and the Rust
-// hotkey driver only listens for RightAlt today (Phase 5 polish item).
+//   1. **Transcription modes** (normal / verbose / fragment) — exactly
+//      ONE is active at a time. The active one is what Right-Alt
+//      uses for the next dictation. Card UI: a "Use this mode" radio
+//      affordance replaces the legacy enable/disable toggle, the
+//      per-mode hotkey badge is hidden (Right-Alt is global), and the
+//      active card gets an accent border + "Active" pill.
+//
+//   2. **AI command modes** (rewrite / expand / summarize) — toggle
+//      on/off independently. Each has its own hotkey when enabled.
+//      These act on selected/clipboard text — they're not candidates
+//      for the active-mode setting because there's no audio input
+//      concept attached. UI: kept as-is (toggle + hotkey badge).
+//
+// All field edits (provider/model/temp/max-tokens) auto-save on a
+// 400 ms debounce. No global "Save" button — that's a category of
+// UX bug (changes lost on tab-away). Auto-save keeps the user in
+// flow.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -12,6 +24,7 @@ import { PageHeader, Spinner } from "../components/primitives";
 import { t } from "../i18n";
 import { useAppStore } from "../lib/store";
 import { api } from "../lib/tauri";
+import { isTranscriptionSlug } from "../lib/types";
 import type { ModeRow } from "../lib/types";
 
 import styles from "./Modes.module.css";
@@ -21,32 +34,34 @@ const SAVE_DEBOUNCE_MS = 400;
 export function ModesPage() {
   const modes = useAppStore((s) => s.modes);
   const setModes = useAppStore((s) => s.setModes);
+  const activeModeSlug = useAppStore((s) => s.activeModeSlug);
+  const setActiveModeSlug = useAppStore((s) => s.setActiveModeSlug);
 
-  // Local copy keyed by slug so per-mode edits don't re-render siblings.
   const [savedSlug, setSavedSlug] = useState<string | null>(null);
-  // Surface IPC errors instead of leaving the user staring at a
-  // forever-spinner — caught us out during Phase 5 smoketest when
-  // list_modes was throwing a SQL error and the empty-state path
-  // looked identical to the loading-state path.
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // First-load: the App boot already populates the store, but if the
-  // user lands directly on this page (e.g., refresh), we re-fetch.
+  // First-load: re-fetch modes + active selection if not warm.
   useEffect(() => {
     if (modes.length === 0) {
       void api.list_modes().then(setModes).catch((err: unknown) => {
         setLoadError(err instanceof Error ? err.message : String(err));
       });
     }
-  }, [modes.length, setModes]);
+    if (activeModeSlug === null) {
+      void api
+        .get_active_mode()
+        .then((a) => setActiveModeSlug(a.slug))
+        .catch(() => {
+          // Non-fatal — fall back to displaying nothing as active.
+          // The Modes UI still works; the user just sees no card
+          // highlighted. Logging the error would noise up the console.
+        });
+    }
+  }, [modes.length, activeModeSlug, setModes, setActiveModeSlug]);
 
   const handlePatch = useCallback(
     async (slug: string, patch: Partial<ModeRow>) => {
-      // Optimistic update — apply locally first so the input doesn't
-      // jitter back to the old value while the IPC round-trips.
-      setModes(
-        modes.map((m) => (m.slug === slug ? { ...m, ...patch } : m)),
-      );
+      setModes(modes.map((m) => (m.slug === slug ? { ...m, ...patch } : m)));
       await api.update_mode(slug, patch);
       setSavedSlug(slug);
       window.setTimeout(() => setSavedSlug((s) => (s === slug ? null : s)), 1200);
@@ -54,16 +69,50 @@ export function ModesPage() {
     [modes, setModes],
   );
 
+  const handleSetActive = useCallback(
+    async (slug: string) => {
+      // Optimistic — flip the highlight immediately. If the IPC
+      // fails we revert and surface the error.
+      const prev = activeModeSlug;
+      setActiveModeSlug(slug);
+      try {
+        await api.set_active_mode(slug);
+        setSavedSlug(slug);
+        window.setTimeout(
+          () => setSavedSlug((s) => (s === slug ? null : s)),
+          1200,
+        );
+      } catch (err) {
+        setActiveModeSlug(prev);
+        setLoadError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [activeModeSlug, setActiveModeSlug],
+  );
+
+  // Split modes into the two visual groups. We do this in render
+  // (not on the Rust side) because it's purely a UI concern and the
+  // categorisation may change without a backend release.
+  const { transcription, commands } = useMemo(() => {
+    const transcription: ModeRow[] = [];
+    const commands: ModeRow[] = [];
+    for (const m of modes) {
+      if (isTranscriptionSlug(m.slug)) {
+        transcription.push(m);
+      } else {
+        commands.push(m);
+      }
+    }
+    return { transcription, commands };
+  }, [modes]);
+
   if (modes.length === 0) {
     return (
       <>
-        <PageHeader
-          title={t("modes.title")}
-          subtitle={t("modes.subtitle")}
-        />
+        <PageHeader title={t("modes.title")} subtitle={t("modes.subtitle")} />
         {loadError ? (
           <div className={styles.errorBox} role="alert">
-            <strong>Couldn't load modes.</strong>
+            <strong>Couldn&apos;t load modes.</strong>
             <pre>{loadError}</pre>
           </div>
         ) : (
@@ -77,28 +126,87 @@ export function ModesPage() {
     <>
       <PageHeader title={t("modes.title")} subtitle={t("modes.subtitle")} />
       <div className={styles.shell}>
-        {modes.map((m) => (
-          <ModeCard
-            key={m.slug}
-            mode={m}
-            justSaved={savedSlug === m.slug}
-            onPatch={(patch) => void handlePatch(m.slug, patch)}
-          />
-        ))}
+        {transcription.length > 0 ? (
+          <section className={styles.group} aria-labelledby="modes-tx-heading">
+            <header className={styles.groupHeader}>
+              <h2 id="modes-tx-heading" className={styles.groupTitle}>
+                {t("modes.section.transcription")}
+              </h2>
+              <p className={styles.groupHelp}>
+                {t("modes.section.transcription.help")}
+              </p>
+            </header>
+            <div
+              className={styles.cards}
+              role="radiogroup"
+              aria-label={t("modes.section.transcription")}
+            >
+              {transcription.map((m) => (
+                <ModeCard
+                  key={m.slug}
+                  mode={m}
+                  variant="transcription"
+                  isActive={m.slug === activeModeSlug}
+                  justSaved={savedSlug === m.slug}
+                  onPatch={(patch) => void handlePatch(m.slug, patch)}
+                  onSetActive={() => void handleSetActive(m.slug)}
+                />
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {commands.length > 0 ? (
+          <section className={styles.group} aria-labelledby="modes-cmd-heading">
+            <header className={styles.groupHeader}>
+              <h2 id="modes-cmd-heading" className={styles.groupTitle}>
+                {t("modes.section.commands")}
+              </h2>
+              <p className={styles.groupHelp}>
+                {t("modes.section.commands.help")}
+              </p>
+            </header>
+            <div className={styles.cards}>
+              {commands.map((m) => (
+                <ModeCard
+                  key={m.slug}
+                  mode={m}
+                  variant="command"
+                  isActive={false}
+                  justSaved={savedSlug === m.slug}
+                  onPatch={(patch) => void handlePatch(m.slug, patch)}
+                  onSetActive={() => {
+                    /* not applicable for command modes */
+                  }}
+                />
+              ))}
+            </div>
+          </section>
+        ) : null}
       </div>
     </>
   );
 }
 
-function ModeCard({
-  mode,
-  justSaved,
-  onPatch,
-}: {
+type CardVariant = "transcription" | "command";
+
+interface ModeCardProps {
   mode: ModeRow;
+  variant: CardVariant;
+  isActive: boolean;
   justSaved: boolean;
   onPatch: (patch: Partial<ModeRow>) => void;
-}) {
+  onSetActive: () => void;
+}
+
+function ModeCard({
+  mode,
+  variant,
+  isActive,
+  justSaved,
+  onPatch,
+  onSetActive,
+}: ModeCardProps) {
   // Local draft state for the debounced fields. We don't `setModes`
   // until the debounce fires — otherwise typing in "Temperature 0.4"
   // sends 3 IPC writes for "0", "0.", "0.4".
@@ -106,12 +214,10 @@ function ModeCard({
   const [maxTok, setMaxTok] = useState(mode.maxTokens.toString());
   const [model, setModel] = useState(mode.modelId);
 
-  // Keep local in sync if the upstream changes (e.g., another tab).
   useEffect(() => setTemp(mode.temperature.toString()), [mode.temperature]);
   useEffect(() => setMaxTok(mode.maxTokens.toString()), [mode.maxTokens]);
   useEffect(() => setModel(mode.modelId), [mode.modelId]);
 
-  // Debounce numeric / text fields.
   useEffect(() => {
     if (model === mode.modelId) return;
     const h = window.setTimeout(() => onPatch({ modelId: model }), SAVE_DEBOUNCE_MS);
@@ -148,13 +254,22 @@ function ModeCard({
     [mode.slug],
   );
 
+  const isTranscription = variant === "transcription";
+  // Command modes use the legacy "disabled" dimming. Transcription
+  // modes are NEVER dimmed — even the non-active ones are fully
+  // configurable; "active" is just a selection, not an enablement.
+  const cardClass = [
+    styles.modeCard,
+    !isTranscription && !mode.enabled ? styles.disabled : "",
+    isActive ? styles.activeCard : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <section
-      className={`${styles.modeCard} ${!mode.enabled ? styles.disabled : ""}`}
-      aria-label={`Mode: ${mode.label}`}
-    >
+    <section className={cardClass} aria-label={`Mode: ${mode.label}`}>
       <header className={styles.header}>
-        <h2 className={styles.title}>
+        <h3 className={styles.title}>
           <span
             style={{
               display: "inline-block",
@@ -165,22 +280,54 @@ function ModeCard({
             }}
           />
           {mode.label}
-        </h2>
-        <div className={styles.headerActions}>
-          <span className={styles.hotkeyBadge} title={t("modes.field.hotkey")}>
-            {mode.hotkey}
-          </span>
-          <label className={styles.toggle}>
-            <input
-              type="checkbox"
-              checked={mode.enabled}
-              onChange={(e) => onPatch({ enabled: e.target.checked })}
-              aria-label={mode.enabled ? t("modes.disabled") : t("modes.enabled")}
-            />
-            <span className={styles.toggleTrack}>
-              <span className={styles.toggleThumb} />
+          {isActive ? (
+            <span className={styles.activePill} aria-label={t("modes.active")}>
+              {t("modes.active")}
             </span>
-          </label>
+          ) : null}
+        </h3>
+        <div className={styles.headerActions}>
+          {isTranscription ? (
+            // Radio-like "Use this mode" button. We use a button +
+            // role=radio (not a real <input type=radio>) because the
+            // visual treatment is bigger than a radio dot, and screen
+            // readers care about the role + aria-checked, not the
+            // underlying element type.
+            <button
+              type="button"
+              role="radio"
+              aria-checked={isActive}
+              className={
+                isActive ? styles.useModeBtnActive : styles.useModeBtn
+              }
+              onClick={onSetActive}
+              disabled={isActive}
+            >
+              {isActive ? t("modes.active") : t("modes.setActive")}
+            </button>
+          ) : (
+            <>
+              <span
+                className={styles.hotkeyBadge}
+                title={t("modes.field.hotkey")}
+              >
+                {mode.hotkey}
+              </span>
+              <label className={styles.toggle}>
+                <input
+                  type="checkbox"
+                  checked={mode.enabled}
+                  onChange={(e) => onPatch({ enabled: e.target.checked })}
+                  aria-label={
+                    mode.enabled ? t("modes.disabled") : t("modes.enabled")
+                  }
+                />
+                <span className={styles.toggleTrack}>
+                  <span className={styles.toggleThumb} />
+                </span>
+              </label>
+            </>
+          )}
         </div>
       </header>
 
@@ -193,7 +340,9 @@ function ModeCard({
             id={`${mode.slug}-provider`}
             className={styles.select}
             value={mode.provider}
-            onChange={(e) => onPatch({ provider: e.target.value as "ollama" | "claude" })}
+            onChange={(e) =>
+              onPatch({ provider: e.target.value as "ollama" | "claude" })
+            }
           >
             <option value="ollama">Ollama (local)</option>
             <option value="claude">Claude (cloud)</option>
@@ -247,7 +396,11 @@ function ModeCard({
 
       <div className={styles.saveRow}>
         {justSaved ? (
-          <span className={styles.savedHint}>{t("modes.saved")}</span>
+          <span className={styles.savedHint}>
+            {isTranscription && isActive
+              ? t("modes.activated")
+              : t("modes.saved")}
+          </span>
         ) : null}
       </div>
     </section>

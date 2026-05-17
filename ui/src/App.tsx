@@ -20,19 +20,24 @@ interface AppProps {
 export function App({ children }: AppProps) {
   const setModes = useAppStore((s) => s.setModes);
   const setSettings = useAppStore((s) => s.setSettings);
+  const setActiveModeSlug = useAppStore((s) => s.setActiveModeSlug);
   const applyTheme = useAppStore((s) => s.applyTheme);
 
-  // Boot — load modes + settings once and apply theme. Pure idempotent
-  // effect; no cleanup needed.
+  // Boot — load modes, settings, and active-mode selection in
+  // parallel, then apply theme. The active-mode fetch is what feeds
+  // the Sidebar indicator on first paint (without it, the indicator
+  // wouldn't appear until the user visited the Modes page).
   useEffect(() => {
     void (async () => {
       try {
-        const [modes, settings] = await Promise.all([
+        const [modes, settings, activeMode] = await Promise.all([
           api.list_modes(),
           api.get_settings(),
+          api.get_active_mode(),
         ]);
         setModes(modes);
         setSettings(settings);
+        setActiveModeSlug(activeMode.slug);
         applyTheme(settings.theme);
       } catch (err) {
         // Stay alive — the page will surface its own error state.
@@ -40,7 +45,7 @@ export function App({ children }: AppProps) {
         console.warn("App boot fetch failed", err);
       }
     })();
-  }, [setModes, setSettings, applyTheme]);
+  }, [setModes, setSettings, setActiveModeSlug, applyTheme]);
 
   return (
     <div className={styles.shell}>

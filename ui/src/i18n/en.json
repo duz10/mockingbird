@@ -65,7 +65,13 @@
   "dictionary.deleted": "Term deleted",
 
   "modes.title": "Modes",
-  "modes.subtitle": "Each mode is a prompt + model + hotkey. Use the toggle to enable AI command modes.",
+  "modes.subtitle": "Pick which transcription mode Right-Alt uses. AI command modes are separate — enable the ones you want and they get their own hotkey.",
+  "modes.section.transcription": "Transcription modes",
+  "modes.section.transcription.help": "Exactly one is active. Right-Alt always uses the selected mode.",
+  "modes.section.commands": "AI command modes",
+  "modes.section.commands.help": "Act on selected or clipboard text. Each has its own hotkey when enabled.",
+  "modes.active": "Active",
+  "modes.setActive": "Use this mode",
   "modes.enabled": "Enabled",
   "modes.disabled": "Disabled",
   "modes.field.hotkey": "Hotkey",
@@ -74,6 +80,9 @@
   "modes.field.temperature": "Temperature",
   "modes.field.maxTokens": "Max tokens",
   "modes.saved": "Mode saved",
+  "modes.activated": "Set as active mode",
+
+  "sidebar.activeMode": "Active mode",
 
   "settings.title": "Settings",
   "settings.tab.general": "General",

@@ -9,6 +9,35 @@
 .shell {
   display: flex;
   flex-direction: column;
+  gap: var(--s-5);
+}
+
+/* Two visually-distinct sections: transcription (radio-style picker)
+ * and command (toggle + hotkey). Each has its own heading + help. */
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.groupHeader {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.groupTitle {
+  font: var(--type-md);
+  font-weight: 600;
+  color: var(--on-surf);
+  margin: 0;
+}
+.groupHelp {
+  font: var(--type-sm);
+  color: var(--on-surf-muted);
+  margin: 0;
+}
+.cards {
+  display: flex;
+  flex-direction: column;
   gap: var(--s-3);
 }
 
@@ -24,6 +53,62 @@
 
 .modeCard.disabled {
   opacity: 0.6;
+}
+
+/* Active transcription mode — left accent stripe + slight surface
+ * lift. We DON'T change the entire border colour because that
+ * fights with the per-mode dot in the header. The 3 px inset stripe
+ * is unambiguous without dominating the card. */
+.modeCard.activeCard {
+  border-color: var(--mode-normal);
+  box-shadow: inset 3px 0 0 var(--mode-normal);
+  background: color-mix(in oklab, var(--mode-normal) 6%, var(--surf-2));
+}
+
+/* "Active" pill next to the mode name. Compact + lower-contrast than
+ * the click target so the row reads cleanly. */
+.activePill {
+  margin-left: var(--s-2);
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  font: var(--type-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: color-mix(in oklab, var(--mode-normal) 22%, transparent);
+  color: var(--on-surf);
+}
+
+/* "Use this mode" button (visual radio replacement). Two states:
+ * idle (clickable, ghost) and active (filled, disabled — you can't
+ * click to "re-activate" the currently-active mode). */
+.useModeBtn,
+.useModeBtnActive {
+  font: var(--type-sm);
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  background: var(--surf-3);
+  color: var(--on-surf);
+  transition: background var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out);
+}
+.useModeBtn:hover {
+  background: color-mix(in oklab, var(--mode-normal) 18%, var(--surf-3));
+  border-color: var(--mode-normal);
+}
+.useModeBtn:focus-visible {
+  outline: 2px solid var(--mode-normal);
+  outline-offset: 2px;
+}
+.useModeBtnActive {
+  background: var(--mode-normal);
+  color: var(--surf-1);
+  border-color: var(--mode-normal);
+  cursor: default;
 }
 
 .header {

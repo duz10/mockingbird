@@ -2,6 +2,7 @@
 // Keyboard-friendly: each NavLink is a focusable button-like anchor.
 
 import type { ComponentType } from "react";
+import { useMemo } from "react";
 import { NavLink } from "react-router-dom";
 
 import {
@@ -14,6 +15,7 @@ import {
   SparklesIcon,
 } from "../design/Icon";
 import { t } from "../i18n";
+import { useAppStore } from "../lib/store";
 
 import styles from "./Sidebar.module.css";
 
@@ -33,12 +35,36 @@ const NAV: NavItem[] = [
 ];
 
 export function Sidebar() {
+  // Surface the active transcription mode under the brand. Tiny but
+  // valuable: "which mode does Right-Alt use right now?" is currently
+  // a question that requires opening the Modes page to answer.
+  const activeModeSlug = useAppStore((s) => s.activeModeSlug);
+  const modes = useAppStore((s) => s.modes);
+  const activeModeLabel = useMemo(() => {
+    if (!activeModeSlug) return null;
+    return modes.find((m) => m.slug === activeModeSlug)?.label ?? activeModeSlug;
+  }, [activeModeSlug, modes]);
+
   return (
     <aside className={styles.sidebar} aria-label="Primary navigation">
       <div className={styles.brand}>
         <MicIcon size={20} />
         <span className={styles.brandText}>Mockingbird</span>
       </div>
+      {activeModeLabel ? (
+        <div className={styles.activeMode} aria-live="polite">
+          <span
+            className={styles.activeModeDot}
+            style={{
+              background: `var(--mode-${activeModeSlug}, var(--mode-normal))`,
+            }}
+            aria-hidden
+          />
+          <span className={styles.activeModeLabel}>
+            {t("sidebar.activeMode")}: <strong>{activeModeLabel}</strong>
+          </span>
+        </div>
+      ) : null}
       <nav className={styles.nav}>
         {NAV.map(({ to, label, Icon }) => (
           <NavLink

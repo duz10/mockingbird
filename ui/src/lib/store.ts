@@ -9,11 +9,19 @@ import type { ModeRow, SessionDetail, SettingsSnapshot, ThemeChoice } from "./ty
 interface AppState {
   // Cached lookups — populated on first access by useMockingbird().
   modes: ModeRow[];
+  /**
+   * Slug of the currently-active transcription mode. `null` until
+   * the first `get_active_mode` IPC call resolves. Used by both the
+   * Modes page (to render the selected card) and the Sidebar
+   * (active-mode indicator).
+   */
+  activeModeSlug: string | null;
   settings: SettingsSnapshot | null;
   // History view's selected session detail (cleared on route change away).
   selectedSession: SessionDetail | null;
 
   setModes: (modes: ModeRow[]) => void;
+  setActiveModeSlug: (slug: string | null) => void;
   setSettings: (settings: SettingsSnapshot | null) => void;
   setSelectedSession: (s: SessionDetail | null) => void;
   applyTheme: (theme: ThemeChoice) => void;
@@ -21,9 +29,11 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set) => ({
   modes: [],
+  activeModeSlug: null,
   settings: null,
   selectedSession: null,
   setModes: (modes) => set({ modes }),
+  setActiveModeSlug: (slug) => set({ activeModeSlug: slug }),
   setSettings: (settings) => set({ settings }),
   setSelectedSession: (s) => set({ selectedSession: s }),
   applyTheme: (theme) => {

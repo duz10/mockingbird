@@ -15,6 +15,7 @@
 //! error to JS as a string. We funnel through `AppError::to_string()`
 //! at the boundary so the JS side gets a friendly message.
 
+pub mod active_mode;
 pub mod dictionary;
 pub mod insights;
 pub mod learning;
@@ -81,6 +82,8 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         // Modes
         modes::list_modes,
         modes::update_mode,
+        active_mode::get_active_mode,
+        active_mode::set_active_mode,
         // Settings (UI panel)
         settings::get_settings,
         settings::update_setting,

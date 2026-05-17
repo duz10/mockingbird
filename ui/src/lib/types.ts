@@ -94,6 +94,33 @@ export interface ModeRow {
   promptVersion: string;
 }
 
+/**
+ * Currently-selected transcription mode. The orchestrator resolves
+ * this fresh at the start of every dictation, so `set_active_mode`
+ * takes effect on the NEXT Right-Alt hold without any restart.
+ *
+ * AI command modes (rewrite/expand/summarize) are NOT eligible to be
+ * set as active — they act on existing text via their own hotkeys.
+ */
+export interface ActiveMode {
+  /** Slug of the active transcription mode (e.g. `"normal"`). */
+  slug: string;
+}
+
+/**
+ * The fixed allowlist of mode slugs that can be set as active. Kept
+ * in sync with `TRANSCRIPTION_SLUGS` in
+ * `src-tauri/src/commands/active_mode.rs`. The Modes UI uses this to
+ * decide which mode cards get the "Set active" radio treatment vs.
+ * the legacy enable/disable + hotkey treatment.
+ */
+export const TRANSCRIPTION_SLUGS = ["normal", "verbose", "fragment"] as const;
+export type TranscriptionSlug = (typeof TRANSCRIPTION_SLUGS)[number];
+
+export function isTranscriptionSlug(slug: string): slug is TranscriptionSlug {
+  return (TRANSCRIPTION_SLUGS as readonly string[]).includes(slug);
+}
+
 export interface SettingsSnapshot {
   theme: ThemeChoice;
   soundEnabled: boolean;
