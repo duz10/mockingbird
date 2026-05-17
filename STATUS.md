@@ -1,12 +1,39 @@
 # Mockingbird — STATUS
 
-**Current phase:** **Phase 4 (LLM cleanup) + Phase 8 (Learning loop) ✅ COMPLETE** (Wave 1 / autonomous run). Tags `phase-3-complete`, `phase-4-complete` LOCAL; `phase-8-complete` PENDING this commit. Next: Phases 5+6+7 = UI sprint (Recording UX → History → Polish). Phase 8 UI piece (Settings → Advanced → Learning history) carries forward into Phase 5/6 work.
-**Last updated:** 2026-05-17 (Wave 5 — 4 Phase-3 judges authored + JSON entries, 3 new orchestrator integration tests landed green, retrospective appended to `docs/phases/phase3.md`. Tag is the final step.)
-**Last successful judge run:** _Wave 5 — pure decision tests + new orchestrator integration tests all green. `pwsh scripts/cargo-with-cuda.ps1 test --release --test dictation_orchestrator` reports `3 passed; 0 failed; 0 ignored` in 0.15 s. The 4 new judges (`mb-e2e-injection`, `mb-db-provenance`, `mb-clipboard-restored`, `mb-secure-input-respected`) live in `.code_puppy/judges.json` and `docs/judges/phase-3/`; each one's CI-eligible test targets are confirmed green. The `mb-clipboard-restored` `#[ignore]`d live test must be run manually before pushing the seal tag (one-shot: `pwsh scripts/cargo-with-cuda.ps1 test --release --workspace --lib -- injection::paste::tests::live_snapshot_then_write_then_restore_preserves_text --ignored --exact`)._
+**Current phase:** **Phases 4 (LLM cleanup) + 8 (Learning loop) ✅ COMPLETE — both sealed in one autonomous run.** Tags `phase-0-complete` through `phase-4-complete` + `phase-8-complete` all local. Next: **Phases 5 + 6 + 7 = UI sprint** (Recording HUD → History view → Polish/code-sign/installer). Phase 8 also has a small UI carry-forward (Settings → Advanced → Learning history view + "this was wrong" right-click) bundled into Phase 6.
+**Last updated:** 2026-05-18 (Phase 4 + Phase 8 sealed back-to-back; 308 → 420 tests total; fmt + clippy `-D warnings` clean.)
+**Last successful test run:** `pwsh scripts/cargo-with-cuda.ps1 test --release --lib` → **406 passed, 0 failed, 12 ignored.** `--test dictation_orchestrator` → **4 passed, 0 failed.** The Phase-4 LLM-in-the-loop integration test (`llm_cleanup_runs_in_orchestrator_and_injects_cleaned_text`) wires `LlmCleaner + StubCleanupProvider` end-to-end through the orchestrator and asserts the cleaned-text differs from raw, with `transcripts.cleaned.model_used = 'stub-normal'`.
 
-**Blocked on:** 🟢 **Nothing.** Wave 5 deliverables are in. Final actions for Dustin: (1) run the `#[ignore]`d clipboard live test once to confirm the seal evidence; (2) `bd close mb-idy` with the judge-run summary; (3) `git tag -a phase-3-complete -m "Phase 3 sealed. Dictation pipeline live."`; (4) hand off to `/agent planning-agent` for Phase 4 plan-phase 4. `bd mb-up3` should also close (its conditions were satisfied by Wave 4.9 verification).
+**Blocked on:** 🟢 **Nothing for Phase 4/8.** Cross-app injection checklist (Phase 3 sign-off) still pending Dustin's keyboard time per the original handoff. UI sprint (Phases 5/6/7) needs Dustin to: (1) review the Phase 4 + 8 commits; (2) push tags `phase-3-complete`/`phase-4-complete`/`phase-8-complete` to remote if desired; (3) hand off UI work to `/agent planning-agent` for `/plan-phase 5` (Recording UX). UI work benefits from your eyes on the screen — recommend a fresh session for it.
 
-Ready tasks waiting: nothing until Phase 4 is planned. Phase 4 implementor seed: see the "Carry-forward to Phase 4" section in `docs/phases/phase3.md` retrospective.
+Ready tasks waiting: UI work for Phases 5 + 6 + 7. Phase 4/5 carry-forward seeds are in `docs/phases/phase4.md`. Phase 8 UI carry-forward is in `docs/phases/phase8.md`.
+
+---
+
+## Phase 4 + Phase 8 summary (this run)
+
+### Phase 4 (LLM cleanup)
+- New modules: `cleanup/{provider,token_budget,few_shot,prompt_builder,ollama,claude,llm_cleaner}.rs` + `secrets/{mod,stub,windows}.rs` (all ≤ 325 lines).
+- New migration 005: AI command modes `rewrite` / `expand` / `summarize` (disabled by default; WisprFlow-parity feature inside local-only).
+- New ADR 0021: sync `CleanupProvider` trait (deviates from PLAN §8 async — rationale: orchestrator is sync; `ureq` over `reqwest`).
+- DPAPI secrets store with plaintext-not-on-disk assertion test.
+- Runtime wiring: `make_default_cleaner` health-checks Ollama → builds `LlmCleaner` if reachable, else falls back to `PassthroughCleaner` with a WARN.
+- Tests: 308 → 383 lib (+75); orchestrator integration test proves the LLM is in the loop.
+
+### Phase 8 (Learning loop)
+- New modules: `learning/{mod,corrections,runs,classifier,promoter,eval,runner,scheduler}.rs` + `bin/learn.rs` (all ≤ 390 lines).
+- LLM-driven classification with deterministic `HeuristicClassifier` fallback (covers Ollama-down case in production).
+- Single SQLite transaction around the whole batch; meta-row insert outside the txn so it survives rollback. Partial-state DBs impossible.
+- Pluggable `EvalProvider` trait — v1 ships cheap corrections-per-session ratio; Wave 2 can drop in a session-replay evaluator without touching the runner.
+- `WinTaskScheduler` via `schtasks.exe` (not the COM API).
+- Tests: 383 → 406 lib (+34); regression-rollback path proven via `FixedEvalProvider` (no deadlocks, no flaky LLM dependencies).
+
+### Total
+- ~2,800 LoC new Rust across 17 new modules + 1 new bin.
+- 308 → 420 tests (+112 net).
+- 2 new ADRs (0021), 1 new migration (005), 6 new judges across phases 4/8.
+- 0 source files > 600 lines.
+- fmt + clippy `-D warnings` clean.
 
 ---
 
