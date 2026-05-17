@@ -114,7 +114,14 @@ export interface ActiveMode {
  * decide which mode cards get the "Set active" radio treatment vs.
  * the legacy enable/disable + hotkey treatment.
  */
-export const TRANSCRIPTION_SLUGS = ["normal", "verbose", "fragment"] as const;
+/**
+ * Updated for Wave 2 of ADR 0022 (migration 008). The pre-Wave-2
+ * trio (`normal` / `verbose` / `fragment`) was replaced with the
+ * three focused modes below. `verbose` and `fragment` rows still
+ * exist in the database (soft-disabled) so historical session rows
+ * resolve correctly, but they're not pickable as the active mode.
+ */
+export const TRANSCRIPTION_SLUGS = ["casual", "normal", "formal"] as const;
 export type TranscriptionSlug = (typeof TRANSCRIPTION_SLUGS)[number];
 
 export function isTranscriptionSlug(slug: string): slug is TranscriptionSlug {

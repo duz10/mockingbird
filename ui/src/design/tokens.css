@@ -29,10 +29,18 @@
   --status-ok:         oklch(0.72 0.18 145);     /* green */
   --status-error:      oklch(0.62 0.22 25);      /* red-flash */
 
-  /* Mode palette. */
+  /* Mode palette. Post-Wave-2 (migration 008) the three
+     transcription modes are casual/normal/formal. The legacy
+     verbose/fragment swatches stay because Insights still has to
+     render mode-mix bars for historical sessions that referenced
+     them — and Dictionary still uses the verbose swatch as the
+     "import" source badge background. Don't delete unused-looking
+     tokens without grepping for `--mode-` first. */
+  --mode-casual:    oklch(0.74 0.14 145);        /* green */
   --mode-normal:    oklch(0.70 0.14 230);        /* blue */
-  --mode-verbose:   oklch(0.72 0.16 285);        /* violet */
-  --mode-fragment:  oklch(0.78 0.14 95);         /* yellow-green */
+  --mode-formal:    oklch(0.66 0.18 305);        /* deep violet */
+  --mode-verbose:   oklch(0.72 0.16 285);        /* violet — legacy, retained for Insights + Dictionary */
+  --mode-fragment:  oklch(0.78 0.14 95);         /* yellow-green — legacy, retained for Dictionary */
   --mode-rewrite:   oklch(0.74 0.15 200);        /* cyan — AI command */
   --mode-expand:    oklch(0.72 0.14 320);        /* magenta — AI command */
   --mode-summarize: oklch(0.74 0.14 60);         /* orange — AI command */

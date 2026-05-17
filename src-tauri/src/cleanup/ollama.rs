@@ -34,9 +34,16 @@ pub const DEFAULT_BASE_URL: &str = "http://localhost:11434";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Wall-clock cap for a single cleanup request. PLAN doesn't pin a
-/// hard number; this matches the 30-s "if cleanup hangs, fall back"
-/// rule in ADR 0021.
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// hard number; this matches the "if cleanup hangs, fall back" rule
+/// in ADR 0021. Bumped from 30 s → 60 s in Wave 2 of ADR 0022
+/// because the new default `normal` model is 7B (was 3B); cold-load
+/// of a 7B-q4 into a 6 GB VRAM card with Whisper already resident
+/// measures at ~15-25 s in isolation and can spike to 40-50 s
+/// during app startup when Whisper, Ollama, and the GUI runtime
+/// are all competing for I/O. Steady-state warm calls remain
+/// 1-3 s; the timeout only matters for the once-per-boot first
+/// dictation. Hot calls don't pay the cost.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Health-check timeout — short, this is "is Ollama alive at all".
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(5);

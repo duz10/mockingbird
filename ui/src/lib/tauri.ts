@@ -124,6 +124,14 @@ export const api = {
     invoke<{ dataDir: string; logsDir: string; modelsDir: string }>(
       "app_paths",
     ),
+  /**
+   * Local Ollama `/api/tags`. Returns the installed model names
+   * (e.g. `["qwen2.5:7b-instruct-q4_K_M", "gemma2:2b"]`) for the
+   * Modes editor's model dropdown. Returns `[]` when Ollama is
+   * unreachable so the UI falls back to free-text input.
+   */
+  list_installed_models: () =>
+    invoke<string[]>("list_installed_models"),
 };
 
 /* ------------------------------------------------------------------ */
@@ -160,6 +168,14 @@ function fixtureFor<T>(command: string, args?: object): T {
         logsDir: "C:\\Users\\you\\AppData\\Roaming\\Mockingbird\\logs",
         modelsDir: "C:\\Users\\you\\mockingbird_models",
       }) as T;
+    case "list_installed_models":
+      // Mirror the user's actual setup so the storybook-style
+      // browser preview looks right.
+      return fixture(command, [
+        "qwen2.5:7b-instruct-q4_K_M",
+        "qwen2.5:3b-instruct-q4_K_M",
+        "gemma2:2b-instruct-q4_K_M",
+      ]) as T;
     // Write commands — no-op in fixture mode.
     case "delete_session":
     case "mark_session_as_example":
@@ -200,9 +216,9 @@ export const FIXTURES: {
     streakDays: 14,
     sparkline7d: [320, 410, 220, 580, 1100, 760, 1842],
     modeMix: [
-      { slug: "normal", label: "Normal", count: 14 },
-      { slug: "verbose", label: "Verbose", count: 5 },
-      { slug: "fragment", label: "Fragment", count: 4 },
+      { slug: "casual", label: "Casual", count: 9 },
+      { slug: "normal", label: "Normal", count: 11 },
+      { slug: "formal", label: "Formal", count: 3 },
     ],
     topApps: [
       { app: "slack.exe", count: 9 },
@@ -226,7 +242,7 @@ export const FIXTURES: {
   sessions: Array.from({ length: 40 }, (_, i) => ({
     id: 100 + i,
     uuid: `00000000-0000-0000-0000-${(100 + i).toString().padStart(12, "0")}`,
-    modeSlug: ["normal", "verbose", "fragment"][i % 3]!,
+    modeSlug: ["casual", "normal", "formal"][i % 3]!,
     startedAt: new Date(Date.now() - i * 1000 * 60 * 17).toISOString(),
     durationMs: 4_000 + (i % 6) * 2_000,
     foregroundApp: ["slack.exe", "Code.exe", "chrome.exe", "notepad.exe"][i % 4]!,
@@ -302,37 +318,41 @@ export const FIXTURES: {
     },
   ],
   modes: [
+    // Browser-preview fixture mirrors the post-Wave-2 mode set
+    // (migration 008). Updating these every migration is friction;
+    // worth it because designers see the same shape as the shipped
+    // app.
+    {
+      slug: "casual",
+      label: "Casual",
+      enabled: true,
+      modelId: "qwen2.5:3b-instruct-q4_K_M",
+      provider: "ollama",
+      temperature: 0.4,
+      maxTokens: 1024,
+      hotkey: "Ctrl+Win+C",
+      promptVersion: "v1",
+    },
     {
       slug: "normal",
       label: "Normal",
       enabled: true,
-      modelId: "qwen2.5:3b-instruct-q4_K_M",
+      modelId: "qwen2.5:7b-instruct-q4_K_M",
       provider: "ollama",
-      temperature: 0.3,
+      temperature: 0.1,
       maxTokens: 2048,
       hotkey: "Ctrl+Win",
-      promptVersion: "v1",
+      promptVersion: "v4",
     },
     {
-      slug: "verbose",
-      label: "Verbose",
+      slug: "formal",
+      label: "Formal",
       enabled: true,
-      modelId: "qwen2.5:3b-instruct-q4_K_M",
+      modelId: "qwen2.5:7b-instruct-q4_K_M",
       provider: "ollama",
-      temperature: 0.5,
+      temperature: 0.1,
       maxTokens: 4096,
-      hotkey: "Ctrl+Win+Shift+V",
-      promptVersion: "v1",
-    },
-    {
-      slug: "fragment",
-      label: "Fragment",
-      enabled: true,
-      modelId: "qwen2.5:3b-instruct-q4_K_M",
-      provider: "ollama",
-      temperature: 0.2,
-      maxTokens: 1024,
-      hotkey: "Ctrl+Win+Shift+F",
+      hotkey: "Ctrl+Win+F",
       promptVersion: "v1",
     },
     {

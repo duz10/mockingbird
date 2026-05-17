@@ -48,7 +48,11 @@ pub const DEFAULT_ACTIVE_MODE: &str = "normal";
 
 /// Slugs eligible to be set as the active transcription mode.
 /// AI command modes are intentionally excluded — see module docs.
-pub const TRANSCRIPTION_SLUGS: &[&str] = &["normal", "verbose", "fragment"];
+/// Updated for Wave 2 (migration 008): the three focused modes are
+/// `casual` / `normal` / `formal`. `verbose` and `fragment` were
+/// soft-disabled in 008 (`enabled = 0`) — they're still in the table
+/// for historical-session resolution but no longer pickable here.
+pub const TRANSCRIPTION_SLUGS: &[&str] = &["casual", "normal", "formal"];
 
 /// Response shape for [`get_active_mode`].
 #[derive(Debug, Serialize)]

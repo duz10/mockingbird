@@ -77,6 +77,8 @@
   "modes.field.hotkey": "Hotkey",
   "modes.field.provider": "Provider",
   "modes.field.model": "Model",
+  "modes.field.model.help": "Pick from your local Ollama installs, or type any tag. Cloud providers ignore this list.",
+  "modes.field.model.empty": "No local Ollama models detected — Ollama may not be running.",
   "modes.field.temperature": "Temperature",
   "modes.field.maxTokens": "Max tokens",
   "modes.saved": "Mode saved",

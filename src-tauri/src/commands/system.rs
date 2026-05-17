@@ -9,6 +9,7 @@
 
 use std::path::PathBuf;
 
+use crate::cleanup::OllamaProvider;
 use crate::commands::types::AppPaths;
 
 /// Open a path with the OS default handler. On Windows this lands in
@@ -63,4 +64,26 @@ pub fn app_paths() -> Result<AppPaths, String> {
         logs_dir: logs_dir.to_string_lossy().into_owned(),
         models_dir: models_dir.to_string_lossy().into_owned(),
     })
+}
+
+/// List the local Ollama tags via `GET /api/tags`. Used by the Modes
+/// editor's per-mode model dropdown — UI populates the `<select>`
+/// options with whatever the user actually has installed, so we
+/// can't recommend a default the box can't run.
+///
+/// Returns the empty Vec when Ollama isn't reachable so the UI can
+/// fall back to a free-text input instead of blocking the editor.
+/// (The cleaner already handles missing-model gracefully at
+/// dictation time.)
+#[tauri::command]
+pub fn list_installed_models() -> Result<Vec<String>, String> {
+    let provider = OllamaProvider::new();
+    match provider.list_models() {
+        Ok(models) => Ok(models),
+        Err(e) => {
+            // Log but don't propagate — the UI falls back to text input.
+            tracing::warn!(error = %e, "list_installed_models: ollama unreachable");
+            Ok(Vec::new())
+        }
+    }
 }

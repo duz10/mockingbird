@@ -1,3 +1,70 @@
+## 2026-05-17 — Postship Wave 9: three focused modes (ADR 0022 Wave 2)
+
+**Status:** Shipped. Migration 008 applied cleanly; live boot resolved
+`mode=normal prompt_id=10 model=qwen2.5:7b-instruct-q4_K_M temperature=0.1`.
+
+### What
+- Three new transcription modes: **casual** / **normal** / **formal**
+  — replacing the old normal/verbose/fragment trio. The old rows
+  survive in the DB (soft-disabled, `enabled = 0`) so historical
+  session rows still resolve.
+- Three new prompts (~1.5 KB each, all front-loaded with
+  "PRESERVE EVERY SENTENCE" as the non-negotiable first rule):
+    - `casual_v1.md` — text-to-a-friend; lists inline as prose
+    - `normal_v4.md` — well-edited written English; lead-in line
+      mandatory when speaker names a list (the Santa-test fix)
+    - `formal_v1.md` — professional doc; headers, numbered lists,
+      expanded contractions, register polish
+- Smart-default model assignments for this RTX-2060/6 GB rig:
+    - casual → qwen2.5:3b (fast)
+    - normal → **qwen2.5:7b** (newly installed; default bumped for
+      reliability — 3B was making editorial decisions it shouldn't)
+    - formal → qwen2.5:7b (quality)
+- Temperature dropped to 0.1 for normal+formal (content fidelity
+  > creativity). Casual stays at 0.4 (light register tweaks OK).
+- New `list_installed_models` IPC + Modes-editor model field is
+  now a combobox sourced from `ollama /api/tags`. Free-text still
+  works (cloud providers / models about to be pulled).
+- Active-mode auto-rescue: any user previously on `verbose` /
+  `fragment` is migrated to `normal` in migration 008.
+- Backend `REQUEST_TIMEOUT` bumped from 30 s → 60 s to cover 7B
+  cold-load on app startup (Whisper + Ollama contention spikes
+  past the old budget).
+
+### Why
+Seventh-smoketest screenshot showed the LLM dropping 3 sentences
+of preamble on the Santa-list utterance — it took editorial liberty
+that cleanup is forbidden from taking. Root cause: the 3B-q4
+model's attention budget can't reliably attend to rules buried
+below ~1 KB of prompt. Fix: smaller prompts with the
+load-bearing rule FIRST, and a bigger default model.
+
+### Provenance
+No schema change beyond append-only INSERTs. ADR 0008 + ADR 0010
+invariants intact. Old `normal_v3` row preserved; new `normal_v4`
+is a new row in the prompts table.
+
+### Cost
+- 8 files changed; ~600 lines added
+- 4m34s release build
+- 4.7 GB Ollama pull (qwen2.5:7b) before this work started
+
+### Blocked-on / Next
+- **You** to live-test the Santa-list utterance + the keyboard-
+  supplies utterance + a casual short message + a formal long
+  paragraph. Confirm:
+    - normal mode preserves preamble
+    - casual mode emits prose with inline lists (no bullets)
+    - formal mode promotes structure (headings, numbered lists)
+    - Modes-editor model dropdown shows your three installed tags
+    - 7B latency feels acceptable (~3-4 s warm vs ~1.5 s for 3B)
+- After your sign-off: Wave 3 (LLM-skip for short casual
+  utterances → ~300 ms direct-paste of preprocessor output)
+
+### Last-judge: Bernard self-assessed; deferred to user smoketest.
+
+---
+
 ## 2026-05-17 — Postship Wave 8: deterministic preprocessor (ADR 0022 Wave 1)
 
 **Status:** Shipped. Live as of PID 39876.

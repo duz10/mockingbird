@@ -14,6 +14,95 @@ Format:
 
 ---
 
+## 2026-05-17 [phase5-postship-9] three focused modes + 7B default — Wave 2 of ADR 0022
+
+- **The Santa-list regression** (2026-05-17 seventh smoketest):
+  with the preprocessor in place, raw input `"I'm making a list
+  of things and checking it twice. And I'm going to find out
+  who's naughty or nice. And to do that I need to know these
+  important things. Who has stolen something? Who has lied to
+  their friends? Who has lied to their mom?"` came out cleaned as
+  just three bulleted questions — the four sentences of preamble
+  were dropped. The v3 prompt explicitly said "do not summarize"
+  but the 3B-q4 model decided the questions were "the point"
+  and editorialized everything else away.
+- **Root cause is attention budget, not prompt wording.** The v3
+  prompt was ~4.8 KB. A 3B-q4 model has finite attention; rules
+  buried below the first KB of a long prompt get statistically
+  ignored. **Load-bearing rules must go FIRST.** Same lesson as
+  Wave 1's "move work out of the LLM" — every byte of prompt the
+  model doesn't have to attend to is attention budget freed for
+  the actual judgment work.
+- **"Preserve every sentence" must be NON-NEGOTIABLE and FIRST.**
+  All three Wave-2 prompts (casual_v1, normal_v4, formal_v1)
+  start with a section literally titled
+  `## NON-NEGOTIABLE RULES` whose first rule is
+  `**PRESERVE EVERY SENTENCE.**` Followed by the reason: cleanup
+  ≠ summarization, every sentence the speaker said matters. Then
+  the rest of the prompt fits in ~1 KB. With this structure the
+  rule lives in the highest-attention region of the context
+  window. Small model can't miss it.
+- **Bigger model when content fidelity matters.** qwen2.5:7b-q4
+  follows instructions markedly better than 3b-q4 — the model-size
+  effect on rule-following is real and large. The 7B cold-loads
+  in ~17 s on the user's RTX-2060/6 GB rig (with Whisper-large
+  already resident, ~1 GB free) and runs warm calls in ~3 s vs
+  ~1.5 s for 3B. **2× latency for ~10× rule-following reliability
+  is a great trade** for normal/formal modes. Casual stays on 3B
+  because Wave 3 will skip the LLM entirely for short casual
+  utterances anyway.
+- **REQUEST_TIMEOUT must bracket the worst-case cold-load.** Old
+  value 30 s covered 3B cold-load (~6 s) with 5× headroom. Same
+  budget on a 7B cold-load is only 1.2× headroom; one moment of
+  Whisper-Ollama-Tauri startup contention can blow through it.
+  Bumped to 60 s. Steady-state warm calls pay nothing extra.
+  Lesson: when changing default model SIZE, recheck every
+  timeout downstream of it.
+- **Migration `ON CONFLICT DO UPDATE WHERE` is exactly the right
+  tool for soft state migration.** Migration 008 needed to rescue
+  any user whose `dictation.active_mode_slug` setting pointed at
+  the now-disabled `verbose` or `fragment`. The SQLite idiom:
+  ```sql
+  INSERT INTO settings VALUES ('dictation.active_mode_slug', 'normal')
+  ON CONFLICT(key) DO UPDATE SET value = 'normal'
+  WHERE value IN ('verbose', 'fragment');
+  ```
+  This is one statement that handles all four cases: row absent →
+  insert with 'normal'; row present + verbose/fragment → update
+  to 'normal'; row present + something else → WHERE excludes, no
+  update; row present + already 'normal' → WHERE matches but
+  UPDATE is a no-op. No `if exists` ceremony, no client-side
+  branching.
+- **Shared `<datalist>` is the DRY way to wire N comboboxes from
+  one source.** The Modes editor has one model `<input>` per
+  mode card, but all of them autocomplete from the same
+  installed-models list. Browsers de-dup automatically when
+  multiple inputs reference the same `list=` id, so the cleanest
+  pattern is: render the `<datalist id="...">` ONCE at the top
+  of the page, point every input at it via `list=`. The shared
+  ID lives in a const at the top of the file (`MODELS_DATALIST_ID`)
+  so producer + consumer can't drift.
+- **Patterns burned in:**
+  - **"Load-bearing rules go first." This applies to prompts,
+    docstrings, function signatures, and anything else attention-
+    budgeted. The most important rule deserves the highest-
+    attention slot — front of the section, front of the line,
+    bold/uppercase if the medium allows.
+  - **"Smaller prompts > more rules."** The v3→v4 prompt shrank
+    from 4.8 KB to 1.5 KB despite ADDING the preservation rule.
+    How? Removed every rule the deterministic preprocessor now
+    handles (fillers, punctuation, capitalization, layout cues).
+    The LLM only sees the SHAPE of cleanup work it actually has
+    to do. Same architectural move as Wave 1 — push work down
+    the stack so the LLM-shaped portion shrinks.
+  - **"Test the regression you fixed."** Each Wave-2 prompt's
+    `## Examples` section contains the exact Santa-list utterance
+    that triggered the regression. The example shows the model
+    the right answer for the input that previously broke. Next
+    test against the same input is a high-confidence pass.
+
+---
+
 ## 2026-05-17 [phase5-postship-8] deterministic preprocessor — Wave 1 of ADR 0022
 
 - **Context:** sixth-smoketest screenshot showed the LLM emitting

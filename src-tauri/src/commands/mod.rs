@@ -93,6 +93,7 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         // System
         system::open_path,
         system::app_paths,
+        system::list_installed_models,
     ])
 }
 

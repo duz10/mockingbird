@@ -1,6 +1,7 @@
 // Modes editor with two distinct sections:
 //
-//   1. **Transcription modes** (normal / verbose / fragment) — exactly
+//   1. **Transcription modes** (casual / normal / formal — see
+//      migration 008) — exactly
 //      ONE is active at a time. The active one is what Right-Alt
 //      uses for the next dictation. Card UI: a "Use this mode" radio
 //      affordance replaces the legacy enable/disable toggle, the
@@ -31,6 +32,13 @@ import styles from "./Modes.module.css";
 
 const SAVE_DEBOUNCE_MS = 400;
 
+/**
+ * DOM id for the shared `<datalist>` of locally-installed Ollama
+ * models. Every model `<input>` references it via `list=`. Kept as
+ * a constant so the producer + consumer can't drift.
+ */
+const MODELS_DATALIST_ID = "ollama-installed-models";
+
 export function ModesPage() {
   const modes = useAppStore((s) => s.modes);
   const setModes = useAppStore((s) => s.setModes);
@@ -39,6 +47,9 @@ export function ModesPage() {
 
   const [savedSlug, setSavedSlug] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Installed Ollama tags for the model dropdown. Empty = Ollama
+  // unreachable; the input falls back to free-text-only.
+  const [installedModels, setInstalledModels] = useState<string[]>([]);
 
   // First-load: re-fetch modes + active selection if not warm.
   useEffect(() => {
@@ -57,6 +68,9 @@ export function ModesPage() {
           // highlighted. Logging the error would noise up the console.
         });
     }
+    // Fire-and-forget. IPC returns [] on Ollama-unreachable so we
+    // never reject — no .catch needed.
+    void api.list_installed_models().then(setInstalledModels);
   }, [modes.length, activeModeSlug, setModes, setActiveModeSlug]);
 
   const handlePatch = useCallback(
@@ -125,6 +139,18 @@ export function ModesPage() {
   return (
     <>
       <PageHeader title={t("modes.title")} subtitle={t("modes.subtitle")} />
+      {/*
+        Single shared <datalist> for all model <input>s on the page.
+        Browsers de-dup automatically when multiple inputs reference
+        the same `list=` id, so this is the DRY way to wire suggestions
+        for N cards. Empty list (Ollama unreachable) is fine — the
+        input degrades to plain free-text.
+      */}
+      <datalist id={MODELS_DATALIST_ID}>
+        {installedModels.map((m) => (
+          <option key={m} value={m} />
+        ))}
+      </datalist>
       <div className={styles.shell}>
         {transcription.length > 0 ? (
           <section className={styles.group} aria-labelledby="modes-tx-heading">
@@ -148,6 +174,7 @@ export function ModesPage() {
                   variant="transcription"
                   isActive={m.slug === activeModeSlug}
                   justSaved={savedSlug === m.slug}
+                  installedModels={installedModels}
                   onPatch={(patch) => void handlePatch(m.slug, patch)}
                   onSetActive={() => void handleSetActive(m.slug)}
                 />
@@ -174,6 +201,7 @@ export function ModesPage() {
                   variant="command"
                   isActive={false}
                   justSaved={savedSlug === m.slug}
+                  installedModels={installedModels}
                   onPatch={(patch) => void handlePatch(m.slug, patch)}
                   onSetActive={() => {
                     /* not applicable for command modes */
@@ -195,6 +223,12 @@ interface ModeCardProps {
   variant: CardVariant;
   isActive: boolean;
   justSaved: boolean;
+  /**
+   * Names of locally-installed Ollama models, surfaced via the
+   * shared `<datalist>` for autocomplete on the model field. Empty
+   * Vec = no suggestions; input still accepts any string.
+   */
+  installedModels: string[];
   onPatch: (patch: Partial<ModeRow>) => void;
   onSetActive: () => void;
 }
@@ -204,6 +238,7 @@ function ModeCard({
   variant,
   isActive,
   justSaved,
+  installedModels,
   onPatch,
   onSetActive,
 }: ModeCardProps) {
@@ -353,11 +388,24 @@ function ModeCard({
           <label className={styles.fieldLabel} htmlFor={`${mode.slug}-model`}>
             {t("modes.field.model")}
           </label>
+          {/*
+            `list=` makes this a combobox: typing filters the
+            datalist suggestions, but the user can also free-text
+            any model tag (useful for cloud providers or a model
+            they're about to `ollama pull`). The empty-installed
+            case degrades to a plain text input — no broken UX.
+          */}
           <input
             id={`${mode.slug}-model`}
             className={styles.input}
+            list={MODELS_DATALIST_ID}
             value={model}
             onChange={(e) => setModel(e.target.value)}
+            placeholder={
+              installedModels.length === 0
+                ? t("modes.field.model.empty")
+                : undefined
+            }
           />
         </div>
 
