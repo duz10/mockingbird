@@ -1,105 +1,221 @@
-//! Recording-window owner (stub for Wave 4).
+//! Recording-window owner.
 //!
-//! The recording window is a small non-activating Tauri window that
-//! the orchestrator shows during `StateAction::StartCapture` and hides
-//! on `StopCapture` / `DiscardAudio`. It surfaces a recording
-//! indicator (level meter, elapsed timer, cancel button) — the React
-//! UI inside the window lands in Phase 5.
+//! The recording window is a small **non-activating** Tauri webview
+//! (label `"recording"`, configured in `tauri.conf.json` with
+//! `focus: false`, `decorations: false`, `transparent: true`,
+//! `alwaysOnTop: true`, `skipTaskbar: true`). The orchestrator shows
+//! it during `StateAction::StartCapture` and hides it on
+//! `StopCapture` / `DiscardAudio`. Mid-pipeline it emits
+//! `dictation:state` events so the React overlay (`recording.html`)
+//! can move from "listening" to "transcribing" to "pasting" to "done".
 //!
-//! ## Wave 4 scope
+//! ## Contract
 //!
-//! - **Stable Rust API**: [`RecordingWindow::show`] / [`Self::hide`] /
-//!   [`Self::is_visible`].
-//! - **Idempotent**: `show()` while visible is a no-op; `hide()` while
-//!   hidden is a no-op. The orchestrator doesn't track visibility.
-//! - **Stubbed visuals**: no actual Tauri window yet. State machine
-//!   only — implementation lands in Phase 5 with the React side.
-//! - **Non-activating contract**: any future impl MUST use Tauri's
-//!   `focused(false)` + `WS_EX_NOACTIVATE` so the recording window
-//!   never steals foreground (which would cause our injection to
-//!   land in our OWN window — catastrophic ADR 0016 §7 failure mode).
+//! - **Idempotent** show / hide / set_state. Orchestrator never has to
+//!   track its own visibility.
+//! - **App-handle is optional**. Pure unit tests construct without
+//!   one; production wiring in `lib.rs::run()` calls
+//!   [`Self::set_app_handle`] right after the runtime is spawned. This
+//!   keeps the orchestrator constructible in tests with no Tauri
+//!   runtime present.
+//! - **Non-activating**. We `.show()` the window but never `.set_focus()`,
+//!   and the config locks `focus: false`. If a future change ever
+//!   focuses this window, our SendInput will land in **our own** webview
+//!   instead of the user's app — catastrophic ADR 0016 §7 failure.
+//! - **Best-effort I/O**. Tauri errors (window gone, runtime not yet
+//!   ready) are logged and swallowed — feedback is convenience, never
+//!   correctness, so a missing UI must not stall the dictation pipeline.
 //!
-//! ## Wave 4.7 — interim audible feedback
+//! ## Audible beep (interim)
 //!
-//! Until Phase 5 ships the real visual indicator, `show()` / `hide()`
-//! emit short `Beep`s (800 Hz on start, 400 Hz on stop) so the user
-//! has *some* confirmation that the hotkey was detected. Phase 5 may
-//! keep or drop these — they're a temporary UX scaffold, not a
-//! permanent contract. Beep is best-effort (errors logged, ignored).
+//! While the visual indicator was unwired, `show()`/`hide()` emitted
+//! short kernel32 `Beep`s as audible feedback. They're still here
+//! gated on `--feature audible-beeps`; the default build is silent
+//! now that the overlay is real.
 //!
-//! ## Pure-vs-OS split
+//! ## Cross-platform
 //!
-//! The state machine is pure. The audible-beep helper is `cfg`-gated
-//! to Windows and no-ops elsewhere (Phase 9 macOS / Linux can fill in
-//! platform-native equivalents).
+//! The state machine + emit logic is portable; the visual webview is
+//! Tauri-provided on every platform. The `Beep` helper is
+//! Windows-only and no-ops elsewhere.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::error::AppResult;
 
-/// Frequency (Hz) of the "recording started" beep.
-const BEEP_START_HZ: u32 = 800;
-/// Frequency (Hz) of the "recording stopped" beep — lower so the
-/// user can tell start vs stop by ear.
-const BEEP_STOP_HZ: u32 = 400;
-/// Beep duration (ms). Long enough to hear, short enough not to feel
-/// laggy. `Beep` is synchronous, so this directly delays the orchestrator
-/// — keep it small.
-const BEEP_DURATION_MS: u32 = 60;
+/// Webview label declared in `tauri.conf.json`. Kept here as a const
+/// so the wiring stays in one file.
+const RECORDING_WINDOW_LABEL: &str = "recording";
+
+/// Event name the recording overlay subscribes to. Mirrored in the
+/// TypeScript side at `ui/src/lib/tauri.ts`.
+const STATE_EVENT: &str = "dictation:state";
+
+/// Pipeline states surfaced to the overlay. Strings (not an enum
+/// discriminator) so adding a new state on the Rust side doesn't
+/// silently change the TypeScript shape.
+pub mod state {
+    /// User is holding the hotkey; mic is open.
+    pub const LISTENING: &str = "listening";
+    /// Whisper is running on the captured audio.
+    pub const TRANSCRIBING: &str = "transcribing";
+    /// LLM cleanup pass.
+    pub const CLEANING: &str = "cleaning";
+    /// SendInput / clipboard paste in progress.
+    pub const PASTING: &str = "pasting";
+    /// Successfully injected — shown briefly before fading to idle.
+    pub const DONE: &str = "done";
+    /// Pipeline failed (with an error message in payload).
+    pub const ERROR: &str = "error";
+    /// Quiet state — window hidden, no activity.
+    pub const IDLE: &str = "idle";
+    /// User cancelled mid-flight.
+    pub const ABORTED: &str = "aborted";
+}
+
+/// Payload shape for the `dictation:state` event. Matches
+/// `DictationStateEvent` on the TypeScript side.
+#[derive(Clone, Debug, Serialize)]
+struct StateEventPayload<'a> {
+    state: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "modeSlug")]
+    mode_slug: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<&'a str>,
+}
 
 /// Owner of the recording-window state.
 ///
-/// Cloneable — the orchestrator hands clones to the state-driver
-/// thread (show/hide) and to the tray thread (it may want to know
-/// "is the recording window currently up?" for status display).
+/// Cheap to clone (`Arc`s under the hood). The orchestrator hands
+/// clones to every thread that needs to surface state — they all
+/// share the same visibility flag and the same `AppHandle`.
 #[derive(Clone, Default)]
 pub struct RecordingWindow {
     visible: Arc<AtomicBool>,
+    /// Set lazily from `lib.rs::run()` after the Tauri app is built.
+    /// `Option` so unit tests can construct a window without spinning
+    /// up a full Tauri runtime.
+    app: Arc<Mutex<Option<AppHandle>>>,
 }
 
 impl RecordingWindow {
-    /// Construct a new window owner with `visible = false`.
+    /// Construct a new window owner. The Tauri handle is plugged in
+    /// later via [`Self::set_app_handle`].
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Show the recording window. Idempotent.
-    ///
-    /// Wave-4 stub: flips the visibility atomic and (on Windows)
-    /// emits a short start-beep for interim audible feedback. Phase 5
-    /// will replace the beep with the real Tauri window.
-    pub fn show(&self) -> AppResult<()> {
-        if !self.visible.swap(true, Ordering::SeqCst) {
-            tracing::info!("🎙 recording window: SHOW (start)");
-            beep_best_effort(BEEP_START_HZ, BEEP_DURATION_MS);
+    /// Wire up the Tauri app handle. Idempotent — last writer wins.
+    /// Called once from `lib.rs::run()` setup.
+    pub fn set_app_handle(&self, app: AppHandle) {
+        // The Mutex is held briefly only on (rare) handle replacement;
+        // reads on the hot path use a separate try_lock-equivalent.
+        if let Ok(mut g) = self.app.lock() {
+            *g = Some(app);
         }
+    }
+
+    /// Show the recording window and emit a `listening` state event.
+    /// Idempotent — calling `show()` while visible just re-emits the
+    /// state (cheap, and lets the UI recover if it missed the first).
+    pub fn show(&self, mode_slug: &str) -> AppResult<()> {
+        let was_hidden = !self.visible.swap(true, Ordering::SeqCst);
+        if was_hidden {
+            tracing::info!(mode = %mode_slug, "🎙 recording window: SHOW");
+            beep_best_effort(BEEP_START_HZ, BEEP_DURATION_MS);
+            self.with_window(|w| {
+                let _ = w.show();
+            });
+        }
+        self.emit(state::LISTENING, Some(mode_slug), None);
         Ok(())
     }
 
-    /// Hide the recording window. Idempotent.
+    /// Hide the recording window and emit an `idle` state event.
+    /// Idempotent.
     pub fn hide(&self) -> AppResult<()> {
-        if self.visible.swap(false, Ordering::SeqCst) {
-            tracing::info!("🎙 recording window: HIDE (stop)");
+        let was_visible = self.visible.swap(false, Ordering::SeqCst);
+        if was_visible {
+            tracing::info!("🎙 recording window: HIDE");
             beep_best_effort(BEEP_STOP_HZ, BEEP_DURATION_MS);
+            self.with_window(|w| {
+                let _ = w.hide();
+            });
         }
+        self.emit(state::IDLE, None, None);
         Ok(())
+    }
+
+    /// Emit a mid-pipeline state without touching visibility. Used
+    /// during `complete()` to push `transcribing` / `cleaning` /
+    /// `pasting` / `done` to the overlay.
+    pub fn set_state(&self, state: &str, mode_slug: Option<&str>) {
+        self.emit(state, mode_slug, None);
+    }
+
+    /// Emit an error state. The overlay surfaces a brief toast then
+    /// returns to idle.
+    pub fn set_error(&self, msg: &str) {
+        self.emit(state::ERROR, None, Some(msg));
     }
 
     /// Current visibility — exposed for the tray status + tests.
     pub fn is_visible(&self) -> bool {
         self.visible.load(Ordering::SeqCst)
     }
+
+    /// Internal: run a closure with the recording webview if available.
+    /// Logs + swallows the "window gone" case so the pipeline never
+    /// stalls on UI hiccups.
+    fn with_window<F: FnOnce(tauri::WebviewWindow)>(&self, f: F) {
+        let Ok(guard) = self.app.lock() else { return };
+        let Some(app) = guard.as_ref() else { return };
+        match app.get_webview_window(RECORDING_WINDOW_LABEL) {
+            Some(w) => f(w),
+            None => {
+                tracing::warn!(
+                    label = RECORDING_WINDOW_LABEL,
+                    "recording webview not found — running headless?"
+                );
+            }
+        }
+    }
+
+    /// Internal: emit a `dictation:state` event. Errors are logged
+    /// at debug — they're harmless in tests + headless contexts.
+    fn emit(&self, state: &str, mode_slug: Option<&str>, error: Option<&str>) {
+        let Ok(guard) = self.app.lock() else { return };
+        let Some(app) = guard.as_ref() else {
+            tracing::trace!(state, "skip emit: no app handle (tests / not booted)");
+            return;
+        };
+        let payload = StateEventPayload { state, mode_slug, error };
+        if let Err(e) = app.emit(STATE_EVENT, &payload) {
+            tracing::debug!(error = ?e, state, "failed to emit dictation:state");
+        }
+    }
 }
+
+// ---------------------------------------------------------------------
+// Audible beep — Windows-only kernel32 binding. Optional now that we
+// have a real overlay; gated on a cargo feature for users who liked it.
+// ---------------------------------------------------------------------
+
+const BEEP_START_HZ: u32 = 800;
+const BEEP_STOP_HZ: u32 = 400;
+const BEEP_DURATION_MS: u32 = 60;
 
 /// Best-effort audible beep. Errors are swallowed silently —
 /// feedback is convenience, not correctness, so a missing audio
 /// output (no speakers, headless CI) must never break dictation.
 ///
-/// `Beep` is in kernel32. The `windows` 0.56 crate doesn't expose it
-/// (it's a pre-Windows-NT relic), so we declare the FFI inline. The
-/// signature has been frozen since Windows 95 — safe to bind by hand.
-#[cfg(target_os = "windows")]
+/// Gated on the `audible-beeps` cargo feature so the default build
+/// is silent now that the visual overlay is real.
+#[cfg(all(target_os = "windows", feature = "audible-beeps"))]
 fn beep_best_effort(freq_hz: u32, duration_ms: u32) {
     // SAFETY: `Beep` is a stable kernel32 export with no callback or
     // pointer arguments; freq/duration are by-value u32s. The function
@@ -113,9 +229,8 @@ fn beep_best_effort(freq_hz: u32, duration_ms: u32) {
     }
 }
 
-/// No-op on non-Windows targets. Phase 9 will provide platform-native
-/// equivalents (macOS `NSBeep`, Linux `XBell` / PipeWire ping).
-#[cfg(not(target_os = "windows"))]
+/// No-op on non-Windows targets or when the feature is disabled.
+#[cfg(not(all(target_os = "windows", feature = "audible-beeps")))]
 fn beep_best_effort(_freq_hz: u32, _duration_ms: u32) {}
 
 #[cfg(test)]
@@ -131,14 +246,14 @@ mod tests {
     #[test]
     fn show_makes_visible() {
         let w = RecordingWindow::new();
-        w.show().unwrap();
+        w.show("normal").unwrap();
         assert!(w.is_visible());
     }
 
     #[test]
     fn hide_after_show_makes_hidden() {
         let w = RecordingWindow::new();
-        w.show().unwrap();
+        w.show("normal").unwrap();
         w.hide().unwrap();
         assert!(!w.is_visible());
     }
@@ -146,8 +261,8 @@ mod tests {
     #[test]
     fn show_is_idempotent() {
         let w = RecordingWindow::new();
-        w.show().unwrap();
-        w.show().unwrap();
+        w.show("normal").unwrap();
+        w.show("normal").unwrap();
         assert!(w.is_visible());
     }
 
@@ -165,9 +280,17 @@ mod tests {
         // the same visibility flag.
         let w = RecordingWindow::new();
         let w2 = w.clone();
-        w.show().unwrap();
+        w.show("normal").unwrap();
         assert!(w2.is_visible());
         w2.hide().unwrap();
         assert!(!w.is_visible());
+    }
+
+    #[test]
+    fn set_state_does_not_change_visibility() {
+        let w = RecordingWindow::new();
+        w.show("normal").unwrap();
+        w.set_state(state::TRANSCRIBING, Some("normal"));
+        assert!(w.is_visible());
     }
 }

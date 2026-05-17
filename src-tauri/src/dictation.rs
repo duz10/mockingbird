@@ -271,7 +271,9 @@ impl DictationOrchestrator {
         self.state.started_at = Some(Instant::now());
         self.state.started_at_iso = Some(now_iso());
         self.audio.start()?;
-        self.recording_window.show()?;
+        // show() handles both the OS-level window display + emitting
+        // the initial `listening` state to the React overlay.
+        self.recording_window.show(&self.config.mode_slug)?;
         tracing::info!(
             fg = ?self.state.fg_keydown.as_ref().map(|f| &f.process_name),
             "dictation: start_capture"
@@ -284,7 +286,11 @@ impl DictationOrchestrator {
         let stop_at = Instant::now();
         let stop_iso = now_iso();
         self.audio.stop()?;
-        self.recording_window.hide()?;
+        // Window stays VISIBLE through the rest of the pipeline so
+        // the user gets progress feedback (transcribing → cleaning →
+        // pasting → done). It's hidden at the end of this fn, or by
+        // the persist_failed_* helpers on early-return paths.
+        let mode_slug = self.config.mode_slug.clone();
 
         // Drain the audio.
         let mut samples: Vec<i16> = Vec::new();
@@ -345,6 +351,8 @@ impl DictationOrchestrator {
         );
 
         // STT.
+        self.recording_window
+            .set_state(crate::recording_window::state::TRANSCRIBING, Some(&mode_slug));
         let stt_start = Instant::now();
         let stt_result = self.stt.transcribe(TranscribeRequest {
             audio: &trimmed,
@@ -360,6 +368,8 @@ impl DictationOrchestrator {
         };
 
         // Cleanup.
+        self.recording_window
+            .set_state(crate::recording_window::state::CLEANING, Some(&mode_slug));
         let cleanup_start = Instant::now();
         let cleaned_text = match self.cleaner.clean(&raw_text, &self.config.mode_slug) {
             Ok(c) => c,
@@ -381,6 +391,8 @@ impl DictationOrchestrator {
         let decision = pipeline::decide(&inputs);
 
         // Inject (or skip per decision).
+        self.recording_window
+            .set_state(crate::recording_window::state::PASTING, Some(&mode_slug));
         let inject_start = Instant::now();
         let outcome = match decision {
             pipeline::Decision::Proceed(strategy) => {
@@ -420,6 +432,17 @@ impl DictationOrchestrator {
             injected_text,
             cleanup_model: self.cleaner.model_name(),
         })?;
+
+        // Brief "done" flash before the window vanishes. The 200ms
+        // sleep is on the dedicated dictation thread; the next
+        // hotkey can't fire until the state machine receives
+        // PipelineComplete (sent by the caller in handle()), so the
+        // brief pause never delays the user.
+        self.recording_window
+            .set_state(crate::recording_window::state::DONE, Some(&mode_slug));
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        self.recording_window.hide()?;
+
         // Reset transient state.
         self.state = SessionState::default();
         Ok(())
@@ -482,12 +505,17 @@ impl DictationOrchestrator {
         fg_keyup: &ForegroundWindow,
         err: AppError,
     ) -> AppResult<()> {
+        // Surface to the overlay BEFORE the DB write so the user sees
+        // an error indicator immediately even if persistence stalls.
+        let msg = format!("stt failed: {err}");
+        self.recording_window.set_error(&msg);
+        self.recording_window.hide()?;
         let conn = self
             .db
             .lock()
             .map_err(|_| AppError::Other("orchestrator: db mutex poisoned".into()))?;
         let id = self.insert_session_row(&conn, &recording_ended_iso, fg_keyup)?;
-        sessions::update_status_error(&conn, id, &format!("stt failed: {err}"))?;
+        sessions::update_status_error(&conn, id, &msg)?;
         Ok(())
     }
 
@@ -496,6 +524,9 @@ impl DictationOrchestrator {
         recording_ended_iso: String,
         _recording_duration_ms: i64,
     ) -> AppResult<()> {
+        self.recording_window
+            .set_error("no foreground window at key-up");
+        self.recording_window.hide()?;
         let conn = self
             .db
             .lock()

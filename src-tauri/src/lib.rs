@@ -91,6 +91,16 @@ pub fn run() {
                     HashMap::new(),
                 ) {
                     Ok(runtime) => {
+                        // Plug the Tauri AppHandle into the recording
+                        // window so it can show/hide the real webview
+                        // and emit `dictation:state` events to the
+                        // overlay. Done AFTER spawn so the orchestrator
+                        // thread already has its clone; the
+                        // Arc<Mutex<Option<_>>> inside is shared with
+                        // every clone, so this writes once and propagates.
+                        runtime
+                            .recording_window
+                            .set_app_handle(app.handle().clone());
                         tracing::info!(
                             "🐦 dictation runtime started; hold RightAlt to dictate"
                         );

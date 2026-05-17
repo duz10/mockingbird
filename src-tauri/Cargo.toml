@@ -68,6 +68,13 @@ harness = false
 name = "verify_wave49"
 path = "examples/verify_wave49.rs"
 
+# Opt-in feature: emit short kernel32 Beeps on recording start/stop.
+# Default OFF now that the visual overlay (Phase 5) ships real feedback;
+# kept around for users on headless / overlay-broken setups.
+[features]
+default          = []
+audible-beeps    = []
+
 # Notes:
 # - Phase 2 Wave 4 added `whisper-rs` (currently CPU-only; see bd mb-ltq).
 # - Phase 3 adds `phf` for the injection-strategy override table (ADR 0016)

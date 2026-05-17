@@ -14,6 +14,31 @@ Format:
 
 ---
 
+## 2026-05-17 [phase5-wave-I] `cargo test --lib` exits 0xc0000139 even with cargo-with-cuda wrapper
+
+- **Context:** Phase 5 Wave I wiring `RecordingWindow` to the real Tauri
+  webview + `Emitter`. Wanted to run `cargo test --lib recording_window`
+  (pure tests, no DLL deps in my code) to confirm new unit tests pass.
+- **Finding:** Test binary exits with `STATUS_ENTRYPOINT_NOT_FOUND`
+  (0xc0000139) even when `pwsh scripts/cargo-with-cuda.ps1 test --lib`
+  is used. The earlier `0xc0000135 STATUS_DLL_NOT_FOUND` was solvable
+  by putting `target\debug\` on PATH; this one is one level deeper —
+  a DLL loaded successfully but an expected export is missing
+  (likely `whisper.dll` ABI drift between debug+release builds, or
+  `onnxruntime.dll` version mismatch). Affects ALL lib tests, not just
+  mine — `cargo test --lib hotkey::state` (pure state-machine, no
+  whisper/ort touch) also exits 0xc0000139. So it's a process-load-time
+  failure, not a test failure.
+- **Action:** Verify Rust code via `cargo build --lib` +
+  `cargo test --lib --no-run` instead — both confirm the type system,
+  borrow checker, and trait bounds without needing to actually launch
+  the test exe. If a Phase 5/6 wave needs live test execution, the
+  fix is to copy `whisper.dll` + `onnxruntime.dll` into
+  `target\debug\deps\` (where the test exe lives), not just
+  `target\debug\`. The launcher script doesn't do this today.
+
+---
+
 ## 2026-05-17 [phase3-wave4.8] Silero v5 ONNX needs an UNDOCUMENTED 64-sample context buffer
 
 - **Context:** End-to-end dictation produced empty Whisper output. Tracing
