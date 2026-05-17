@@ -1,6 +1,19 @@
 /* Global reset + base styles. */
 
+/* Legacy v1 tokens (cool blue-grey + Inter). Active when html has no
+ * data-design attribute or data-design="v1". */
 @import "./tokens.css";
+
+/* Design Language v1 (the new warm-earth + Liquid Glass system).
+ * The fonts.css with self-hosted @font-face declarations is loaded
+ * via a <link> tag in index.html + recording.html so it is processed
+ * by the browser as a static asset and the WOFF2 references resolve
+ * correctly in both dev and production builds. All v2 styles are
+ * scoped to [data-design="v2"] and remain dormant until
+ * useDesignVersion flips the root attribute. Wave 1 of the Design
+ * Language Phase (ADR 0023). */
+@import "./tokens-v2.css";
+@import "./typography-v2.css";
 
 *,
 *::before,
@@ -17,6 +30,17 @@ body {
   background: var(--surf-0);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+/* v2 body styling — only kicks in when the design flag is set.
+ * Sized + family copied from docs/design/design-language-v1.html base
+ * block. Phase-level visual sweep happens wave-by-wave; this just
+ * ensures the body itself is on-brand when the flag is on. */
+html[data-design="v2"],
+html[data-design="v2"] body {
+  font-family: "DM Sans", sans-serif;
+  color: var(--md-sys-on-background);
+  background: var(--md-sys-background);
 }
 
 body {

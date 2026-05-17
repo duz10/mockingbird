@@ -1748,3 +1748,11 @@ driver, so the machine never transitioned.
   command-module crate before writing the first `.map_err`. Future
   authors will copy the pattern without thinking about closure
   inference.
+
+
+## 2026-05-17 — Vite CSS `@import` does not resolve absolute `/public` paths
+
+- **Context:** Design Language Phase Wave 1 (mb-9pw). Adding self-hosted Latin WOFF2s under `ui/public/fonts/` plus a generated `fonts.css` next to them. Wanted to pull `fonts.css` into the bundle from `ui/src/design/global.css` with `@import "/fonts/fonts.css";` so a single CSS entry kept all design-system styles together.
+- **Symptom:** TS build wouldn't have flagged it (we run `tsc --noEmit && vite build` and CSS imports go through Vite's plugin), but Vite's CSS resolver treats `@import` strings as module specifiers, not URL paths. An absolute path like `/fonts/fonts.css` either gets resolved against the source tree (not the `public/` root) or silently dropped from the bundle, depending on Vite version. Either way the WOFF2 references in the imported CSS end up broken in production.
+- **Finding:** `public/` is for files you want served verbatim. Reference them with `<link rel="stylesheet" href="/fonts/fonts.css">` in `index.html` (and `recording.html` for the recording overlay window) — the browser fetches them as plain static assets and the relative `url(./DMSans-latin.woff2)` references inside resolve correctly against the served URL.
+- **Action:** Both Tauri webview entry points (`ui/index.html`, `ui/recording.html`) now `<link>` the fonts stylesheet. The token + typography CSS still lives in `src/design/` and gets `@import`ed via the JS-imported `global.css` — that path works fine because both files are inside `src/` and Vite's resolver is happy with relative source-tree paths. Future rule: anything under `public/` is loaded via `<link>` / `<script>` in HTML, never via JS-imported CSS `@import`.

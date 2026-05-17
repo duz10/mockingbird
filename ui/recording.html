@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
     <title>Mockingbird Recording</title>
+    <!-- Same font bundle as the main window; the recording overlay
+         becomes the Listening Pill in Wave 5 and needs the families
+         pre-loaded so its first paint is on-brand. ADR 0023. -->
+    <link rel="stylesheet" href="/fonts/fonts.css" />
   </head>
   <body class="recording-body">
     <div id="recording-root"></div>

@@ -1,7 +1,7 @@
 # ADR 0023 — Design Language v1 (Mockingbird earth-tone Liquid Glass)
 
-**Status:** DRAFT — awaiting Dustin sign-off · 2026-05-17
-**Phase:** TBD (likely a dedicated mini-phase between Phase 4 and Phase 5; see Open Questions)
+**Status:** Accepted — 2026-05-17
+**Phase:** Design Language Phase (parallel track, **no phase number** — does not overwrite the planned Phase 5/6/7 main-track scope).
 **Supersedes:** the implicit "blue-grey cool-dark + Inter" style established ad-hoc across Phases 1-4 and codified loosely in `ui/src/design/tokens.css`.
 
 ## Context
@@ -112,17 +112,19 @@ Estimate: ~3-5 days of focused work for W1+W2, then ~1 day per W4 page, then ~2 
   grep gate in W6 that fails the commit if any `--surf-` or pre-v2
   `--mode-` reference survives outside known archive paths.
 
-## Open questions (for Dustin before promoting from DRAFT)
+## Resolved decisions (Dustin, 2026-05-17)
 
-1. **Phase placement.** Is this its own mini-phase (e.g. "Phase 4.5 — Design Language v1") with a `phase-4.5-complete` tag at W6 seal? Or does it become Phase 5 outright, with the original Phase 5 scope (whatever that was) deferred? Or do we just ship under "postship Wave N" headers like the current cleanup work?
-2. **Light theme:** drop entirely, keep `prefers-color-scheme` auto-switch with a hand-derived light palette, or defer with a "coming soon" toast?
-3. **Listening Pill UX scope:** is it strictly a visual rebuild of the existing recording overlay (same trigger, same lifecycle), or do we also lean into the design doc's "tap to start" / "tap to pause" / "double-tap to drop a marker" interactions? The latter is a real UX scope expansion that would need its own ADR.
-4. **Fonts subsetting + bundling tool:** do we want me to wire `glyphhanger` or `fonttools-subset` into the build, or just commit pre-subset WOFF2s by hand once?
-5. **Cutover risk tolerance:** is the W6 big-bang acceptable, or do you want the v2 flag exposed in Settings → General for the first week post-cutover so you can flip back if something feels off?
+The five draft open questions were answered in chat as follows.
+
+1. **Phase placement.** Treated as its own **"Design Language Phase"** running **parallel** to the numbered main-track phases. *Not* a renumber of Phase 5, *not* an absorption into Phase 4, *not* labelled "postship" (the app hasn't shipped). The seal commit at W6 carries an unnumbered tag — `design-language-v1-complete` rather than `phase-N-complete` — so it cannot be confused with the main-track sequence. The Phase 5/6/7 scope tracked by `mb-xwi` stays intact and untouched.
+2. **Light theme.** Deferred. The W6 cutover replaces the current `prefers-color-scheme` auto-switch with a **"Light theme coming soon"** toast on attempted toggle. The light-theme tokens currently in `tokens.css` are deleted with the rest of the legacy system. A future bead will revive light when we're ready to hand-derive M3 light roles for the warm-earth palette.
+3. **Listening Pill UX scope.** **Pure visual rebuild** for W5. Same Tauri IPC contract, same hotkey trigger, same lifecycle states — only the React tree + CSS swap. The design doc's "tap to start / tap to pause / double-tap to drop a marker" interactions are **deliberately not implemented in W5**; they're future feature work that *extends* the pill rather than replacing it. Filed as a future bead.
+4. **Fonts + bundling.** All three families (Fraunces, DM Sans, IBM Plex Mono) are **SIL OFL-licensed and free to redistribute** — confirmed during W1 setup. Bundled locally under `ui/public/fonts/`, fetched once at W1 setup time from Google Fonts' WOFF2 service (Latin subset only) and committed as-is to the repo. No build-time subsetting tool wired up — re-subsetting is a one-line script if we ever need a different glyph range.
+5. **Cutover risk tolerance.** **None.** Pre-ship, single user (Dustin), still building. The W6 cutover is a straight one-commit flip with no v1-fallback toggle. If something feels off post-cutover we `git revert` the cutover commit and iterate; that's the safety net.
 
 ## Reversibility
 
-The wave plan is reversible up to W6. Through W5, the legacy `tokens.css` + every legacy CSS module is intact; flipping `data-design` back to absent restores the current look. After W6 lands the deletion commit, rollback means a `git revert` of that one commit.
+The wave plan is reversible up to W6. Through W5, the legacy `tokens.css` + every legacy CSS module is intact; flipping `data-design` back to absent restores the current look. After W6 lands the deletion commit, rollback means a `git revert` of that one commit — which is the explicit "no fallback toggle" safety net agreed in Resolved Decision 5.
 
 ## Implementation notes (sketch)
 
