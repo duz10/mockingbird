@@ -68,11 +68,23 @@ harness = false
 name = "verify_wave49"
 path = "examples/verify_wave49.rs"
 
-# Opt-in feature: emit short kernel32 Beeps on recording start/stop.
-# Default OFF now that the visual overlay (Phase 5) ships real feedback;
-# kept around for users on headless / overlay-broken setups.
+# Feature flags.
+#
+# `custom-protocol` is the Tauri 2 toggle that switches release builds
+# from `devUrl` (http://localhost:5173 — Vite dev server) to the bundled
+# assets under `frontendDist`. `cargo tauri build` enables it implicitly;
+# raw `cargo build --release` (which our `scripts/cargo-with-cuda.ps1`
+# wrapper uses, because tauri-cli doesn't propagate our CUDA env reliably)
+# does NOT — so we make it the default. Without this, the production
+# binary boots a webview pointed at a dev server that isn't running and
+# users see "localhost refused to connect". (LESSONS 2026-05-17.)
+#
+# `audible-beeps` is opt-in: it emits short kernel32 Beeps on recording
+# start/stop. Default OFF now that the visual overlay (Phase 5) ships
+# real feedback; kept around for users on headless / overlay-broken setups.
 [features]
-default          = []
+default          = ["custom-protocol"]
+custom-protocol  = ["tauri/custom-protocol"]
 audible-beeps    = []
 
 # Notes:

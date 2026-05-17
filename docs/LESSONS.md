@@ -14,6 +14,90 @@ Format:
 
 ---
 
+## 2026-05-17 [phase5-postship] release binary baked in `localhost:5173` — webview shows "can't reach this page"
+
+- **Context:** First end-to-end Dustin smoke test of the Phase 5 build.
+  Tray icon left-click started working (after our prior fix), main
+  window opened... and rendered the Edge/WebView2 default error page:
+  *"Hmmm… can't reach this page — localhost refused to connect…
+  ERR_CONNECTION_REFUSED"*. Pipeline still worked; only the visual
+  surface was dead.
+- **Finding:** In Tauri 2, the choice between `devUrl`
+  (`http://localhost:5173`) and bundled-asset `frontendDist` is gated
+  on the `tauri/custom-protocol` cargo feature, NOT on
+  `cfg(debug_assertions)`. `cargo tauri build` enables `custom-protocol`
+  implicitly; plain `cargo build --release` does NOT. So a vanilla
+  `cargo build --release` produces a binary that, in production,
+  literally tries to fetch the UI from a dev server that isn't running.
+  Confirmed by string-searching the .exe: `localhost:5173` was right
+  there, baked in.
+- **Action:** Add `default = ["custom-protocol"]` +
+  `custom-protocol = ["tauri/custom-protocol"]` to `src-tauri/Cargo.toml
+  [features]`. Now both `cargo build --release` (our wrapper path,
+  because tauri-cli doesn't propagate CUDA env reliably) AND
+  `cargo tauri build` produce a binary that uses the bundled UI. The
+  override pattern `cargo build --release --no-default-features` still
+  works if someone genuinely wants the dev-server path in a release
+  binary (weird but supported).
+- **Diagnostic snippet** worth keeping:
+  ```powershell
+  $bytes = [IO.File]::ReadAllBytes('target\release\mockingbird.exe')
+  $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+  if ($text -match 'localhost:5173') { 'devUrl LEAKED into release binary' }
+  ```
+
+---
+
+## 2026-05-17 [phase5-postship] tray left-click did nothing + recording overlay rendered blank
+
+- **Context:** Same Dustin smoke test. Two visible bugs:
+  (1) left-clicking the tray icon did nothing (the menu opens on
+  right-click, the main window never appeared); (2) the recording
+  overlay appeared as a blank rounded box — not the pretty pill from
+  the Playwright baselines.
+- **Finding (tray):** `tray.rs` had `.on_menu_event(…)` (right-click
+  menu) but ZERO `.on_tray_icon_event(…)` (left-click). And the
+  `open_history` / `settings` / `pause` menu items were still Phase 1
+  stubs that just `tracing::info!`d "(stub, Phase 5)". Easy miss
+  during the UI sprint because the orchestrator + DB work absorbed all
+  attention; the tray surface was never re-touched after Phase 1.
+- **Finding (overlay):** Two stacked race conditions:
+  - **Emit-before-listen.** `RecordingWindow::show()` calls
+    `w.show()` then immediately `self.emit(LISTENING, …)`. On the
+    first show the webview cold-starts (~50–500ms: WebView2 process
+    spawn + JS bundle load + React mount + `listen()` registration).
+    The single emit fires WHILE React is still mounting and the
+    listener doesn't exist yet — event is lost forever, React stays at
+    its initial `state: "idle"` value.
+  - **Missing `modeLabel` in payload.** Rust `StateEventPayload` had
+    `state + mode_slug + error`. React renders the mode badge
+    conditionally on `event.modeLabel` — which was always undefined.
+  - **Naive event-replace on the React side.** Mid-pipeline emits
+    (`transcribing`, `cleaning`, …) only carry the new `state`, no
+    `modeSlug` / `modeLabel`. A bare `setEvent(e.payload)` was wiping
+    the mode badge on every transition.
+- **Action (tray):** Add `.on_tray_icon_event` matching `MouseButton::Left`
+  + `MouseButtonState::Up`, toggle the main window's visibility +
+  focus. Wire `open_history` and `settings` menu items to call the
+  same show-main-window helper. (Deep-linking to specific pages
+  needs an `app:navigate` event — follow-up.)
+- **Action (overlay):** Three layers of defense, all cheap:
+  1. Rust: spawn a 3-emit burst at 50/200/500ms after the first
+     `show()`, gated on `was_hidden`, bailing if visibility flips off.
+  2. Rust: add `mode_label: Option<String>` to the payload, derived
+     from `mode_slug` via title-case fallback.
+  3. React: change initial state to `"listening"` (not `"idle"`) so
+     the pretty pill renders even if every emit somehow misses;
+     change `setEvent(e.payload)` to `setEvent(prev => ({ …prev, …e.payload }))`
+     so mid-pipeline emits preserve the mode badge.
+- **Pattern for future Tauri overlays:** ALWAYS pair an event-driven
+  initial-state push with EITHER a query-on-mount IPC command OR a
+  re-emit burst. The webview-cold-start emit race is silent and
+  reproducible; debugging it without a console is brutal because
+  transparent + `focus: false` windows are awkward to attach DevTools to.
+
+---
+
 ## 2026-05-17 [phase5-wave-I] `cargo test --lib` exits 0xc0000139 even with cargo-with-cuda wrapper
 
 - **Context:** Phase 5 Wave I wiring `RecordingWindow` to the real Tauri
