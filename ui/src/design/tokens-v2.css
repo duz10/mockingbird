@@ -175,6 +175,50 @@
   --glass-highlight: rgba(255, 250, 240, 0.18);
   --glass-shadow:    0 12px 40px rgba(0, 0, 0, 0.45),
                      0 2px 8px rgba(0, 0, 0, 0.25);
+
+  /* ════════════════════════════════════════════════════════════
+     §00.H  LEGACY TOKEN BRIDGE — temporary, deleted at W6 cutover.
+
+     Every legacy v1 page CSS module references the cool-palette
+     tokens (--surf-0, --on-surf, --border, --font-sans …). Without
+     this block, flipping data-design="v2" produces ZERO visible
+     change on any unmigrated page — the v2 body background is
+     covered 100% by .shell + .content + .sidebar, which still
+     paint themselves with the v1 token values.
+
+     The bridge re-binds the v1 token names to v2 equivalents so
+     the entire app previews v2 colours/fonts immediately, even
+     before W4 page migrations rewrite the markup. Migrated pages
+     ignore the bridge (they reference --md-sys-* directly).
+     Wave 6's cutover deletes both this bridge AND the legacy
+     tokens.css in the same commit — by then no page should still
+     reference the old names. A grep gate enforces it.
+     ════════════════════════════════════════════════════════════ */
+
+  --surf-0: var(--md-sys-background);
+  --surf-1: var(--md-sys-surface);
+  --surf-2: var(--md-sys-surface-container);
+  --surf-3: var(--md-sys-surface-container-high);
+  --on-surf: var(--md-sys-on-surface);
+  --on-surf-muted: var(--md-sys-on-surface-variant);
+  --on-surf-faint: var(--md-sys-outline);
+  --border: var(--md-sys-outline-variant);
+  --border-strong: var(--md-sys-outline);
+
+  --font-sans: "DM Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Status palette — map legacy v1 status tokens onto the v2 system
+     colours so the recording overlay + Insights cards stay legible
+     mid-migration. */
+  --status-idle:       var(--md-sys-outline);
+  --status-recording:  var(--md-sys-primary);
+  --status-processing: var(--md-sys-warning);
+  --status-ok:         var(--md-sys-success);
+  --status-error:      var(--md-sys-error);
+
+  /* Mode palette — keep the legacy hues for the bridge; migration
+     of each page in W4 will replace these with proper M3 accents. */
 }
 
 /* ════════════════════════════════════════════════════════════════
