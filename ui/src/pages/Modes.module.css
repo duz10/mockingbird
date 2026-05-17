@@ -1,0 +1,149 @@
+/* Modes — one card per mode, stacked vertically. Each card has a
+ * header (label + enabled toggle + hotkey badge) and a small grid of
+ * editable fields (provider, model, temperature, max tokens, hotkey).
+ *
+ * Cards are full-width — the field grid handles its own internal
+ * columns. We considered a side-by-side grid but the long model-id
+ * input would push the column too narrow on smaller laptops. */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.modeCard {
+  background: var(--surf-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+  padding: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.modeCard.disabled {
+  opacity: 0.6;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font: var(--type-lg);
+  font-weight: 600;
+  color: var(--on-surf);
+  margin: 0;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.hotkeyBadge {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 2px 8px;
+  background: var(--surf-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-1);
+  color: var(--on-surf);
+}
+
+/* Toggle switch — pill-shaped, animated. */
+.toggle {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  cursor: pointer;
+}
+.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.toggleTrack {
+  position: absolute;
+  inset: 0;
+  background: var(--surf-3);
+  border-radius: var(--r-pill);
+  transition: background var(--dur-1) var(--ease-out);
+}
+.toggleThumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  background: var(--on-surf);
+  border-radius: 50%;
+  transition: transform var(--dur-1) var(--ease-out);
+}
+.toggle input:checked + .toggleTrack {
+  background: var(--mode-normal);
+}
+.toggle input:checked + .toggleTrack .toggleThumb {
+  transform: translateX(18px);
+}
+.toggle input:focus-visible + .toggleTrack {
+  outline: 2px solid var(--mode-normal);
+  outline-offset: 2px;
+}
+
+/* Fields grid */
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--s-3);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.fieldLabel {
+  font: var(--type-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--on-surf-muted);
+}
+
+.input,
+.select {
+  background: var(--surf-1);
+  color: var(--on-surf);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  padding: var(--s-2);
+  font: var(--type-sm);
+  font-family: inherit;
+}
+.input:focus,
+.select:focus {
+  outline: 2px solid var(--mode-normal);
+  outline-offset: 1px;
+  border-color: var(--mode-normal);
+}
+
+.saveRow {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--s-2);
+}
+.savedHint {
+  font: var(--type-xs);
+  color: var(--status-ok);
+}

@@ -1,0 +1,142 @@
+/* Dictionary — table with an inline add-row form on top.
+ * Kept as a real <table> for screen-reader friendliness; the visual
+ * design uses CSS Grid for column control rather than fighting
+ * `display: table`. */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+
+.searchBox {
+  flex: 1 1 240px;
+  min-width: 200px;
+  max-width: 360px;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.searchInput {
+  width: 100%;
+  padding: var(--s-2) var(--s-3) var(--s-2) calc(var(--s-3) + 18px);
+  background: var(--surf-2);
+  color: var(--on-surf);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  font: var(--type-sm);
+  font-family: inherit;
+}
+.searchInput:focus {
+  outline: 2px solid var(--mode-normal);
+  outline-offset: 1px;
+  border-color: var(--mode-normal);
+}
+.searchIcon {
+  position: absolute;
+  left: var(--s-2);
+  color: var(--on-surf-faint);
+  pointer-events: none;
+}
+
+.tableWrap {
+  background: var(--surf-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+  overflow: hidden;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font: var(--type-sm);
+  color: var(--on-surf);
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--border);
+}
+.table th {
+  font: var(--type-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--on-surf-muted);
+  background: var(--surf-3);
+}
+.table tr:last-child td { border-bottom: none; }
+.table tr:hover td { background: oklch(from var(--mode-normal) l c h / 0.06); }
+
+.cellMono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.cellCount {
+  font-variant-numeric: tabular-nums;
+  color: var(--on-surf-muted);
+}
+
+.cellActions {
+  display: flex;
+  gap: var(--s-1);
+  justify-content: flex-end;
+}
+
+.inlineInput {
+  width: 100%;
+  padding: var(--s-1) var(--s-2);
+  background: var(--surf-1);
+  color: var(--on-surf);
+  border: 1px solid var(--border);
+  border-radius: var(--r-1);
+  font: var(--type-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.inlineInput:focus {
+  outline: 2px solid var(--mode-normal);
+  outline-offset: 0;
+  border-color: var(--mode-normal);
+}
+
+.addRow td {
+  background: oklch(from var(--mode-normal) l c h / 0.08);
+}
+
+.sourceBadge {
+  font: var(--type-xs);
+  text-transform: capitalize;
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+}
+.sourceUser    { background: oklch(from var(--mode-normal) l c h / 0.2); color: var(--mode-normal); }
+.sourceLearned { background: oklch(from var(--mode-fragment) l c h / 0.2); color: var(--mode-fragment); }
+.sourceImport  { background: oklch(from var(--mode-verbose) l c h / 0.2); color: var(--mode-verbose); }
+
+.confidenceBar {
+  display: inline-block;
+  width: 60px;
+  height: 6px;
+  background: var(--surf-3);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  vertical-align: middle;
+  margin-left: var(--s-2);
+}
+.confidenceFill {
+  height: 100%;
+  background: var(--status-ok);
+  border-radius: var(--r-pill);
+}

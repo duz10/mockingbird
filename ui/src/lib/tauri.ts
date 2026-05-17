@@ -89,8 +89,14 @@ export const api = {
 
   // Dictionary
   list_dictionary: () => invoke<DictionaryEntry[]>("list_dictionary"),
-  upsert_dictionary_entry: (entry: Omit<DictionaryEntry, "id" | "createdAt" | "useCount" | "lastUsedAt">) =>
-    invoke<number>("upsert_dictionary_entry", { entry }),
+  // upsert: when `id` is set the Rust side updates the existing row;
+  // when omitted it inserts a new one. Either way the returned number
+  // is the row id.
+  upsert_dictionary_entry: (
+    entry: Omit<DictionaryEntry, "id" | "createdAt" | "useCount" | "lastUsedAt"> & {
+      id?: number;
+    },
+  ) => invoke<number>("upsert_dictionary_entry", { entry }),
   delete_dictionary_entry: (id: number) =>
     invoke<void>("delete_dictionary_entry", { id }),
 

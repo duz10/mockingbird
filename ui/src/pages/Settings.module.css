@@ -1,0 +1,217 @@
+/* Settings — left-rail tabs + right pane. Roughly mirrors macOS
+ * System Settings. Each tab renders a stack of Cards. */
+
+.shell {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: var(--s-4);
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+  .tabs {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+}
+
+.tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  background: var(--surf-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+  padding: var(--s-2);
+  position: sticky;
+  top: var(--s-4);
+}
+
+.tab {
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-2);
+  font: var(--type-sm);
+  color: var(--on-surf);
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.tab:hover { background: var(--surf-3); }
+.tab:focus-visible {
+  outline: 2px solid var(--mode-normal);
+  outline-offset: 1px;
+}
+.tabActive {
+  background: oklch(from var(--mode-normal) l c h / 0.18);
+  color: var(--mode-normal);
+  font-weight: 600;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+/* Setting row inside a Card */
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding: var(--s-2) 0;
+}
+.row:not(:last-child) {
+  border-bottom: 1px solid var(--border);
+}
+
+.rowMain {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  flex: 1;
+}
+.rowLabel {
+  font: var(--type-md);
+  color: var(--on-surf);
+  font-weight: 500;
+}
+.rowHelp {
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  max-width: 56ch;
+}
+
+.rowControl {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+/* Inline pill toggle (re-using the same shape as Modes). */
+.toggle {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  cursor: pointer;
+}
+.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.toggleTrack {
+  position: absolute;
+  inset: 0;
+  background: var(--surf-3);
+  border-radius: var(--r-pill);
+  transition: background var(--dur-1) var(--ease-out);
+}
+.toggleThumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  background: var(--on-surf);
+  border-radius: 50%;
+  transition: transform var(--dur-1) var(--ease-out);
+}
+.toggle input:checked + .toggleTrack {
+  background: var(--mode-normal);
+}
+.toggle input:checked + .toggleTrack .toggleThumb {
+  transform: translateX(18px);
+}
+
+.select {
+  background: var(--surf-1);
+  color: var(--on-surf);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  padding: var(--s-1) var(--s-2);
+  font: var(--type-sm);
+  font-family: inherit;
+  min-width: 140px;
+}
+
+.themePicker {
+  display: inline-flex;
+  background: var(--surf-3);
+  border-radius: var(--r-2);
+  padding: 2px;
+  gap: 2px;
+}
+.themeBtn {
+  background: transparent;
+  border: none;
+  font: var(--type-sm);
+  padding: 4px var(--s-3);
+  border-radius: var(--r-1);
+  color: var(--on-surf-muted);
+  cursor: pointer;
+  font-family: inherit;
+}
+.themeBtnActive {
+  background: var(--surf-2);
+  color: var(--on-surf);
+  box-shadow: var(--shadow-1);
+}
+
+.pathRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--on-surf-muted);
+  background: var(--surf-3);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-2);
+}
+.pathRow code {
+  flex: 1;
+  word-break: break-all;
+}
+
+.telemetryNote {
+  font: var(--type-sm);
+  color: var(--on-surf-muted);
+  padding: var(--s-3);
+  background: oklch(from var(--status-ok) l c h / 0.08);
+  border-left: 3px solid var(--status-ok);
+  border-radius: var(--r-2);
+}
+
+.learningRuns {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.learningRun {
+  display: grid;
+  grid-template-columns: max-content 1fr max-content;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  font: var(--type-sm);
+}
+.learningRunDate {
+  font-variant-numeric: tabular-nums;
+  color: var(--on-surf-muted);
+}
+.learningRunStats {
+  color: var(--on-surf);
+}
+.learningRunCommitted { color: var(--status-ok); font-weight: 600; }
+.learningRunRolled    { color: var(--status-error); font-weight: 600; }
