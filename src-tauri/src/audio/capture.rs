@@ -38,8 +38,25 @@ use crate::error::AppResult;
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
 /// Target channel count. Locked in by ADR 0013.
 pub const TARGET_CHANNELS: u16 = 1;
-/// Ring buffer capacity (~30 s @ 16 kHz mono i16 ≈ 960 KB).
-pub const RING_CAPACITY: usize = 480_000;
+/// Ring buffer capacity. Sized to match the hotkey state machine's
+/// `max_session = 300 s` (see `hotkey/state.rs`) so the buffer can
+/// hold an entire max-length recording without overwriting samples.
+///
+/// Math: 300 s × 16 000 Hz × 2 bytes/sample (i16 mono) ≈ 9.6 MB.
+/// Cheap RAM; eliminates the silent-truncation footgun where
+/// recordings > 30 s would lose audio off the front (or back,
+/// depending on which end the producer hits first).
+///
+/// Pre-Wave-2 value was 480_000 (= 30 s), which matched Whisper's
+/// single-window inference budget but NOT the hotkey ceiling. 2026-
+/// 05-17 user smoketest in formal mode (1 m 27 s recording) produced
+/// a raw transcript covering only the first ~28 s; the rest fell off
+/// the buffer's edge before STT could consume them. See bead
+/// `audio-streaming-chunked-whisper` for the proper long-term fix
+/// (streaming Whisper inference with overlapping chunks); this
+/// bump is the interim that keeps the user productive in the
+/// meantime.
+pub const RING_CAPACITY: usize = 4_800_000;
 /// Device-watcher poll interval.
 pub const DEVICE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 

@@ -39,6 +39,15 @@ const SAVE_DEBOUNCE_MS = 400;
  */
 const MODELS_DATALIST_ID = "ollama-installed-models";
 
+/**
+ * Transcription-mode slugs that the database still holds (with
+ * `enabled = 0`, for historical session resolution) but that the
+ * UI must NOT display. Currently: the pre-Wave-2 trio that was
+ * replaced by casual/normal/formal in migration 008. Centralised
+ * here so future deprecations don't have to hunt for the filter.
+ */
+const DEPRECATED_SLUGS: ReadonlySet<string> = new Set(["verbose", "fragment"]);
+
 export function ModesPage() {
   const modes = useAppStore((s) => s.modes);
   const setModes = useAppStore((s) => s.setModes);
@@ -107,10 +116,15 @@ export function ModesPage() {
   // Split modes into the two visual groups. We do this in render
   // (not on the Rust side) because it's purely a UI concern and the
   // categorisation may change without a backend release.
+  //
+  // Filter the deprecated slugs (see module-level const) out of
+  // BOTH visual groups. The DB rows survive for historical
+  // session resolution; this is a pure UI concern.
   const { transcription, commands } = useMemo(() => {
     const transcription: ModeRow[] = [];
     const commands: ModeRow[] = [];
     for (const m of modes) {
+      if (DEPRECATED_SLUGS.has(m.slug)) continue;
       if (isTranscriptionSlug(m.slug)) {
         transcription.push(m);
       } else {

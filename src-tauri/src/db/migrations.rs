@@ -18,6 +18,7 @@ const MIGRATION_005: &str = include_str!("migrations/005_ai_command_modes.sql");
 const MIGRATION_006: &str = include_str!("migrations/006_prompt_normal_v2.sql");
 const MIGRATION_007: &str = include_str!("migrations/007_prompt_normal_v3.sql");
 const MIGRATION_008: &str = include_str!("migrations/008_wave2_three_modes.sql");
+const MIGRATION_009: &str = include_str!("migrations/009_bump_max_tokens.sql");
 
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
@@ -55,6 +56,13 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
     }
     if current < 8 {
         let prepared = substitute_prompt_bodies(MIGRATION_008);
+        conn.execute_batch(&prepared)?;
+    }
+    if current < 9 {
+        // No prompt-body substitution needed for 009 — pure UPDATE.
+        // Run through the substituter anyway so the leftover-token
+        // guard catches accidental `__PROMPT_*_BODY__` leaks.
+        let prepared = substitute_prompt_bodies(MIGRATION_009);
         conn.execute_batch(&prepared)?;
     }
     Ok(())
@@ -103,7 +111,7 @@ mod tests {
     /// `if current < N` block in `apply_all` plus this assert are the
     /// two coupled spots.
     #[test]
-    fn apply_all_brings_fresh_db_to_version_8() {
+    fn apply_all_brings_fresh_db_to_version_9() {
         let conn = Connection::open_in_memory().expect("open in-memory");
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .expect("pragma fk");
@@ -115,7 +123,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "8");
+        assert_eq!(v, "9");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
