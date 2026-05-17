@@ -7,11 +7,15 @@
 
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
-    tray::TrayIconBuilder,
-    App, AppHandle,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    App, AppHandle, Manager,
 };
 
 use crate::error::{AppError, AppResult};
+
+/// Label of the main window declared in `tauri.conf.json`.
+/// Kept as a const so the tray wiring stays in one file.
+const MAIN_WINDOW_LABEL: &str = "main";
 
 /// Build and register the tray. Idempotent in the sense that only one
 /// caller should run it during `.setup()`.
@@ -38,9 +42,60 @@ pub fn register(app: &mut App) -> AppResult<()> {
     let _tray = TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
         .on_menu_event(|app, event| handle_menu_event(app, event.id().as_ref()))
+        .on_tray_icon_event(|tray, event| {
+            // Left-click on the tray icon toggles the main window. We
+            // explicitly handle Up (not Down) because Down fires while
+            // the user is still pressing — visually jarring on Windows.
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                toggle_main_window(tray.app_handle());
+            }
+        })
         .build(app)
         .map_err(map_tauri)?;
     Ok(())
+}
+
+/// Show + focus the main window, creating-the-illusion-of-launch even
+/// though the process has been running in the background since boot.
+/// Logs + swallows Tauri errors — UI glitches must never panic the app.
+fn show_main_window(app: &AppHandle) {
+    let Some(w) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
+        tracing::warn!(label = MAIN_WINDOW_LABEL, "main window not found");
+        return;
+    };
+    if let Err(e) = w.show() {
+        tracing::warn!(error = ?e, "failed to show main window");
+    }
+    if let Err(e) = w.unminimize() {
+        tracing::debug!(error = ?e, "failed to unminimize main window (ok if not minimized)");
+    }
+    if let Err(e) = w.set_focus() {
+        tracing::warn!(error = ?e, "failed to focus main window");
+    }
+}
+
+/// Show-or-hide toggle bound to tray left-click. Hides only when the
+/// window is both visible AND focused — otherwise a click during
+/// focus-elsewhere does the natural thing (bring it forward).
+fn toggle_main_window(app: &AppHandle) {
+    let Some(w) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
+        tracing::warn!(label = MAIN_WINDOW_LABEL, "main window not found");
+        return;
+    };
+    let visible = w.is_visible().unwrap_or(false);
+    let focused = w.is_focused().unwrap_or(false);
+    if visible && focused {
+        if let Err(e) = w.hide() {
+            tracing::warn!(error = ?e, "failed to hide main window");
+        }
+    } else {
+        show_main_window(app);
+    }
 }
 
 fn map_tauri(e: tauri::Error) -> AppError {
@@ -56,9 +111,16 @@ pub fn handle_menu_event_pure(id: &str) -> bool {
 
 fn handle_menu_event(app: &AppHandle, id: &str) {
     match id {
-        "open_history" => tracing::info!("tray: open_history (stub, Phase 5)"),
-        "pause" => tracing::info!("tray: pause (stub, Phase 5)"),
-        "settings" => tracing::info!("tray: settings (stub, Phase 5)"),
+        // All three navigation items just show the main window. The
+        // hash-router target lives in TS — emitting an `app:navigate`
+        // event would let us deep-link to History / Settings, but
+        // until that lands the user lands on Insights and clicks
+        // through. Cheap, predictable, no surprises.
+        "open_history" | "settings" => {
+            tracing::info!(id = id, "tray: opening main window");
+            show_main_window(app);
+        }
+        "pause" => tracing::info!("tray: pause (stub, Phase 5 polish)"),
         "quit" => {
             tracing::info!("tray: quit — exiting");
             app.exit(0);

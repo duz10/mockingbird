@@ -72,24 +72,32 @@ function modeColorVar(slug: string | undefined): string {
 }
 
 export function RecordingWindow() {
-  // Default to "listening" in dev so the overlay isn't a confused
-  // blank box during design work. In Tauri the orchestrator will
-  // emit an explicit state right after spawn.
+  // Start in "listening" state so the overlay renders the pretty pill
+  // immediately on first show — there's a cold-start race where the
+  // orchestrator's first `dictation:state` emit can fire BEFORE this
+  // component has mounted its listener. The Rust side now re-emits
+  // at 50/200/500ms to win the race; this default makes the visual
+  // correct even if all three emits somehow miss.
   const [event, setEvent] = useState<DictationEvent>({
-    state: isTauri() ? "idle" : "listening",
+    state: "listening",
     modeSlug: "normal",
     modeLabel: "Normal",
   });
 
   // Subscribe to Tauri events. Dynamically imported so the recording
   // bundle stays import-free outside Tauri.
+  //
+  // We MERGE the incoming payload into the existing state rather than
+  // replacing it — mid-pipeline events like `transcribing` only carry
+  // the new state, no modeSlug/modeLabel, so a naive replace would
+  // blank out the mode badge between listening → transcribing.
   useEffect(() => {
     if (!isTauri()) return;
     let unlisten: (() => void) | undefined;
     (async () => {
       const { listen } = await import("@tauri-apps/api/event");
       unlisten = await listen<DictationEvent>("dictation:state", (e) => {
-        setEvent(e.payload);
+        setEvent((prev) => ({ ...prev, ...e.payload }));
       });
     })();
     return () => unlisten?.();

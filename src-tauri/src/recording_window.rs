@@ -84,8 +84,24 @@ struct StateEventPayload<'a> {
     state: &'a str,
     #[serde(skip_serializing_if = "Option::is_none", rename = "modeSlug")]
     mode_slug: Option<&'a str>,
+    /// Human-readable mode name ("Normal", "Verbose", …). Without
+    /// this the React overlay's mode badge stays hidden because the
+    /// component renders `event.modeLabel && <Badge>…</Badge>`.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "modeLabel")]
+    mode_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<&'a str>,
+}
+
+/// Title-case a mode slug ("normal" → "Normal"). Cheap, no allocator
+/// in the common case of an empty input. Kept private — the React
+/// overlay does its own label lookup for i18n, this is the fallback.
+fn label_from_slug(slug: &str) -> String {
+    let mut chars = slug.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
 }
 
 /// Owner of the recording-window state.
@@ -122,6 +138,14 @@ impl RecordingWindow {
     /// Show the recording window and emit a `listening` state event.
     /// Idempotent — calling `show()` while visible just re-emits the
     /// state (cheap, and lets the UI recover if it missed the first).
+    ///
+    /// **Emit-after-show race**: the first `w.show()` is a cold start
+    /// for the webview (WebView2 process spawn + React mount + event
+    /// listener registration — 50–500ms). A single emit fires while
+    /// React is still mounting and the listener never sees it. We
+    /// counter this with a tiny burst of re-emits at 50ms / 200ms /
+    /// 500ms after the initial fire. Cost: 3 cheap event sends per
+    /// dictation. Benefit: the pretty pill actually appears.
     pub fn show(&self, mode_slug: &str) -> AppResult<()> {
         let was_hidden = !self.visible.swap(true, Ordering::SeqCst);
         if was_hidden {
@@ -132,6 +156,24 @@ impl RecordingWindow {
             });
         }
         self.emit(state::LISTENING, Some(mode_slug), None);
+
+        // Re-emit burst to win the cold-start race on first show.
+        if was_hidden {
+            let me = self.clone();
+            let slug = mode_slug.to_string();
+            std::thread::spawn(move || {
+                for delay_ms in [50u64, 200, 500] {
+                    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                    // Bail if the window was hidden in the meantime
+                    // (very short dictations).
+                    if !me.visible.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    me.emit(state::LISTENING, Some(&slug), None);
+                }
+            });
+        }
+
         Ok(())
     }
 
@@ -193,7 +235,8 @@ impl RecordingWindow {
             tracing::trace!(state, "skip emit: no app handle (tests / not booted)");
             return;
         };
-        let payload = StateEventPayload { state, mode_slug, error };
+        let mode_label = mode_slug.map(label_from_slug);
+        let payload = StateEventPayload { state, mode_slug, mode_label, error };
         if let Err(e) = app.emit(STATE_EVENT, &payload) {
             tracing::debug!(error = ?e, state, "failed to emit dictation:state");
         }
