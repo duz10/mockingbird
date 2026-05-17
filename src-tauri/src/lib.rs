@@ -22,6 +22,7 @@ pub mod hotkey;
 pub mod injection;
 pub mod logging;
 pub mod recording_window;
+pub mod secrets;
 pub mod settings;
 pub mod stt;
 pub mod tray;

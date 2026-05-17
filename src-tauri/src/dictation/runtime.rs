@@ -39,7 +39,7 @@ use std::thread::JoinHandle;
 use rusqlite::Connection;
 
 use super::{DictationOrchestrator, OrchestratorConfig};
-use crate::cleanup::PassthroughCleaner;
+use crate::cleanup::{Cleaner, LlmCleaner, OllamaProvider, PassthroughCleaner};
 use crate::error::{AppError, AppResult};
 use crate::hotkey::driver::StateDriver;
 use crate::hotkey::pause::PauseHandle;
@@ -180,7 +180,7 @@ fn run_dictation_thread(
     let audio = crate::audio::make_default_capture()?;
     let vad = crate::audio::vad::make_default_vad()?;
     let stt = crate::stt::make_default_stt()?;
-    let cleaner = Box::new(PassthroughCleaner::new());
+    let cleaner = make_default_cleaner(&db, &config);
     let injector = crate::injection::make_default_injector()?;
     let window_ctx = crate::window_context::make_default_context()?;
     let secure_guard = Box::new(WinSecureInputGuard::new());
@@ -234,6 +234,81 @@ fn ensure_ort_dylib_set() {
         if candidate.is_file() {
             tracing::info!(path = %candidate.display(), "setting ORT_DYLIB_PATH");
             std::env::set_var("ORT_DYLIB_PATH", candidate);
+        }
+    }
+}
+
+/// Build the cleaner the dictation thread will use.
+///
+/// Strategy: try to construct an [`LlmCleaner`] wired to a local
+/// Ollama via the mode's configured model. If Ollama is unreachable
+/// (no service running, wrong port, network blocked), log a `WARN`
+/// and fall back to [`PassthroughCleaner`] — the user still gets
+/// their raw transcript injected, with the cleanup phase a no-op.
+///
+/// Phase 7 will replace this with a settings-driven dispatcher that
+/// picks Ollama vs Claude per-mode. For Phase 4 we hard-default to
+/// the Normal mode's `ollama` provider — that's the PLAN §8 default.
+fn make_default_cleaner(
+    db: &Arc<Mutex<Connection>>,
+    config: &OrchestratorConfig,
+) -> Box<dyn Cleaner> {
+    let lookup = {
+        let conn = match db.lock() {
+            Ok(g) => g,
+            Err(_) => {
+                tracing::warn!("cleaner: db mutex poisoned at boot; using passthrough");
+                return Box::new(PassthroughCleaner::new());
+            }
+        };
+        conn.query_row(
+            "SELECT model_id, temperature, max_tokens FROM modes WHERE slug = ?1",
+            [&config.mode_slug],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, f64>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
+            },
+        )
+    };
+    let (model_id, temperature, max_tokens) = match lookup {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                error = ?e,
+                mode = %config.mode_slug,
+                "cleaner: mode lookup failed; using passthrough"
+            );
+            return Box::new(PassthroughCleaner::new());
+        }
+    };
+
+    let provider = OllamaProvider::new();
+    match provider.health_check() {
+        Ok(_) => {
+            tracing::info!(
+                model = %model_id,
+                temperature,
+                max_tokens,
+                "cleaner: Ollama reachable; using LlmCleaner"
+            );
+            Box::new(LlmCleaner::new(
+                Box::new(provider),
+                Arc::clone(db),
+                model_id,
+                temperature as f32,
+                max_tokens as u32,
+            ))
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "cleaner: Ollama health check failed; falling back to passthrough \
+                 (start Ollama + pull the model to enable LLM cleanup)"
+            );
+            Box::new(PassthroughCleaner::new())
         }
     }
 }

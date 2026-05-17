@@ -47,6 +47,9 @@ windows = { workspace = true }
 # Phase 3 — per-app injection-strategy override table (ADR 0016).
 phf     = { workspace = true }
 
+# Phase 4 — sync HTTP for cleanup providers (ADR 0021).
+ureq    = { workspace = true }
+
 [dev-dependencies]
 tempfile  = { workspace = true }
 rstest    = { workspace = true }

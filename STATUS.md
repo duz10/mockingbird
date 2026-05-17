@@ -1,6 +1,6 @@
 # Mockingbird — STATUS
 
-**Current phase:** Phase 3 — Waves 1 + 2 + 3 + 4 + 4.5 + 4.8 + 4.9 + **5 (judges + retrospective)** ✅ **COMPLETE**; **`phase-3-complete` tag ready to push**. Phase 4 (LLM cleanup integration) is the next unblocked phase.
+**Current phase:** **Phase 4 (LLM cleanup) ✅ COMPLETE** (Wave 1 / autonomous run). `phase-3-complete` tag LOCAL; `phase-4-complete` tag PENDING this commit. Next: Phase 5 (Recording UX) — requires UI scaffolding.
 **Last updated:** 2026-05-17 (Wave 5 — 4 Phase-3 judges authored + JSON entries, 3 new orchestrator integration tests landed green, retrospective appended to `docs/phases/phase3.md`. Tag is the final step.)
 **Last successful judge run:** _Wave 5 — pure decision tests + new orchestrator integration tests all green. `pwsh scripts/cargo-with-cuda.ps1 test --release --test dictation_orchestrator` reports `3 passed; 0 failed; 0 ignored` in 0.15 s. The 4 new judges (`mb-e2e-injection`, `mb-db-provenance`, `mb-clipboard-restored`, `mb-secure-input-respected`) live in `.code_puppy/judges.json` and `docs/judges/phase-3/`; each one's CI-eligible test targets are confirmed green. The `mb-clipboard-restored` `#[ignore]`d live test must be run manually before pushing the seal tag (one-shot: `pwsh scripts/cargo-with-cuda.ps1 test --release --workspace --lib -- injection::paste::tests::live_snapshot_then_write_then_restore_preserves_text --ignored --exact`)._
 

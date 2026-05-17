@@ -1,14 +1,31 @@
 //! Transcript cleanup — the post-STT polish layer.
 //!
-//! Wave 4 ships the **trait + passthrough** only. The LLM-backed
-//! cleaner (which routes raw transcripts through the prompts under
-//! `cleanup/prompts/` to fix disfluencies, capitalisation, etc.) is
-//! Phase 4 territory.
+//! Wave 4 shipped the **trait + passthrough** stub. Phase 4 fills in
+//! the real pipeline: provider abstraction ([`CleanupProvider`])
+//! with Ollama + Claude implementations, token-budget enforcement
+//! ([`token_budget`]), few-shot example selection ([`few_shot`]),
+//! prompt assembly ([`prompt_builder`]), and the orchestrator-facing
+//! glue ([`LlmCleaner`]).
 //!
-//! Keeping the trait stable now means the Wave 4 orchestrator pipeline
-//! is locked in: `audio → STT → Cleaner::clean → Injector::inject`.
-//! Phase 4 swaps the [`PassthroughCleaner`] for an LLM implementation
-//! without touching the orchestrator.
+//! The Wave-4 orchestrator interface ([`Cleaner`]) is unchanged —
+//! `LlmCleaner` slots in next to `PassthroughCleaner` via the same
+//! `Box<dyn Cleaner>` the dictation thread already holds.
+//!
+//! See [ADR 0021](../../../docs/adr/0021-sync-cleanup-provider.md)
+//! for the sync-vs-async-trait decision.
+
+pub mod claude;
+pub mod few_shot;
+pub mod llm_cleaner;
+pub mod ollama;
+pub mod prompt_builder;
+pub mod provider;
+pub mod token_budget;
+
+pub use claude::ClaudeProvider;
+pub use llm_cleaner::LlmCleaner;
+pub use ollama::OllamaProvider;
+pub use provider::{CleanupProvider, CleanupRequest, CleanupResult, StubCleanupProvider};
 
 use crate::error::AppResult;
 

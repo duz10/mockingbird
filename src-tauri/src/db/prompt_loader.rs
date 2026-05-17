@@ -16,12 +16,23 @@
 const PROMPT_NORMAL: &str = include_str!("../cleanup/prompts/normal.md");
 const PROMPT_VERBOSE: &str = include_str!("../cleanup/prompts/verbose.md");
 const PROMPT_FRAGMENT: &str = include_str!("../cleanup/prompts/fragment.md");
+const PROMPT_REWRITE: &str = include_str!("../cleanup/prompts/rewrite.md");
+const PROMPT_EXPAND: &str = include_str!("../cleanup/prompts/expand.md");
+const PROMPT_SUMMARIZE: &str = include_str!("../cleanup/prompts/summarize.md");
 
 /// Replace `__PROMPT_*_BODY__` tokens with SQL-escaped prompt bodies.
+///
+/// Adding a new prompt-bearing migration? Add the `include_str!`
+/// constant above + the corresponding `.replace(...)` below in the
+/// SAME commit as the migration SQL. Order doesn't matter — these
+/// are simple non-overlapping replacements.
 pub fn substitute_prompt_bodies(sql: &str) -> String {
     sql.replace("__PROMPT_NORMAL_BODY__", &sql_escape(PROMPT_NORMAL))
         .replace("__PROMPT_VERBOSE_BODY__", &sql_escape(PROMPT_VERBOSE))
         .replace("__PROMPT_FRAGMENT_BODY__", &sql_escape(PROMPT_FRAGMENT))
+        .replace("__PROMPT_REWRITE_BODY__", &sql_escape(PROMPT_REWRITE))
+        .replace("__PROMPT_EXPAND_BODY__", &sql_escape(PROMPT_EXPAND))
+        .replace("__PROMPT_SUMMARIZE_BODY__", &sql_escape(PROMPT_SUMMARIZE))
 }
 
 /// Double single-quotes so the body can sit inside a SQL string
@@ -37,13 +48,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn substitution_replaces_all_three_tokens() {
-        let template =
-            "x __PROMPT_NORMAL_BODY__ y __PROMPT_VERBOSE_BODY__ z __PROMPT_FRAGMENT_BODY__";
+    fn substitution_replaces_all_six_tokens() {
+        let template = "a __PROMPT_NORMAL_BODY__ b __PROMPT_VERBOSE_BODY__ c \
+                        __PROMPT_FRAGMENT_BODY__ d __PROMPT_REWRITE_BODY__ e \
+                        __PROMPT_EXPAND_BODY__ f __PROMPT_SUMMARIZE_BODY__";
         let out = substitute_prompt_bodies(template);
         assert!(
             !out.contains("__PROMPT_"),
-            "all three tokens should have been replaced; got: {out}"
+            "all six tokens should have been replaced; got: {out}"
         );
     }
 

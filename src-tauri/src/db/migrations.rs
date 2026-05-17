@@ -14,6 +14,7 @@ const MIGRATION_001: &str = include_str!("migrations/001_initial.sql");
 const MIGRATION_002: &str = include_str!("migrations/002_audit_triggers.sql");
 const MIGRATION_003: &str = include_str!("migrations/003_seed_modes.sql");
 const MIGRATION_004: &str = include_str!("migrations/004_injection_status.sql");
+const MIGRATION_005: &str = include_str!("migrations/005_ai_command_modes.sql");
 
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
@@ -36,6 +37,10 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
     }
     if current < 4 {
         conn.execute_batch(MIGRATION_004)?;
+    }
+    if current < 5 {
+        let prepared = substitute_prompt_bodies(MIGRATION_005);
+        conn.execute_batch(&prepared)?;
     }
     Ok(())
 }
@@ -81,7 +86,7 @@ mod tests {
     /// must leave `schema_version = 3`. (Smoke-level; the integration
     /// test suite covers full table/trigger/FTS5 assertions.)
     #[test]
-    fn apply_all_brings_fresh_db_to_version_4() {
+    fn apply_all_brings_fresh_db_to_version_5() {
         let conn = Connection::open_in_memory().expect("open in-memory");
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .expect("pragma fk");
@@ -93,7 +98,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "4");
+        assert_eq!(v, "5");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -111,7 +116,29 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "4");
+        assert_eq!(v, "5");
+    }
+
+    /// Migration 005 seeds the AI command modes (disabled by default).
+    #[test]
+    fn migration_005_seeds_ai_command_modes() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+        for slug in ["rewrite", "expand", "summarize"] {
+            let count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM modes WHERE slug = ?1", [slug], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 1, "missing mode row for {slug}");
+            let enabled: i64 = conn
+                .query_row("SELECT enabled FROM modes WHERE slug = ?1", [slug], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            assert_eq!(enabled, 0, "{slug} should ship disabled by default");
+        }
     }
 
     /// Migration 004 actually adds the column it claims to add.

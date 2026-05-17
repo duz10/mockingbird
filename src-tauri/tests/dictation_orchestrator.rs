@@ -30,7 +30,7 @@ use std::sync::{Arc, Mutex};
 
 use mockingbird_lib::audio::vad::{VadFrame, VoiceActivityDetector};
 use mockingbird_lib::audio::AudioCapture;
-use mockingbird_lib::cleanup::PassthroughCleaner;
+use mockingbird_lib::cleanup::{LlmCleaner, PassthroughCleaner, StubCleanupProvider};
 use mockingbird_lib::db::{sessions, transcripts, Database};
 use mockingbird_lib::dictation::runtime::default_normal_config;
 use mockingbird_lib::dictation::DictationOrchestrator;
@@ -195,16 +195,27 @@ fn build_orchestrator(
     RecordingInjector,
     mpsc::Receiver<mockingbird_lib::hotkey::HotkeyEvent>,
 ) {
-    // In-memory DB with migrations applied + provenance rows seeded.
+    build_orchestrator_with_cleaner(secure, stt_text, Box::new(PassthroughCleaner::new()))
+}
+
+/// Same as `build_orchestrator` but lets the test inject a custom
+/// cleaner — used by the Phase 4 `llm_cleanup_runs_in_orchestrator`
+/// test to wire an `LlmCleaner` backed by `StubCleanupProvider`.
+fn build_orchestrator_with_cleaner(
+    secure: bool,
+    stt_text: &str,
+    cleaner: Box<dyn mockingbird_lib::cleanup::Cleaner>,
+) -> (
+    DictationOrchestrator,
+    Arc<Mutex<rusqlite::Connection>>,
+    RecordingInjector,
+    mpsc::Receiver<mockingbird_lib::hotkey::HotkeyEvent>,
+) {
     let db = Database::open_in_memory().expect("open in-memory db");
     let config = default_normal_config(&db.conn).expect("default normal config");
     let db_arc = Arc::new(Mutex::new(db.conn));
 
     let injector = RecordingInjector::new();
-
-    // PipelineComplete signal channel — orchestrator emits on every
-    // terminal action. Tests don't care about the events but we hold
-    // the receiver alive so the send doesn't fail with `SendError`.
     let (hotkey_tx, hotkey_rx) = mpsc::channel();
 
     let orchestrator = DictationOrchestrator::new(
@@ -213,7 +224,7 @@ fn build_orchestrator(
         Box::new(StubStt {
             text: stt_text.into(),
         }),
-        Box::new(PassthroughCleaner::new()),
+        cleaner,
         Box::new(injector.clone()),
         Box::new(FixedWindowContext {
             fg: notepad_window(),
@@ -392,5 +403,98 @@ fn cleaned_text_round_trips_through_injector_call_verbatim() {
     assert_eq!(
         calls[0].0, weird,
         "passthrough cleaner must preserve the text byte-for-byte"
+    );
+}
+
+// --------------------------------------------------------------------
+// Phase 4: `LlmCleaner` (backed by `StubCleanupProvider`) actually runs
+// inside the orchestrator and produces text that differs from raw.
+// This is the Phase 4 mb-modes-differ analogue at the orchestrator
+// level — proves the cleanup layer is wired up end-to-end.
+// --------------------------------------------------------------------
+
+#[test]
+fn llm_cleanup_runs_in_orchestrator_and_injects_cleaned_text() {
+    // Build an LlmCleaner backed by the stub provider. We need to
+    // share the DB with both the cleaner (for prompt + dict lookups)
+    // and the orchestrator (for session persistence). Easiest: build
+    // the orchestrator with the cleaner already wired, sharing a DB
+    // Arc.
+    let db = Database::open_in_memory().expect("open in-memory db");
+    let config = default_normal_config(&db.conn).expect("default normal config");
+    let db_arc = Arc::new(Mutex::new(db.conn));
+
+    // LlmCleaner needs model_id/temp/max_tokens — pull from the mode row.
+    let (model_id, temperature, max_tokens) = {
+        let conn = db_arc.lock().unwrap();
+        conn.query_row(
+            "SELECT model_id, temperature, max_tokens FROM modes WHERE slug='normal'",
+            [],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, f64>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .unwrap()
+    };
+    let cleaner = Box::new(LlmCleaner::new(
+        Box::new(StubCleanupProvider::new()),
+        Arc::clone(&db_arc),
+        model_id,
+        temperature as f32,
+        max_tokens as u32,
+    ));
+
+    let injector = RecordingInjector::new();
+    let (hotkey_tx, _hotkey_rx) = mpsc::channel();
+    let orchestrator = DictationOrchestrator::new(
+        Box::new(StubAudioCapture),
+        Box::new(StubVad),
+        Box::new(StubStt {
+            text: "hello world".into(),
+        }),
+        cleaner,
+        Box::new(injector.clone()),
+        Box::new(FixedWindowContext {
+            fg: notepad_window(),
+        }),
+        Box::new(ConstSecureGuard(false)),
+        RecordingWindow::new(),
+        Arc::clone(&db_arc),
+        config,
+        HashMap::new(),
+        hotkey_tx,
+    );
+    run_one_cycle(orchestrator);
+
+    // The stub provider's `normal` mode capitalises + adds a period.
+    let calls = injector.calls();
+    assert_eq!(calls.len(), 1, "got {calls:?}");
+    assert_eq!(
+        calls[0].0, "Hello world.",
+        "LlmCleaner output should be the stub's normal-mode transform, not raw"
+    );
+
+    // And the DB should have raw="hello world", cleaned="Hello world.",
+    // final="Hello world.".
+    let conn = db_arc.lock().unwrap();
+    let session = sessions::list_recent(&conn, 1).unwrap().pop().unwrap();
+    let rows = transcripts::get_by_session(&conn, session.id).unwrap();
+    assert_eq!(rows.len(), 3);
+    let raw_row = rows.iter().find(|r| r.stage.as_str() == "raw").unwrap();
+    let cleaned_row = rows.iter().find(|r| r.stage.as_str() == "cleaned").unwrap();
+    let final_row = rows.iter().find(|r| r.stage.as_str() == "final").unwrap();
+    assert_eq!(raw_row.text, "hello world");
+    assert_eq!(cleaned_row.text, "Hello world.");
+    assert_eq!(final_row.text, "Hello world.");
+    // Stub provider returns `stub-{mode_slug}`; LlmCleaner forwards
+    // that into `last_model_used`, and the orchestrator persists it.
+    assert_eq!(
+        cleaned_row.model_used.as_deref(),
+        Some("stub-normal"),
+        "cleaned-row model_used should reflect the actual model the provider used"
     );
 }

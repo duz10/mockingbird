@@ -99,11 +99,19 @@ windows        = { version = "0.56", features = [
     "Win32_System_Memory",
     "Win32_System_Threading",
     "Win32_System_ProcessStatus",
+    # Phase 4 — DPAPI for Anthropic API key encryption at rest.
+    "Win32_Security_Cryptography",
 ] }
 
 # Phase 3 — Static per-app injection-strategy override table.
 # Zero-allocation compile-time lookup. See ADR 0016.
 phf            = { version = "0.11", features = ["macros"] }
+
+# Phase 4 — Sync HTTP for cleanup providers (Ollama + Claude).
+# See ADR 0021: kept sync to fit the orchestrator's sync architecture
+# without dragging in a tokio runtime per dictation. `rustls-tls`
+# avoids OpenSSL on Windows. `json` for serde body marshalling.
+ureq           = { version = "2.10", default-features = false, features = ["tls", "json"] }
 
 # Dev / test helpers.
 tempfile       = "3"

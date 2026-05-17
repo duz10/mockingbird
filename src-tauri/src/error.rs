@@ -55,6 +55,22 @@ pub enum AppError {
     #[error("injection error: {0}")]
     Injection(String),
 
+    /// Cleanup-LLM failures.
+    ///
+    /// Sources: HTTP to Ollama / Claude (timeout, 5xx, connection
+    /// refused), provider-side model errors, token budget exceeded
+    /// before the raw transcript can fit, prompt assembly failures.
+    /// Phase 4 +.
+    #[error("cleanup error: {0}")]
+    Cleanup(String),
+
+    /// Secrets-store failures (DPAPI on Windows, Keychain on macOS).
+    ///
+    /// Sources: DPAPI protect/unprotect errors, missing key, file I/O.
+    /// Phase 4 +.
+    #[error("secrets error: {0}")]
+    Secrets(String),
+
     /// Generic catch-all for early Phase 1; replaced by typed variants
     /// as concrete modules surface their errors.
     #[error("{0}")]
@@ -91,5 +107,17 @@ mod tests {
     fn injection_displays_with_prefix() {
         let err = AppError::Injection("clipboard locked".to_string());
         assert_eq!(err.to_string(), "injection error: clipboard locked");
+    }
+
+    #[test]
+    fn cleanup_displays_with_prefix() {
+        let err = AppError::Cleanup("ollama refused connection".to_string());
+        assert_eq!(err.to_string(), "cleanup error: ollama refused connection");
+    }
+
+    #[test]
+    fn secrets_displays_with_prefix() {
+        let err = AppError::Secrets("DPAPI unprotect failed".to_string());
+        assert_eq!(err.to_string(), "secrets error: DPAPI unprotect failed");
     }
 }
