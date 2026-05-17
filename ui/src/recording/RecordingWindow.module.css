@@ -178,3 +178,100 @@
   outline: 2px solid var(--mode-normal);
   outline-offset: 2px;
 }
+
+
+/* ════════════════════════════════════════════════════════════════
+ * Design Language v1 (v2) overrides — Recording Window.
+ *
+ * The signature surface: a glass-thick floating capsule with the
+ * MockingbirdMark logo carrying live state. Per design HTML §11,
+ * the dot + waveform combo from v1 is REPLACED by the logo motion
+ * itself (the RecordingWindow.tsx renders <MockingbirdMark> instead
+ * of the dot+bars when designVersion === "v2").
+ *
+ * Wave 5 of the Design Language Phase. ADR 0023.
+ * ════════════════════════════════════════════════════════════════ */
+
+:global([data-design="v2"]) .pill {
+  /* Glass-thick — heaviest blur, ambient tint, hairline edge + strong
+   * shadow. The pill IS the window (per Phase-5 LESSONS), so the
+   * shadow is on the DWM frame, not the CSS box. The box-shadow we
+   * still need: interior highlights for the glass look. */
+  background: linear-gradient(180deg,
+    var(--glass-tint-regular) 0%,
+    var(--glass-tint-thin) 100%);
+  backdrop-filter: blur(40px) saturate(200%);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+}
+
+/* Hide the v1 dot + waveform + static-bars when v2 is active.
+ * They're rendered conditionally in TSX too, but defense in depth:
+ * if someone hardcodes one, this still wins. */
+:global([data-design="v2"]) .dot,
+:global([data-design="v2"]) .bars,
+:global([data-design="v2"]) .barsStatic {
+  display: none;
+}
+
+/* Status text — DM Sans body, 14/20, weight 500. Colour follows the
+ * pipeline state so the user can read the pill at a glance:
+ * - listening / transcribing / cleaning / pasting: on-surface (active)
+ * - idle / done / aborted: on-surface-variant (muted) */
+:global([data-design="v2"]) .statusText {
+  font-family: "DM Sans", sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: var(--md-sys-on-surface);
+}
+
+:global([data-design="v2"]) .pill.stateIdle .statusText,
+:global([data-design="v2"]) .pill.stateDone .statusText {
+  color: var(--md-sys-on-surface-variant);
+}
+
+:global([data-design="v2"]) .pill.stateAborted .statusText {
+  color: var(--md-sys-error);
+}
+
+/* Mode badge — IBM Plex Mono uppercase label-medium. The mode-color
+ * inline var still feeds the colour; in v2 it resolves to a warm M3
+ * accent via the --mode-* bridge in tokens-v2.css. */
+:global([data-design="v2"]) .modeBadge {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: var(--shape-full);
+  background: color-mix(in oklab,
+    var(--mode-color, var(--md-sys-primary)) 14%, transparent);
+  color: var(--mode-color, var(--md-sys-primary));
+  margin-left: auto;
+}
+
+/* Cancel button — tonal icon button shape. Hover lifts to error tint. */
+:global([data-design="v2"]) .cancel {
+  border-radius: var(--shape-full);
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--md-sys-on-surface-variant);
+}
+:global([data-design="v2"]) .cancel:hover {
+  background: color-mix(in oklab, var(--md-sys-error) 16%, transparent);
+  color: var(--md-sys-error);
+}
+:global([data-design="v2"]) .cancel:focus-visible {
+  outline: 2px solid var(--md-sys-primary);
+  outline-offset: 2px;
+}

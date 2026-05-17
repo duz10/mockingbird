@@ -17,7 +17,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { isTauri } from "../lib/tauri";
+import { useAppStore } from "../lib/store";
 import { XIcon } from "../design/Icon";
+import { MockingbirdMark, type MarkState } from "../design/components/MockingbirdMark";
 import { t } from "../i18n";
 import styles from "./RecordingWindow.module.css";
 
@@ -49,6 +51,23 @@ function statusLabel(state: DictationState): string {
     case "done":         return t("recording.state.done");
     case "aborted":      return t("recording.state.aborted");
     case "idle":         return t("recording.state.idle");
+  }
+}
+
+/**
+ * Map dictation pipeline state → MockingbirdMark visual state.
+ * Per Design Language v1 §08 (live state in motion): collapsed circles
+ * when waiting, oscillating ellipses while recording, settle on done.
+ */
+function dictationStateToMarkState(state: DictationState): MarkState {
+  switch (state) {
+    case "idle":         return "idle";
+    case "listening":    return "active";
+    case "transcribing": return "active";
+    case "cleaning":     return "active";
+    case "pasting":      return "active";
+    case "done":         return "static";
+    case "aborted":      return "exit";
   }
 }
 
@@ -159,6 +178,8 @@ export function RecordingWindow() {
 
   const isActive = event.state === "listening";
   const showWaveform = event.state === "listening";
+  const designVersion = useAppStore((s) => s.designVersion);
+  const useV2 = designVersion === "v2";
 
   return (
     <div className={styles.shell}>
@@ -170,12 +191,31 @@ export function RecordingWindow() {
         // declare `app-region: no-drag` so clicks register.
         data-tauri-drag-region
       >
-        <span className={styles.dot} aria-hidden="true" />
-
-        {showWaveform ? (
-          <Waveform active={isActive} />
+        {useV2 ? (
+          // v2 — the logo itself carries live state. Per the Design
+          // Language v1 doc §11: "the logo carries the live state —
+          // collapsed circles when waiting, oscillating ellipses
+          // while recording." Replaces the dot + waveform combo.
+          <MockingbirdMark
+            state={dictationStateToMarkState(event.state)}
+            size={28}
+            // Use the idle muted gradient when the mark is in idle
+            // state — matches the Design Language v1 doc §11 first
+            // pill state ("Idle · tap to start").
+            gradient={
+              event.state === "idle" ? ["#8A7A6E", "#6B5A4E"] : undefined
+            }
+            title={statusLabel(event.state)}
+          />
         ) : (
-          <span className={styles.barsStatic} aria-hidden="true" />
+          <>
+            <span className={styles.dot} aria-hidden="true" />
+            {showWaveform ? (
+              <Waveform active={isActive} />
+            ) : (
+              <span className={styles.barsStatic} aria-hidden="true" />
+            )}
+          </>
         )}
 
         <span className={styles.statusText}>{statusLabel(event.state)}</span>
