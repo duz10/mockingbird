@@ -785,3 +785,79 @@ driver, so the machine never transitioned.
 - **What actually works:** put the test in `src-tauri/tests/dictation_orchestrator.rs` (separate crate, depends on `mockingbird_lib` like any consumer). Stub every trait the orchestrator takes (`AudioCapture` / `VoiceActivityDetector` / `SpeechToText` / `Cleaner` / `Injector` / `WindowContext` / `SecureInputGuard`). Use `Database::open_in_memory()` for SQLite + `default_normal_config` for FK seeding. Use a plain `std::sync::mpsc` pair for `StateAction`. The orchestrator's `run(rx)` iterates `rx.iter()` and terminates when the sender drops — so the test pushes its two actions, drops `tx`, then calls `run(rx)` inline. No threads, no synchronisation primitives beyond the channels the orchestrator already owns.
 - **Generalisation:** when an orchestrator has `Box<dyn Trait>` deps for every I/O surface, integration tests should mirror the pattern: in-memory DB + stub traits + drop-the-sender to terminate the loop. The Phase 4 `LlmCleaner` integration test should follow the same recipe, swapping `PassthroughCleaner` for a `StubLlmCleaner` that returns a deterministic transformation, so the e2e-injection judge can prove the LLM is actually in the loop.
 - **Gotcha:** `rustfmt` rewrites long `assert_eq!` lines aggressively. Always run `pwsh scripts/cargo-with-cuda.ps1 fmt` (no `--check`) before pushing — a fmt-check failure blocks the `mb-quality-bar` judge AND surfaces noise about unrelated files (e.g. Wave 4.9's `examples/verify_wave49.rs` was already not-clean and got swept up in Wave 5's pre-tag check).
+
+
+## 2026-05-18 [phase5/6 UI sprint] CSS Modules need a vite-env.d.ts to satisfy tsc
+
+- **Context:** UI bundle compiled fine via Vite alone, but `tsc --noEmit`
+  (the first step of `npm run build`) flagged every `import styles from
+  "./Foo.module.css"` as TS2307. Even `@vitejs/plugin-react` doesn't add
+  the module ambient declaration on its own — that's `vite/client` types
+  via a triple-slash reference.
+- **Finding:** A `ui/src/vite-env.d.ts` with `/// <reference types="vite/client" />`
+  plus ambient declarations for `*.module.css`, `*.module.scss`, `*.css`
+  is what unblocks `tsc`. Vite's docs imply this file is auto-created
+  by `npm create vite`, but a hand-rolled Phase 5 scaffold needs it
+  explicitly.
+- **Action:** When standing up a new Vite + TS workspace, drop a
+  `vite-env.d.ts` next to `main.tsx` BEFORE writing the first
+  `.module.css` import. Saves a round-trip through Playwright/CI to
+  notice.
+
+## 2026-05-18 [phase5/6 UI sprint] Tauri `commands.rs` (file) vs `commands/` (dir) conflict
+
+- **Context:** Splitting the IPC surface into per-feature sub-modules
+  (`commands/insights.rs`, `commands/sessions.rs`, ...) collided with the
+  Phase 1 `commands.rs` file that held `AppState` + `get_setting` /
+  `set_setting` / `fts_smoke_test`. Rust 2024 module resolution
+  rejects having both `foo.rs` and `foo/mod.rs` at the same depth.
+- **Finding:** Delete the old file and move its contents into a
+  `commands/legacy.rs` sub-module. Keeping both command surfaces
+  side-by-side (typed `SettingKey`-JSON vs flat string/string) is fine
+  because Tauri command names are globally unique — `get_setting` vs
+  `get_settings` (different by one letter) is enough. The `AppState`
+  struct stays re-exported from `commands/mod.rs` so the call site
+  `use crate::commands::AppState` in `lib.rs` keeps working unchanged.
+- **Action:** Treat `pub mod commands` as a directory from day one in
+  Tauri projects, even when it contains only one file initially.
+  Cheaper than the inevitable refactor when the IPC surface grows past
+  3 commands.
+
+## 2026-05-18 [phase5/6 UI sprint] `tauri::AppHandle` in command signatures bounces with CommandArg error
+
+- **Context:** Wanted `#[tauri::command] pub fn app_paths(app: AppHandle) -> ...`
+  so the path resolver could return canonical app-data + log dirs.
+  Compiler bounced it: `the trait Deserialize<'_> is not implemented for AppHandle`.
+- **Finding:** Inside a `#[tauri::command]` fn the runtime extracts
+  `AppHandle<R>` from the invoke context, NOT from JS-side args. The
+  `generate_handler!` macro should detect that and skip the
+  `CommandArg` impl — but in our setup (tauri 2.x with the runtime
+  generic erased at the registration site) it didn't.
+- **Action:** For app-data / logs / models paths, bypass `AppHandle`
+  entirely and read `APPDATA` + `USERPROFILE` env vars the same way
+  `logging::init` and `lib::run` do. Matches the rest of the runtime's
+  resolution logic. If we hit a case where Tauri's `path_resolver` has
+  overrides we truly need, revisit by adding the runtime generic to
+  the command: `pub fn app_paths<R: tauri::Runtime>(app: tauri::AppHandle<R>)`.
+
+## 2026-05-18 [phase5/6 UI sprint] rusqlite closure type inference needs explicit annotations under `?`-chains returning String
+
+- **Context:** Several new command modules did this pattern:
+  ```rust
+  let mut stmt = conn.prepare(SQL).map_err(|e| e.to_string())?;
+  let rows = stmt.query_map([], |r| Ok(MyRow { ... })).map_err(|e| e.to_string())?;
+  ```
+  Half the closures failed with E0282 ("type annotations needed"). The
+  outer `?` operator was wired to `Result<_, String>` via `map_err`
+  but the closure return type couldn't be inferred backwards from
+  there.
+- **Finding:** Two cleaner fixes:
+  1. Hint the closure: `|r: &rusqlite::Row<'_>| -> rusqlite::Result<MyRow> { ... }`.
+  2. Use a generic `into_err<E: Display>(e) -> String` helper instead of
+     `|e| e.to_string()` closures everywhere — the function pointer's
+     type signature does the inference.
+  We picked (2) because it also dedupes the `map_err` body and reads better.
+- **Action:** Add `commands::into_err` (or similar) to any
+  command-module crate before writing the first `.map_err`. Future
+  authors will copy the pattern without thinking about closure
+  inference.

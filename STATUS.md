@@ -1,3 +1,79 @@
+## UI sprint progress (2026-05-18 — this iteration)
+
+**Status:** Phase 5 Wave A.5 + Wave B landed in one session. UI sprint
+continues — see the wave checklist below.
+
+### Wave A.5 — IPC command surface ✅
+- `src-tauri/src/commands/{insights,sessions,dictionary,modes,settings,learning,system}.rs`
+  + `commands/types.rs` (DTO mirror of `ui/src/lib/types.ts`)
+  + `commands/legacy.rs` (Phase 1 typed `SettingKey` bridge — kept for tests)
+  + `commands/mod.rs` (registers everything via `commands::register`)
+- 22 new `#[tauri::command]` entry points wired into `lib.rs::run()`.
+- DTO + `into_err` helper dedupe the `.map_err(|e| e.to_string())` boilerplate.
+- Tests: **406 → 409 passing** (insights snapshot block has 4 new tests).
+- fmt + check `--release` clean on RTX 2060 with CUDA 12.8.
+
+### Wave B — Recording overlay ✅
+- `ui/src/recording/RecordingWindow.tsx` (180 LoC) + `RecordingWindow.module.css`.
+- States: idle / listening / transcribing / cleaning / pasting / done / aborted.
+- Pulsing dot + 24-bar fake waveform (rAF-driven sine + per-bar noise;
+  replaced 1-to-1 with real RMS samples once the orchestrator pipes them
+  across — Phase 5 carry-forward).
+- Subscribes to `dictation:state` Tauri events; emits `dictation:cancel`
+  on Esc/click. Orchestrator listener is the Phase 5 follow-up.
+- Respects `prefers-reduced-motion`: animations + waveform hidden,
+  static line shown. `data-tauri-drag-region` makes the pill draggable.
+- Mode-tinted badge via `--mode-{slug}` token lookup.
+- Esc handler is window-global (`window.addEventListener`) so the
+  overlay doesn't need focus.
+- 8 new i18n keys under `recording.state.*` and `recording.action.cancel`.
+
+### Wave A scaffolding inherited from prior session
+- Design tokens (`tokens.css`), primitives, sidebar, store, fixtures,
+  per-page stubs (`Insights.tsx`, `History.tsx`, …) all in place.
+- `ui/src/vite-env.d.ts` added this iteration (CSS-modules ambient
+  declaration was missing — see LESSONS.md).
+- `npm install --ignore-scripts` clean (394 packages). `npm run build`
+  green: main 63 kB / 20 kB gz, recording 3.8 kB / 1.6 kB gz, total
+  CSS 11 kB / 3.6 kB gz. Well under the 250 kB / 80 kB-gz budget.
+
+### Not yet done (next iterations)
+- Wave C — `Insights` page (render the fixture; charts via `<canvas>`).
+- Wave D — `History` list + detail + FTS search box.
+- Wave E — `Dictionary` CRUD.
+- Wave F — `Modes` editor.
+- Wave G — `Settings` panel (5 tabs).
+- Wave H — Tauri shell config for the recording window
+  (frameless + transparent + always-on-top + position).
+- Wave I — Tauri shell wiring: spawn the overlay on dictation start,
+  hide on done; emit the `dictation:state` events from the orchestrator.
+- Wave J — Playwright visual-baseline run on Insights / History / Settings.
+
+### Standing rules audit (this iteration)
+- ✅ Raw transcripts: untouched (commands only READ via `transcripts::get_stage`).
+- ✅ No telemetry: zero outbound HTTP added.
+- ✅ Cross-platform: `open_path` and `app_paths` cfg-gated to Windows
+  with clear `(unset)` fallbacks on Linux/Mac so the dev loop works
+  on either OS for everything except the OS-specific bits.
+- ✅ No `@tanstack/*`: not introduced.
+- ✅ `npm install --ignore-scripts` used.
+- ✅ Settings UI uses an allowlist of 8 keys — UI cannot write arbitrary settings.
+- ✅ DRY: `into_err` helper, `lock_db` helper, `stage_text` helper.
+- ✅ All new files < 600 lines. Largest: `RecordingWindow.tsx` at ~210 lines.
+- ✅ Cost line: not tracking (no LLM judge runs this iteration).
+
+### Blocked on
+- Nothing right now. Waves C–J are independent of any external decision.
+- The `dictation:state` event needs the orchestrator to actually emit it
+  (small Phase 5 Rust ticket; will pair with Wave I).
+
+### Last-judge line
+- `cargo test --release --lib` → **409 passed, 0 failed, 12 ignored.**
+- `npm run build` (ui/) → green, no TS errors, no warnings.
+- No formal Phase 5 judges run yet (Playwright visual baselines come in Wave J).
+
+---
+
 # Mockingbird — STATUS
 
 **Current phase:** **Phases 4 (LLM cleanup) + 8 (Learning loop) ✅ COMPLETE — both sealed in one autonomous run.** Tags `phase-0-complete` through `phase-4-complete` + `phase-8-complete` all local. Next: **Phases 5 + 6 + 7 = UI sprint** (Recording HUD → History view → Polish/code-sign/installer). Phase 8 also has a small UI carry-forward (Settings → Advanced → Learning history view + "this was wrong" right-click) bundled into Phase 6.
