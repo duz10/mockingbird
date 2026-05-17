@@ -20,6 +20,7 @@ pub mod dictation;
 pub mod error;
 pub mod hotkey;
 pub mod injection;
+pub mod learning;
 pub mod logging;
 pub mod recording_window;
 pub mod secrets;
