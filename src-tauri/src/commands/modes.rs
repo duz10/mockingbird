@@ -22,14 +22,21 @@ pub struct ModePatch {
 #[tauri::command]
 pub fn list_modes(db: State<'_, AppStateHandle>) -> Result<Vec<ModeDto>, String> {
     let conn = lock_db(&db)?;
-    // The DTO field is `label`; the schema column is `display_name`
-    // (per migrations/001_initial.sql). Alias here so we don't have to
-    // rename either side. Renaming the column post-Phase-1-seal is
-    // forbidden (migrations are append-only).
+    // Two SQL↔schema name mismatches handled inline here:
+    //   - `label` is the DTO field; `display_name` is the schema column
+    //     (migrations/001_initial.sql). Migrations are append-only
+    //     post-Phase-1-seal so we alias on the SELECT side.
+    //   - `prompt_version` is `String` on the DTO; `prompts.version` is
+    //     `INTEGER` on the schema. SQLite will return Integer for the
+    //     raw column, which fails rusqlite's String column-type check
+    //     ("Invalid column type Integer at index: 8"). Concatenating
+    //     `'v' || p.version` forces TEXT affinity and produces the
+    //     human-readable form (v1, v2, …) the UI already expects —
+    //     same shape as the `'v1'` literal fallback.
     let mut stmt = conn
         .prepare(
             "SELECT m.slug, m.display_name AS label, m.enabled, m.model_id, m.provider, \
-                    m.temperature, m.max_tokens, m.hotkey, COALESCE(p.version, 'v1') \
+                    m.temperature, m.max_tokens, m.hotkey, COALESCE('v' || p.version, 'v1') \
              FROM modes m \
              LEFT JOIN prompts p ON p.id = m.prompt_id \
              ORDER BY m.id ASC",

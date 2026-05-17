@@ -14,6 +14,99 @@ Format:
 
 ---
 
+## 2026-05-17 [phase5-postship-2] pill stayed up + app crashed when Ollama cold-loaded a model past our 30s timeout
+
+- **Context:** Phase 5 second smoketest. Right Alt + dictate. Capture
+  finished cleanly. Pill went CLEANING. Then a 31-second gap in the
+  logs ending with `WARN cleanup failed; falling back to raw
+  transcript error=transport: http://localhost:11434/api/chat:
+  Network Error: Error encountered in the status line: A c...`. After
+  that: zero further log lines, pill stuck on screen forever,
+  Mockingbird eventually crashed (process gone).
+- **Finding 1 (cleanup hang root cause):** Ollama loads the model into
+  VRAM on the FIRST `/api/chat` request. For qwen2.5:3b-q4 on a fresh
+  Ollama process, that cold load can take 30-60 seconds. Our
+  `REQUEST_TIMEOUT` in `cleanup/ollama.rs` is exactly 30s, so we sit
+  RIGHT at the edge and frequently lose by a hair. The `/api/tags`
+  health probe passes instantly (no model load involved), so the
+  app's startup health check shows green even when the first cleanup
+  is doomed to time out.
+- **Finding 2 (pill stuck after cleanup hang):** `LlmCleaner::clean`
+  catches the timeout error and returns `Ok(raw)` per the fallback
+  rule — the WARN line in the log proves we reached that branch. But
+  no logs after that means either the inject path hung silently OR
+  the process panicked between cleanup-fallback and inject. Either
+  way, `complete()` never reached its explicit `self.recording_window
+  .hide()` at the bottom. The pill has no self-defense mechanism.
+- **Finding 3 (why the process eventually crashed):** Unproven but
+  most likely: the WebView2 child process died after our many
+  emit-while-no-listener events with no logging path (WebView2 uses
+  its own process group; when it dies, AppHandle::emit silently
+  no-ops, but if the death was during an emit's actual IPC handshake
+  the parent can get a broken-pipe panic propagating up the Tauri
+  internals).
+- **Action (defense in depth):**
+  1. **Rust Drop guard.** Added `PillHideGuard` (RAII) at the top of
+     `complete()`. Wraps a clone of `RecordingWindow` (cheap — it's
+     Arc<AtomicBool> + Arc<Mutex<Option<AppHandle>>>). On Drop, if
+     the window is still visible, hide it. Disarmed right before the
+     explicit success-path hide() so we don't double-fire. Skips the
+     warning log when window is already hidden (idempotent persist_
+     failed_* paths beat us to it).
+  2. **React watchdog.** Recording overlay now tracks time since the
+     last `dictation:state` event. If >60s passes (= Rust
+     orchestrator dead or terminally hung), the webview hides itself
+     via `getCurrentWindow().hide()`. Doesn't need IPC to a dead
+     parent. This is the only line of defense that works when the
+     ENTIRE Rust process has crashed.
+  3. **Inject logging.** Added `tracing::info!` at cleanup-begin,
+     cleanup-end, inject-begin, inject-end. Next time something
+     hangs we'll see exactly where.
+  4. **Did NOT touch the 30s timeout** (in scope: defensive UI; the
+     timeout itself is a separate ADR conversation — raising it
+     punishes the user with longer hangs, lowering it more risks
+     legit slow first-calls). Future work: a one-time "warm Ollama"
+     ping on app boot that does a dummy /api/chat to pay the
+     model-load cost in the background, so the first user dictation
+     hits a hot model.
+- **Pattern for future Tauri overlays:** ANY OS-managed visual
+  affordance (overlay window, tray flyout, status badge) needs:
+  - A Drop guard on the Rust side guaranteeing the affordance gets
+    cleared on early return / panic.
+  - A watchdog timer on the webview side that self-clears when no
+    state update arrives within N seconds, using the webview's own
+    API rather than IPC. The parent process might be dead.
+  Together these handle (a) Rust-level errors, (b) Rust panics, (c)
+  full Rust process crashes — the only failure they don't cover is
+  WebView2 itself dying, in which case the user gets to ALT-F4 the
+  empty window like any other ghost.
+
+---
+
+## 2026-05-17 [phase5-postship-2] `prompts.version INTEGER` failed to deserialize as `String`
+
+- **Context:** Same smoketest. Modes page error box (after our prior
+  silent-spinner fix exposed it): `Invalid column type Integer at
+  index: 8, name: COALESCE(p.version, 'v1')`.
+- **Finding:** `prompts.version` is `INTEGER` in 001_initial.sql. The
+  `ModeDto.prompt_version` is `String`. The fallback literal `'v1'`
+  IS a string, which made the COALESCE return type ambiguous —
+  rusqlite picks the first non-null branch's affinity at row time,
+  and on rows where `p.version` was non-null it returned Integer.
+  rusqlite's `String` deserializer rejects Integer columns hard.
+- **Action:** Concatenate to force TEXT affinity:
+  `COALESCE('v' || p.version, 'v1')`. SQLite's `||` operator coerces
+  both operands to TEXT. Produces strings like "v1", "v2", … which
+  is what the UI was already rendering. No schema change needed
+  (and forbidden post-Phase-1-seal anyway).
+- **Reusable rule:** Whenever an SQL fallback literal differs in type
+  from the column it's replacing, the COALESCE result type is
+  per-row-dependent. Either cast both sides or change the DTO to
+  match the column type. Default to casting (DTO contracts cross
+  process boundaries; column types are internal).
+
+---
+
 ## 2026-05-17 [phase5-postship] release binary baked in `localhost:5173` — webview shows "can't reach this page"
 
 - **Context:** First end-to-end Dustin smoke test of the Phase 5 build.

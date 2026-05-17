@@ -91,16 +91,53 @@ export function RecordingWindow() {
   // replacing it — mid-pipeline events like `transcribing` only carry
   // the new state, no modeSlug/modeLabel, so a naive replace would
   // blank out the mode badge between listening → transcribing.
+  //
+  // **Watchdog**: also kick a 60-second timer on every state event.
+  // If it ever fires (no state update for 60s = Rust orchestrator is
+  // hung OR the process has crashed), hide ourselves so the user
+  // isn't staring at a frozen pill forever. Saw this happen in Phase
+  // 5 smoketest when an Ollama HTTP call hung past the 30s timeout
+  // and the parent process crashed before the cleanup-fallback path
+  // could run.
   useEffect(() => {
     if (!isTauri()) return;
     let unlisten: (() => void) | undefined;
+    let watchdog: number | undefined;
+
+    const kickWatchdog = () => {
+      if (watchdog !== undefined) window.clearTimeout(watchdog);
+      watchdog = window.setTimeout(() => {
+        // No state update for 60s — assume the Rust side is dead and
+        // self-destruct. Use Tauri's window API directly because IPC
+        // to a crashed process won't return.
+        void (async () => {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[recording] no state event for 60s; assuming orchestrator dead, hiding self",
+          );
+          try {
+            const { getCurrentWindow } = await import("@tauri-apps/api/window");
+            await getCurrentWindow().hide();
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.warn("[recording] watchdog hide failed", err);
+          }
+        })();
+      }, 60_000);
+    };
+
     (async () => {
       const { listen } = await import("@tauri-apps/api/event");
       unlisten = await listen<DictationEvent>("dictation:state", (e) => {
         setEvent((prev) => ({ ...prev, ...e.payload }));
+        kickWatchdog();
       });
+      kickWatchdog(); // Arm on initial mount too.
     })();
-    return () => unlisten?.();
+    return () => {
+      unlisten?.();
+      if (watchdog !== undefined) window.clearTimeout(watchdog);
+    };
   }, []);
 
   // Esc → cancel the active dictation. Hook is global so the overlay

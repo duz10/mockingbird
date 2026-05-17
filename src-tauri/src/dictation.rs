@@ -290,6 +290,16 @@ impl DictationOrchestrator {
         // the user gets progress feedback (transcribing → cleaning →
         // pasting → done). It's hidden at the end of this fn, or by
         // the persist_failed_* helpers on early-return paths.
+        //
+        // **Belt + suspenders**: wire a Drop guard so that if ANY
+        // step in complete() panics, early-returns through `?`, or
+        // hangs long enough to be killed, the pill still vanishes.
+        // Without this, a hung cleanup HTTP call (Ollama loading a
+        // cold model and exceeding our 30s timeout) leaves the user
+        // staring at a frozen "CLEANING" pill forever — observed in
+        // Phase 5 smoketest 2026-05-17. Guard is disarmed right
+        // before the explicit DONE-flash hide() at the bottom.
+        let mut pill_guard = PillHideGuard::arm(self.recording_window.clone());
         let mode_slug = self.config.mode_slug.clone();
 
         // Drain the audio.
@@ -371,6 +381,7 @@ impl DictationOrchestrator {
         self.recording_window
             .set_state(crate::recording_window::state::CLEANING, Some(&mode_slug));
         let cleanup_start = Instant::now();
+        tracing::info!(mode = %mode_slug, "dictation: cleanup begin");
         let cleaned_text = match self.cleaner.clean(&raw_text, &self.config.mode_slug) {
             Ok(c) => c,
             Err(e) => {
@@ -379,6 +390,11 @@ impl DictationOrchestrator {
             }
         };
         let cleanup_latency_ms = cleanup_start.elapsed().as_millis() as i64;
+        tracing::info!(
+            cleanup_latency_ms,
+            cleaned_len = cleaned_text.len(),
+            "dictation: cleanup end"
+        );
 
         // Secure-input check + focus-loss + strategy resolution.
         let is_secure = self.secure_guard.is_secure(&fg_keyup);
@@ -394,6 +410,11 @@ impl DictationOrchestrator {
         self.recording_window
             .set_state(crate::recording_window::state::PASTING, Some(&mode_slug));
         let inject_start = Instant::now();
+        tracing::info!(
+            decision = ?decision,
+            text_len = cleaned_text.len(),
+            "dictation: inject begin"
+        );
         let outcome = match decision {
             pipeline::Decision::Proceed(strategy) => {
                 match self.injector.inject(&cleaned_text, strategy) {
@@ -407,6 +428,11 @@ impl DictationOrchestrator {
             pipeline::Decision::Abort(o) => o,
         };
         let injection_latency_ms = inject_start.elapsed().as_millis() as i64;
+        tracing::info!(
+            injection_latency_ms,
+            outcome = ?outcome,
+            "dictation: inject end"
+        );
 
         // Persist. Whether the `final` transcript stage gets a row
         // depends on whether we actually injected something: an
@@ -441,6 +467,9 @@ impl DictationOrchestrator {
         self.recording_window
             .set_state(crate::recording_window::state::DONE, Some(&mode_slug));
         std::thread::sleep(std::time::Duration::from_millis(200));
+        // Disarm the guard — we're about to hide explicitly with the
+        // proper transition; we don't want a double-hide log.
+        pill_guard.disarm();
         self.recording_window.hide()?;
 
         // Reset transient state.
@@ -657,6 +686,62 @@ pub mod pipeline {
 // --------------------------------------------------------------------
 // Helpers
 // --------------------------------------------------------------------
+
+/// RAII guard that hides the recording pill on drop unless explicitly
+/// disarmed. Used by [`DictationOrchestrator::complete`] so that any
+/// early return (`?`), panic, or task abort still tears down the
+/// overlay — a stuck pill is the worst possible failure mode because
+/// it covers the user's screen with stale UI and they can't tell if
+/// the app is hung or just slow.
+///
+/// `Clone` on [`RecordingWindow`] is cheap (Arc<AtomicBool> +
+/// Arc<Mutex<Option<AppHandle>>>) so we hold a clone rather than a
+/// borrow — keeps the borrow checker happy when complete() still
+/// needs mutable access to other parts of `self`.
+struct PillHideGuard {
+    window: RecordingWindow,
+    armed: bool,
+}
+
+impl PillHideGuard {
+    fn arm(window: RecordingWindow) -> Self {
+        Self { window, armed: true }
+    }
+
+    /// Disarm the guard — call this on the normal success path right
+    /// before doing the explicit `hide()` with a state transition
+    /// (e.g. the DONE flash). Without disarming, the explicit hide()
+    /// would run, then Drop would call hide() AGAIN, producing two
+    /// log lines and two beeps.
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for PillHideGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        // If the window is already hidden, one of the persist_failed_*
+        // helpers already did its explicit hide() with the proper
+        // logging. Don't log a noisy redundant warning in the happy
+        // "early-return-that-already-cleaned-up" case.
+        if !self.window.is_visible() {
+            return;
+        }
+        tracing::warn!(
+            "PillHideGuard fired — complete() exited with pill still visible; \
+             hiding defensively (likely panic or hung step that no other \
+             cleanup path reached)"
+        );
+        // Best-effort: hide() returns AppResult but we're in Drop so
+        // we can't propagate; tracing-log on failure.
+        if let Err(e) = self.window.hide() {
+            tracing::warn!(error = ?e, "PillHideGuard: hide() failed");
+        }
+    }
+}
 
 fn new_uuid() -> String {
     uuid::Uuid::new_v4().to_string()
