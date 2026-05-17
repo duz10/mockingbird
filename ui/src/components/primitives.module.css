@@ -164,3 +164,29 @@
   border: 1px solid oklch(from var(--pill-color, var(--on-surf-faint)) l c h / 0.3);
   white-space: nowrap;
 }
+
+
+/* Spinner */
+.spinnerWrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: var(--s-5);
+}
+
+.spinner {
+  display: inline-block;
+  border-style: solid;
+  border-color: var(--surf-3);
+  border-top-color: var(--mode-normal);
+  border-radius: 50%;
+  animation: mb-spin 0.9s linear infinite;
+}
+
+@keyframes mb-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}

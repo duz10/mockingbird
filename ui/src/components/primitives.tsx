@@ -137,3 +137,31 @@ export function Pill({ children, tone, className }: PillProps) {
     </span>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* Spinner — indeterminate progress. Used while a page is loading its  */
+/* initial fetch. Kept dead simple: a CSS-animated ring. Respects      */
+/* prefers-reduced-motion (stops spinning, stays visible).             */
+/* ------------------------------------------------------------------ */
+
+interface SpinnerProps {
+  /** Pixel size of the ring. Default 24. */
+  size?: number;
+  /** Optional label for screen readers. */
+  label?: string;
+}
+
+export function Spinner({ size = 24, label = "Loading" }: SpinnerProps) {
+  return (
+    <div
+      className={styles.spinnerWrap}
+      role="status"
+      aria-label={label}
+    >
+      <span
+        className={styles.spinner}
+        style={{ width: size, height: size, borderWidth: Math.max(2, size / 10) }}
+      />
+    </div>
+  );
+}

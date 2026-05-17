@@ -1,0 +1,205 @@
+/* Insights — dashboard grid. Three rows:
+ *   1. Today's "big numbers" + streak badge.
+ *   2. Sparkline + mode mix side-by-side.
+ *   3. Top apps + latency + learning loop, three across on wide screens,
+ *      stacked under 920px. */
+
+.shell { display: flex; flex-direction: column; gap: var(--s-5); }
+
+/* Row 1 — 4 metric tiles + streak badge. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--s-3);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: var(--s-4);
+  background: var(--surf-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+}
+
+.tileLabel {
+  font: var(--type-sm);
+  color: var(--on-surf-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tileValue {
+  font: var(--type-2xl);
+  font-weight: 700;
+  color: var(--on-surf);
+  letter-spacing: -0.02em;
+  /* Monospaced tabular figures so jittering counts don't shift. */
+  font-variant-numeric: tabular-nums;
+}
+
+.tileHint {
+  font: var(--type-xs);
+  color: var(--on-surf-faint);
+}
+
+/* Streak tile uses the same shell but flagged with a gold accent. */
+.tileStreak { border-color: oklch(from var(--status-processing) l c h / 0.6); }
+.tileStreak .tileValue { color: var(--status-processing); }
+
+/* Row 2 + 3 — two-column then three-column. */
+.row2 {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--s-3);
+}
+.row3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-3);
+}
+@media (max-width: 920px) {
+  .row2, .row3 { grid-template-columns: 1fr; }
+}
+
+/* Sparkline */
+.sparkWrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.sparkCanvas {
+  width: 100%;
+  height: 80px;
+  display: block;
+  border-radius: var(--r-2);
+  background: var(--surf-3);
+}
+.sparkScale {
+  display: flex;
+  justify-content: space-between;
+  font: var(--type-xs);
+  color: var(--on-surf-faint);
+}
+
+/* Mode mix — labeled segmented bar + legend. */
+.mixBar {
+  display: flex;
+  width: 100%;
+  height: 18px;
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  background: var(--surf-3);
+}
+.mixSeg {
+  height: 100%;
+  transition: filter var(--dur-1) var(--ease-out);
+}
+.mixSeg:hover { filter: brightness(1.15); }
+
+.mixLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  font: var(--type-sm);
+  color: var(--on-surf-muted);
+}
+.mixLegendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.mixSwatch {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--r-1);
+  flex-shrink: 0;
+}
+.mixCount {
+  color: var(--on-surf);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Top apps — labelled horizontal bar chart. */
+.appsList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.appRow {
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) minmax(80px, 3fr) auto;
+  gap: var(--s-3);
+  align-items: center;
+  font: var(--type-sm);
+  color: var(--on-surf);
+}
+.appName { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.appBar {
+  height: 8px;
+  background: var(--surf-3);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+.appBarFill {
+  height: 100%;
+  background: var(--mode-normal);
+  border-radius: var(--r-pill);
+}
+.appCount {
+  color: var(--on-surf-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Latency block — three labeled milestones in a row. */
+.latencyRow {
+  display: flex;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+.latencyItem {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  min-width: 96px;
+}
+.latencyLabel {
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.latencyValue {
+  font: var(--type-lg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--on-surf);
+}
+.latencyValue.fast { color: var(--status-ok); }
+.latencyValue.slow { color: var(--status-error); }
+
+/* Learning loop summary */
+.learnGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-3);
+}
+.learnTerms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+}
+.learnTerm {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 2px 6px;
+  background: var(--surf-3);
+  border-radius: var(--r-1);
+  color: var(--on-surf);
+}
+.learnRolledBack {
+  color: var(--status-error);
+  font-weight: 600;
+}
