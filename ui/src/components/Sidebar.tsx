@@ -14,6 +14,7 @@ import {
   SlidersIcon,
   SparklesIcon,
 } from "../design/Icon";
+import { MockingbirdMark } from "../design/components/MockingbirdMark";
 import { t } from "../i18n";
 import { useAppStore } from "../lib/store";
 import type { DesignVersion } from "../lib/store";
@@ -69,6 +70,7 @@ export function Sidebar() {
   // a question that requires opening the Modes page to answer.
   const activeModeSlug = useAppStore((s) => s.activeModeSlug);
   const modes = useAppStore((s) => s.modes);
+  const designVersion = useAppStore((s) => s.designVersion);
   const activeModeLabel = useMemo(() => {
     if (!activeModeSlug) return null;
     return modes.find((m) => m.slug === activeModeSlug)?.label ?? activeModeSlug;
@@ -77,7 +79,11 @@ export function Sidebar() {
   return (
     <aside className={styles.sidebar} aria-label="Primary navigation">
       <div className={styles.brand}>
-        <MicIcon size={20} />
+        {designVersion === "v2" ? (
+          <MockingbirdMark size={22} state="static" />
+        ) : (
+          <MicIcon size={20} />
+        )}
         <span className={styles.brandText}>Mockingbird</span>
       </div>
       {activeModeLabel ? (

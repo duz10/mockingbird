@@ -1,0 +1,171 @@
+/* Mockingbird Design Language v1 — materials + ambient background.
+ *
+ * Sourced from docs/design/design-language-v1.html §06 (Elevation +
+ * Materials) and the body-level ambient blob.
+ *
+ * Two layers of paint here:
+ *
+ *   1. The ambient warm-blob background. `body::before` paints two
+ *      radial gradients of terracotta and deep terracotta that drift
+ *      slowly across the viewport; `body::after` adds a top-fade so
+ *      the page header reads cleanly. This is the layer the Liquid
+ *      Glass surfaces refract against — without it, glass looks like
+ *      a flat tint instead of glass.
+ *
+ *   2. The .glass / .glass-thin / .glass-thick / .glass-ultra-thin
+ *      utility classes. Each composes a backdrop-filter (blur +
+ *      saturate) over the matching --glass-tint-* token and adds the
+ *      hairline edge + interior highlight that give the material its
+ *      depth. Compose these onto any surface — cards, sidebars,
+ *      panels, the listening pill — instead of redefining
+ *      translucent tints per-component.
+ *
+ * Scoped under [data-design="v2"] so it cannot leak into v1.
+ * Wave 2 of the Design Language Phase. ADR 0023.
+ */
+
+/* ════════════════════════════════════════════════════════════════
+   Ambient warm-blob background.
+
+   `body::before` carries the three slow-drifting radial gradients
+   that give v2 its warmth even where there's no glass on top. The
+   drift animation is 30s + ease-in-out + alternate so it never
+   feels like a screensaver — it's a slow breath that you only
+   notice if you stare. Reduced-motion zeroes the animation duration
+   via the duration-token scale, but we ALSO pause it explicitly
+   below so reduced-motion users see a static blob instead of one
+   frozen mid-keyframe.
+
+   z-index: -2 keeps it behind everything including the gradient
+   wash from `body::after`.
+   ════════════════════════════════════════════════════════════════ */
+
+html[data-design="v2"] body::before {
+  content: "";
+  position: fixed;
+  inset: -20%;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 50% at 18% 22%, rgba(216, 144, 96, 0.18), transparent 60%),
+    radial-gradient(50% 50% at 82% 68%, rgba(148, 71, 48, 0.16), transparent 60%),
+    radial-gradient(40% 40% at 50% 100%, rgba(184, 92, 56, 0.12), transparent 60%);
+  filter: blur(40px);
+  animation: mb-drift 30s ease-in-out infinite alternate;
+}
+
+html[data-design="v2"] body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 100% 60% at 50% 0%,
+    transparent 0%,
+    var(--md-sys-background) 80%
+  );
+}
+
+@keyframes mb-drift {
+  0%   { transform: translate(0, 0) rotate(0deg); }
+  100% { transform: translate(-30px, 20px) rotate(2deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-design="v2"] body::before {
+    animation: none;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Liquid Glass utility classes.
+
+   Compose with `className="glass ..."`. Four thicknesses; pick by
+   how much the surface needs to recede from / stand out against
+   the page chrome (see design doc §06):
+
+     - ultra-thin: floating chips, hover affordances. Barely there.
+     - thin:       inputs, list items, ambient panels.
+     - regular:    default cards, sidebar, settings rows. The most
+                   common choice.
+     - thick:      hero surfaces — dialog, FAB, listening pill.
+                   Reads as a primary object on top of everything.
+
+   Backdrop-filter performance: we measure this in W5 on the
+   recording overlay (the surface that's on screen during every
+   dictation). If it costs >2 ms/frame on the RTX-2060 dev box,
+   we drop the saturate component first (cheapest knob) then fall
+   back to flat tinted solids for that surface specifically.
+   ════════════════════════════════════════════════════════════════ */
+
+[data-design="v2"] .glass {
+  background: linear-gradient(180deg,
+    var(--glass-tint-regular) 0%,
+    var(--glass-tint-thin) 100%);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+    var(--glass-shadow);
+  border-radius: var(--shape-xl);
+  position: relative;
+}
+
+[data-design="v2"] .glass-thin {
+  background: var(--glass-tint-thin);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid var(--glass-border);
+  box-shadow: inset 0 1px 0 rgba(255, 250, 240, 0.1);
+  border-radius: var(--shape-lg);
+}
+
+[data-design="v2"] .glass-thick {
+  background: linear-gradient(180deg,
+    var(--glass-tint-thick) 0%,
+    var(--glass-tint-regular) 100%);
+  backdrop-filter: blur(40px) saturate(200%);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  border: 1px solid var(--glass-border-bright);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 250, 240, 0.25),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3),
+    0 20px 60px rgba(0, 0, 0, 0.5),
+    0 4px 16px rgba(0, 0, 0, 0.3);
+  border-radius: var(--shape-2xl);
+}
+
+[data-design="v2"] .glass-ultra-thin {
+  background: var(--glass-tint-ultra-thin);
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--shape-md);
+}
+
+/* ════════════════════════════════════════════════════════════════
+   M3 elevation tokens for SOLID (non-glass) surfaces.
+
+   Use these on things that need a sense of depth but are not the
+   right semantic fit for glass (e.g. opaque dropdown menus over
+   complex backgrounds, code blocks, certain notification toasts).
+   Glass is the default; reach for these only when glass would
+   muddy the content.
+   ════════════════════════════════════════════════════════════════ */
+
+[data-design="v2"] {
+  --elevation-0: none;
+  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.30),
+                 0 1px 3px rgba(0, 0, 0, 0.15);
+  --elevation-2: 0 1px 2px rgba(0, 0, 0, 0.30),
+                 0 2px 6px rgba(0, 0, 0, 0.15);
+  --elevation-3: 0 1px 3px rgba(0, 0, 0, 0.30),
+                 0 4px 8px rgba(0, 0, 0, 0.15);
+  --elevation-4: 0 2px 3px rgba(0, 0, 0, 0.30),
+                 0 6px 10px rgba(0, 0, 0, 0.15);
+  --elevation-5: 0 4px 4px rgba(0, 0, 0, 0.30),
+                 0 8px 12px rgba(0, 0, 0, 0.15);
+}

@@ -1,0 +1,150 @@
+/* Mockingbird brand mark — animation states.
+ *
+ * Keyframes lifted 1:1 from docs/design/design-language-v1.html §08.
+ * If you tweak timing values here, mirror the change in that doc so
+ * the in-repo spec keeps matching the source of truth. ADR 0023. */
+
+.mark {
+  display: block;
+  flex-shrink: 0;
+}
+
+.mark ellipse,
+.mark path {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   IDLE — ellipses collapsed to near-circle proportions; triangle
+   stays at full size. Reads as "I'm here, waiting." Transitions in
+   over 500 ms so toggling state on a mounted mark feels alive.
+   ────────────────────────────────────────────────────────────────── */
+
+.state_idle ellipse:nth-of-type(1) {
+  transform: scaleY(0.28);
+  transition: transform 500ms var(--motion-emphasized, cubic-bezier(0.2, 0, 0, 1));
+}
+.state_idle ellipse:nth-of-type(2) {
+  transform: scaleY(0.26);
+  transition: transform 500ms var(--motion-emphasized, cubic-bezier(0.2, 0, 0, 1));
+}
+.state_idle ellipse:nth-of-type(3) {
+  transform: scaleY(0.38);
+  transition: transform 500ms var(--motion-emphasized, cubic-bezier(0.2, 0, 0, 1));
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   ACTIVE — three ellipses oscillate on independent cycles with
+   different durations + negative animation-delays so they never
+   sync. Read as live audio.
+   ────────────────────────────────────────────────────────────────── */
+
+.state_active ellipse:nth-of-type(1) {
+  animation: mb-wave-1 1.35s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+.state_active ellipse:nth-of-type(2) {
+  animation: mb-wave-2 1.65s cubic-bezier(0.45, 0, 0.55, 1) infinite -0.4s;
+}
+.state_active ellipse:nth-of-type(3) {
+  animation: mb-wave-3 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite -0.7s;
+}
+
+@keyframes mb-wave-1 {
+  0%, 100% { transform: scaleY(0.38); }
+  50%      { transform: scaleY(1);    }
+}
+@keyframes mb-wave-2 {
+  0%, 100% { transform: scaleY(0.30); }
+  50%      { transform: scaleY(1.04); }
+}
+@keyframes mb-wave-3 {
+  0%, 100% { transform: scaleY(0.50); }
+  50%      { transform: scaleY(0.92); }
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   SPLASH — entrance. Ellipses scale up in sequence with a slight
+   overshoot, triangle pops last. Total runtime ≈ 980 ms; matches
+   the design doc's M3 emphasized easing.
+   ────────────────────────────────────────────────────────────────── */
+
+.state_splash ellipse:nth-of-type(1) {
+  animation: mb-splash-ellipse 700ms 100ms
+    var(--motion-emphasized, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+.state_splash ellipse:nth-of-type(2) {
+  animation: mb-splash-ellipse 750ms 200ms
+    var(--motion-emphasized, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+.state_splash ellipse:nth-of-type(3) {
+  animation: mb-splash-ellipse 650ms 320ms
+    var(--motion-emphasized, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+.state_splash path {
+  animation: mb-splash-triangle 500ms 480ms
+    var(--motion-emphasized, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+
+@keyframes mb-splash-ellipse {
+  0%   { transform: scaleY(0);    opacity: 0; }
+  55%  { transform: scaleY(1.08); opacity: 1; }
+  100% { transform: scaleY(1);    opacity: 1; }
+}
+@keyframes mb-splash-triangle {
+  0%   { transform: scale(0);    opacity: 0; }
+  60%  { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1);    opacity: 1; }
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   EXIT — reverse of splash. Triangle goes first, then ellipses
+   collapse from outer-in.
+   ────────────────────────────────────────────────────────────────── */
+
+.state_exit path {
+  animation: mb-exit-triangle 350ms 0ms
+    var(--motion-emphasized, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+.state_exit ellipse:nth-of-type(3) {
+  animation: mb-exit-ellipse 500ms 100ms
+    var(--motion-emphasized, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+.state_exit ellipse:nth-of-type(2) {
+  animation: mb-exit-ellipse 550ms 200ms
+    var(--motion-emphasized, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+.state_exit ellipse:nth-of-type(1) {
+  animation: mb-exit-ellipse 500ms 320ms
+    var(--motion-emphasized, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+
+@keyframes mb-exit-ellipse {
+  0%   { transform: scaleY(1); opacity: 1; }
+  100% { transform: scaleY(0); opacity: 0; }
+}
+@keyframes mb-exit-triangle {
+  0%   { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0); opacity: 0; }
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   REDUCED MOTION — explicit static state. We don't just zero the
+   durations because a frozen mid-keyframe frame (scale 0, opacity 0)
+   would render the mark INVISIBLE. Override forces it back to
+   identity transforms + full opacity.
+   ────────────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .state_idle ellipse,
+  .state_active ellipse,
+  .state_splash ellipse,
+  .state_splash path,
+  .state_exit ellipse,
+  .state_exit path {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+  }
+}
