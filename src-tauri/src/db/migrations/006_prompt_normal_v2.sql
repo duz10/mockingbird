@@ -21,9 +21,19 @@
 --     Future v3 will be migration 007.
 --
 -- Body source: src-tauri/src/cleanup/prompts/normal_v2.md, substituted
--- at runtime via db/prompt_loader.rs (the `__PROMPT_NORMAL_V2_BODY__`
--- token below). The v1 file (normal.md) stays frozen at v1 forever
--- as the on-disk record of what shipped originally.
+-- at runtime via db/prompt_loader.rs (the `__PROMPT_*_BODY__` token
+-- on the INSERT line below). The v1 file (normal.md) stays frozen at
+-- v1 forever as the on-disk record of what shipped originally.
+--
+-- **DO NOT write the exact substitution token in this comment.** The
+-- token-replacer in prompt_loader.rs is a blanket text replace; if
+-- the comment line contains the literal token, the multi-line prompt
+-- body gets substituted there too, the newlines terminate the SQL
+-- `--` comment early, and the parser meets escaped apostrophes
+-- outside any string literal → syntax error halfway through the
+-- file. Killed the entire app at boot during 2026-05-17 smoketest.
+-- Use `__PROMPT_*_BODY__` (with literal asterisk) when referring to
+-- the token family in prose.
 -- ──────────────────────────────────────────────────────────────────────
 
 BEGIN TRANSACTION;

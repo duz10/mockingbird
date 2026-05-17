@@ -14,6 +14,91 @@ Format:
 
 ---
 
+## 2026-05-17 [phase5-postship-5] migration 006 crashed the entire app at boot with cryptic `near 'voice': syntax error`
+
+- **Context:** Fifth Dustin smoketest (sigh). User ran `run-mockingbird.ps1`,
+  terminal said "Started in background", but no tray icon, no main window,
+  nothing. `Get-Process mockingbird` returned empty — the process was
+  dead. The log file showed only `Mockingbird starting` and then
+  silence. `database ready` (the next log line) never printed, so the
+  crash was somewhere inside `db::apply_migrations`.
+- **Finding:** Reproduced the migration outside the app via a tiny
+  Python script (`sqlite3.executescript`) and got
+  `OperationalError: near "voice": syntax error`. The word "voice"
+  appears in the v2 prompt body ("preserve the speaker's voice"). My
+  initial assumption — unescaped apostrophe in `speaker's` — was
+  wrong; `prompt_loader::sql_escape` correctly doubles all single
+  quotes. Real root cause was geometrically worse:
+
+  Migration 006's own `--` comment block included the literal token
+  `` `__PROMPT_NORMAL_V2_BODY__` `` as documentation of where the
+  body gets substituted. `prompt_loader::substitute_prompt_bodies`
+  is a blanket text replace — it doesn't care whether the token sits
+  inside a SQL string literal, a `--` comment, or a `/* */` block.
+  So the entire v2 prompt body (3.7KB of markdown with embedded
+  newlines, apostrophes, fenced code blocks, etc.) got injected into
+  the middle of a comment line. The body's first `\n` terminated
+  the `--` comment early, and everything from there onward (
+  including escaped apostrophes that were `''` inside the intended
+  string literal but are now bare unmatched quotes in raw SQL
+  context) hit the parser. Hence "syntax error near 'voice'".
+
+  Migrations 003 and 005 dodged this by accident: both refer to the
+  token family as `__PROMPT_*_BODY__` (with a literal asterisk), which
+  doesn't match any concrete substitution key. I wrote 006's comment
+  with the exact token literal because it felt more precise. It was.
+  Precisely catastrophic.
+- **Action (two-layer fix):**
+  1. **Migration 006 comment** rewritten to use `__PROMPT_*_BODY__`
+     style (matches the 003/005 precedent), with a multi-line
+     `DO NOT` warning explaining what happens if you write the
+     exact token. The next person to copy this file gets the
+     warning at the same time they get the example.
+  2. **Defensive leftover-token guard** in
+     `prompt_loader::substitute_prompt_bodies`: after the chained
+     `.replace()` calls, scan for any surviving `__PROMPT_` substring
+     and panic loudly with the offending token + a hint about the
+     two ways this happens (forgot to register, OR wrote it in a
+     comment). Costs microseconds at boot; saves the next hour of
+     "why does it say 'near voice'" debugging.
+- **DB state preserved by SQLite transaction semantics.** Migration
+  006 starts with `BEGIN TRANSACTION` and ends with `COMMIT`. When
+  the syntax error fired mid-script, SQLite implicitly rolled back
+  the open transaction. Verified post-incident: live DB still at
+  schema_version=5, prompts table still has only v1 rows, no audit
+  trigger noise. **This is exactly why every multi-statement
+  migration must be wrapped in a transaction.** Phase 1 made this a
+  rule (in 002, 003, 005); 006 honoured it; it saved the user from
+  a partially-applied migration that would have required manual
+  recovery.
+- **Patterns burned in:**
+  - **Text-substitution tooling treats source files as opaque
+    strings.** Comments do not protect against substitution. If
+    the substitution payload can contain syntactically-significant
+    characters (newlines, quotes, semicolons), it can break out of
+    any host-language construct that was structurally protecting
+    the surrounding code. Either:
+    (a) make the substitution syntax-aware (parse SQL, only
+        substitute inside string literals), OR
+    (b) make the token name impossible to confuse with prose (e.g.
+        `<<<INSERT_NORMAL_V2_HERE>>>` with rare ASCII), OR
+    (c) add a post-substitution sanity check (the path we took —
+        cheapest, catches everything blanket-replace can miss).
+  - **"Syntax error near X" usually means the parser entered the
+    wrong state several tokens earlier.** Don't trust the column
+    number. Dump the actual SQL that hit the parser; scan backward
+    for the first place the lexer would have changed state
+    incorrectly (unterminated string, broken comment, missing
+    semicolon).
+  - **Silent process death after a single log line is almost always
+    a panic before tracing flushes.** First instinct should be
+    "reproduce outside the app and capture the real error", not
+    "hunt through the source for what runs between those two log
+    statements." The reproduction took two minutes; the visual
+    inspection would have taken much longer.
+
+---
+
 ## 2026-05-17 [phase5-postship-4] History metadata showed `—` for Model / Prompt / Dictionary even though all three were populated in the DB
 
 - **Context:** Fourth Dustin smoketest. Ollama-cleaned dictation worked

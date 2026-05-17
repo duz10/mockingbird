@@ -32,13 +32,44 @@ pub fn substitute_prompt_bodies(sql: &str) -> String {
     // suffix of `__PROMPT_NORMAL_BODY__`, so the chained replace() is
     // non-overlapping regardless of order. v1 stays addressable for
     // historical session rows; v2 ships in migration 006.
-    sql.replace("__PROMPT_NORMAL_BODY__", &sql_escape(PROMPT_NORMAL))
+    let substituted = sql
+        .replace("__PROMPT_NORMAL_BODY__", &sql_escape(PROMPT_NORMAL))
         .replace("__PROMPT_NORMAL_V2_BODY__", &sql_escape(PROMPT_NORMAL_V2))
         .replace("__PROMPT_VERBOSE_BODY__", &sql_escape(PROMPT_VERBOSE))
         .replace("__PROMPT_FRAGMENT_BODY__", &sql_escape(PROMPT_FRAGMENT))
         .replace("__PROMPT_REWRITE_BODY__", &sql_escape(PROMPT_REWRITE))
         .replace("__PROMPT_EXPAND_BODY__", &sql_escape(PROMPT_EXPAND))
-        .replace("__PROMPT_SUMMARIZE_BODY__", &sql_escape(PROMPT_SUMMARIZE))
+        .replace("__PROMPT_SUMMARIZE_BODY__", &sql_escape(PROMPT_SUMMARIZE));
+
+    // **Leftover-token guard.** If any `__PROMPT_..._BODY__` marker
+    // survived substitution, fail HARD and LOUDLY at boot rather than
+    // shipping the malformed SQL to SQLite (which gives cryptic
+    // "syntax error near 'voice'" messages that take an hour to
+    // diagnose — see LESSONS 2026-05-17 phase5-postship-5).
+    //
+    // This catches two distinct mistakes:
+    //   1. New migration uses a token we forgot to wire here.
+    //   2. New migration writes the literal token in a `--` comment
+    //      AND the comment line is short enough that the body's first
+    //      newline doesn't break out of the comment — in that case
+    //      the body sits inside a `--` line, no syntax error, but the
+    //      v2 prompt content gets thrown away (no row in DB).
+    // The guard takes ~microseconds; cost is negligible vs. the
+    // multi-hour debugging session it prevents.
+    if let Some(idx) = substituted.find("__PROMPT_") {
+        let snippet_end = substituted[idx..]
+            .find("__")
+            .and_then(|rel| substituted[idx + rel + 2..].find("__").map(|r2| idx + rel + 2 + r2 + 2))
+            .unwrap_or_else(|| (idx + 60).min(substituted.len()));
+        panic!(
+            "prompt_loader: unsubstituted token survived in migration SQL at offset {idx}: \
+             `{}`. Either (a) add the matching include_str! + .replace() in prompt_loader.rs, \
+             or (b) if the token appears in a SQL comment, paraphrase to `__PROMPT_*_BODY__` \
+             (literal asterisk) so it doesn't match the replacer.",
+            &substituted[idx..snippet_end]
+        );
+    }
+    substituted
 }
 
 /// Double single-quotes so the body can sit inside a SQL string
