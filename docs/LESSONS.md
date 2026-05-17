@@ -14,6 +14,58 @@ Format:
 
 ---
 
+## 2026-05-17 [phase5-postship-9-followup] stale UI bundle embedded in release binary
+
+- **Symptom:** shipped Wave 2 backend + UI source changes, ran my
+  usual `cargo-with-cuda.ps1 build --release`, launched, and the
+  Modes page showed the OLD layout — Normal/Verbose/Fragment in
+  the transcription section + Casual/Formal incorrectly grouped
+  under AI command modes alongside Rewrite/Expand/Summarize. The
+  database had the right rows (`prompt_id=10`, `model=qwen2.5:7b`,
+  `temperature=0.1` in the orchestrator log), the IPC returned
+  them, but the partitioning logic on the JS side was using the
+  pre-Wave-2 `TRANSCRIPTION_SLUGS = ["normal", "verbose",
+  "fragment"]` allowlist. Stale frontend.
+- **Root cause:** Tauri's `beforeBuildCommand`
+  (`"npm --prefix ../ui run build"` in `tauri.conf.json`) ONLY
+  runs under `cargo tauri build`. Plain `cargo build --release`
+  skips it. So when I edited `ui/src/lib/types.ts` + friends and
+  then ran `cargo-with-cuda.ps1 build --release`, the Rust binary
+  re-linked against whatever `ui/dist/` was sitting on disk —
+  which was the bundle from the last `cargo tauri build` or `npm
+  run build`. New TypeScript sources, old bundled output.
+- **Second trap on top of the first:** even after running
+  `npm run build` manually to refresh `ui/dist/`, a subsequent
+  `cargo build --release` didn't re-link the binary, because
+  tauri-build's `cargo:rerun-if-changed=` directives don't always
+  detect content changes inside `frontendDist`. The build said
+  "Finished" instantly but the .exe timestamp didn't move. Had
+  to `touch src-tauri/src/lib.rs` to force a re-link that
+  re-embedded the assets.
+- **Fix (long-term):** new `scripts/build-release.ps1` wraps the
+  full three-step dance: `npm run build` + touch `lib.rs` +
+  `cargo build --release`. Use this any time UI sources changed.
+  `cargo-with-cuda.ps1 build` (without the wrapper) is fine for
+  pure-backend iteration.
+- **Patterns burned in:**
+  - **"If the schema/IPC says one thing and the UI shows another,
+    suspect a stale bundle BEFORE suspecting a logic bug."** The
+    backend logs (`orchestrator config resolved mode=normal
+    prompt_id=10`) were the smoking gun — they proved the
+    backend was correct; therefore the discrepancy had to be
+    upstream of the bundle.
+  - **"Build tools that conditionally run hooks are a footgun."**
+    Tauri's `beforeBuildCommand` is meant to be helpful but its
+    silent skip on plain `cargo build` creates a class of bug
+    that's invisible at build time and surfaces only when the
+    user opens the page. A wrapper script that ALWAYS does the
+    full dance removes the conditional.
+  - **"Trust your eyes, not the build success message."** Both
+    `npm run build` and `cargo build --release` reported success.
+    The bug was in the gap between them.
+
+---
+
 ## 2026-05-17 [phase5-postship-9] three focused modes + 7B default — Wave 2 of ADR 0022
 
 - **The Santa-list regression** (2026-05-17 seventh smoketest):
