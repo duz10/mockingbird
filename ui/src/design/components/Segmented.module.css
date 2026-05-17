@@ -1,0 +1,54 @@
+/* Segmented control. Wave 3. ADR 0023. */
+
+.group {
+  display: inline-flex;
+  background: var(--md-sys-surface-container);
+  border: 1px solid var(--md-sys-outline-variant);
+  border-radius: var(--shape-full);
+  padding: 4px;
+  gap: 2px;
+}
+
+.segment {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 16px;
+  height: 32px;
+  border-radius: var(--shape-full);
+  font-family: "DM Sans", sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--md-sys-on-surface-variant);
+  cursor: pointer;
+  transition: background var(--duration-short-2) var(--motion-standard),
+              color var(--duration-short-2) var(--motion-standard);
+  white-space: nowrap;
+}
+.segment:hover {
+  background: var(--md-sys-surface-container-high);
+  color: var(--md-sys-on-surface);
+}
+
+.segment_active {
+  background: var(--md-sys-primary-container);
+  color: var(--md-sys-on-primary-container);
+}
+.segment_active:hover {
+  background: var(--md-sys-primary-container);
+}
+
+.input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.input:focus-visible + .label {
+  outline: 2px solid var(--md-sys-primary);
+  outline-offset: 4px;
+  border-radius: var(--shape-full);
+}

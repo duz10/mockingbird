@@ -1,0 +1,72 @@
+/* Chip — pill-shaped label. Wave 3. ADR 0023. */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  height: 28px;
+  border: 1px solid var(--md-sys-outline-variant);
+  border-radius: var(--shape-full);
+  font-family: "DM Sans", sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--md-sys-surface-container);
+  color: var(--md-sys-on-surface);
+  transition: background var(--duration-short-2) var(--motion-standard),
+              border-color var(--duration-short-2) var(--motion-standard);
+}
+
+.chip[role="button"] {
+  cursor: pointer;
+}
+.chip[role="button"]:hover {
+  background: var(--md-sys-surface-container-high);
+}
+.chip[role="button"]:focus-visible {
+  outline: 2px solid var(--md-sys-primary);
+  outline-offset: 2px;
+}
+
+.chip_accent {
+  background: var(--md-sys-primary-container);
+  border-color: var(--md-sys-primary);
+  color: var(--md-sys-on-primary-container);
+}
+.chip_accent[role="button"]:hover {
+  background: color-mix(in oklch, var(--md-sys-primary-container) 88%, white);
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  font-size: 14px;
+}
+.label {
+  display: inline-flex;
+  align-items: center;
+}
+
+.dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: -4px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--shape-full);
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: background var(--duration-short-2) var(--motion-standard),
+              opacity var(--duration-short-2) var(--motion-standard);
+}
+.dismiss:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.08);
+}

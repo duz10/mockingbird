@@ -1,0 +1,154 @@
+/* Button family — all variants share the .btn baseline and override
+ * background/border/colour via .btn_<variant>. Sizes adjust padding,
+ * height, and label font. Scoped to [data-design="v2"] via the wider
+ * tokens-v2 cascade — no extra :root needed because all variables
+ * referenced are v2 tokens that only exist under data-design="v2".
+ * Wave 3. ADR 0023. */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--shape-full);
+  font-family: "DM Sans", sans-serif;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background var(--duration-short-2) var(--motion-standard),
+              border-color var(--duration-short-2) var(--motion-standard),
+              color var(--duration-short-2) var(--motion-standard),
+              transform var(--duration-short-2) var(--motion-standard);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--md-sys-primary);
+  outline-offset: 2px;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.label {
+  display: inline-flex;
+  align-items: center;
+}
+.icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* ────────── Sizes ────────── */
+
+.btn_sm {
+  height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
+  line-height: 1;
+}
+.btn_md {
+  height: 40px;
+  padding: 0 20px;
+  font-size: 14px;
+  line-height: 1;
+}
+.btn_lg {
+  height: 52px;
+  padding: 0 28px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* ────────── Variants ────────── */
+
+.btn_filled {
+  background: var(--md-sys-primary);
+  color: var(--md-sys-on-primary);
+}
+.btn_filled:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--md-sys-primary) 88%, white);
+}
+
+.btn_tonal {
+  background: var(--md-sys-secondary-container);
+  color: var(--md-sys-on-secondary-container);
+}
+.btn_tonal:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--md-sys-secondary-container) 88%, white);
+}
+
+.btn_outlined {
+  background: transparent;
+  border-color: var(--md-sys-outline);
+  color: var(--md-sys-on-surface);
+}
+.btn_outlined:hover:not(:disabled) {
+  background: var(--md-sys-surface-container-low);
+}
+
+.btn_text {
+  background: transparent;
+  color: var(--md-sys-primary);
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.btn_text:hover:not(:disabled) {
+  background: var(--md-sys-surface-container-low);
+}
+
+.btn_glass {
+  background: var(--glass-tint-regular);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border-color: var(--glass-border);
+  color: var(--md-sys-on-surface);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+.btn_glass:hover:not(:disabled) {
+  background: var(--glass-tint-thick);
+  border-color: var(--glass-border-bright);
+}
+
+/* Icon button: square, no min-width, padding is 1:1. Size adjusts. */
+.btn_icon {
+  background: transparent;
+  color: var(--md-sys-on-surface-variant);
+  padding: 0;
+  border-radius: var(--shape-full);
+  aspect-ratio: 1 / 1;
+}
+.btn_icon.btn_sm { width: 32px; height: 32px; padding: 0; }
+.btn_icon.btn_md { width: 40px; height: 40px; padding: 0; }
+.btn_icon.btn_lg { width: 52px; height: 52px; padding: 0; }
+.btn_icon:hover:not(:disabled) {
+  background: var(--md-sys-surface-container-high);
+  color: var(--md-sys-on-surface);
+}
+
+/* FAB: extended action with prominent shadow. Always uses primary tone.
+   Override .btn_lg padding to match design doc proportions. */
+.btn_fab {
+  background: var(--md-sys-primary-container);
+  color: var(--md-sys-on-primary-container);
+  border-radius: var(--shape-lg);
+  box-shadow: var(--elevation-3);
+  padding: 0 24px;
+  height: 56px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.btn_fab:hover:not(:disabled) {
+  box-shadow: var(--elevation-4);
+  background: color-mix(in oklch, var(--md-sys-primary-container) 88%, white);
+}

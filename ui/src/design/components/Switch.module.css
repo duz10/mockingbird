@@ -1,0 +1,94 @@
+/* Switch — visual track + thumb on top of a hidden native checkbox.
+ * The native input handles focus / keyboard / form semantics; CSS
+ * just paints. Wave 3. ADR 0023. */
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  cursor: pointer;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.label {
+  font-family: "DM Sans", sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--md-sys-on-surface);
+}
+.description {
+  font-family: "DM Sans", sans-serif;
+  font-size: 12px;
+  color: var(--md-sys-on-surface-variant);
+}
+
+.switchWrap {
+  position: relative;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 24px;
+}
+
+/* Native input — invisible but kept in flow + focusable. */
+.input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.track {
+  position: absolute;
+  inset: 0;
+  background: var(--md-sys-surface-container-highest);
+  border: 1px solid var(--md-sys-outline-variant);
+  border-radius: var(--shape-full);
+  transition: background var(--duration-short-2) var(--motion-standard),
+              border-color var(--duration-short-2) var(--motion-standard);
+}
+
+.thumb {
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  width: 14px;
+  height: 14px;
+  background: var(--md-sys-outline);
+  border-radius: var(--shape-full);
+  transform: translateY(-50%);
+  transition: transform var(--duration-short-3) var(--motion-emphasized),
+              background var(--duration-short-3) var(--motion-emphasized),
+              width var(--duration-short-3) var(--motion-emphasized),
+              height var(--duration-short-3) var(--motion-emphasized),
+              left var(--duration-short-3) var(--motion-emphasized);
+}
+
+/* Checked state — driven entirely by :checked on the native input. */
+.input:checked + .track {
+  background: var(--md-sys-primary);
+  border-color: var(--md-sys-primary);
+}
+.input:checked + .track .thumb {
+  background: var(--md-sys-on-primary);
+  width: 18px;
+  height: 18px;
+  left: calc(100% - 22px);
+}
+
+.input:focus-visible + .track {
+  outline: 2px solid var(--md-sys-primary);
+  outline-offset: 2px;
+}
+
+.input:disabled + .track {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

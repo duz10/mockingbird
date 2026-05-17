@@ -1,0 +1,16 @@
+/* Mockingbird Design Language v1 — iconography overrides.
+ *
+ * The design doc §09 specifies "outlined, 1.5 px stroke, currentColor"
+ * for the icon style. Our legacy Icon.tsx hardcodes strokeWidth=2.
+ * Rather than rewriting every <svg> in the file, override the stroke
+ * weight globally inside the v2 surface. SVG attributes are presented
+ * as CSS-controllable properties on modern browsers, so this Just
+ * Works — no JS change, no per-icon patch.
+ *
+ * Scoped under [data-design="v2"] so v1 remains untouched. Wave 3 of
+ * the Design Language Phase. ADR 0023.
+ */
+
+[data-design="v2"] svg[stroke="currentColor"] {
+  stroke-width: 1.5;
+}

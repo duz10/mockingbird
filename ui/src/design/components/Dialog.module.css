@@ -1,0 +1,79 @@
+/* Dialog — glass-thick modal sheet. Wave 3. ADR 0023. */
+
+.dialog {
+  /* Native <dialog> ships padding, border, and a default position;
+   * we wipe all of that and re-style from scratch. */
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--md-sys-on-surface);
+  max-width: 440px;
+  width: 90vw;
+  border-radius: var(--shape-2xl);
+  overflow: visible;
+}
+
+.dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.body {
+  background: linear-gradient(180deg,
+    var(--glass-tint-thick) 0%,
+    var(--glass-tint-regular) 100%);
+  backdrop-filter: blur(40px) saturate(200%);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  border: 1px solid var(--glass-border-bright);
+  border-radius: var(--shape-2xl);
+  padding: var(--space-7) var(--space-6) var(--space-6);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 250, 240, 0.25),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3),
+    0 20px 60px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  align-items: stretch;
+  text-align: center;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--shape-full);
+  background: var(--md-sys-primary-container);
+  color: var(--md-sys-on-primary-container);
+}
+
+.title {
+  margin: 0;
+  font-family: "Fraunces", serif;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 500;
+  font-variation-settings: "opsz" 36, "SOFT" 60;
+  color: var(--md-sys-on-surface);
+}
+
+.content {
+  font-family: "DM Sans", sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--md-sys-on-surface-variant);
+}
+.content p {
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
