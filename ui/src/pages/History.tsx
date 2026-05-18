@@ -38,7 +38,7 @@ import {
   truncate,
 } from "../lib/format";
 import { useAppStore } from "../lib/store";
-import { api } from "../lib/tauri";
+import { api, isTauri } from "../lib/tauri";
 import type { SessionDetail, SessionSummary, TranscriptSearchHit } from "../lib/types";
 
 import styles from "./History.module.css";
@@ -65,6 +65,48 @@ export function HistoryPage() {
     })();
     // selectedId intentionally omitted — we only auto-pick on first load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Live-refresh: the Rust orchestrator emits `history:session-saved`
+  // after each new row (Complete or Error) is committed to the DB.
+  // We refetch the list silently — preserving the user's current
+  // `selectedId` so they aren't yanked away from an old session
+  // they're reading. The new row simply appears at the top.
+  //
+  // Deliberately does NOT auto-select the new row, because the user
+  // may be triaging an older one. If they want the freshly-dictated
+  // session, the list's top entry is one click away.
+  //
+  // Dynamic import keeps `@tauri-apps/api/event` out of the
+  // fixture/preview bundle (same pattern RecordingWindow uses).
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      unlisten = await listen<{ sessionId: number }>(
+        "history:session-saved",
+        () => {
+          // Don't refetch on a stale listener if the component
+          // unmounted between event fire and async resolution.
+          if (cancelled) return;
+          void (async () => {
+            const list = await api.list_sessions(PAGE_SIZE, 0);
+            if (cancelled) return;
+            setSessions(list);
+            // If nothing was selected yet (e.g. very first dictation
+            // since app launch with empty history), pick the new row.
+            // Otherwise keep the current selection untouched.
+            setSelectedId((prev) => prev ?? list[0]?.id ?? null);
+          })();
+        },
+      );
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   // Debounced search.

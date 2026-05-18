@@ -370,11 +370,14 @@ impl DictationOrchestrator {
     /// helpers, which may be called from error paths that bypass
     /// `start_capture`.
     fn current_mode(&self) -> ResolvedMode {
-        self.state.active_mode.clone().unwrap_or_else(|| ResolvedMode {
-            mode_id: self.config.mode_id,
-            slug: self.config.mode_slug.clone(),
-            prompt_id: self.config.prompt_id,
-        })
+        self.state
+            .active_mode
+            .clone()
+            .unwrap_or_else(|| ResolvedMode {
+                mode_id: self.config.mode_id,
+                slug: self.config.mode_slug.clone(),
+                prompt_id: self.config.prompt_id,
+            })
     }
 
     fn complete(&mut self) -> AppResult<()> {
@@ -460,8 +463,10 @@ impl DictationOrchestrator {
         );
 
         // STT.
-        self.recording_window
-            .set_state(crate::recording_window::state::TRANSCRIBING, Some(&mode_slug));
+        self.recording_window.set_state(
+            crate::recording_window::state::TRANSCRIBING,
+            Some(&mode_slug),
+        );
         let stt_start = Instant::now();
         let stt_result = self.stt.transcribe(TranscribeRequest {
             audio: &trimmed,
@@ -665,7 +670,14 @@ impl DictationOrchestrator {
                 injection_latency_ms: p.injection_latency_ms,
                 injection_status: Some(p.outcome.as_db_str().to_string()),
             },
-        )
+        )?;
+
+        // Drop the DB lock before emitting so the frontend's
+        // refetch (which goes through `list_sessions` -> DB) doesn't
+        // race against our still-held connection.
+        drop(conn);
+        self.recording_window.emit_session_saved(id);
+        Ok(())
     }
 
     fn persist_failed_stt(
@@ -686,6 +698,8 @@ impl DictationOrchestrator {
             .map_err(|_| AppError::Other("orchestrator: db mutex poisoned".into()))?;
         let id = self.insert_session_row(&conn, &recording_ended_iso, fg_keyup)?;
         sessions::update_status_error(&conn, id, &msg)?;
+        drop(conn);
+        self.recording_window.emit_session_saved(id);
         Ok(())
     }
 
@@ -704,6 +718,8 @@ impl DictationOrchestrator {
         // No fg_keyup means we can't fill foreground_app — leave NULL.
         let id = self.insert_session_row_no_fg(&conn, &recording_ended_iso)?;
         sessions::update_status_error(&conn, id, "no foreground window at key-up")?;
+        drop(conn);
+        self.recording_window.emit_session_saved(id);
         Ok(())
     }
 
@@ -848,7 +864,10 @@ struct PillHideGuard {
 
 impl PillHideGuard {
     fn arm(window: RecordingWindow) -> Self {
-        Self { window, armed: true }
+        Self {
+            window,
+            armed: true,
+        }
     }
 
     /// Disarm the guard — call this on the normal success path right

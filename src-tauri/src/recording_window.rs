@@ -55,6 +55,19 @@ const RECORDING_WINDOW_LABEL: &str = "recording";
 /// TypeScript side at `ui/src/lib/tauri.ts`.
 const STATE_EVENT: &str = "dictation:state";
 
+/// Event fired *after* a session row has been committed to the
+/// database (Complete or Error). The main UI's History page listens
+/// for this to refresh its list live, without a manual reload.
+///
+/// Decoupled from `dictation:state` deliberately: the state event
+/// is the UI state machine (idle → listening → … → done/error) and
+/// it sometimes fires BEFORE the DB write (e.g. failed-STT path
+/// surfaces the error indicator first so the user sees feedback even
+/// if persistence stalls). "Data changed" is a separate concern; it
+/// must only fire AFTER the row exists, otherwise the History
+/// refetch would race and miss the new entry.
+const SESSION_SAVED_EVENT: &str = "history:session-saved";
+
 /// Pipeline states surfaced to the overlay. Strings (not an enum
 /// discriminator) so adding a new state on the Rust side doesn't
 /// silently change the TypeScript shape.
@@ -75,6 +88,17 @@ pub mod state {
     pub const IDLE: &str = "idle";
     /// User cancelled mid-flight.
     pub const ABORTED: &str = "aborted";
+}
+
+/// Payload shape for the `history:session-saved` event. Mirrored
+/// in TypeScript on the History page's listener. The id is enough
+/// for the frontend to optimistically refetch and select if desired;
+/// kept deliberately small (no row body) since the page already has
+/// `get_session_detail(id)` for the full payload.
+#[derive(Clone, Debug, Serialize)]
+struct SessionSavedPayload {
+    #[serde(rename = "sessionId")]
+    session_id: i64,
 }
 
 /// Payload shape for the `dictation:state` event. Matches
@@ -205,6 +229,30 @@ impl RecordingWindow {
         self.emit(state::ERROR, None, Some(msg));
     }
 
+    /// Signal that a session row has just landed in the database.
+    /// Fires `history:session-saved` with the new row id so the
+    /// History page (and anything else interested) can refetch.
+    /// Best-effort like every other emit — logged + swallowed on
+    /// failure so the dictation pipeline never blocks on UI hiccups.
+    pub fn emit_session_saved(&self, session_id: i64) {
+        let Ok(guard) = self.app.lock() else { return };
+        let Some(app) = guard.as_ref() else {
+            tracing::trace!(
+                session_id,
+                "skip emit_session_saved: no app handle (tests / not booted)"
+            );
+            return;
+        };
+        let payload = SessionSavedPayload { session_id };
+        if let Err(e) = app.emit(SESSION_SAVED_EVENT, &payload) {
+            tracing::debug!(
+                error = ?e,
+                session_id,
+                "failed to emit history:session-saved"
+            );
+        }
+    }
+
     /// Current visibility — exposed for the tray status + tests.
     pub fn is_visible(&self) -> bool {
         self.visible.load(Ordering::SeqCst)
@@ -236,7 +284,12 @@ impl RecordingWindow {
             return;
         };
         let mode_label = mode_slug.map(label_from_slug);
-        let payload = StateEventPayload { state, mode_slug, mode_label, error };
+        let payload = StateEventPayload {
+            state,
+            mode_slug,
+            mode_label,
+            error,
+        };
         if let Err(e) = app.emit(STATE_EVENT, &payload) {
             tracing::debug!(error = ?e, state, "failed to emit dictation:state");
         }
