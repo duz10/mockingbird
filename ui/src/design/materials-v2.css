@@ -146,4 +146,42 @@ body::after {
   border-radius: var(--shape-md);
 }
 
+/* ════════════════════════════════════════════════════════════════
+   Photo-background mode overrides.
+
+   Activated by `<html data-photo-bg="active">`, set by the
+   UnsplashBackground component whenever a user-enabled photo is on
+   screen. The default glass tints are 4–12% cream — designed to
+   refract against the dark warm-blob ambient. Against an arbitrary
+   Unsplash photo (bright sky, busy foliage, white pages) those tints
+   are not enough material to mask the photo content, so body text
+   washes out and inactive sidebar links become unreadable.
+
+   The override flips the tint base from "cream alpha over near-
+   black ambient" to "near-black alpha over arbitrary photo". Same
+   blur, same border highlight, same shape language — the surface
+   stays recognisably glass, just denser. We bump the borders too
+   so card edges remain crisp against high-frequency photo regions.
+
+   Users can dial the photo brightness via the overlay slider in
+   Settings (Background → overlay opacity) if a particular photo
+   still washes out; the slider stacks on TOP of the photo and
+   UNDER these glass surfaces, so the two knobs compose cleanly.
+   ════════════════════════════════════════════════════════════════ */
+
+:root[data-photo-bg] {
+  /* Dark-cream-tinted glass: --neutral-04 base (#0F0B08) at high
+   * alpha keeps the warm undertone of the design system while
+   * masking enough photo for body text to clear AA contrast. */
+  --glass-tint-ultra-thin: rgba(15, 11, 8, 0.45);
+  --glass-tint-thin:       rgba(15, 11, 8, 0.60);
+  --glass-tint-regular:    rgba(15, 11, 8, 0.72);
+  --glass-tint-thick:      rgba(15, 11, 8, 0.82);
+
+  /* Borders need to read against bright spots in the photo —
+   * the default 10% cream gets lost over white book pages, etc. */
+  --glass-border:        rgba(255, 245, 230, 0.18);
+  --glass-border-bright: rgba(255, 245, 230, 0.30);
+}
+
 

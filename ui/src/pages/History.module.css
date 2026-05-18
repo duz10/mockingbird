@@ -204,3 +204,23 @@
   box-shadow: var(--shadow-2);
   z-index: 100;
 }
+
+/* ════════════════════════════════════════════════════════════════
+ * Photo-background mode: the left pane is a bare flex container
+ * with no material at rest (the .list inside has --surf-2). Against
+ * a photo, the gaps between search box and list — plus the bare
+ * search row — become a transparent strip that exposes the photo.
+ * Wrap the whole pane in a glass surface so it reads as a single
+ * grouped panel. The inner .list keeps its --surf-2 fill so the
+ * scrollable list area visually nests inside the panel — natural
+ * card-within-card hierarchy.
+ * ════════════════════════════════════════════════════════════════ */
+
+:root[data-photo-bg] .leftPane {
+  background: var(--glass-tint-regular);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--shape-lg);
+  padding: var(--space-4);
+}

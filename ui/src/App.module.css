@@ -34,6 +34,29 @@
 
 .shell {
   background: transparent;
+  /* CRITICAL stacking fix for the Unsplash photo background.
+   *
+   * `UnsplashBackground` renders a `<div>` with `position: fixed;
+   * z-index: 0`, which forms its own stacking context. Per CSS paint
+   * order, positioned elements with z-index ≥ 0 paint ABOVE non-
+   * positioned elements regardless of DOM order. Without an explicit
+   * stacking context here, in-flow page chrome (e.g. PageHeader text)
+   * silently renders BENEATH the photo and disappears.
+   *
+   * Glass cards + the sidebar accidentally dodged this because their
+   * `backdrop-filter` creates an implicit stacking context that lifts
+   * them out of the default flow — but anything without backdrop-
+   * filter, transform, or opacity (i.e. plain text containers like
+   * PageHeader) was hidden behind the photo until this fix.
+   *
+   * `position: relative; z-index: 1` is the minimum required: it
+   * promotes `.shell` into a positioned element so it stacks above
+   * the photo (`z-index: 0`), and gives every descendant a sane
+   * paint order without each component needing its own stacking
+   * fix. Single source of truth, DRY.
+   */
+  position: relative;
+  z-index: 1;
 }
 
 .content {

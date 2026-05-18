@@ -8,6 +8,7 @@ import { useEffect, type ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 
 import { Sidebar } from "./components/Sidebar";
+import { UnsplashBackground } from "./components/UnsplashBackground";
 import { api } from "./lib/tauri";
 import { useAppStore } from "./lib/store";
 
@@ -48,12 +49,21 @@ export function App({ children }: AppProps) {
   }, [setModes, setSettings, setActiveModeSlug, applyTheme]);
 
   return (
-    <div className={styles.shell}>
-      <Sidebar />
-      <main className={styles.content} role="main">
-        {children}
-      </main>
-    </div>
+    <>
+      {/*
+        Photo background — sits behind the entire shell (z-index 0,
+        pointer-events: none). Renders nothing when the user has
+        the feature disabled or hasn't entered an Unsplash key, so
+        there's no cost when off.
+      */}
+      <UnsplashBackground />
+      <div className={styles.shell}>
+        <Sidebar />
+        <main className={styles.content} role="main">
+          {children}
+        </main>
+      </div>
+    </>
   );
 }
 

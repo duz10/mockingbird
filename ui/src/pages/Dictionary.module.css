@@ -140,3 +140,21 @@
   background: var(--status-ok);
   border-radius: var(--r-pill);
 }
+
+/* ════════════════════════════════════════════════════════════════
+ * Photo-background mode: .shell is a bare flex container (toolbar +
+ * tableWrap stacked). The .tableWrap inside has --surf-2 fill, but
+ * the toolbar (search box) floats orphaned over the photo, and the
+ * loading state (rows === null) shows just the search box with no
+ * surrounding material. Wrap the whole page-shell in glass so it
+ * reads as one grouped panel regardless of load state.
+ * ════════════════════════════════════════════════════════════════ */
+
+:root[data-photo-bg] .shell {
+  background: var(--glass-tint-regular);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--shape-lg);
+  padding: var(--space-5);
+}

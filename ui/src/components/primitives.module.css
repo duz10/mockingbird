@@ -329,3 +329,40 @@
   border-color: var(--md-sys-surface-container-high);
   border-top-color: var(--md-sys-primary);
 }
+
+/* ════════════════════════════════════════════════════════════════
+ * Photo-background mode adjustments for primitives that have NO
+ * material at rest (EmptyState being the main one). Empty fixtures
+ * + photo background = floating text over arbitrary imagery, which
+ * looks broken. Give them a thin-glass treatment ONLY when a photo
+ * is active so the default zero-data look on dark ambient stays
+ * minimal. Materials-v2.css already swaps the tints to dark-opaque
+ * under [data-photo-bg], so we just compose the recipe here.
+ * ════════════════════════════════════════════════════════════════ */
+
+:root[data-photo-bg] .empty {
+  background: var(--glass-tint-regular);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--shape-lg);
+}
+
+/* PageHeader is intentionally "hero floating text" — no material at
+ * rest, sits directly over the page so the design feels editorial.
+ * On a photo background that means the h1/subtitle can land over a
+ * bright photo region and disappear. Rather than wrap it in glass
+ * (which would defeat the editorial feel), give the text a tight
+ * dark drop shadow + soft halo so it lifts off any backdrop. This
+ * is the standard "text-protection" pattern from print/photo layout.
+ * The border-bottom hairline gets a touch more body so it still
+ * separates the header from the page content. */
+:root[data-photo-bg] .pageHeader {
+  border-bottom-color: var(--glass-border-bright);
+}
+:root[data-photo-bg] .pageTitle,
+:root[data-photo-bg] .pageSubtitle {
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.85),
+    0 2px 16px rgba(0, 0, 0, 0.55);
+}

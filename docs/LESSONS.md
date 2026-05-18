@@ -14,6 +14,81 @@ Format:
 
 ---
 
+## 2026-05-19 [unsplash-bg] glass token override beats per-component rewrites for photo-vs-ambient modes
+
+- **Context:** Landed an optional Unsplash photo background. The
+  design-system glass surfaces (sidebar, Cards, panels) are tuned
+  via four `--glass-tint-*` tokens at 4–12% cream-alpha — designed
+  to refract against the warm-blob ambient (near-black). Against
+  arbitrary photos they wash out completely: text becomes invisible
+  on bright photo regions, the sidebar ghosts away over high-
+  frequency foliage / book spines, etc.
+- **Finding:** Don't restyle every glass component. Add
+  `<html data-photo-bg="active">` from the photo component, then
+  declare a `:root[data-photo-bg]` scope in `materials-v2.css` that
+  **overrides the same four token values** to dark-alpha (45–82%).
+  Every existing consumer of `var(--glass-tint-*)` auto-adapts
+  with zero per-component churn — OCP-clean (extension without
+  modification). Tier-B surfaces that never opted into the token
+  system (History `.leftPane`, Dictionary `.shell`) still need
+  one-line additions in their own module CSS, but everything that
+  was already a "good citizen" of the design system upgrades for
+  free.
+- **Bonus pattern — adaptive overlay:** Unsplash returns an average
+  `photo.color` per response. Compute Rec.709 luminance from it and
+  apply a clamped (0..0.45) dark-scrim overlay automatically; combine
+  with the user's manual slider via `Math.max` so the slider is a
+  floor. Dark photos stay pristine; bright photos auto-darken to the
+  point page-header text clears AA. Helper in `fetchPhoto.ts` as
+  `autoOverlayForColor`.
+- **Action:** When adding any "mode toggle" that changes how the
+  design system reads (light↔dark, ambient↔photo, dense↔airy),
+  reach for token override scopes FIRST. Per-component rewrites are
+  a code smell — they multiply maintenance and drift. Only fall
+  back to per-component additions for surfaces that never
+  consumed the relevant tokens to begin with.
+
+---
+
+## 2026-05-19 [unsplash-bg] z-index:0 photo background trapped in-flow text BENEATH the photo
+
+- **Symptom:** With the Unsplash background enabled, **PageHeader
+  text (page h1 + subtitle) disappeared completely** even though
+  Cards and Sidebar rendered fine over the photo. DevTools showed
+  the `<header>` element present with proper 538×64 dimensions — the
+  text just wasn't visible. First instinct ("contrast issue!") was
+  wrong; I added text-shadows and the problem persisted.
+- **Finding:** Classic CSS painting-order trap. The photo layer
+  was a `<div>` with `position: fixed; z-index: 0` (forms its own
+  stacking context). The app shell (`.shell`) was non-positioned,
+  in the default flow. **Per CSS paint order, positioned elements
+  with z-index ≥ 0 paint ABOVE non-positioned in-flow elements
+  regardless of DOM order.** So the photo was drawn ON TOP of any
+  page chrome that didn't have its own stacking context.
+- **Why some elements worked and others didn't:** Cards and Sidebar
+  accidentally dodged the bug because their `backdrop-filter:
+  blur(...)` quietly creates an implicit stacking context (same way
+  `opacity != 1`, `transform`, `will-change: transform`, `filter`,
+  and `isolation: isolate` do). PageHeader had no such property →
+  no stacking context → stuck below the photo. The bug is INVISIBLE
+  during component-level testing because cards always work; only
+  affects bare in-flow text.
+- **Fix:** One line in `App.module.css` — `.shell { position:
+  relative; z-index: 1; }`. Promotes the entire app shell into a
+  stacking context above the photo. Every descendant inherits the
+  right paint order. No per-component bandaids needed.
+- **Action:** Whenever introducing a `position: fixed/absolute;
+  z-index: 0` background layer (photo, video, canvas, …), ALWAYS
+  give the sibling content tree an explicit positive z-index +
+  positioning to form its own stacking context. The default works
+  by accident when every visible element happens to have a
+  stacking-context-forming CSS property, and silently breaks the
+  moment one doesn't. Add this to the design-system layout-shell
+  contract; not the photo component's job to know about every
+  sibling's z-context.
+
+---
+
 ## 2026-05-17 [phase5-postship-9-followup] stale UI bundle embedded in release binary
 
 - **Symptom:** shipped Wave 2 backend + UI source changes, ran my

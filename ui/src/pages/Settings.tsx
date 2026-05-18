@@ -12,6 +12,14 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Button, Card, PageHeader, Spinner } from "../components/primitives";
+import { CATEGORIES } from "../components/UnsplashBackground/categories";
+import {
+  getPrefs,
+  PREFS_EVENT,
+  setPref,
+  type BackgroundPrefs,
+  type CurationMode,
+} from "../components/UnsplashBackground/prefs";
 import { FolderIcon } from "../design/Icon";
 import { t } from "../i18n";
 import { useAppStore } from "../lib/store";
@@ -185,6 +193,7 @@ function GeneralPanel({
     void patch("ui.theme", theme, { theme });
   };
   return (
+    <>
     <Card title={t("settings.tab.general")}>
       <Row
         label={t("settings.general.theme")}
@@ -243,6 +252,185 @@ function GeneralPanel({
           />
         }
       />
+      </Card>
+      <BackgroundCard />
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Background photo card — Unsplash-powered ambient background.        */
+/*                                                                    */
+/* Storage: prefs go through `prefs.ts` (localStorage today, future   */
+/* DPAPI + settings table). This card reads on mount, subscribes to   */
+/* the `PREFS_EVENT` so external writes propagate, and writes back    */
+/* on each control change.                                            */
+/* ------------------------------------------------------------------ */
+
+function BackgroundCard() {
+  const [prefs, setPrefsState] = useState<BackgroundPrefs>(() => getPrefs());
+  // Local mirror of the API-key input so we can save on blur rather
+  // than firing a write on every keystroke. The committed value is
+  // still `prefs.apiKey`.
+  const [keyDraft, setKeyDraft] = useState(prefs.apiKey);
+
+  useEffect(() => {
+    const onChange = () => {
+      const next = getPrefs();
+      setPrefsState(next);
+      setKeyDraft((d) => (d === "" ? next.apiKey : d));
+    };
+    window.addEventListener(PREFS_EVENT, onChange);
+    return () => window.removeEventListener(PREFS_EVENT, onChange);
+  }, []);
+
+  const update = <K extends keyof BackgroundPrefs>(
+    key: K,
+    value: BackgroundPrefs[K],
+  ) => {
+    setPref(key, value);
+    setPrefsState((p) => ({ ...p, [key]: value }));
+  };
+
+  const toggleCategory = (slug: string) => {
+    const has = prefs.categories.includes(slug);
+    const next = has
+      ? prefs.categories.filter((s) => s !== slug)
+      : [...prefs.categories, slug];
+    update("categories", next);
+  };
+
+  const keyConfigured = prefs.apiKey.length > 0;
+
+  return (
+    <Card title={t("settings.general.bg.title")}>
+      <p
+        style={{
+          color: "var(--on-surf-muted)",
+          margin: 0,
+          font: "var(--type-sm)",
+        }}
+      >
+        {t("settings.general.bg.help")}
+      </p>
+
+      <Row
+        label={t("settings.general.bg.enabled")}
+        help={
+          keyConfigured
+            ? undefined
+            : t("settings.general.bg.enabled.needsKey")
+        }
+        control={
+          <Toggle
+            checked={prefs.enabled && keyConfigured}
+            onChange={(v) => update("enabled", v)}
+            ariaLabel={t("settings.general.bg.enabled")}
+          />
+        }
+      />
+
+      <Row
+        label={t("settings.general.bg.apiKey")}
+        help={t("settings.general.bg.apiKey.help")}
+        control={
+          <input
+            type="password"
+            value={keyDraft}
+            onChange={(e) => setKeyDraft(e.target.value)}
+            onBlur={() => {
+              if (keyDraft !== prefs.apiKey) update("apiKey", keyDraft.trim());
+            }}
+            placeholder={t("settings.general.bg.apiKey.placeholder")}
+            spellCheck={false}
+            autoComplete="off"
+            style={{
+              background: "var(--surf-1)",
+              color: "var(--on-surf)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--r-2)",
+              padding: "var(--s-2)",
+              font: "var(--type-sm)",
+              fontFamily: "var(--font-mono)",
+              width: 280,
+            }}
+          />
+        }
+      />
+
+      <Row
+        label={t("settings.general.bg.mode")}
+        control={
+          <div
+            role="radiogroup"
+            aria-label={t("settings.general.bg.mode")}
+            className={styles.themePicker}
+          >
+            {(["random", "curated"] as CurationMode[]).map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="radio"
+                aria-checked={prefs.mode === m}
+                className={`${styles.themeBtn} ${
+                  prefs.mode === m ? styles.themeBtnActive : ""
+                }`}
+                onClick={() => update("mode", m)}
+              >
+                {t(`settings.general.bg.mode.${m}`)}
+              </button>
+            ))}
+          </div>
+        }
+      />
+
+      {prefs.mode === "curated" ? (
+        <Row
+          label={t("settings.general.bg.categories")}
+          help={t("settings.general.bg.categories.help")}
+          control={
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+                gap: "var(--s-2)",
+                width: "100%",
+              }}
+            >
+              {CATEGORIES.map((c) => {
+                const checked = prefs.categories.includes(c.slug);
+                return (
+                  <label
+                    key={c.slug}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "6px 10px",
+                      borderRadius: "var(--r-pill)",
+                      border: "1px solid var(--border)",
+                      background: checked
+                        ? "color-mix(in oklab, var(--mode-normal) 18%, var(--surf-1))"
+                        : "var(--surf-1)",
+                      cursor: "pointer",
+                      font: "var(--type-sm)",
+                      userSelect: "none",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleCategory(c.slug)}
+                      style={{ margin: 0 }}
+                    />
+                    {c.label}
+                  </label>
+                );
+              })}
+            </div>
+          }
+        />
+      ) : null}
     </Card>
   );
 }

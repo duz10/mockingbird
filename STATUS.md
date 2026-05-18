@@ -19,15 +19,124 @@
 > **NEXT P1 LATERAL:** `mb-2bi` – audio streaming + chunked Whisper
 >   (proper long-form fix). Standing P1. Required for true Wisprflow-
 >   parity latency on normal/formal modes per ADR 0024 acceptance.
-> **IN-FLIGHT THIS SESSION:** *(none — ADR 0024 epic mb-e7s sealed.
->   Migration 010 ready to ship with iter-1 casual prompt fix folded
->   in via amend; smoketest checklist in
->   `docs/cleanup/release-wiring-migration-010.md`. Eval corpus
->   extended 39→52 fixtures during the iter-1 verification round —
->   that's now the baseline going forward.)*
+> **IN-FLIGHT THIS SESSION:** Unsplash photo background feature
+>   shipped + readability polish landed (mb-biy, closed). Compliance
+>   audit + dev creds + smoketest in
+>   `docs/cleanup/unsplash-background-ship.md`. Two non-obvious
+>   findings logged in LESSONS (2026-05-19): the `data-photo-bg`
+>   token-override pattern for swapping glass tints without per-
+>   component churn, and the stacking-context gotcha where in-flow
+>   page chrome silently rendered BENEATH a `position: fixed;
+>   z-index: 0` photo layer. ADR 0024 epic mb-e7s remains sealed.
 > **HOW TO RESUME:** `/agent code-puppy` → re-read this block → `bd ready`
 >   for the unblocked queue → start. If your prompt conflicts with anything
 >   above, STOP and ask before doing tool calls.
+
+---
+
+## 2026-05-19 – Unsplash photo background shipped (mb-biy closed)
+
+**Status:** Optional ambient photo background landed end-to-end in the
+main window. Off by default; users opt in via Settings → Background by
+pasting their own Unsplash access key. Compliance audit clean against
+all six items in the Unsplash API guideline checklist (hotlink,
+download trigger, attribution + UTM, no logo / similar name, distinct
+visual, accurate app metadata in the dev portal).
+
+### What
+
+- **Component** at `ui/src/components/UnsplashBackground/` — six
+  files (~700 LOC): `index.tsx` (lifecycle + clock-aligned 5-min
+  rotation + crossfade orchestration), `fetchPhoto.ts` (typed API
+  shim + `triggerDownload` + `withUtm` + `autoOverlayForColor`
+  luminance helper), `Attribution.tsx` (hover-revealed credit pill
+  with photographer + Unsplash links), `prefs.ts` (localStorage
+  seam — migrates to DPAPI when release-build wiring lands),
+  `categories.ts` (curation slug list), `styles.module.css`.
+- **Settings UI** — new `BackgroundCard` in `Settings.tsx` with
+  API-key input, enable toggle, mode picker (random / curated),
+  category multi-select, dark-overlay slider. i18n keys under
+  `settings.general.bg.*` in `ui/src/i18n/en.json`.
+- **App wiring** — `<UnsplashBackground />` mounted at the App
+  root behind the shell; `tauri.conf.json` CSP extended to allow
+  `api.unsplash.com` (connect-src) and `images.unsplash.com`
+  (img-src). End users still BYO key; nothing ships with the app.
+- **Design-system polish** — three rounds of qa-kitten audits +
+  fixes for readability against arbitrary photos. Final shape:
+  - `:root[data-photo-bg]` token-override scope in
+    `materials-v2.css` swaps the four `--glass-tint-*` tokens from
+    cream-alpha (4–12%) to dark-alpha (45–82%) when a photo is on.
+    Every glass surface (sidebar, Card primitive, mode cards, etc.)
+    auto-adapts without touching consumer CSS — single source of
+    truth, OCP-clean.
+  - `position: relative; z-index: 1` on `.shell` (App.module.css)
+    fixes the stacking-context bug where in-flow page chrome
+    (PageHeader title + subtitle) was silently painted BENEATH the
+    photo layer (positioned z:0 elements outpaint non-positioned
+    in-flow elements regardless of DOM order; cards dodged it via
+    implicit backdrop-filter stacking contexts). See LESSONS
+    2026-05-19.
+  - Adaptive scrim in `index.tsx` — `autoOverlayForColor` derives
+    a recommended overlay opacity from Unsplash's `photo.color`
+    using Rec.709 luminance. Combined with the user pref via
+    `Math.max(prefs.overlay, autoOverlayForColor(...))` — the
+    slider is a floor, the system can darken more on bright photos.
+  - Glass treatment for History `.leftPane` + Dictionary `.shell`
+    scoped to `[data-photo-bg]` (the two pages whose top-level
+    containers never opted into the token system).
+  - Text-shadow halo on `.pageTitle` + `.pageSubtitle` under
+    `[data-photo-bg]` as belt-and-suspenders against extreme-
+    luminance regions; preserves the editorial "hero floating text"
+    intent without wrapping headings in glass.
+  - Attribution pill pulled out of `.root`'s stacking context
+    (rendered as a sibling) so its hover popover floats above
+    cards instead of being clipped beneath them.
+- **Dev creds** in `.env.local` (gitignored; verified via
+  `git check-ignore`). `.env.example` carries the variable names
+  with values blank so the convention is discoverable. End users
+  ship their own key via the Settings UI — nothing in the app
+  binary references these.
+
+### Rate-limit math
+
+Demo Unsplash tier: 50 req/hr. 5-min rotation = 12 req/hr + 1
+initial = ~13 req/hr (≈26% of cap). `triggerDownload` pings to
+`links.download_location` do NOT count against rate limit per
+Unsplash docs.
+
+### Files
+
+- New: `ui/src/components/UnsplashBackground/{index,fetchPhoto,
+  Attribution,prefs,categories}.{tsx,ts}` + `styles.module.css`
+- Modified UI: `App.tsx`, `App.module.css`, `i18n/en.json`,
+  `pages/Settings.tsx`, `pages/History.module.css`,
+  `pages/Dictionary.module.css`, `components/primitives.module.css`,
+  `design/materials-v2.css`
+- Modified Tauri: `tauri.conf.json` (CSP only)
+- Docs: `docs/cleanup/unsplash-background-ship.md`, LESSONS
+  2026-05-19 entry
+- Dev: `.env.local` (gitignored), `.env.example` (hints)
+
+### Release-build smoketest
+
+See `docs/cleanup/unsplash-background-ship.md` §"Release-build
+smoketest" for the full checklist. Headline: `cargo tauri build
+--release` triggers `npm run build` via `beforeBuildCommand`, so
+the UI bundle is fresh in the shipped binary. Verified `npm run
+build` cleanly produces fresh hashes; `tsc --noEmit` is green.
+
+### Known follow-ups (not blocking ship)
+
+- API-key storage migrates from `localStorage` to DPAPI when this
+  graduates into the release-build wiring. Documented in
+  `prefs.ts` module-level doc.
+- The Unsplash glyph in `Attribution.tsx` is a simplified camera-
+  shutter mark inlined as SVG. Within Unsplash's brand guidelines
+  for attribution contexts; flagged as a potential swap to a
+  generic camera icon if a future reviewer side-eyes it.
+- Pre-existing ESLint v9 config migration is broken (unrelated to
+  this work). `npm run lint` errors out before reading our files;
+  `tsc --noEmit` covered type safety in the meantime.
 
 ---
 
@@ -450,6 +559,22 @@ Dustin's eyes-on review before polish.
 - DPAPI-backed Claude API key modal (replacing `window.prompt`).
 - Real RMS waveform feed from orchestrator (currently rAF sine + noise).
 - `purge_all_history` IPC handler (UI wired; backend is a TODO).
+- **History live-refresh not firing in shipped build.** Backend emits
+  `history:session-saved` after each `persist_*` commits the row
+  (`src-tauri/src/dictation.rs` + `recording_window.rs::emit_session_saved`).
+  Frontend listener is wired in `ui/src/pages/History.tsx`. User
+  confirmed 2026-05-19 that the list still requires a manual page
+  change to refresh — event is not arriving / not triggering the
+  refetch. Suspects to investigate when we revisit: (a) listener
+  registered too late vs. emit timing on first dictation after
+  History mount; (b) event scoped to wrong window (main vs.
+  recording webview — `app.emit` is app-wide, but worth double-
+  checking the receiver runs in the main webview); (c) `selectedId`
+  ref-stability causing the effect to re-bind and miss events;
+  (d) `isTauri()` returning false in the shipped build (very
+  unlikely but cheap to log). First debug step: add a
+  `console.log` in the listener body + a `tracing::info!` next to
+  the emit, then dictate and grep both.
 
 ---
 

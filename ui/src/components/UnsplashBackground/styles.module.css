@@ -1,0 +1,200 @@
+/* UnsplashBackground — full-bleed photo background.
+ *
+ * Layering rules:
+ *   - `.root` sits at z:0 (or below — pointer-events:none so it
+ *     never steals clicks).
+ *   - Two `<img>` layers stack inside it. Both start oversized by
+ *     12% so the WAAPI pan can translate +/-6% without revealing
+ *     the edges.
+ *   - `.overlay` is a black scrim controlled by the
+ *     `--mb-photo-overlay` CSS var (0..1). Default is 0 in prefs;
+ *     we leave the surface here for one-line tuning.
+ *   - `.attribution` sits bottom-right at z:2 — above the photos +
+ *     overlay, but still in the background layer so it never
+ *     intercepts main-app clicks (it has its OWN pointer-events
+ *     re-enabled below).
+ */
+
+.root {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  /* Nothing in the background layer should intercept input —
+   * except the attribution pill, which opts back in below. */
+  pointer-events: none;
+  /* Smooth color → photo handoff while the first image decodes:
+   * the `backgroundColor` inline style is the Unsplash-provided
+   * average color from the API response. */
+  background-color: #1a1a1a;
+}
+
+.imgLayer {
+  position: absolute;
+  /* Oversize: pan range is +/-6%, so 112% leaves a small safety
+   * margin so the photo never reveals its own edge. */
+  top: -6%;
+  left: -6%;
+  width: 112%;
+  height: 112%;
+  object-fit: cover;
+  /* `will-change: transform` hints the compositor to GPU-promote
+   * this layer — the WAAPI pan stays buttery on a 5-minute
+   * duration without it eating CPU. */
+  will-change: transform, opacity;
+  /* Crossfade duration — must match `FADE_MS` in index.tsx. */
+  transition: opacity 2000ms ease-in-out;
+  /* Default opacity. Fade classes flip it. */
+  opacity: 1;
+}
+
+/* The OLD layer is the one fading out; new layer is fading in.
+ * Initial render of an incoming layer sets opacity:0; the parent
+ * then flips `fadeIn` which transitions to 1. */
+.imgLayer.fadeOut {
+  opacity: 0;
+}
+.imgLayer:not(.fadeIn):not(.fadeOut) {
+  opacity: 1;
+}
+/* When an incoming layer FIRST mounts, it has neither class —
+ * we want it invisible. We achieve that by giving the second
+ * stacked layer (the incoming one) opacity:0 by default. The
+ * crossfade kicks in when the `.fadeIn` modifier is applied. */
+.imgLayer + .imgLayer {
+  opacity: 0;
+}
+.imgLayer.fadeIn {
+  opacity: 1;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  background-color: rgb(0 0 0 / var(--mb-photo-overlay, 0));
+  pointer-events: none;
+  /* Transition the overlay too so the user dragging the slider
+   * (or us flipping the default later) doesn't jolt. */
+  transition: background-color 250ms ease-out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Attribution pill                                                    */
+/* ------------------------------------------------------------------ */
+
+.attribution {
+  /* `fixed` (not `absolute`) so the pill lives in the top-level
+   * stacking context, NOT inside `.root` (which is z-index:0 and
+   * forms its own stacking context that would trap the popover
+   * beneath any app card). Combined with the high z-index below,
+   * the pill + its hover popover float above everything. */
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 1000;
+  /* Re-enable pointer events ONLY on the pill, not the rest of the
+   * background layer. (`.root` keeps pointer-events: none for the
+   * photos + overlay; the pill is its own sibling now.) */
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  /* Glass micro-surface — matches the design language. Subtle at
+   * rest, never competes with content. */
+  background: rgb(0 0 0 / 0.36);
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  color: rgb(255 255 255 / 0.78);
+  font: var(--type-xs);
+  line-height: 1.2;
+  /* Dim at rest, brighten on hover/focus-within. */
+  opacity: 0.7;
+  transition: opacity 160ms ease-out;
+  user-select: none;
+  /* Constrain so really-long descriptions don't push off-screen on
+   * narrow windows. The hover popover has the full text. */
+  max-width: 320px;
+}
+.attribution:hover,
+.attribution:focus-within {
+  opacity: 1;
+}
+
+.attributionGlyph {
+  flex-shrink: 0;
+  /* Inherits color from `.attribution` via `currentColor`. */
+}
+
+.attributionTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hover/focus popover — anchored above the pill, right-aligned so
+ * long content grows leftward. */
+.attributionPop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  min-width: 240px;
+  max-width: 360px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgb(0 0 0 / 0.78);
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  color: rgb(255 255 255 / 0.92);
+  font: var(--type-sm);
+  line-height: 1.4;
+  /* Hidden at rest; reveal on parent hover/focus-within. */
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition:
+    opacity 160ms ease-out,
+    visibility 0s linear 160ms,
+    transform 160ms ease-out;
+  pointer-events: none;
+}
+.attribution:hover .attributionPop,
+.attribution:focus-within .attributionPop {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  pointer-events: auto;
+  transition-delay: 0s, 0s, 0s;
+}
+
+.attributionPopTitle {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+.attributionPopCredit {
+  margin: 0;
+}
+.attributionPopHint {
+  margin: 6px 0 0;
+  font: var(--type-xs);
+  opacity: 0.85;
+}
+.attributionPop a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.attributionPop a:hover {
+  text-decoration-thickness: 2px;
+}
+
+/* Honor prefers-reduced-motion — kill the pan + crossfade
+ * for users who've asked the OS to slow things down. The
+ * background still rotates, just without animation. */
+@media (prefers-reduced-motion: reduce) {
+  .imgLayer {
+    transition: opacity 0ms;
+    animation: none !important;
+  }
+}
