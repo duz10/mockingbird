@@ -67,7 +67,13 @@ names but ships no implementations. Do not attempt to invoke them.
 2. Close completed beads (`bd close <id>`) and create new ones for any
    work discovered mid-iteration (`bd create ... --type task`)
 3. If a non-obvious thing happened, append to `docs/LESSONS.md`
-4. Run `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test`
+4. Run the cargo gate via the Windows wrapper (see
+   "Build / run / test environment (Windows)" below):
+   `powershell -File scripts\cargo-with-cuda.ps1 fmt --check`,
+   `powershell -File scripts\cargo-with-cuda.ps1 clippy --release -- -D warnings`,
+   `powershell -File scripts\cargo-with-cuda.ps1 test --release`
+   (use `--no-run` fallback when the documented launch failure hits;
+   pure-Rust modules go through the throwaway-crate recipe — same section)
 5. Run `npm run lint`, `npm test` (whichever apply to your changes)
 6. Commit all changes with descriptive commit messages
 7. If phase is complete: `git tag phase-{N}-complete` after the final commit
@@ -78,7 +84,12 @@ names but ships no implementations. Do not attempt to invoke them.
 
 ### Rust
 - Edition 2021, Rust ≥ 1.77
-- `cargo fmt` is law; `cargo clippy -- -D warnings` must pass
+- `cargo fmt` is law; `cargo clippy --release -- -D warnings` must pass
+  (release flag required to reuse whisper-rs-sys CUDA artifacts;
+  LESSONS 2026-05-15)
+- **All cargo invocations on Windows go through `scripts\cargo-with-cuda.ps1`** —
+  plain `cargo` compiles but produces binaries that may not launch.
+  See "Build / run / test environment (Windows)" section below.
 - `Result<T, E>` everywhere; `unwrap()` only in tests
 - `thiserror::Error` for module error types
 - `tracing` for logging (not `println!`)
@@ -104,6 +115,113 @@ names but ships no implementations. Do not attempt to invoke them.
 - Module-level docs explain WHY, not WHAT
 - Doc comments on public APIs
 - Append to `docs/LESSONS.md` on non-obvious findings
+
+## Build / run / test environment (Windows)
+
+**This is a Windows + CUDA dev box.** Plain `cargo` invocations compile
+but produce binaries that may fail to launch due to missing MSVC + CUDA
+runtime env. ALL cargo invocations MUST go through the project wrapper.
+
+### The cargo wrapper
+
+```
+powershell -File scripts\cargo-with-cuda.ps1 <cargo-args>
+```
+
+Common invocations:
+- `powershell -File scripts\cargo-with-cuda.ps1 check`
+- `powershell -File scripts\cargo-with-cuda.ps1 clippy --release -- -D warnings`
+- `powershell -File scripts\cargo-with-cuda.ps1 test --release`
+- `powershell -File scripts\cargo-with-cuda.ps1 fmt --check`
+- `powershell -File scripts\cargo-with-cuda.ps1 build --release`
+
+What it does (full details in the script header):
+1. Imports MSVC env via `vcvars64.bat`.
+2. Pins `CUDA_PATH` + `CUDA_PATH_V12_8` to v12.8 (ADR 0011).
+3. Prepends `cmake` to PATH.
+4. Caps `CMAKE_BUILD_PARALLEL_LEVEL=4` (whisper-rs CUDA OOMs at 16).
+5. Forwards args through `cmd.exe /c` (stream-flattening; LESSONS 2026-05-17).
+
+### Shell: `powershell.exe`, NOT `pwsh`
+
+PowerShell 7 (`pwsh`) is **not on PATH** on this box. Use PS 5.1
+(`powershell.exe`) and invoke the wrapper via `-File`:
+
+| ✓ Works                                                | ✗ Fails                                                          |
+|--------------------------------------------------------|------------------------------------------------------------------|
+| `powershell -File scripts\cargo-with-cuda.ps1 …`       | `pwsh scripts\cargo-with-cuda.ps1 …` (`'pwsh' not recognized`)   |
+|                                                        | `powershell -Command "scripts\… ..."` (LESSONS: breaks arg pass) |
+
+LESSONS 2026-05-17 documents both pitfalls under "Finding 4".
+
+### Running the app
+
+Use the launcher script — never `Start-Process target\release\mockingbird.exe` directly:
+
+```
+powershell -File scripts\run-mockingbird.ps1
+```
+
+The launcher sets `ORT_DYLIB_PATH` and prepends CUDA bin to `PATH` so
+the binary can load `onnxruntime.dll` (Silero VAD) and `cudart64_12.dll`
+(whisper-rs CUDA) at process start. Launching the exe directly omits
+both and produces hard-to-diagnose `STATUS_DLL_NOT_FOUND` or silent
+VAD failure.
+
+### Models directory
+
+Runtime model home: `%USERPROFILE%\mockingbird_models\`. Contains:
+- `onnxruntime.dll` — ORT 1.22.x for Silero VAD
+- `silero_vad.onnx` — Silero VAD weights
+- `whisper-large-v3-turbo-q5_0.bin` (or whichever GGUF is configured)
+
+Override parent via `MOCKINGBIRD_MODELS_DIR` env var (`mockingbird_models`
+is appended to it).
+
+If the dir is missing/sparse:
+- `powershell -File scripts\download-onnxruntime.ps1` — restores ORT (~12 MB)
+- `powershell -File scripts\download-models.ps1` — restores Whisper GGUF (~500 MB – 2 GB)
+
+### Known issue: `cargo test --release` launch failure
+
+LESSONS 2026-05-17 (`[phase5-wave-I]`) documents that `cargo test --release`
+exits with `STATUS_ENTRYPOINT_NOT_FOUND` (0xc0000139) on this box even
+with the wrapper, even with `ORT_DYLIB_PATH` set, and even with the
+models dir populated. Root cause is an unidentified DLL ABI mismatch
+in the test-binary's load chain. The **app binary itself launches fine** —
+only the test runner is affected. Re-confirmed 2026-05-18.
+
+**Sanctioned fallback gate** (use when live test exec is blocked):
+
+1. `… cargo-with-cuda.ps1 check`
+2. `… cargo-with-cuda.ps1 clippy --release -- -D warnings`
+3. `… cargo-with-cuda.ps1 fmt --check`
+4. `… cargo-with-cuda.ps1 test --release --no-run`
+   (binaries link clean ⇒ type system, traits, link surface all valid)
+
+For pure-Rust modules with no whisper-rs / ort / cuda deps (e.g.
+`meetings/formatter.rs`, `meetings/filler_words.rs`, `cleanup/preprocessor.rs`),
+live-test via the throwaway-crate recipe documented in LESSONS 2026-05-17:
+copy source into `$env:TEMP\<modname>_tests\`, add only that module's
+real deps, run vanilla `cargo test` there. Merge back when green.
+
+For wired modules (touching whisper-rs / ort / cuda): cargo check +
+clippy + the human-in-loop QA matrix in each phase doc.
+
+### PowerShell single-quote variable trap
+
+Single-quoted strings in PowerShell do NOT expand variables:
+
+| ✓ Works                                  | ✗ Silently wrong                                                                       |
+|------------------------------------------|----------------------------------------------------------------------------------------|
+| `Test-Path "$env:USERPROFILE\foo"`       | `Test-Path '$env:USERPROFILE\foo'` (tests for the literal string `$env:USERPROFILE\foo`) |
+| `Test-Path -LiteralPath "$home\foo"`     |                                                                                        |
+
+Bernard hit this 2026-05-18 verifying the models dir; reported "missing"
+when the folder was in fact present. Use double-quoted strings or
+`[System.IO.Path]::Combine($env:USERPROFILE, ...)` for path assembly.
+
+---
 
 ## Principles (binding)
 

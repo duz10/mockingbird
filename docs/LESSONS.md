@@ -2113,3 +2113,62 @@ multi-file bin layout; precedent now set for future dev tooling.
   - **Few-shot example formatting is a load-bearing design choice on small models.** Bold/markdown labels invite mirroring. Plain prefixed labels with explicit forbid rules are more robust. Worth checking normal_v5 and formal_v2 if/when their next iteration comes around -- the same scaffolding is latent there.
   - **Imperative-shaped dictation is a real use case.** Users dictate "create a function", "add this feature", "write a test for X", "tell me how to" all the time. The prompt MUST handle these as content, not as requests. Worth adding to every future cleanup prompt's non-negotiable rule list, not just casual.
   - **Wall-clock note:** v2corpus run (all 3 modes, 156 calls) finished in 6 min 24 s vs the iter-2 baseline's 11+ min on 117 calls. Hot model cache makes a big difference; first-run latency is not representative.
+
+---
+
+## 2026-05-18 [phase-mc-wave-0] Build/test env conventions were tribal knowledge; AGENTS.md didn't carry them
+
+- **Context:** Phase MC kickoff. The user-provided kickoff prompt's
+  cargo gate read literally "cargo check / cargo clippy --release -- -D
+  warnings / cargo test --release / cargo fmt --check". I started by
+  running those plain commands. `check` and `clippy` passed (they only
+  compile, never link/launch), `test --release` exploded at first
+  binary launch with `STATUS_ENTRYPOINT_NOT_FOUND` (0xc0000139).
+- **Finding 1:** Project AGENTS.md (`.code_puppy/AGENTS.md`) had a
+  bare `cargo fmt` / `cargo clippy` / `cargo test` recipe in the
+  end-of-iteration block. It did NOT mention:
+  - `scripts/cargo-with-cuda.ps1` is mandatory for ALL cargo calls.
+  - `pwsh` is not on PATH; `powershell -File` is the working invocation.
+  - `scripts/run-mockingbird.ps1` is the only sanctioned app launcher.
+  - `%USERPROFILE%\mockingbird_models\` is the runtime model home and
+    must be populated (`download-onnxruntime.ps1` / `download-models.ps1`).
+  - LESSONS 2026-05-17's `STATUS_ENTRYPOINT_NOT_FOUND` known issue
+    + the `--no-run` / throwaway-crate fallback gate.
+  Every one of these was tribal knowledge buried in LESSONS or runbooks.
+  Fresh agent + clean context = fresh agent steps on every rake.
+- **Finding 2:** A Stop-Process race — user had run
+  `Start-Process target\release\mockingbird.exe` (the stale May-18
+  build) earlier in the session. That held a file lock on the exe,
+  which made `cargo build --release` fail with
+  `error: failed to remove file ... Access is denied. (os error 5)`.
+  Cargo's error message is fine, but the failure mode (the bytecode
+  for "old binary still loaded") needs to be on the AGENTS quickref
+  because it's a very normal mid-session occurrence.
+- **Finding 3 (Bernard's bug):** I reported "mockingbird_models dir is
+  missing" when in fact the folder was present. Root cause: PowerShell
+  single-quoted strings DO NOT expand `$env:USERPROFILE`. I wrote
+  `Test-Path '$env:USERPROFILE\mockingbird_models'` and got `False`
+  because Test-Path was checking for a literal path whose first segment
+  was the 8-character string `$env:USE` (no, wait — literally `$env:USERPROFILE`).
+  Either way: the folder exists, the test mis-reported. Use double
+  quotes (`"$env:USERPROFILE\..."`) or `-LiteralPath "$home\..."`.
+- **Action 1:** AGENTS.md updated with a full new section
+  "Build / run / test environment (Windows)". Carries: wrapper usage,
+  pwsh-vs-powershell, app launcher, models dir, known launch-failure
+  fallback gate, throwaway-crate recipe pointer, PS single-quote trap.
+  End-of-iteration cargo gate now points at the wrapper invocations
+  explicitly. Rust coding-standards section now flags the wrapper as
+  mandatory and pins clippy to `--release` per LESSONS 2026-05-15.
+- **Action 2:** Five-attempt rule fired correctly on the
+  `STATUS_ENTRYPOINT_NOT_FOUND` debug loop (~5 attempts: bare cargo,
+  wrapper-only, wrapper+`ORT_DYLIB_PATH` to deps copy, wrapper+real
+  dir, dependency check). Stopped, escalated to the user, confirmed
+  the LESSONS 2026-05-17 fallback gate, proceeded.
+- **Pattern burned in:** *Tribal-knowledge debt accrues silently. The
+  test of whether a runbook is real is whether a fresh agent with
+  cleared context can execute it.* Anything not in AGENTS.md or the
+  active phase doc is not a runbook — it's folklore. Today's gap was
+  ~6 distinct facts buried in LESSONS that the kickoff prompt didn't
+  surface. Cost: ~30 min of debug + a rebuild. Fix: surface them.
+
+---
