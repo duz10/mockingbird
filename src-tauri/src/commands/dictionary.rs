@@ -34,9 +34,7 @@ fn to_dto(e: dictionary::DictionaryEntry) -> DictionaryEntryDto {
 }
 
 #[tauri::command]
-pub fn list_dictionary(
-    db: State<'_, AppStateHandle>,
-) -> Result<Vec<DictionaryEntryDto>, String> {
+pub fn list_dictionary(db: State<'_, AppStateHandle>) -> Result<Vec<DictionaryEntryDto>, String> {
     let conn = lock_db(&db)?;
     let rows = dictionary::list_all(&conn).map_err(into_err)?;
     Ok(rows.into_iter().map(to_dto).collect())
@@ -76,10 +74,7 @@ pub fn upsert_dictionary_entry(
 }
 
 #[tauri::command]
-pub fn delete_dictionary_entry(
-    db: State<'_, AppStateHandle>,
-    id: i64,
-) -> Result<(), String> {
+pub fn delete_dictionary_entry(db: State<'_, AppStateHandle>, id: i64) -> Result<(), String> {
     let conn = lock_db(&db)?;
     dictionary::delete(&conn, id).map_err(into_err)
 }

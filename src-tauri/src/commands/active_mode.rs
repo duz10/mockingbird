@@ -76,10 +76,7 @@ pub fn get_active_mode(db: State<'_, AppStateHandle>) -> Result<ActiveMode, Stri
 }
 
 #[tauri::command]
-pub fn set_active_mode(
-    db: State<'_, AppStateHandle>,
-    slug: String,
-) -> Result<(), String> {
+pub fn set_active_mode(db: State<'_, AppStateHandle>, slug: String) -> Result<(), String> {
     // Allowlist check FIRST — before we touch the DB. Returns a
     // clear error the UI can surface; no half-applied state.
     if !TRANSCRIPTION_SLUGS.contains(&slug.as_str()) {

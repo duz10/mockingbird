@@ -239,7 +239,9 @@ fn render_punctuation_cues(input: &str, notes: &mut ProcessedNotes) -> String {
             // Replace as " <glyph> " to neutralise the leading-space
             // capture group; whitespace collapse + the "drop space
             // before punctuation" pass below handle the rest.
-            out = re.replace_all(&out, format!("{glyph} ").as_str()).into_owned();
+            out = re
+                .replace_all(&out, format!("{glyph} ").as_str())
+                .into_owned();
             notes.punctuation_cues_rendered += count;
         }
     }
@@ -322,8 +324,7 @@ fn strip_tier1_fillers(input: &str, notes: &mut ProcessedNotes) -> String {
         // The alternation is built from TIER_1_FILLERS so a const
         // addition is automatically picked up.
         let alt = TIER_1_FILLERS.join("|");
-        Regex::new(&format!(r"(?i)\b(?:{alt})\b[,.]?\s*"))
-            .expect("tier-1 filler regex")
+        Regex::new(&format!(r"(?i)\b(?:{alt})\b[,.]?\s*")).expect("tier-1 filler regex")
     });
     let count = re.find_iter(input).count();
     notes.fillers_stripped += count;
@@ -420,9 +421,7 @@ fn collapse_stutters(input: &str, notes: &mut ProcessedNotes) -> String {
 /// in the middle of a sentence is preserved (proper nouns, acronyms).
 fn capitalize_sentences(input: &str, notes: &mut ProcessedNotes) -> String {
     static RE: OnceLock<Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| {
-        Regex::new(r"(^|[.!?]\s+|\n\n)([a-z])").expect("capitalize regex")
-    });
+    let re = RE.get_or_init(|| Regex::new(r"(^|[.!?]\s+|\n\n)([a-z])").expect("capitalize regex"));
     let mut count = 0usize;
     let out = re
         .replace_all(input, |caps: &regex::Captures<'_>| {
@@ -496,8 +495,7 @@ fn drop_space_before_close_bracket(input: &str) -> String {
 /// `world` without trailing-whitespace artifacts.
 fn cue_regex(cue: &str) -> Regex {
     let escaped = regex::escape(cue);
-    Regex::new(&format!(r"(?i)(?:^|\s){escaped}\b\s?"))
-        .expect("cue regex")
+    Regex::new(&format!(r"(?i)(?:^|\s){escaped}\b\s?")).expect("cue regex")
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -538,7 +536,10 @@ mod tests {
     fn preserves_words_containing_filler_substrings() {
         // "uhh" / "ohm" / "humble" should NOT be stripped — the
         // word-boundary anchors prevent substring matches.
-        assert_eq!(run("the humble hummingbird hums"), "The humble hummingbird hums.");
+        assert_eq!(
+            run("the humble hummingbird hums"),
+            "The humble hummingbird hums."
+        );
     }
 
     // -- Tier 2 fillers -----------------------------------------------
@@ -556,17 +557,17 @@ mod tests {
 
     #[test]
     fn strips_comma_bounded_you_know() {
-        assert_eq!(
-            run("so, you know, it works"),
-            "So, it works."
-        );
+        assert_eq!(run("so, you know, it works"), "So, it works.");
     }
 
     #[test]
     fn keeps_you_know_when_not_bounded() {
         // "you know nothing" → "you know" is content. Conservative
         // rule: only strip when prosody (commas) flags it as filler.
-        assert_eq!(run("you know nothing about it"), "You know nothing about it.");
+        assert_eq!(
+            run("you know nothing about it"),
+            "You know nothing about it."
+        );
     }
 
     // -- Stutters -----------------------------------------------------
@@ -603,18 +604,12 @@ mod tests {
 
     #[test]
     fn stitches_no_i_mean() {
-        assert_eq!(
-            run("call John, no I mean Sarah"),
-            "Call John. Sarah."
-        );
+        assert_eq!(run("call John, no I mean Sarah"), "Call John. Sarah.");
     }
 
     #[test]
     fn stitches_scratch_that() {
-        assert_eq!(
-            run("meet at 3, scratch that, 4 pm"),
-            "Meet at 3. 4 pm."
-        );
+        assert_eq!(run("meet at 3, scratch that, 4 pm"), "Meet at 3. 4 pm.");
     }
 
     // -- Verbal punctuation ------------------------------------------
@@ -644,7 +639,10 @@ mod tests {
     #[test]
     fn renders_new_paragraph() {
         let out = run("first thought new paragraph second thought");
-        assert!(out.contains("\n\n"), "expected paragraph break, got {out:?}");
+        assert!(
+            out.contains("\n\n"),
+            "expected paragraph break, got {out:?}"
+        );
     }
 
     #[test]
@@ -686,10 +684,7 @@ mod tests {
     fn does_not_recapitalize_proper_nouns() {
         // "Alice" / "Bob" inside sentence stay as-is. We only touch
         // the first letter after sentence boundaries.
-        assert_eq!(
-            run("hello Alice and Bob"),
-            "Hello Alice and Bob."
-        );
+        assert_eq!(run("hello Alice and Bob"), "Hello Alice and Bob.");
     }
 
     // -- Terminal punctuation ----------------------------------------
@@ -731,7 +726,10 @@ mod tests {
         assert!(!out.contains("uh"), "got {out:?}");
         assert!(out.starts_with('S'), "should be capitalised; got {out:?}");
         assert!(out.ends_with('.'), "needs terminal punct; got {out:?}");
-        assert!(out.contains("Alice"), "stitch must keep right side; got {out:?}");
+        assert!(
+            out.contains("Alice"),
+            "stitch must keep right side; got {out:?}"
+        );
     }
 
     #[test]
@@ -742,15 +740,7 @@ mod tests {
         let input = "here I have a list of keyboard supplies first thing is air duster second is alcohol wipes third is an extra cable";
         let out = run(input);
         for needle in [
-            "list",
-            "keyboard",
-            "supplies",
-            "air",
-            "duster",
-            "alcohol",
-            "wipes",
-            "extra",
-            "cable",
+            "list", "keyboard", "supplies", "air", "duster", "alcohol", "wipes", "extra", "cable",
         ] {
             assert!(
                 out.to_lowercase().contains(needle),

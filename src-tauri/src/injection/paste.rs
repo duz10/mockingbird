@@ -767,7 +767,10 @@ mod tests {
     #[test]
     fn text_formats_are_hglobal() {
         for fmt in [CF_TEXT, CF_OEMTEXT, CF_LOCALE] {
-            assert!(is_hglobal_format(fmt), "text format {fmt:#x} should be allowlisted");
+            assert!(
+                is_hglobal_format(fmt),
+                "text format {fmt:#x} should be allowlisted"
+            );
         }
     }
 

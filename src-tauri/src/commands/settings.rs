@@ -20,11 +20,9 @@ const KEY_LEARNING_ENABLED: &str = "learning.enabled";
 const KEY_CLAUDE_CONFIGURED: &str = "secrets.claude_key_configured";
 
 fn get_string(conn: &Connection, key: &str) -> Option<String> {
-    conn.query_row(
-        "SELECT value FROM settings WHERE key = ?1",
-        [key],
-        |r| r.get::<_, String>(0),
-    )
+    conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+        r.get::<_, String>(0)
+    })
     .ok()
 }
 
@@ -41,9 +39,7 @@ fn get_i64(conn: &Connection, key: &str, default: i64) -> i64 {
 }
 
 #[tauri::command]
-pub fn get_settings(
-    db: State<'_, AppStateHandle>,
-) -> Result<SettingsSnapshot, String> {
+pub fn get_settings(db: State<'_, AppStateHandle>) -> Result<SettingsSnapshot, String> {
     let conn = lock_db(&db)?;
     Ok(SettingsSnapshot {
         theme: get_string(&conn, KEY_THEME).unwrap_or_else(|| "system".into()),

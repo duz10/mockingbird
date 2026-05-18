@@ -106,8 +106,7 @@ pub fn update_mode(
     }
     params_vec.push(Box::new(slug));
     let sql = format!("UPDATE modes SET {} WHERE slug = ?", sets.join(", "));
-    let refs: Vec<&dyn rusqlite::ToSql> =
-        params_vec.iter().map(|b| b.as_ref()).collect();
+    let refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
     conn.execute(&sql, refs.as_slice()).map_err(into_err)?;
     Ok(())
 }

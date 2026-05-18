@@ -44,8 +44,8 @@ use dictation::runtime::{default_normal_config, DictationRuntime};
 /// hook, spawns the dictation orchestrator thread, and registers
 /// every Tauri command the UI uses (see `commands::register`).
 pub fn run() {
-    let builder = tauri::Builder::default().setup(
-        |app| -> Result<(), Box<dyn std::error::Error>> {
+    let builder =
+        tauri::Builder::default().setup(|app| -> Result<(), Box<dyn std::error::Error>> {
             let app_data = app.path().app_data_dir().map_err(box_err)?;
             std::fs::create_dir_all(&app_data)?;
 
@@ -65,8 +65,7 @@ pub fn run() {
             // Build the orchestrator config BEFORE moving the
             // connection into the shared Arc<Mutex<>>. The bootstrap
             // creates default provenance rows if missing.
-            let orchestrator_config =
-                default_normal_config(&database.conn).map_err(box_err)?;
+            let orchestrator_config = default_normal_config(&database.conn).map_err(box_err)?;
             tracing::info!(
                 mode = %orchestrator_config.mode_slug,
                 prompt_id = orchestrator_config.prompt_id,
@@ -85,11 +84,7 @@ pub fn run() {
             // tears down the hook + threads cleanly.
             #[cfg(target_os = "windows")]
             {
-                match DictationRuntime::spawn(
-                    shared_conn,
-                    orchestrator_config,
-                    HashMap::new(),
-                ) {
+                match DictationRuntime::spawn(shared_conn, orchestrator_config, HashMap::new()) {
                     Ok(runtime) => {
                         // Plug the Tauri AppHandle into the recording
                         // window so it can show/hide the real webview
@@ -101,9 +96,7 @@ pub fn run() {
                         runtime
                             .recording_window
                             .set_app_handle(app.handle().clone());
-                        tracing::info!(
-                            "🐦 dictation runtime started; hold RightAlt to dictate"
-                        );
+                        tracing::info!("🐦 dictation runtime started; hold RightAlt to dictate");
                         app.manage(runtime);
                     }
                     Err(e) => {
@@ -123,8 +116,7 @@ pub fn run() {
             }
 
             Ok(())
-        },
-    );
+        });
 
     commands::register(builder)
         .run(tauri::generate_context!())

@@ -44,8 +44,7 @@ pub fn open_path(path: String) -> Result<(), String> {
 /// - models: `%USERPROFILE%/mockingbird_models`  (override via env)
 #[tauri::command]
 pub fn app_paths() -> Result<AppPaths, String> {
-    let appdata = std::env::var("APPDATA")
-        .map_err(|_| "APPDATA env var not set".to_string())?;
+    let appdata = std::env::var("APPDATA").map_err(|_| "APPDATA env var not set".to_string())?;
     let data_dir = PathBuf::from(&appdata).join("Mockingbird");
     let logs_dir = data_dir.join("logs");
 

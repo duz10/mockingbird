@@ -52,8 +52,7 @@ fn duration_ms(started_at: &str, recording_ended_at: &str) -> i64 {
         chrono::DateTime::parse_from_rfc3339(s)
             .map(|d| d.with_timezone(&chrono::Utc))
             .or_else(|_| {
-                chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
-                    .map(|d| d.and_utc())
+                chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").map(|d| d.and_utc())
             })
             .ok()
     }
@@ -110,10 +109,7 @@ pub fn list_sessions(
 }
 
 #[tauri::command]
-pub fn get_session_detail(
-    db: State<'_, AppStateHandle>,
-    id: i64,
-) -> Result<SessionDetail, String> {
+pub fn get_session_detail(db: State<'_, AppStateHandle>, id: i64) -> Result<SessionDetail, String> {
     let conn = lock_db(&db)?;
     let session = sessions::get_by_id(&conn, id)
         .map_err(into_err)?
@@ -219,10 +215,7 @@ pub fn delete_session(db: State<'_, AppStateHandle>, id: i64) -> Result<(), Stri
 }
 
 #[tauri::command]
-pub fn mark_session_as_example(
-    db: State<'_, AppStateHandle>,
-    id: i64,
-) -> Result<(), String> {
+pub fn mark_session_as_example(db: State<'_, AppStateHandle>, id: i64) -> Result<(), String> {
     let conn = lock_db(&db)?;
     let session = sessions::get_by_id(&conn, id)
         .map_err(into_err)?

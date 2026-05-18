@@ -42,8 +42,8 @@ pub fn trigger_learning_run(db: State<'_, AppStateHandle>) -> Result<i64, String
     let mut clf = learning::classifier::HeuristicClassifier;
     let mut eval = learning::eval::DefaultEvalProvider;
     let cfg = learning::runner::RunnerConfig::default();
-    let outcome = learning::runner::run_once(&db.db, &mut clf, &mut eval, &cfg)
-        .map_err(into_err)?;
+    let outcome =
+        learning::runner::run_once(&db.db, &mut clf, &mut eval, &cfg).map_err(into_err)?;
     Ok(match outcome {
         learning::runner::RunOutcome::NoOp => 0,
         learning::runner::RunOutcome::Committed { run_id, .. } => run_id,

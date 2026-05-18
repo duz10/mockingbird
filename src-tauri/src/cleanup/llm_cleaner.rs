@@ -32,7 +32,9 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
 
-use crate::cleanup::{few_shot, preprocessor::Preprocessor, prompt_builder, Cleaner, PREPROCESSOR_VERSION};
+use crate::cleanup::{
+    few_shot, preprocessor::Preprocessor, prompt_builder, Cleaner, PREPROCESSOR_VERSION,
+};
 use crate::db::{dictionary, prompts};
 use crate::error::{AppError, AppResult};
 
