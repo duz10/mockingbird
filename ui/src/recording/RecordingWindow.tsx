@@ -3,27 +3,21 @@
 // Phase 0 contract:
 //   - Renders a frameless transparent Tauri window content area.
 //   - Subscribes to a `dictation:state` Tauri event for state.
-//   - Renders a fake waveform while Listening (real RMS comes Phase 4).
+//   - The MockingbirdMark logo carries the live state (oscillating
+//     ellipses while recording, collapsed idle, settle on done) per
+//     Design Language v1 §08.
 //   - Esc emits `dictation:cancel` (orchestrator wires this up later).
-//   - Honors `prefers-reduced-motion`.
+//   - Honors `prefers-reduced-motion` (mark animations zero out).
 //   - Renders in a plain browser too (Vite preview / Playwright):
 //     defaults to a static "Listening" pill so designers see something.
-//
-// The waveform is a sine + noise oscillator, NOT real audio. Wiring
-// real RMS would mean piping samples from the orchestrator's audio
-// thread, which we don't have yet. The fake one shows the UX cleanly
-// and gets replaced 1-to-1 in Phase 4.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { isTauri } from "../lib/tauri";
-import { useAppStore } from "../lib/store";
 import { XIcon } from "../design/Icon";
 import { MockingbirdMark, type MarkState } from "../design/components/MockingbirdMark";
 import { t } from "../i18n";
 import styles from "./RecordingWindow.module.css";
-
-const BAR_COUNT = 24;
 
 /** All states the orchestrator can drive the overlay through. */
 type DictationState =
@@ -176,11 +170,6 @@ export function RecordingWindow() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const isActive = event.state === "listening";
-  const showWaveform = event.state === "listening";
-  const designVersion = useAppStore((s) => s.designVersion);
-  const useV2 = designVersion === "v2";
-
   return (
     <div className={styles.shell}>
       <div
@@ -191,32 +180,20 @@ export function RecordingWindow() {
         // declare `app-region: no-drag` so clicks register.
         data-tauri-drag-region
       >
-        {useV2 ? (
-          // v2 — the logo itself carries live state. Per the Design
-          // Language v1 doc §11: "the logo carries the live state —
-          // collapsed circles when waiting, oscillating ellipses
-          // while recording." Replaces the dot + waveform combo.
-          <MockingbirdMark
-            state={dictationStateToMarkState(event.state)}
-            size={28}
-            // Use the idle muted gradient when the mark is in idle
-            // state — matches the Design Language v1 doc §11 first
-            // pill state ("Idle · tap to start").
-            gradient={
-              event.state === "idle" ? ["#8A7A6E", "#6B5A4E"] : undefined
-            }
-            title={statusLabel(event.state)}
-          />
-        ) : (
-          <>
-            <span className={styles.dot} aria-hidden="true" />
-            {showWaveform ? (
-              <Waveform active={isActive} />
-            ) : (
-              <span className={styles.barsStatic} aria-hidden="true" />
-            )}
-          </>
-        )}
+        {/* The logo itself carries live state. Per the Design
+            Language v1 doc §11: "the logo carries the live state —
+            collapsed circles when waiting, oscillating ellipses
+            while recording." */}
+        <MockingbirdMark
+          state={dictationStateToMarkState(event.state)}
+          size={28}
+          // Use the idle muted gradient when the mark is in idle
+          // state — matches the design doc §11 first pill state.
+          gradient={
+            event.state === "idle" ? ["#8A7A6E", "#6B5A4E"] : undefined
+          }
+          title={statusLabel(event.state)}
+        />
 
         <span className={styles.statusText}>{statusLabel(event.state)}</span>
 
@@ -250,61 +227,3 @@ export function RecordingWindow() {
   );
 }
 
-/**
- * Fake-but-pretty animated waveform. 24 vertical bars; each bar is a
- * phase-offset sine modulated by deterministic noise so the motion
- * reads as "audio" instead of "monotonic clock".
- *
- * Real audio RMS goes here once the orchestrator pipes samples
- * across (Phase 4 ticket). Until then this gives reviewers a sense
- * of the look without depending on Rust state.
- */
-function Waveform({ active }: { active: boolean }) {
-  const refs = useRef<(HTMLDivElement | null)[]>([]);
-  const startedAt = useMemo(() => performance.now(), []);
-
-  useEffect(() => {
-    if (!active) return;
-    // Respect the OS-level reduced-motion preference at the JS layer
-    // too — CSS hides the bars but we shouldn't burn cycles ticking
-    // an invisible canvas.
-    if (
-      typeof window !== "undefined" &&
-      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
-    ) {
-      return;
-    }
-    let raf = 0;
-    function tick(now: number) {
-      const t = (now - startedAt) / 1000;
-      for (let i = 0; i < BAR_COUNT; i++) {
-        const el = refs.current[i];
-        if (!el) continue;
-        // Phase per bar + per-bar noise. The `% 7`-style noise keeps
-        // the bars from marching in unison without needing Math.random
-        // (which would re-trigger React renders if we put it in state).
-        const phase = (i / BAR_COUNT) * Math.PI * 2;
-        const noise = ((i * 13) % 7) / 7;
-        const v = Math.abs(Math.sin(t * 4 + phase) * (0.6 + noise * 0.4));
-        el.style.height = `${2 + v * 16}px`;
-      }
-      raf = requestAnimationFrame(tick);
-    }
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [active, startedAt]);
-
-  return (
-    <div className={styles.bars} aria-hidden="true">
-      {Array.from({ length: BAR_COUNT }, (_, i) => (
-        <div
-          key={i}
-          ref={(el) => {
-            refs.current[i] = el;
-          }}
-          className={`${styles.bar} ${active ? styles.barActive : ""}`}
-        />
-      ))}
-    </div>
-  );
-}

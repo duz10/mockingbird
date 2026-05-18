@@ -20,7 +20,7 @@
  *      panels, the listening pill — instead of redefining
  *      translucent tints per-component.
  *
- * Scoped under [data-design="v2"] so it cannot leak into v1.
+ * Scoped under so it cannot leak into v1.
  * Wave 2 of the Design Language Phase. ADR 0023.
  */
 
@@ -40,7 +40,7 @@
    wash from `body::after`.
    ════════════════════════════════════════════════════════════════ */
 
-html[data-design="v2"] body::before {
+body::before {
   content: "";
   position: fixed;
   inset: -20%;
@@ -54,7 +54,7 @@ html[data-design="v2"] body::before {
   animation: mb-drift 30s ease-in-out infinite alternate;
 }
 
-html[data-design="v2"] body::after {
+body::after {
   content: "";
   position: fixed;
   inset: 0;
@@ -73,7 +73,7 @@ html[data-design="v2"] body::after {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  html[data-design="v2"] body::before {
+  body::before {
     animation: none;
   }
 }
@@ -99,7 +99,7 @@ html[data-design="v2"] body::after {
    back to flat tinted solids for that surface specifically.
    ════════════════════════════════════════════════════════════════ */
 
-[data-design="v2"] .glass {
+.glass {
   background: linear-gradient(180deg,
     var(--glass-tint-regular) 0%,
     var(--glass-tint-thin) 100%);
@@ -114,7 +114,7 @@ html[data-design="v2"] body::after {
   position: relative;
 }
 
-[data-design="v2"] .glass-thin {
+.glass-thin {
   background: var(--glass-tint-thin);
   backdrop-filter: blur(16px) saturate(160%);
   -webkit-backdrop-filter: blur(16px) saturate(160%);
@@ -123,7 +123,7 @@ html[data-design="v2"] body::after {
   border-radius: var(--shape-lg);
 }
 
-[data-design="v2"] .glass-thick {
+.glass-thick {
   background: linear-gradient(180deg,
     var(--glass-tint-thick) 0%,
     var(--glass-tint-regular) 100%);
@@ -138,7 +138,7 @@ html[data-design="v2"] body::after {
   border-radius: var(--shape-2xl);
 }
 
-[data-design="v2"] .glass-ultra-thin {
+.glass-ultra-thin {
   background: var(--glass-tint-ultra-thin);
   backdrop-filter: blur(8px) saturate(140%);
   -webkit-backdrop-filter: blur(8px) saturate(140%);
@@ -146,26 +146,4 @@ html[data-design="v2"] body::after {
   border-radius: var(--shape-md);
 }
 
-/* ════════════════════════════════════════════════════════════════
-   M3 elevation tokens for SOLID (non-glass) surfaces.
 
-   Use these on things that need a sense of depth but are not the
-   right semantic fit for glass (e.g. opaque dropdown menus over
-   complex backgrounds, code blocks, certain notification toasts).
-   Glass is the default; reach for these only when glass would
-   muddy the content.
-   ════════════════════════════════════════════════════════════════ */
-
-[data-design="v2"] {
-  --elevation-0: none;
-  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.30),
-                 0 1px 3px rgba(0, 0, 0, 0.15);
-  --elevation-2: 0 1px 2px rgba(0, 0, 0, 0.30),
-                 0 2px 6px rgba(0, 0, 0, 0.15);
-  --elevation-3: 0 1px 3px rgba(0, 0, 0, 0.30),
-                 0 4px 8px rgba(0, 0, 0, 0.15);
-  --elevation-4: 0 2px 3px rgba(0, 0, 0, 0.30),
-                 0 6px 10px rgba(0, 0, 0, 0.15);
-  --elevation-5: 0 4px 4px rgba(0, 0, 0, 0.30),
-                 0 8px 12px rgba(0, 0, 0, 0.15);
-}

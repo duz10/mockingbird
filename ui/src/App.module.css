@@ -32,11 +32,11 @@
  * Wave 4 of the Design Language Phase. ADR 0023.
  * ════════════════════════════════════════════════════════════════ */
 
-:global([data-design="v2"]) .shell {
+.shell {
   background: transparent;
 }
 
-:global([data-design="v2"]) .content {
+.content {
   background: transparent;
   padding: var(--space-7);
 }

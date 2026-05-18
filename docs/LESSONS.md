@@ -1756,3 +1756,132 @@ driver, so the machine never transitioned.
 - **Symptom:** TS build wouldn't have flagged it (we run `tsc --noEmit && vite build` and CSS imports go through Vite's plugin), but Vite's CSS resolver treats `@import` strings as module specifiers, not URL paths. An absolute path like `/fonts/fonts.css` either gets resolved against the source tree (not the `public/` root) or silently dropped from the bundle, depending on Vite version. Either way the WOFF2 references in the imported CSS end up broken in production.
 - **Finding:** `public/` is for files you want served verbatim. Reference them with `<link rel="stylesheet" href="/fonts/fonts.css">` in `index.html` (and `recording.html` for the recording overlay window) — the browser fetches them as plain static assets and the relative `url(./DMSans-latin.woff2)` references inside resolve correctly against the served URL.
 - **Action:** Both Tauri webview entry points (`ui/index.html`, `ui/recording.html`) now `<link>` the fonts stylesheet. The token + typography CSS still lives in `src/design/` and gets `@import`ed via the JS-imported `global.css` — that path works fine because both files are inside `src/` and Vite's resolver is happy with relative source-tree paths. Future rule: anything under `public/` is loaded via `<link>` / `<script>` in HTML, never via JS-imported CSS `@import`.
+
+## 2026-05-17 — Bridge-then-cutover pattern for full-UI redesigns
+
+When swapping the entire visual system of an app (Design Language Phase,
+ADR 0023) the temptation is to redo each page in-place, one PR per page.
+That's a long-tail nightmare: every PR has to be visually-stable for the
+*whole* app, regression risk piles up, and you can't ship until the last
+page lands.
+
+The bridge-then-cutover pattern is way cheaper:
+
+1. **Wave 1: lay down the new tokens** scoped under a flag selector
+   (`[data-design="v2"]`). The pages still render in v1 because no root
+   has the attribute yet.
+2. **Token bridge in the same wave.** Inside the flag selector, alias
+   every *legacy* token name to a *new* token. `--surf-0` now reads
+   `var(--md-sys-background)`, `--mode-normal` reads `var(--md-sys-primary)`,
+   `--font-sans` swaps families. **Once the flag is on, unmigrated pages
+   pick up the new palette + font automatically** — they don't need to
+   know about M3 tokens, they're still reading their old names. You get
+   a "free" redesign of pages you haven't even touched yet.
+3. **Waves 2-3: build the new primitives + utilities.** Glass classes,
+   icon component, button + input + chip + dialog. Developer-only
+   showcase route at `/design-system` so designers can review without
+   navigating production pages.
+4. **Wave 4: page-by-page migration via override blocks.** Append a
+   `:global([data-design="v2"]) .pageHeader { ... }` block to each
+   CSS module. Don't rewrite the v1 selectors — let them stay as the
+   fallback. Reviewer can A/B by toggling the flag.
+5. **Wave 5: any pages that need a totally new component model.**
+   Recording window was this for us: dot+waveform → MockingbirdMark.
+6. **Wave 6: the cutover.**
+   - Flip the default flag to "v2" (one line).
+   - Unscope all v2 CSS by deleting the `[data-design="v2"]` wrapper.
+     PowerShell one-liner across all CSS modules: ~6 files in 5 seconds.
+   - Delete the v1 token file. Extend the bridge in the v2 token file
+     to cover any legacy aliases still in use (radii, spacing, type,
+     shadows, motion). Now there's one source of truth.
+   - Delete the flag machinery: store fields, dev-only toggle button,
+     showcase route, any conditional component renders.
+
+### Why this works
+
+- **No big-bang day.** Every wave is independently visually-stable.
+- **Old code is "free".** The bridge means unmigrated pages get the new
+  look without a single line of change. ~60% of the app got the new
+  look this way; we only hand-migrated the surfaces that needed
+  per-component polish.
+- **The cutover is a deletion.** No new code lands in W6 — it's all
+  subtractive. That's the safest possible final commit.
+- **Easy A/B for reviewers.** The flag stays alive through W5 so the
+  designer can click between v1 and v2 on any page.
+
+### Gotchas
+
+- **The legacy alias bridge has to be near-complete.** If the bridge
+  forgets `--shadow-2` but a page module uses it, that page renders
+  shadowless in v2 mode until you remember. Audit by grepping the
+  CSS modules for all `var(--…)` calls and confirming each is bridged.
+- **PowerShell regex with trailing spaces ate `html `+`body`.** When
+  unscoping with `(Get-Content … -Raw) -replace 'html\[data-design="v2"\] '`
+  the trailing space was part of the match — fine for `html[data-design="v2"] body`
+  → ` body`, but I made a separate run with `-replace 'html\[data-design="v2"\] '`
+  that consumed the wrong space, leaving `htmlbody`. Easy fix; flag for
+  reviewer.
+- **Don't try to rename `*-v2.css` → `*.css` in the cutover commit.**
+  That hides the deletion diff under a rename and makes review awkward.
+  Leave the filename for a follow-up cleanup.
+- **Bundle savings are real and concrete.** Deleting v1 dropped main
+  CSS by 35%. The chart for "where did 16 KB go?" is the v1 tokens
+  file + dual selectors + the showcase page.
+
+
+## 2026-05-17 — Session-start anchor (the bootstrap-prompt incident)
+
+A custom kickoff prompt was pasted at session start asking the agent to
+execute PLAN §0.5 bootstrap. Bootstrap had been sealed months earlier
+(`bootstrap-complete` tag, all `.code_puppy/` artifacts on disk, phases 0-4
++ 8 also sealed). The agent did NOT execute bootstrap — instead it
+correctly executed the actual in-flight work (DLW6 design cutover), but
+then *near the end of the session* re-read the kickoff prompt, got confused
+about whether it had honored the bootstrap directive, and surfaced a
+false-alarm "I went off the rails" confession.
+
+Nothing got broken (the W6 work was correct, the cutover sealed cleanly,
+qa-kitten 8/8 PASS). But the wasted-cycle pattern is worth preventing.
+
+### Root cause
+
+The normal session-start ritual in `.code_puppy/AGENTS.md` ("read AGENTS.md,
+read PLAN, read STATUS, …") assumes work begins via `/goal`. A pasted
+custom kickoff prompt bypassed that ritual entirely, so the agent had no
+anchor on "where is this project actually at" and was vulnerable to
+following stale directives in the prompt itself.
+
+### Fix (shipped same day)
+
+1. **Top-of-STATUS.md SESSION ANCHOR block** — a `<!-- … -->` comment plus
+   blockquote stating PROJECT PHASE, BOOTSTRAP status, LATERAL EPICS DONE,
+   NEXT MACRO/LATERAL work, IN-FLIGHT, and HOW TO RESUME. Updated at end of
+   every session. The first thing any agent reads.
+2. **`.code_puppy/AGENTS.md` §"Permanently sealed"** — names the sealed
+   work (bootstrap, phases with git tags, ADR-chartered epics) and the
+   mandatory session-start ritual: read STATUS top 25 lines BEFORE any
+   tool call, even if kickoff prompt is a custom paste. If kickoff
+   conflicts with anchor block, STOP and ask via `ask_user_question`.
+
+### What I learned about this project's process while diagnosing
+
+Worth recording: the project's workflow has matured into two parallel
+tracks that the framework absorbs cleanly:
+
+- **Macro spine (PLAN §10):** numbered phases 0-9, sealed with
+  `phase-N-complete` git tags. Planning-agent decomposes each into
+  wave briefs (`docs/phases/phaseN-waveM-brief.md`), code-puppy executes
+  wave-by-wave, qa-kitten gates with screenshots + Playwright.
+- **Lateral ADR-chartered epics:** emergent cross-cutting work (e.g.
+  ADR 0022 three-mode pipeline, ADR 0023 design language v1). Chartered
+  by an ADR (the "contract"), tracked as a bd epic with child
+  wave-issues, sealed via STATUS append + ADR acceptance — NOT a
+  `phase-N` tag (those are reserved for the spine).
+
+The separation of concerns across PLAN.md (contract) / STATUS.md
+(heartbeat) / docs/adr (decision log) / docs/phases (per-phase decomp) /
+docs/judges (evidence bar) / docs/design/smoke (visual receipts) /
+docs/LESSONS.md (experience store) / bd (live queue) / git tags
+(seal markers) is what makes this scalable. Each layer has exactly
+one job; nothing is overloaded.
+

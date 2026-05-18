@@ -7,10 +7,10 @@
  * as CSS-controllable properties on modern browsers, so this Just
  * Works — no JS change, no per-icon patch.
  *
- * Scoped under [data-design="v2"] so v1 remains untouched. Wave 3 of
+ * Scoped under so v1 remains untouched. Wave 3 of
  * the Design Language Phase. ADR 0023.
  */
 
-[data-design="v2"] svg[stroke="currentColor"] {
+svg[stroke="currentColor"] {
   stroke-width: 1.5;
 }

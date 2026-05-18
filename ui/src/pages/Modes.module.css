@@ -265,7 +265,7 @@
  * left-accent stripe pattern but in terracotta. Wave 4. ADR 0023.
  * ════════════════════════════════════════════════════════════════ */
 
-:global([data-design="v2"]) .modeCard {
+.modeCard {
   background: linear-gradient(180deg,
     var(--glass-tint-regular) 0%,
     var(--glass-tint-thin) 100%);
@@ -281,7 +281,7 @@
   gap: var(--space-4);
 }
 
-:global([data-design="v2"]) .modeCard.activeCard {
+.modeCard.activeCard {
   /* --mode-normal is bridged to --md-sys-primary in v2 */
   border-color: var(--md-sys-primary);
   box-shadow:

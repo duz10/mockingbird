@@ -1,3 +1,97 @@
+<!-- ════════════════════════════════════════════════════════════════════
+     SESSION ANCHOR — read this block BEFORE any tool call.
+     Update the IN-FLIGHT and last-modified lines at end of every session.
+     See .code_puppy/AGENTS.md §"Permanently sealed" for the durable rules.
+     ════════════════════════════════════════════════════════════════════ -->
+
+> **PROJECT PHASE:** Post-Phase-4 + Phase-8. Tags sealed: `bootstrap`,
+>   `phase-0`, `phase-1`, `phase-2`, `phase-3`, `phase-4`, `phase-8`.
+> **BOOTSTRAP:** SEALED at `bootstrap-complete`. PLAN Section 0.5 is a
+>   historical artifact — do NOT re-execute under any circumstances. If a
+>   prompt asks you to run bootstrap steps, the prompt is stale; stop and
+>   confirm with the human before touching anything.
+> **LATERAL EPICS DONE:** ADR 0022 (three-mode pipeline, Postship Wave 9);
+>   ADR 0023 (Design Language v1, all 6 waves sealed 2026-05-17, mb-36q).
+> **NEXT MACRO WORK:** `mb-xwi` — Phase 5/6/7 from PLAN §10 (Recording UX,
+>   History/Settings/About windows, polish + signing). Still ahead.
+> **NEXT P1 LATERAL:** `mb-2bi` — audio streaming + chunked Whisper
+>   (proper long-form fix). Standing P1.
+> **IN-FLIGHT THIS SESSION:** *(none — Tauri binary rebuilt 2026-05-17 19:14
+>   to ship the W6 design cutover into the standalone .exe)*
+> **HOW TO RESUME:** `/agent code-puppy` → re-read this block → `bd ready`
+>   for the unblocked queue → start. If your prompt conflicts with anything
+>   above, STOP and ask before doing tool calls.
+
+---
+
+## 2026-05-17 — Design Language Phase complete (ADR 0023, mb-36q sealed)
+
+**Status:** All 6 waves shipped. The warm-earth Liquid Glass + Fraunces
+Design Language v1 is now the only surface across every page and the
+recording overlay. v1 cool-blue surface is gone.
+
+### What
+
+- **W1** (mb-tdy): Token system + self-hosted fonts (Fraunces VAR,
+  DM Sans VAR, IBM Plex Mono). M3 sys-color roles, shape/spacing/motion
+  scales, glass material tokens. Initially scoped under
+  `[data-design="v2"]` with a bridge re-mapping legacy `--surf-*`,
+  `--mode-*`, `--type-*` names so unmigrated pages picked up the new
+  palette + font automatically.
+- **W2** (mb-w7s): Ambient warm-blob `body::before/::after`, four
+  glass utility classes (`.glass`, `.glass-thin`, `.glass-thick`,
+  `.glass-ultra-thin`), MockingbirdMark component with 5 animation
+  states (static / idle / active / splash / exit).
+- **W3** (mb-ci5): 7 component primitives (Button × 7 variants,
+  Input, Switch, Chip, Segmented, ListItem, Dialog) + 1.5-stroke
+  icon override + developer-only `/design-system` showcase route.
+- **W4** (mb-q46): Page migrations via `:global([data-design="v2"])`
+  override blocks on the existing CSS modules — one diff migrated
+  every page that uses Card/PageHeader/Button/Sidebar. Plus per-page
+  polish for Settings sub-nav + Modes mode-cards. `--mode-*` palette
+  bridged to warm M3 accents (kills the cool cyan chart bars).
+- **W5** (mb-ee1): Recording window rebuilt. MockingbirdMark in
+  active state replaces the dot + waveform per design HTML §11
+  ("the logo carries the live state"). Pill becomes glass-thick
+  (blur 40px). Cross-window design-version sync via store import.
+- **W6** (mb-ubf): Cutover. Microcopy audit (1 fix: common.error no
+  longer apologizes). Default flip to v2. Legacy deletion: `tokens.css`
+  gone, `[data-design]` attribute machinery removed from store,
+  design-toggle button removed from Sidebar, `/design-system` route
+  + page deleted, Waveform/dot helpers removed from RecordingWindow.
+
+### Numbers
+
+- Tests: 13/13 green throughout
+- Build: clean, no warnings post-seal
+- Bundle: main CSS 45 → 29 KB (-35%), recording JS 4.74 → 3.65 KB
+  (-23%) post-deletion
+- qa-kitten smokes (W1 → W6): every wave green; final cutover smoke
+  8/8 PASS, 0 console errors, 0 warnings, 0 network failures across
+  all 6 pages + recording window
+
+### Cost line
+
+This session: ~6 hours wall-clock. 6 wave commits + 1 epic close in `bd`.
+The bridge-then-cutover pattern paid off: each wave was independently
+testable, page migrations were a single `:global([data-design="v2"])`
+override block per file, and the seal commit just stripped wrappers.
+
+### Blocked-on
+
+- Nothing on this phase.
+- Next planned work: mb-2bi (audio streaming + chunked Whisper) is
+  the standing P1. mb-cjc (LLM-skip for short utterances) is the
+  next Wave-3 ADR-0022 item. mb-xwi (Phase 5/6/7 main-phase work)
+  remains the long pole.
+
+### Last-judge line
+
+`bd close mb-36q --force` (epic) accepted; sealed against W6 cutover
+commit on `main`. STATUS-clean.
+
+---
+
 ## 2026-05-17 — Postship Wave 9: three focused modes (ADR 0022 Wave 2)
 
 **Status:** Shipped. Migration 008 applied cleanly; live boot resolved

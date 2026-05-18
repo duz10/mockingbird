@@ -4,16 +4,19 @@
  * Every token here maps 1:1 to a CSS custom property in the canonical
  * HTML — if you see a divergence, fix the code, not the doc.
  *
- * IMPORTANT: ALL tokens are scoped under `[data-design="v2"]` so they
- * do not leak into the legacy v1 surface during the wave-by-wave
- * migration. Flipping the root attribute (see useDesignVersion in
- * ui/src/lib/store.ts) is the only switch — no per-component opt-in
- * required.
+ * As of W6 (the cutover) these tokens apply unconditionally at :root.
+ * Previously they were scoped under [data-design="v2"] while the v1
+ * surface was alive; the v1 token file (tokens.css) is now deleted
+ * and the [data-design] attribute machinery is gone from the store.
  *
- * Wave 1 of the Design Language Phase. See ADR 0023.
+ * NOTE on filename: kept as `tokens-v2.css` to preserve git blame /
+ * commit history through the design-language phase. A follow-up
+ * housekeeping commit can rename to `tokens.css` if desired.
+ *
+ * See ADR 0023.
  */
 
-[data-design="v2"] {
+:root {
   /* ════════════════════════════════════════════════════════════
      §00.A  REFERENCE PALETTE — raw tones (don't reach for these
      directly in components; use the M3 sys roles below)
@@ -100,19 +103,18 @@
 
   /* ════════════════════════════════════════════════════════════
      §00.C  SHAPE — M3 corner scale
-     Match radius to function, not size (see design doc §04).
      ════════════════════════════════════════════════════════════ */
 
-  --shape-xs:   4px;    /* tag, key cap, micro-control */
-  --shape-sm:   8px;    /* chip, input field, small card */
-  --shape-md:   12px;   /* standard card, swatch, list item */
-  --shape-lg:   16px;   /* section, FAB, panel */
-  --shape-xl:   24px;   /* hero card, dialog, glass surface */
-  --shape-2xl:  32px;   /* sheet, splash, expressive surface */
-  --shape-full: 9999px; /* button, listening pill, avatar */
+  --shape-xs:   4px;
+  --shape-sm:   8px;
+  --shape-md:   12px;
+  --shape-lg:   16px;
+  --shape-xl:   24px;
+  --shape-2xl:  32px;
+  --shape-full: 9999px;
 
   /* ════════════════════════════════════════════════════════════
-     §00.D  SPACING — 4dp grid (12 steps)
+     §00.D  SPACING — 4dp grid
      ════════════════════════════════════════════════════════════ */
 
   --space-1:  4px;
@@ -152,7 +154,7 @@
   --duration-long-4:   600ms;
 
   /* ════════════════════════════════════════════════════════════
-     §00.F  BRAND GRADIENT — used by the mark, hero CTAs, splash
+     §00.F  BRAND GRADIENT
      ════════════════════════════════════════════════════════════ */
 
   --brand-gradient:      linear-gradient(135deg, #DDA17A 0%, #944730 100%);
@@ -160,8 +162,6 @@
 
   /* ════════════════════════════════════════════════════════════
      §00.G  LIQUID GLASS — signature material
-     The glass utility classes live in materials-v2.css (Wave 2);
-     these are the underlying tints + edge tokens.
      ════════════════════════════════════════════════════════════ */
 
   --glass-tint-ultra-thin: rgba(255, 240, 225, 0.04);
@@ -177,24 +177,25 @@
                      0 2px 8px rgba(0, 0, 0, 0.25);
 
   /* ════════════════════════════════════════════════════════════
-     §00.H  LEGACY TOKEN BRIDGE — temporary, deleted at W6 cutover.
+     §00.H  LEGACY ALIAS BRIDGE
+     ════════════════════════════════════════════════════════════
+     The page CSS modules and primitives still reference the legacy
+     v1 token names (--surf-0, --on-surf, --mode-normal, --type-md,
+     --r-3, --s-4, --shadow-2, --dur-1 …). Rather than rewrite every
+     CSS module to use the M3 names directly (low-value churn for
+     ~600 references), we keep the legacy NAMES alive and just point
+     them at the warm M3 equivalents. The HSL values are gone; only
+     the identifiers remain.
 
-     Every legacy v1 page CSS module references the cool-palette
-     tokens (--surf-0, --on-surf, --border, --font-sans …). Without
-     this block, flipping data-design="v2" produces ZERO visible
-     change on any unmigrated page — the v2 body background is
-     covered 100% by .shell + .content + .sidebar, which still
-     paint themselves with the v1 token values.
-
-     The bridge re-binds the v1 token names to v2 equivalents so
-     the entire app previews v2 colours/fonts immediately, even
-     before W4 page migrations rewrite the markup. Migrated pages
-     ignore the bridge (they reference --md-sys-* directly).
-     Wave 6's cutover deletes both this bridge AND the legacy
-     tokens.css in the same commit — by then no page should still
-     reference the old names. A grep gate enforces it.
+     The original v1 tokens.css file has been DELETED in W6 — this
+     block is the only definition of these names. The implied
+     contract is one-way: pages can read the legacy names; new code
+     should use the M3 names directly. A future commit can sweep
+     the call sites and delete this block too — but it's harmless
+     in the meantime.
      ════════════════════════════════════════════════════════════ */
 
+  /* Surfaces / on-surface / borders */
   --surf-0: var(--md-sys-background);
   --surf-1: var(--md-sys-surface);
   --surf-2: var(--md-sys-surface-container);
@@ -205,42 +206,89 @@
   --border: var(--md-sys-outline-variant);
   --border-strong: var(--md-sys-outline);
 
+  /* Type aliases. --font-sans + --font-mono point at the design
+     language's three families. The --type-* shorthand uses the
+     `font:` shorthand syntax (size/line var(--font-sans)) which
+     legacy modules consume directly. */
   --font-sans: "DM Sans", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --type-xs:  11px/16px var(--font-sans);
+  --type-sm:  14px/20px var(--font-sans);
+  --type-md:  16px/24px var(--font-sans);
+  --type-lg:  22px/28px var(--font-sans);
+  --type-xl:  28px/36px var(--font-sans);
+  --type-2xl: 36px/44px var(--font-sans);
 
-  /* Status palette — map legacy v1 status tokens onto the v2 system
-     colours so the recording overlay + Insights cards stay legible
-     mid-migration. */
+  /* Radii */
+  --r-1:    var(--shape-xs);
+  --r-2:    var(--shape-sm);
+  --r-3:    var(--shape-md);
+  --r-pill: var(--shape-full);
+
+  /* Spacing */
+  --s-1: var(--space-1);
+  --s-2: var(--space-2);
+  --s-3: var(--space-3);
+  --s-4: var(--space-4);
+  --s-5: var(--space-6);
+  --s-6: var(--space-7);
+  --s-7: var(--space-9);
+
+  /* Status palette */
   --status-idle:       var(--md-sys-outline);
   --status-recording:  var(--md-sys-primary);
   --status-processing: var(--md-sys-warning);
   --status-ok:         var(--md-sys-success);
   --status-error:      var(--md-sys-error);
 
-  /* Mode palette — bridge legacy --mode-* names to warm M3 accents.
-     Cool cyans/blues/magentas from the v1 palette read foreign
-     against the warm-earth background; warm tonal swaps make the
-     same chart bars + status dots feel like they belong. Pages that
-     still reference --mode-normal etc (Insights chart bars, History
-     mode badges, Modes accent dots, Dictionary import badge, etc.)
-     pick these up automatically without any per-page change. */
-  --mode-casual:    var(--md-sys-success);                  /* warm green */
-  --mode-normal:    var(--md-sys-primary);                  /* terracotta */
-  --mode-formal:    var(--md-sys-secondary);                /* sand — warm-neutral, plays well next to casual+normal */
-  --mode-verbose:   var(--md-sys-tertiary);                 /* blue-grey — legacy; the one place a cool accent is OK */
-  --mode-fragment:  var(--md-sys-warning);                  /* amber */
-  --mode-rewrite:   var(--md-sys-tertiary-container);       /* deeper blue-grey */
-  --mode-expand:    var(--md-sys-secondary-container);      /* deeper sand */
-  --mode-summarize: var(--md-sys-primary-container);        /* deeper terra */
+  /* Mode palette — warm M3 accents only. */
+  --mode-casual:    var(--md-sys-success);
+  --mode-normal:    var(--md-sys-primary);
+  --mode-formal:    var(--md-sys-secondary);
+  --mode-verbose:   var(--md-sys-tertiary);
+  --mode-fragment:  var(--md-sys-warning);
+  --mode-rewrite:   var(--md-sys-tertiary-container);
+  --mode-expand:    var(--md-sys-secondary-container);
+  --mode-summarize: var(--md-sys-primary-container);
+
+  /* Motion + duration aliases (legacy modules use --ease-* / --dur-*). */
+  --ease-out:    var(--motion-emphasized-decel);
+  --ease-spring: var(--motion-emphasized);
+  --dur-1: var(--duration-short-3);
+  --dur-2: var(--duration-medium-1);
+  --dur-3: var(--duration-medium-3);
+  --dur-fade-out: var(--duration-long-4);
+
+  /* Shadow aliases */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.30),
+              0 1px 3px rgba(0, 0, 0, 0.15);
+  --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.30),
+              0 2px 6px rgba(0, 0, 0, 0.15);
+  --shadow-3: 0 12px 40px rgba(0, 0, 0, 0.45),
+              0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 /* ════════════════════════════════════════════════════════════════
-   Reduced-motion: zero out the M3 duration scale so any v2 animation
-   referencing these tokens degrades to instant. Mirrors the legacy
-   v1 reduced-motion block.
+   M3 elevation tokens for SOLID (non-glass) surfaces. Glass is the
+   default; reach for these only when glass would muddy the content.
    ════════════════════════════════════════════════════════════════ */
+:root {
+  --elevation-0: none;
+  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.30),
+                 0 1px 3px rgba(0, 0, 0, 0.15);
+  --elevation-2: 0 1px 2px rgba(0, 0, 0, 0.30),
+                 0 2px 6px rgba(0, 0, 0, 0.15);
+  --elevation-3: 0 1px 3px rgba(0, 0, 0, 0.30),
+                 0 4px 8px rgba(0, 0, 0, 0.15);
+  --elevation-4: 0 2px 3px rgba(0, 0, 0, 0.30),
+                 0 6px 10px rgba(0, 0, 0, 0.15);
+  --elevation-5: 0 4px 4px rgba(0, 0, 0, 0.30),
+                 0 8px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Reduced-motion + forced-colors fallbacks. */
 @media (prefers-reduced-motion: reduce) {
-  [data-design="v2"] {
+  :root {
     --duration-short-1:  0ms;
     --duration-short-2:  0ms;
     --duration-short-3:  0ms;
@@ -253,25 +301,25 @@
     --duration-long-2:   0ms;
     --duration-long-3:   0ms;
     --duration-long-4:   0ms;
+    --dur-1: 0ms;
+    --dur-2: 0ms;
+    --dur-3: 0ms;
+    --dur-fade-out: 0ms;
   }
 }
 
-/* ════════════════════════════════════════════════════════════════
-   Forced-colors (high-contrast OS theme): defer to system colors so
-   Windows High Contrast mode remains legible. Same pattern as v1.
-   ════════════════════════════════════════════════════════════════ */
 @media (forced-colors: active) {
-  [data-design="v2"] {
-    --md-sys-background:         Canvas;
-    --md-sys-surface:            Canvas;
+  :root {
+    --md-sys-background:                Canvas;
+    --md-sys-surface:                   Canvas;
     --md-sys-surface-container-lowest:  Canvas;
     --md-sys-surface-container-low:     Canvas;
     --md-sys-surface-container:         Canvas;
     --md-sys-surface-container-high:    Canvas;
     --md-sys-surface-container-highest: Canvas;
-    --md-sys-on-surface:         CanvasText;
-    --md-sys-on-surface-variant: GrayText;
-    --md-sys-outline:            ButtonBorder;
-    --md-sys-outline-variant:    ButtonBorder;
+    --md-sys-on-surface:                CanvasText;
+    --md-sys-on-surface-variant:        GrayText;
+    --md-sys-outline:                   ButtonBorder;
+    --md-sys-outline-variant:           ButtonBorder;
   }
 }

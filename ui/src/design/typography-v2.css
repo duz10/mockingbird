@@ -17,14 +17,14 @@
  *     * Voice principle #4: "Numbers in mono" — durations, word
  *       counts, timestamps, hotkeys. Always Plex Mono, never DM Sans.
  *
- * All classes scoped under [data-design="v2"] so they cannot leak
+ * All classes scoped under so they cannot leak
  * into the legacy v1 layout. The class names match the M3 type-scale
  * vocabulary 1:1, no shortening.
  *
  * Wave 1 of the Design Language Phase. See ADR 0023.
  */
 
-[data-design="v2"] .display-large {
+.display-large {
   font-family: "Fraunces", serif;
   font-size: 57px;
   line-height: 64px;
@@ -32,7 +32,7 @@
   letter-spacing: -0.025em;
   font-variation-settings: "opsz" 144, "SOFT" 100;
 }
-[data-design="v2"] .display-medium {
+.display-medium {
   font-family: "Fraunces", serif;
   font-size: 45px;
   line-height: 52px;
@@ -40,7 +40,7 @@
   letter-spacing: -0.02em;
   font-variation-settings: "opsz" 144, "SOFT" 100;
 }
-[data-design="v2"] .display-small {
+.display-small {
   font-family: "Fraunces", serif;
   font-size: 36px;
   line-height: 44px;
@@ -49,7 +49,7 @@
   font-variation-settings: "opsz" 144, "SOFT" 100;
 }
 
-[data-design="v2"] .headline-large {
+.headline-large {
   font-family: "Fraunces", serif;
   font-size: 32px;
   line-height: 40px;
@@ -57,7 +57,7 @@
   letter-spacing: -0.01em;
   font-variation-settings: "opsz" 72, "SOFT" 60;
 }
-[data-design="v2"] .headline-medium {
+.headline-medium {
   font-family: "Fraunces", serif;
   font-size: 28px;
   line-height: 36px;
@@ -65,7 +65,7 @@
   letter-spacing: -0.005em;
   font-variation-settings: "opsz" 72, "SOFT" 60;
 }
-[data-design="v2"] .headline-small {
+.headline-small {
   font-family: "Fraunces", serif;
   font-size: 24px;
   line-height: 32px;
@@ -74,21 +74,21 @@
   font-variation-settings: "opsz" 36, "SOFT" 60;
 }
 
-[data-design="v2"] .title-large {
+.title-large {
   font-family: "DM Sans", sans-serif;
   font-size: 22px;
   line-height: 28px;
   font-weight: 500;
   letter-spacing: 0;
 }
-[data-design="v2"] .title-medium {
+.title-medium {
   font-family: "DM Sans", sans-serif;
   font-size: 16px;
   line-height: 24px;
   font-weight: 600;
   letter-spacing: 0.01em;
 }
-[data-design="v2"] .title-small {
+.title-small {
   font-family: "DM Sans", sans-serif;
   font-size: 14px;
   line-height: 20px;
@@ -96,21 +96,21 @@
   letter-spacing: 0.01em;
 }
 
-[data-design="v2"] .body-large {
+.body-large {
   font-family: "DM Sans", sans-serif;
   font-size: 16px;
   line-height: 24px;
   font-weight: 400;
   letter-spacing: 0.005em;
 }
-[data-design="v2"] .body-medium {
+.body-medium {
   font-family: "DM Sans", sans-serif;
   font-size: 14px;
   line-height: 20px;
   font-weight: 400;
   letter-spacing: 0.005em;
 }
-[data-design="v2"] .body-small {
+.body-small {
   font-family: "DM Sans", sans-serif;
   font-size: 12px;
   line-height: 16px;
@@ -118,14 +118,14 @@
   letter-spacing: 0.01em;
 }
 
-[data-design="v2"] .label-large {
+.label-large {
   font-family: "DM Sans", sans-serif;
   font-size: 14px;
   line-height: 20px;
   font-weight: 500;
   letter-spacing: 0.01em;
 }
-[data-design="v2"] .label-medium {
+.label-medium {
   font-family: "IBM Plex Mono", monospace;
   font-size: 11px;
   line-height: 16px;
@@ -133,7 +133,7 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-[data-design="v2"] .label-small {
+.label-small {
   font-family: "IBM Plex Mono", monospace;
   font-size: 10px;
   line-height: 14px;
@@ -144,6 +144,6 @@
 
 /* Generic mono helper — for inline numbers/codes that aren't a
  * full label-* slot. Voice principle #4 in action. */
-[data-design="v2"] .mono {
+.mono {
   font-family: "IBM Plex Mono", monospace;
 }

@@ -163,5 +163,5 @@
   "common.copy": "Copy",
   "common.copied": "Copied",
   "common.loading": "Loading…",
-  "common.error": "Something went wrong"
+  "common.error": "Couldn't complete that action — check logs for details."
 }

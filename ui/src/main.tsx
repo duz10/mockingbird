@@ -14,7 +14,6 @@ import { DictionaryPage } from "./pages/Dictionary";
 import { ModesPage } from "./pages/Modes";
 import { SettingsPage } from "./pages/Settings";
 import { AboutPage } from "./pages/About";
-import { DesignSystemPage } from "./pages/DesignSystem";
 
 const container = document.getElementById("root");
 if (!container) throw new Error("#root missing");
@@ -33,10 +32,6 @@ createRoot(container).render(
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/settings/:tab" element={<SettingsPage />} />
           <Route path="/about" element={<AboutPage />} />
-          {/* Developer-only design-system showcase. Not linked from
-              the sidebar; reach by typing #/design-system. Removed at
-              the W6 cutover commit. ADR 0023. */}
-          <Route path="/design-system" element={<DesignSystemPage />} />
           <Route path="*" element={<Navigate to="/insights" replace />} />
         </Routes>
       </App>

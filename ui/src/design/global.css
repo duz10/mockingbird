@@ -1,17 +1,17 @@
-/* Global reset + base styles. */
+/* Global reset + base styles.
+ *
+ * As of W6 cutover (ADR 0023): the v1 cool-blue token file is GONE.
+ * The Mockingbird Design Language v1 token system + utilities apply
+ * unconditionally at :root. The [data-design] attribute machinery
+ * has been removed from the store. Filenames are kept as `*-v2.css`
+ * to preserve git history through the design-language phase; a
+ * housekeeping rename can happen in a follow-up.
+ *
+ * Self-hosted @font-face declarations live in design/fonts.css and
+ * are pulled in via <link> tags in index.html + recording.html so
+ * the WOFF2 references resolve correctly in both dev + production.
+ */
 
-/* Legacy v1 tokens (cool blue-grey + Inter). Active when html has no
- * data-design attribute or data-design="v1". */
-@import "./tokens.css";
-
-/* Design Language v1 (the new warm-earth + Liquid Glass system).
- * The fonts.css with self-hosted @font-face declarations is loaded
- * via a <link> tag in index.html + recording.html so it is processed
- * by the browser as a static asset and the WOFF2 references resolve
- * correctly in both dev and production builds. All v2 styles are
- * scoped to [data-design="v2"] and remain dormant until
- * useDesignVersion flips the root attribute. Wave 1 of the Design
- * Language Phase (ADR 0023). */
 @import "./tokens-v2.css";
 @import "./typography-v2.css";
 @import "./materials-v2.css";
@@ -27,22 +27,13 @@ html,
 body {
   margin: 0;
   padding: 0;
-  font: var(--type-md);
-  color: var(--on-surf);
-  background: var(--surf-0);
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
-
-/* v2 body styling — only kicks in when the design flag is set.
- * Sized + family copied from docs/design/design-language-v1.html base
- * block. Phase-level visual sweep happens wave-by-wave; this just
- * ensures the body itself is on-brand when the flag is on. */
-html[data-design="v2"],
-html[data-design="v2"] body {
-  font-family: "DM Sans", sans-serif;
+  font-family: "DM Sans", system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 24px;
   color: var(--md-sys-on-background);
   background: var(--md-sys-background);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 body {
@@ -76,9 +67,9 @@ a:focus-visible,
 input:focus-visible,
 [role="button"]:focus-visible,
 [tabindex]:focus-visible {
-  outline: 2px solid var(--status-recording);
+  outline: 2px solid var(--md-sys-primary);
   outline-offset: 2px;
-  border-radius: var(--r-1);
+  border-radius: var(--shape-xs);
 }
 
 input,
@@ -89,7 +80,7 @@ select {
 }
 
 a {
-  color: var(--mode-normal);
+  color: var(--md-sys-primary);
   text-decoration: none;
 }
 
@@ -108,12 +99,12 @@ a:hover {
 }
 
 *::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: var(--r-pill);
+  background: var(--md-sys-outline-variant);
+  border-radius: var(--shape-full);
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: var(--border-strong);
+  background: var(--md-sys-outline);
 }
 
 /* Utility classes (kept tiny on purpose — most styling is component-local). */

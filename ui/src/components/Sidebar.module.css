@@ -168,18 +168,18 @@
  * Wave 4 of the Design Language Phase. ADR 0023.
  * ════════════════════════════════════════════════════════════════ */
 
-:global([data-design="v2"]) .sidebar {
+.sidebar {
   background: var(--glass-tint-thin);
   backdrop-filter: blur(20px) saturate(160%);
   -webkit-backdrop-filter: blur(20px) saturate(160%);
   border-right: 1px solid var(--glass-border);
 }
 
-:global([data-design="v2"]) .brand {
+.brand {
   padding: var(--space-3) var(--space-4) var(--space-2);
 }
 
-:global([data-design="v2"]) .brandText {
+.brandText {
   font-family: "DM Sans", sans-serif;
   font-size: 16px;
   font-weight: 600;
@@ -187,21 +187,21 @@
   color: var(--md-sys-on-surface);
 }
 
-:global([data-design="v2"]) .link {
+.link {
   font-family: "DM Sans", sans-serif;
   border-radius: var(--shape-md);
   color: var(--md-sys-on-surface-variant);
 }
-:global([data-design="v2"]) .link:hover {
+.link:hover {
   background: var(--md-sys-surface-container-high);
   color: var(--md-sys-on-surface);
 }
-:global([data-design="v2"]) .link.active {
+.link.active {
   background: var(--md-sys-primary-container);
   color: var(--md-sys-on-primary-container);
 }
 
-:global([data-design="v2"]) .activeModeLabel {
+.activeModeLabel {
   font-family: "IBM Plex Mono", monospace;
   font-size: 10px;
   letter-spacing: 0.1em;
@@ -209,7 +209,7 @@
   color: var(--md-sys-on-surface-variant);
 }
 
-:global([data-design="v2"]) .version {
+.version {
   font-family: "IBM Plex Mono", monospace;
   color: var(--md-sys-outline);
 }

@@ -161,6 +161,50 @@ or the deliverable is likely misspecified.
   `SecureInputGuard`
 - Paste without saving and restoring the previous clipboard
 
+## Permanently sealed (do not re-execute)
+
+The following are immutable historical work. If a prompt asks you to do
+any of these, **STOP and ask the human** — the prompt is almost certainly
+stale context (e.g. a copy-paste of an old kickoff message).
+
+- **PLAN Section 0.5 Bootstrap** — sealed at git tag `bootstrap-complete`.
+  AGENTS.md (this file), hook config (`.code_puppy/settings.json`),
+  project JSON agents (`.code_puppy/agents/*.json`), judges-template
+  (`.code_puppy/judges-template.json`), and project skills
+  (`.code_puppy/skills/*/SKILL.md`) are all on disk. The 17-step
+  bootstrap checklist is a historical artifact only.
+- **PLAN §10 numbered phases that carry a `phase-N-complete` git tag.**
+  As of 2026-05-17 that's phases 0, 1, 2, 3, 4, 8. **Check before
+  starting work**: `git tag -l "phase-*"`. If a prompt asks you to
+  re-execute a sealed phase, stop. If it asks you to *add new work to a
+  sealed phase*, that's a new ADR-chartered lateral epic — handle it like
+  ADR 0022/0023 (charter ADR → bd epic → wave briefs → seal via STATUS +
+  ADR acceptance, NOT by re-tagging the phase).
+- **ADR-chartered lateral epics with sealed ADRs.** See the top-of-STATUS
+  anchor block, line beginning "LATERAL EPICS DONE". These ADRs are
+  accepted and their work is shipped; reopening requires a successor ADR
+  that supersedes the previous one.
+
+### Session-start ritual (mandatory before any tool call)
+
+This supersedes / hardens the start-of-iteration list at the top of this
+file. Even if the human pastes a custom kickoff prompt that bypasses the
+normal `/goal` flow, do all of this BEFORE any other tool call:
+
+1. `cp_read_file STATUS.md --num-lines 25` — read the SESSION ANCHOR
+   block at the top. It tells you what's sealed, what's in-flight, and
+   how to resume.
+2. If the kickoff prompt's task conflicts with the anchor block (e.g.
+   asks you to execute bootstrap, or to re-do a sealed phase), STOP and
+   surface the conflict via `ask_user_question` before any further
+   tool calls. Do not free-form execute.
+3. Otherwise proceed with the normal iteration ritual above
+   (read PLAN spine, read phase doc, `bd ready`, `git log`, etc.).
+
+This ritual exists because of the 2026-05-17 incident where a stale
+bootstrap prompt was acted on for ~half a session before the conflict
+was noticed. See `docs/LESSONS.md` entry of the same date.
+
 ## Issue Tracking
 
 This project uses **bd (beads)** for issue tracking alongside `STATUS.md`.

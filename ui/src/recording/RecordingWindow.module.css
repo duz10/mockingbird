@@ -192,7 +192,7 @@
  * Wave 5 of the Design Language Phase. ADR 0023.
  * ════════════════════════════════════════════════════════════════ */
 
-:global([data-design="v2"]) .pill {
+.pill {
   /* Glass-thick — heaviest blur, ambient tint, hairline edge + strong
    * shadow. The pill IS the window (per Phase-5 LESSONS), so the
    * shadow is on the DWM frame, not the CSS box. The box-shadow we
@@ -213,9 +213,9 @@
 /* Hide the v1 dot + waveform + static-bars when v2 is active.
  * They're rendered conditionally in TSX too, but defense in depth:
  * if someone hardcodes one, this still wins. */
-:global([data-design="v2"]) .dot,
-:global([data-design="v2"]) .bars,
-:global([data-design="v2"]) .barsStatic {
+.dot,
+.bars,
+.barsStatic {
   display: none;
 }
 
@@ -223,7 +223,7 @@
  * pipeline state so the user can read the pill at a glance:
  * - listening / transcribing / cleaning / pasting: on-surface (active)
  * - idle / done / aborted: on-surface-variant (muted) */
-:global([data-design="v2"]) .statusText {
+.statusText {
   font-family: "DM Sans", sans-serif;
   font-size: 14px;
   line-height: 20px;
@@ -233,19 +233,19 @@
   color: var(--md-sys-on-surface);
 }
 
-:global([data-design="v2"]) .pill.stateIdle .statusText,
-:global([data-design="v2"]) .pill.stateDone .statusText {
+.pill.stateIdle .statusText,
+.pill.stateDone .statusText {
   color: var(--md-sys-on-surface-variant);
 }
 
-:global([data-design="v2"]) .pill.stateAborted .statusText {
+.pill.stateAborted .statusText {
   color: var(--md-sys-error);
 }
 
 /* Mode badge — IBM Plex Mono uppercase label-medium. The mode-color
  * inline var still feeds the colour; in v2 it resolves to a warm M3
  * accent via the --mode-* bridge in tokens-v2.css. */
-:global([data-design="v2"]) .modeBadge {
+.modeBadge {
   font-family: "IBM Plex Mono", monospace;
   font-size: 10px;
   font-weight: 500;
@@ -260,18 +260,18 @@
 }
 
 /* Cancel button — tonal icon button shape. Hover lifts to error tint. */
-:global([data-design="v2"]) .cancel {
+.cancel {
   border-radius: var(--shape-full);
   width: 28px;
   height: 28px;
   padding: 0;
   color: var(--md-sys-on-surface-variant);
 }
-:global([data-design="v2"]) .cancel:hover {
+.cancel:hover {
   background: color-mix(in oklab, var(--md-sys-error) 16%, transparent);
   color: var(--md-sys-error);
 }
-:global([data-design="v2"]) .cancel:focus-visible {
+.cancel:focus-visible {
   outline: 2px solid var(--md-sys-primary);
   outline-offset: 2px;
 }

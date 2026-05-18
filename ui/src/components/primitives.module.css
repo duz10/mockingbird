@@ -196,7 +196,7 @@
 /* ════════════════════════════════════════════════════════════════
  * Design Language v1 (v2 system) overrides for legacy primitives.
  *
- * The :global([data-design="v2"]) wrapper bypasses CSS Modules' class
+ * The wrapper bypasses CSS Modules' class
  * hashing for the attribute selector, then chains a locally-hashed
  * class to keep specificity tight. Result: every page that uses
  * PageHeader / Card / Button / EmptyState / Pill / Spinner gets the
@@ -206,13 +206,13 @@
  * alongside the rest of this file. ADR 0023.
  * ════════════════════════════════════════════════════════════════ */
 
-:global([data-design="v2"]) .pageHeader {
+.pageHeader {
   border-bottom-color: var(--glass-border);
   margin-bottom: var(--space-7);
   padding-bottom: var(--space-5);
 }
 
-:global([data-design="v2"]) .pageTitle {
+.pageTitle {
   font-family: "Fraunces", serif;
   font-size: 36px;
   line-height: 44px;
@@ -222,7 +222,7 @@
   color: var(--md-sys-on-surface);
 }
 
-:global([data-design="v2"]) .pageSubtitle {
+.pageSubtitle {
   font-family: "DM Sans", sans-serif;
   font-size: 14px;
   line-height: 20px;
@@ -232,7 +232,7 @@
 /* Cards become glass surfaces — backdrop-filter + ambient-tint
  * background + hairline edge + interior highlight. Padding stays
  * the same so existing layouts don't shift. */
-:global([data-design="v2"]) .card {
+.card {
   background: linear-gradient(180deg,
     var(--glass-tint-regular) 0%,
     var(--glass-tint-thin) 100%);
@@ -248,7 +248,7 @@
   gap: var(--space-4);
 }
 
-:global([data-design="v2"]) .cardTitle {
+.cardTitle {
   font-family: "DM Sans", sans-serif;
   font-size: 16px;
   line-height: 24px;
@@ -258,7 +258,7 @@
 }
 
 /* EmptyState — quiet, generous spacing, Fraunces title. */
-:global([data-design="v2"]) .emptyTitle {
+.emptyTitle {
   font-family: "Fraunces", serif;
   font-size: 24px;
   line-height: 32px;
@@ -272,49 +272,49 @@
  * ghost    → outlined with --md-sys-outline
  * danger   → text on --md-sys-error
  * Shape becomes pill-full to match the v2 button family. */
-:global([data-design="v2"]) .btn {
+.btn {
   border-radius: var(--shape-full);
   font-family: "DM Sans", sans-serif;
   font-weight: 500;
   letter-spacing: 0.01em;
 }
-:global([data-design="v2"]) .btn_sm {
+.btn_sm {
   padding: 6px 14px;
   font-size: 13px;
 }
-:global([data-design="v2"]) .btn_md {
+.btn_md {
   padding: 8px 20px;
   font-size: 14px;
   height: 40px;
 }
-:global([data-design="v2"]) .btn_primary {
+.btn_primary {
   background: var(--md-sys-primary);
   color: var(--md-sys-on-primary);
   border-color: var(--md-sys-primary);
 }
-:global([data-design="v2"]) .btn_primary:hover:not(:disabled) {
+.btn_primary:hover:not(:disabled) {
   background: color-mix(in oklch, var(--md-sys-primary) 88%, white);
 }
-:global([data-design="v2"]) .btn_ghost {
+.btn_ghost {
   background: transparent;
   color: var(--md-sys-on-surface);
   border-color: var(--md-sys-outline);
 }
-:global([data-design="v2"]) .btn_ghost:hover:not(:disabled) {
+.btn_ghost:hover:not(:disabled) {
   background: var(--md-sys-surface-container-low);
 }
-:global([data-design="v2"]) .btn_danger {
+.btn_danger {
   background: transparent;
   color: var(--md-sys-error);
   border-color: var(--md-sys-outline-variant);
 }
-:global([data-design="v2"]) .btn_danger:hover:not(:disabled) {
+.btn_danger:hover:not(:disabled) {
   background: color-mix(in oklch, var(--md-sys-error) 12%, transparent);
   border-color: var(--md-sys-error);
 }
 
 /* Pill — pure label, no border, IBM Plex Mono treatment. */
-:global([data-design="v2"]) .pill {
+.pill {
   font-family: "IBM Plex Mono", monospace;
   font-size: 11px;
   font-weight: 500;
@@ -325,7 +325,7 @@
 }
 
 /* Spinner — terracotta accent. */
-:global([data-design="v2"]) .spinner {
+.spinner {
   border-color: var(--md-sys-surface-container-high);
   border-top-color: var(--md-sys-primary);
 }
