@@ -1,7 +1,7 @@
-# ADR 0022 (DRAFT) — Three-mode cleanup: Normal / Casual / Formal with a deterministic pre-pass
+# ADR 0022 – Three-mode cleanup: Normal / Casual / Formal with a deterministic pre-pass
 
-**Status:** DRAFT — awaiting decisions in §"Open questions"
-**Date:** 2026-05-17
+**Status:** Accepted (flipped from DRAFT 2026-05-18 via empirical eval; see Acceptance addendum below)
+**Date:** 2026-05-17 (draft), 2026-05-18 (accepted)
 **Authors:** Bernard (with Dustin in the loop)
 **Supersedes:** parts of ADR 0008 (prompt versioning still binding; mode set changes here)
 
@@ -178,6 +178,97 @@ Implementable as three sequential commits, each independently shippable:
 - **Wave 1: deterministic pre-pass.** New `cleanup/preprocessor.rs` module. Wired in BEFORE the LLM step. Migration 008 adds `transcripts.preprocessor_version`. Unit-tested with ~30 cases. No mode/prompt changes yet. Expected latency win: ~30 % off cleanup time even with current prompts (LLM gets cleaner input → shorter generation).
 - **Wave 2: three modes + per-mode prompts.** New prompts `casual_v1.md`, `normal_v4.md`, `formal_v1.md`. Migration 009 inserts the new prompt rows, marks `verbose`/`fragment` modes as disabled (rows preserved for provenance), inserts `casual` / `formal` modes. Modes page already handles three transcription modes — only the slug list expands.
 - **Wave 3 (optional, deferrable): LLM-skip for short casual.** Heuristic in `LlmCleaner::clean`: if `mode_slug == "casual"` AND `pre_cleaned.split_whitespace().count() <= 20` AND no list cues in input → return pre-cleaned directly. Tag `model_used = "preprocessor_only"`. Latency win: 300 ms total for one-liners.
+
+## Acceptance addendum (2026-05-18)
+
+ADR 0022 was authored after a single failed smoketest. The architecture
+was plausible-on-paper but unproven: the prompts were minimum-viable
+patches; the pipeline ordering was intuited not measured; the claim
+that three modes was the right granularity was untested. This addendum
+records how that uncertainty was resolved.
+
+**Workflow.** ADR 0024 ("Empirical mode tuning") chartered a fixture-
+driven evaluation harness (`src-tauri/src/bin/mode_eval/`) against 39
+fixtures × 3 modes = 117 cases per run, spanning enumeration,
+stream-of-consciousness, self-correction, numbers, tangents, emphasis,
+and mixed-structure utterances. Acceptance criteria were declared
+**before** measurement to prevent goal-post drift.
+
+**Iter-0 baseline (the prompts ADR 0022 originally shipped — `casual_v1`,
+`normal_v4`, `formal_v1`):**
+
+| Mode | preserve avg | full ✅ | zero ❌ |
+|---|---|---|---|
+| casual | 93.4% | 30/39 | **1** (06_implicit_long hallucinated milk-eggs-bread on architecture content) |
+| normal | 96.8% | 32/39 | 0 |
+| formal | 76.9% | 13/39 | **1** |
+
+**Iter-2 final (the v2 prompts shipped via migration 010 —
+`casual_v2`, `normal_v5`, `formal_v2`):**
+
+| Mode | preserve avg | full ✅ | zero ❌ | Bar |
+|---|---|---|---|---|
+| casual | **96.8%** | 32/39 | **0** | ≥95% avg + 0 zero — **met** |
+| normal | **97.5%** | 36/39 | 0 | ≥95% avg — **met** |
+| formal | **87.0%** | 21/39 | **0** | ≥80% avg + 0 zero — **met** |
+
+**Pipeline architecture survives unchanged.** The deterministic
+preprocessor + LLM polish + per-mode prompts + per-mode model
+selection (3B for casual, 7B for normal/formal) is the right shape;
+only the prompt bodies changed. The two-stage architecture earns its
+keep — the preprocessor strips fillers/stutters/cues cheaply, the LLM
+handles the register lift without re-litigating mechanical cleanup.
+
+**Open questions resolved.**
+
+1. **Mode set** — keep `casual` / `normal` / `formal`. Verbose /
+   fragment rows preserved in DB for provenance per ADR 0008, marked
+   `enabled = 0`. No user feedback in 2 weeks of dictation has asked
+   for either back. Confirmed.
+2. **Casual mode latency commitment** — DEFERRED to mb-cjc Wave 3.
+   The LLM-skip heuristic was not needed to hit Wave C
+   preservation bars; it is still wanted for sub-second casual
+   feel and is queued there.
+3. **Larger model for formal** — RESOLVED in favour: formal uses
+   `qwen2.5:7b-instruct-q4_K_M` (the 7B model). Validated by eval:
+   the 7B formal hits 87.0% preserve where the 3B at similar prompts
+   sat around 70-75% in side-experiments. Cost: ~7-11s LLM latency
+   on warm calls. Acceptable for formal-mode use cases (emails,
+   docs, specs).
+4. **Filler list user-customisation** — DEFERRED to a later wave
+   under mb-xwi Phase 5/6. No eval evidence of the fixed list being
+   wrong; YAGNI until a user complains.
+5. **Verbal-cue vocabulary expansion** — DEFERRED. Same rationale.
+   Ship lean, expand on demand.
+6. **Fine-tuning question** — DEFERRED to a future ADR. Wave C shows
+   prompt engineering on quantized off-the-shelf models gets us to
+   the badass bar without fine-tuning; revisit only if hard ceilings
+   appear that prompts cannot crack.
+
+**Lessons captured.** See `docs/LESSONS.md` § "2026-05-17 ADR-0024
+Wave C" for: (a) few-shot examples as attention anchors on small
+models (the casual `06_implicit_long` failure mode), (b) lexical
+preservation scoring overfits without paraphrase escape hatches,
+(c) mode-major iteration order in eval harness saves ~5x wall.
+
+**Ship vehicle.** Migration 010
+(`src-tauri/src/db/migrations/010_adr0024_prompt_v2.sql`) inserts
+the three new prompt rows, repoints each mode at its new latest
+version, and drops casual temperature 0.4 → 0.2. ADR 0008 append-
+only compliance verified: v1/v4 rows untouched; historical sessions
+in the DB continue to resolve their original prompt body.
+
+**Cross-references for this addendum:**
+
+- ADR 0024 — empirical mode tuning methodology + acceptance bars.
+- `docs/cleanup/eval-baseline-*.md` — iter-0 baseline report.
+- `docs/cleanup/eval-iter2-*.md` — iter-2 final report (formal v2
+  rule 1: ALWAYS CLEAN NEVER REFUSE; fixture number-format alts).
+  iter-1 intermediate was not committed (ADR 0024: only baseline +
+  final-iteration reports are canonical artifacts).
+- `docs/cleanup/eval-findings-v1.md` — Wave B Pareto analysis.
+- bd: mb-e7s (epic), mb-jh5 (Wave A), mb-3uv (Wave B), mb-e6a
+  (Wave C), mb-35t (Wave D — this acceptance + the migration ship).
 
 ## Risks
 

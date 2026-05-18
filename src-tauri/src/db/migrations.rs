@@ -19,6 +19,7 @@ const MIGRATION_006: &str = include_str!("migrations/006_prompt_normal_v2.sql");
 const MIGRATION_007: &str = include_str!("migrations/007_prompt_normal_v3.sql");
 const MIGRATION_008: &str = include_str!("migrations/008_wave2_three_modes.sql");
 const MIGRATION_009: &str = include_str!("migrations/009_bump_max_tokens.sql");
+const MIGRATION_010: &str = include_str!("migrations/010_adr0024_prompt_v2.sql");
 
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
@@ -63,6 +64,13 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         // Run through the substituter anyway so the leftover-token
         // guard catches accidental `__PROMPT_*_BODY__` leaks.
         let prepared = substitute_prompt_bodies(MIGRATION_009);
+        conn.execute_batch(&prepared)?;
+    }
+    if current < 10 {
+        // ADR 0024 Wave C: casual_v2 / normal_v5 / formal_v2 prompt
+        // bumps. Token substitution required for the three new prompt
+        // bodies.
+        let prepared = substitute_prompt_bodies(MIGRATION_010);
         conn.execute_batch(&prepared)?;
     }
     Ok(())
@@ -111,7 +119,7 @@ mod tests {
     /// `if current < N` block in `apply_all` plus this assert are the
     /// two coupled spots.
     #[test]
-    fn apply_all_brings_fresh_db_to_version_9() {
+    fn apply_all_brings_fresh_db_to_latest_version() {
         let conn = Connection::open_in_memory().expect("open in-memory");
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .expect("pragma fk");
@@ -123,10 +131,12 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "9");
+        assert_eq!(v, "10");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
+    /// (Pre-existing test had a stale `"7"` assertion from when 007 was
+    /// latest; corrected here as part of migration 010.)
     #[test]
     fn apply_all_is_idempotent() {
         let conn = Connection::open_in_memory().expect("open in-memory");
@@ -141,7 +151,77 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "7");
+        assert_eq!(v, "10");
+    }
+
+    /// Migration 010 (ADR 0024 Wave C) inserts the v2 prompts AND
+    /// repoints each mode at the new latest version. Verifies the
+    /// full chain — markdown file → include_str! → token sub →
+    /// migration apply → mode-row repoint — works end-to-end.
+    #[test]
+    fn migration_010_ships_v2_prompts_and_repoints_modes() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+
+        for (slug, expected_version, body_must_contain) in [
+            // casual_v2's anti-substitution rule is the canary.
+            ("casual", 2, "NEVER SUBSTITUTE THE INPUT WITH AN EXAMPLE"),
+            // normal_v5 also carries the anti-substitution rule.
+            ("normal", 5, "NEVER SUBSTITUTE THE INPUT WITH AN EXAMPLE"),
+            // formal_v2 rule 1 — added in iter-2 — is the canary.
+            ("formal", 2, "ALWAYS CLEAN, NEVER REFUSE"),
+        ] {
+            let (version, body): (i64, String) = conn
+                .query_row(
+                    "SELECT p.version, p.body FROM modes m
+                     JOIN prompts p ON m.prompt_id = p.id
+                     WHERE m.slug = ?1",
+                    [slug],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap_or_else(|e| panic!("resolve {slug}: {e}"));
+            assert_eq!(
+                version, expected_version,
+                "mode {slug} did not repoint to v{expected_version}"
+            );
+            assert!(
+                body.contains(body_must_contain),
+                "mode {slug} v{expected_version} body missing canary phrase {body_must_contain:?}; \
+                 first 200 chars: {:.200}",
+                body
+            );
+        }
+
+        // ADR 0008 append-only: the v1 / v4 rows must still be present
+        // for historical session provenance.
+        for (slug, version) in [("casual", 1), ("normal", 4), ("formal", 1)] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM prompts WHERE mode_slug=?1 AND version=?2",
+                    rusqlite::params![slug, version],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                count, 1,
+                "ADR 0008 violation: {slug}@v{version} row should be preserved"
+            );
+        }
+
+        // Casual temperature drop 0.4 → 0.2 (defensive against
+        // attention-anchor drift on the 3B model).
+        let casual_temp: f64 = conn
+            .query_row(
+                "SELECT temperature FROM modes WHERE slug = 'casual'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            (casual_temp - 0.2).abs() < 0.001,
+            "casual temperature should be 0.2 post-010, got {casual_temp}"
+        );
     }
 
     /// Migration 005 seeds the AI command modes (disabled by default).

@@ -18,7 +18,10 @@ const PROMPT_NORMAL_V2: &str = include_str!("../cleanup/prompts/normal_v2.md");
 const PROMPT_NORMAL_V3: &str = include_str!("../cleanup/prompts/normal_v3.md");
 const PROMPT_NORMAL_V4: &str = include_str!("../cleanup/prompts/normal_v4.md");
 const PROMPT_CASUAL_V1: &str = include_str!("../cleanup/prompts/casual_v1.md");
+const PROMPT_CASUAL_V2: &str = include_str!("../cleanup/prompts/casual_v2.md");
 const PROMPT_FORMAL_V1: &str = include_str!("../cleanup/prompts/formal_v1.md");
+const PROMPT_FORMAL_V2: &str = include_str!("../cleanup/prompts/formal_v2.md");
+const PROMPT_NORMAL_V5: &str = include_str!("../cleanup/prompts/normal_v5.md");
 const PROMPT_VERBOSE: &str = include_str!("../cleanup/prompts/verbose.md");
 const PROMPT_FRAGMENT: &str = include_str!("../cleanup/prompts/fragment.md");
 const PROMPT_REWRITE: &str = include_str!("../cleanup/prompts/rewrite.md");
@@ -41,8 +44,11 @@ pub fn substitute_prompt_bodies(sql: &str) -> String {
         .replace("__PROMPT_NORMAL_V2_BODY__", &sql_escape(PROMPT_NORMAL_V2))
         .replace("__PROMPT_NORMAL_V3_BODY__", &sql_escape(PROMPT_NORMAL_V3))
         .replace("__PROMPT_NORMAL_V4_BODY__", &sql_escape(PROMPT_NORMAL_V4))
+        .replace("__PROMPT_NORMAL_V5_BODY__", &sql_escape(PROMPT_NORMAL_V5))
         .replace("__PROMPT_CASUAL_V1_BODY__", &sql_escape(PROMPT_CASUAL_V1))
+        .replace("__PROMPT_CASUAL_V2_BODY__", &sql_escape(PROMPT_CASUAL_V2))
         .replace("__PROMPT_FORMAL_V1_BODY__", &sql_escape(PROMPT_FORMAL_V1))
+        .replace("__PROMPT_FORMAL_V2_BODY__", &sql_escape(PROMPT_FORMAL_V2))
         .replace("__PROMPT_VERBOSE_BODY__", &sql_escape(PROMPT_VERBOSE))
         .replace("__PROMPT_FRAGMENT_BODY__", &sql_escape(PROMPT_FRAGMENT))
         .replace("__PROMPT_REWRITE_BODY__", &sql_escape(PROMPT_REWRITE))
@@ -121,7 +127,8 @@ mod guard_tests {
     #[test]
     fn safe_asterisk_prose_is_ignored() {
         // Both 003 and 005 use this exact form in their `--` comments.
-        let sql = "-- the runner substitutes the `__PROMPT_*_BODY__` token\nINSERT INTO x VALUES (1);";
+        let sql =
+            "-- the runner substitutes the `__PROMPT_*_BODY__` token\nINSERT INTO x VALUES (1);";
         assert_eq!(find_unsubstituted_prompt_token(sql), None);
     }
 

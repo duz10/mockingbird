@@ -1,0 +1,575 @@
+{
+  "_doc": [
+    "Mode-eval baseline fixtures. 18 categories, 52 total cases.",
+    "Original 13 categories x 3 lengths = 39 cases (ADR 0024 Wave A/B/C).",
+    "Extension: 5 new categories added 2026-05-18 covering content types the",
+    "original corpus under-represented: directions (turn-by-turn navigation),",
+    "project_outline (multi-phase plans with sub-items), code_dictation",
+    "(variable names + function signatures + algorithms), meeting_notes",
+    "(action items + decisions), decision_rationale (with explicit tradeoffs).",
+    "Each `raw` simulates Whisper STT output: mostly lowercase, light or no",
+    "punctuation, occasional disfluencies. `intent` describes speaker meaning.",
+    "`must_preserve` lists concepts that MUST appear in any cleaned output --",
+    "used for automated content-preservation scoring (case-insensitive substring).",
+    "`must_preserve_alts` (optional) groups acceptable equivalents -- ANY term",
+    "in a group satisfies ALL terms in that group. Lets formal-mode paraphrases",
+    "and code-style normalizations (snake_case/camelCase) score correctly.",
+    "`mode_hints` is per-mode optional notes for the human reviewer.",
+    "Authored by Bernard 2026-05-17, extended 2026-05-18 (ADR 0024 v2 corpus)."
+  ],
+  "fixtures": [
+    {
+      "id": "01_enum_short",
+      "category": "verbal_enumerated_list",
+      "length": "short",
+      "raw": "first apples second eggs third milk",
+      "intent": "Shopping list with three items, enumerated.",
+      "must_preserve": ["apples", "eggs", "milk"],
+      "mode_hints": {"casual": "inline: apples, eggs, and milk", "normal": "bulleted list", "formal": "numbered list"}
+    },
+    {
+      "id": "02_enum_medium",
+      "category": "verbal_enumerated_list",
+      "length": "medium",
+      "raw": "here i have a list of keyboard supplies first thing is air duster second is alcohol wipes third is an extra cable and fourth is a microfiber cloth",
+      "intent": "Four-item keyboard supply list with a verbal preamble.",
+      "must_preserve": ["keyboard supplies", "air duster", "alcohol wipes", "extra cable", "microfiber cloth"],
+      "mode_hints": {"casual": "inline with lead-in", "normal": "lead-in + bullets", "formal": "lead-in + numbered list with light register lift"}
+    },
+    {
+      "id": "03_enum_long",
+      "category": "verbal_enumerated_list",
+      "length": "long",
+      "raw": "okay for the weekly review meeting agenda i want to cover the following items first the cleanup pipeline status update including the prompt iteration work that bernard is doing second the learning loop nightly run results from this past week third any outstanding bugs from the qa kitten smoke runs fourth the design language phase six cutover retrospective and fifth open floor for new topics",
+      "intent": "Five-item meeting agenda with a verbal lead-in and contextual preamble.",
+      "must_preserve": ["weekly review meeting", "cleanup pipeline", "learning loop", "outstanding bugs", "design language phase six", "open floor"],
+      "mode_hints": {"casual": "probably awkward — long lists don't read inline", "normal": "bulleted with lead-in", "formal": "header + numbered list"}
+    },
+    {
+      "id": "04_implicit_short",
+      "category": "implicit_list",
+      "length": "short",
+      "raw": "i need milk eggs bread butter",
+      "intent": "Comma-series shopping list, no verbal cue.",
+      "must_preserve": ["milk", "eggs", "bread", "butter"],
+      "mode_hints": {"casual": "inline prose: I need milk, eggs, bread, and butter.", "normal": "JUDGMENT CALL — could be inline or bullets; ambiguous", "formal": "probably bulleted"}
+    },
+    {
+      "id": "05_implicit_medium",
+      "category": "implicit_list",
+      "length": "medium",
+      "raw": "the project depends on tauri rusqlite whisper rs cpal ort and a couple of other crates we should audit them all before phase seven",
+      "intent": "Tech-dependency mention as part of a planning thought.",
+      "must_preserve": ["tauri", "rusqlite", "whisper", "cpal", "ort", "phase seven"],
+      "mode_hints": {"casual": "inline prose with conjunction", "normal": "JUDGMENT — could go either way", "formal": "probably bulleted dependency list"}
+    },
+    {
+      "id": "06_implicit_long",
+      "category": "implicit_list",
+      "length": "long",
+      "raw": "looking at the open issues we have audio streaming which is the standing p one then there is the llm skip for short casual utterances the design language sealing which is now done the hidden ai command modes work and the phase five six seven main phase work which is the long pole and also the mode tuning empirical iteration which is what we are doing right now and probably some smaller cleanup tasks that have not been triaged",
+      "intent": "Stream-of-consciousness enumeration of open work, fairly long.",
+      "must_preserve": ["audio streaming", "llm skip", "design language sealing", "ai command modes", "phase five six seven", "mode tuning", "smaller cleanup tasks"],
+      "mode_hints": {"casual": "inline is going to be a wall — probably acceptable", "normal": "bulleted with prose intro", "formal": "header + bulleted list of items, prose framing"}
+    },
+    {
+      "id": "07_runon_short",
+      "category": "run_on_sentence",
+      "length": "short",
+      "raw": "we should ship this today and i think it is ready and the tests pass and qa kitten signed off",
+      "intent": "Three loosely-joined assertions in one breath.",
+      "must_preserve": ["ship", "today", "ready", "tests pass", "qa kitten"],
+      "mode_hints": {"casual": "one sentence with commas is fine", "normal": "split into 2-3 sentences", "formal": "split + tighten register"}
+    },
+    {
+      "id": "08_runon_medium",
+      "category": "run_on_sentence",
+      "length": "medium",
+      "raw": "the cleanup pipeline takes the raw whisper output runs it through the deterministic preprocessor which handles fillers and verbal cues then sends the result to the local llm which does the actual style work and the output gets injected into whatever app the user has focused at the moment of release",
+      "intent": "Single run-on describing the cleanup pipeline architecture.",
+      "must_preserve": ["raw whisper output", "deterministic preprocessor", "fillers", "verbal cues", "local llm", "style work", "injected", "focused"],
+      "mode_hints": {"casual": "2-3 sentences", "normal": "3-4 sentences with paragraph structure", "formal": "multiple sentences, possibly a process diagram-ish list"}
+    },
+    {
+      "id": "09_runon_long",
+      "category": "run_on_sentence",
+      "length": "long",
+      "raw": "when we started this project the goal was just to replace wisprflow with something local and private but over time we have built up this whole thing with a deterministic preprocessor that handles all the rule shaped work and an llm polish layer that does the judgment work and a learning loop that runs nightly to improve based on user corrections and a design system that took six waves to get right and an entire phase architecture with judges and hooks and project agents and now we are in the empirical mode tuning phase which is hopefully the last big quality push before we ship a real release",
+      "intent": "Long retrospective monologue about project evolution.",
+      "must_preserve": ["wisprflow", "local and private", "deterministic preprocessor", "llm polish", "learning loop", "design system", "six waves", "judges", "hooks", "project agents", "mode tuning", "release"],
+      "mode_hints": {"casual": "probably 4-6 sentences with breaks", "normal": "split into 2-3 paragraphs", "formal": "structured retrospective with possible section header"}
+    },
+    {
+      "id": "10_stream_short",
+      "category": "stream_of_consciousness",
+      "length": "short",
+      "raw": "so the thing is um i was thinking about the the cleanup pipeline and like maybe we should reorder it",
+      "intent": "Hesitant musing about pipeline reordering; fillers present.",
+      "must_preserve": ["cleanup pipeline", "reorder"],
+      "mode_hints": {"casual": "drop fillers but keep the musing tone", "normal": "drop fillers, polish", "formal": "drop fillers + lift register"}
+    },
+    {
+      "id": "11_stream_medium",
+      "category": "stream_of_consciousness",
+      "length": "medium",
+      "raw": "okay so like the question is whether we want to make the preprocessor more aggressive or whether we should just let the llm handle more of it i guess it depends on how much we trust the llm to be consistent which is honestly not super high right now but maybe with the new prompts it will be better",
+      "intent": "Internal deliberation about preprocessor vs LLM division of labor.",
+      "must_preserve": ["preprocessor", "more aggressive", "llm", "consistent", "new prompts"],
+      "mode_hints": {"casual": "preserve the deliberative feel", "normal": "split into clean sentences but keep the open question", "formal": "restructure as a 'two options' framing"}
+    },
+    {
+      "id": "12_stream_long",
+      "category": "stream_of_consciousness",
+      "length": "long",
+      "raw": "i was just thinking about how dictation is interesting because you have this raw audio that gets turned into text and then the text needs to become something usable and there is this whole question of what does usable mean for different contexts like a slack message versus a meeting note versus a formal document and we have these three modes but i wonder if that is even the right axis maybe it should be more about output target than about register and also there is the whole thing about latency where if you take more than two seconds people just stop using the tool entirely which is a hard constraint",
+      "intent": "Long meandering thought about mode design, register vs target, and latency.",
+      "must_preserve": ["raw audio", "usable", "slack message", "meeting note", "formal document", "three modes", "right axis", "output target", "register", "latency", "two seconds", "stop using"],
+      "mode_hints": {"casual": "preserve the meandering quality, drop fillers", "normal": "split into thought-paragraphs", "formal": "restructure aggressively with sections — risk of losing meandering quality"}
+    },
+    {
+      "id": "13_chrono_short",
+      "category": "chronological_narrative",
+      "length": "short",
+      "raw": "i woke up made coffee then went for a walk",
+      "intent": "Three-event morning sequence.",
+      "must_preserve": ["woke up", "coffee", "walk"],
+      "mode_hints": {"casual": "natural narrative", "normal": "natural narrative with commas/period", "formal": "narrative or list — judgment"}
+    },
+    {
+      "id": "14_chrono_medium",
+      "category": "chronological_narrative",
+      "length": "medium",
+      "raw": "first i pulled the latest from main then i ran the migrations then i started the tauri dev server then i tested the recording overlay then i committed and pushed",
+      "intent": "Five-step dev workflow sequence with explicit 'then' markers.",
+      "must_preserve": ["pulled", "main", "migrations", "tauri dev server", "recording overlay", "committed", "pushed"],
+      "mode_hints": {"casual": "narrative with commas", "normal": "could be numbered list given the explicit steps", "formal": "numbered list with header like 'Workflow:'"}
+    },
+    {
+      "id": "15_chrono_long",
+      "category": "chronological_narrative",
+      "length": "long",
+      "raw": "this morning started with a planning session where dustin reviewed the bd queue and prioritized the mode tuning work then bernard read the relevant adr drafts and the existing prompts then we set up the bd issue chain for the four waves then bernard wrote the fixture set and the eval harness then we ran the baseline and tabulated results then we authored the new prompts then we ran iteration two then iteration three then we shipped migration ten and updated status",
+      "intent": "Detailed chronological recap of a planning + execution session.",
+      "must_preserve": ["planning session", "bd queue", "mode tuning", "adr drafts", "existing prompts", "four waves", "fixture set", "eval harness", "baseline", "iteration two", "iteration three", "migration ten"],
+      "mode_hints": {"casual": "long narrative — fine but trim fillers", "normal": "narrative split into 2-3 paragraphs OR numbered list", "formal": "numbered process list with header is probably right"}
+    },
+    {
+      "id": "16_qa_short",
+      "category": "qa_monologue",
+      "length": "short",
+      "raw": "should we ship it well the tests pass so yes",
+      "intent": "Self-Q&A: should we ship? Tests pass, so yes.",
+      "must_preserve": ["ship", "tests pass", "yes"],
+      "mode_hints": {"casual": "natural", "normal": "natural with proper punctuation", "formal": "rephrase as statement rather than self-dialog"}
+    },
+    {
+      "id": "17_qa_medium",
+      "category": "qa_monologue",
+      "length": "medium",
+      "raw": "what is the right model for normal mode well it depends on the user hardware on a six gig vram card we can run the seven b quantized and that gives us good quality but on something smaller we have to fall back to three b which is faster but less reliable",
+      "intent": "Self-Q&A about model selection by hardware capability.",
+      "must_preserve": ["normal mode", "six gig vram", "seven b quantized", "good quality", "three b", "faster", "less reliable"],
+      "mode_hints": {"casual": "natural self-deliberation", "normal": "Q at top, answer flows", "formal": "could become 'Model selection criteria:' with structured answer"}
+    },
+    {
+      "id": "18_qa_long",
+      "category": "qa_monologue",
+      "length": "long",
+      "raw": "the question is whether to add a code mode and the answer is complicated because on one hand programmers dictate variable names and snippets all the time and a code mode would be valuable on the other hand the current three modes axis is register based and code is orthogonal to register so adding code would muddy the model and the third consideration is implementation cost which would mean a new prompt new few shot examples possibly a different model since code likely benefits from a coder model so probably we should not add it yet but revisit after the empirical tuning is done and we have a clearer sense of where the modes are weakest",
+      "intent": "Detailed Q&A about whether to add a code mode, weighing three considerations.",
+      "must_preserve": ["code mode", "programmers", "variable names", "snippets", "three modes axis", "register", "orthogonal", "implementation cost", "few shot examples", "coder model", "not add it yet", "after the empirical tuning"],
+      "mode_hints": {"casual": "preserve the back-and-forth", "normal": "Q + answer paragraphs", "formal": "structured: 'Question:', 'Considerations:', 'Recommendation:'"}
+    },
+    {
+      "id": "19_tech_short",
+      "category": "technical_content",
+      "length": "short",
+      "raw": "the function takes an arc mutex connection and returns app result string",
+      "intent": "Technical description of a Rust function signature.",
+      "must_preserve": ["arc mutex connection", "app result", "string"],
+      "mode_hints": {"casual": "lowercase tech terms OK", "normal": "Arc<Mutex<Connection>> would be ideal but probably won't happen without dict", "formal": "tight technical prose"}
+    },
+    {
+      "id": "20_tech_medium",
+      "category": "technical_content",
+      "length": "medium",
+      "raw": "the llm cleaner struct holds a box dyn cleanup provider an arc mutex connection a model id string a temperature f32 and a max tokens u32 the constructor takes these as arguments and stores them",
+      "intent": "Description of a Rust struct's fields and constructor.",
+      "must_preserve": ["llm cleaner", "box dyn cleanup provider", "arc mutex connection", "model id", "temperature", "max tokens", "constructor"],
+      "mode_hints": {"casual": "lowercase tech is fine", "normal": "should attempt type formatting", "formal": "code-block formatting for types ideally"}
+    },
+    {
+      "id": "21_tech_long",
+      "category": "technical_content",
+      "length": "long",
+      "raw": "the architecture is that the dictation thread owns an arc mutex connection and shares a clone with the orchestrator which in turn shares another clone with the cleaner so when cleanup runs it can issue its own queries for the prompt the dictionary and the few shot examples without negotiating borrows across the orchestrators persist transaction and this works because rusqlite connections are themselves single threaded but the mutex serializes access across the threads that hold clones",
+      "intent": "Architecture explanation: shared DB connection via Arc<Mutex<Connection>>.",
+      "must_preserve": ["dictation thread", "arc mutex connection", "orchestrator", "cleaner", "prompt", "dictionary", "few shot examples", "persist transaction", "rusqlite", "single threaded", "mutex serializes"],
+      "mode_hints": {"casual": "tech narrative is fine", "normal": "2-3 sentence paragraphs", "formal": "could become 'Architecture overview' with structured explanation"}
+    },
+    {
+      "id": "22_casual_short",
+      "category": "casual_chat",
+      "length": "short",
+      "raw": "hey can you grab milk on the way home",
+      "intent": "Quick text-message-style request.",
+      "must_preserve": ["milk", "way home"],
+      "mode_hints": {"casual": "punctuated text message", "normal": "punctuated, slightly tightened", "formal": "INAPPROPRIATE mode for this content but should still preserve"}
+    },
+    {
+      "id": "23_casual_medium",
+      "category": "casual_chat",
+      "length": "medium",
+      "raw": "yo so the movie was actually really good way better than i expected the cinematography was incredible and the soundtrack was on point we should definitely go see it again sometime",
+      "intent": "Casual movie recommendation message with enthusiasm.",
+      "must_preserve": ["movie", "really good", "better than i expected", "cinematography", "soundtrack", "go see it again"],
+      "mode_hints": {"casual": "preserve 'yo' and casual register", "normal": "drop 'yo', light polish", "formal": "WILL feel weird — strip slang aggressively"}
+    },
+    {
+      "id": "24_casual_long",
+      "category": "casual_chat",
+      "length": "long",
+      "raw": "okay so i talked to sarah about the thing and she said its fine but we should probably loop in marcus too because he was kind of involved last time and might have some context that we are missing also i think we should set up a quick sync maybe tomorrow afternoon if everyone is free to make sure we are all aligned before we present to leadership on friday because the last thing we want is to look unprepared in front of them",
+      "intent": "Workplace chat message about coordinating a presentation prep.",
+      "must_preserve": ["sarah", "its fine", "marcus", "involved last time", "context", "quick sync", "tomorrow afternoon", "aligned", "leadership", "friday", "unprepared"],
+      "mode_hints": {"casual": "natural chat, drop fillers, keep flow", "normal": "polish to email-ish quality", "formal": "rewrite as a meeting-request memo — aggressive transformation"}
+    },
+    {
+      "id": "25_selfcorr_short",
+      "category": "self_correction",
+      "length": "short",
+      "raw": "lets meet at three pm no wait four pm",
+      "intent": "Self-correction: time changed from 3pm to 4pm.",
+      "must_preserve": ["meet", "four pm"],
+      "must_preserve_alts": [
+        ["four pm", "4 pm", "4:00 pm", "4 p.m.", "4:00 p.m."]
+      ],
+      "mode_hints": {"casual": "should keep only 4pm (stitch the correction)", "normal": "stitch correction", "formal": "stitch correction"}
+    },
+    {
+      "id": "26_selfcorr_medium",
+      "category": "self_correction",
+      "length": "medium",
+      "raw": "the meeting is on tuesday at the main office actually scratch that its wednesday at the satellite office and bring the latest mockups not the old ones",
+      "intent": "Two-part self-correction: day+location changed; plus a clarification.",
+      "must_preserve": ["wednesday", "satellite office", "latest mockups"],
+      "mode_hints": {"casual": "should stitch corrections — final state only", "normal": "stitch corrections", "formal": "stitch corrections"}
+    },
+    {
+      "id": "27_selfcorr_long",
+      "category": "self_correction",
+      "length": "long",
+      "raw": "for the budget i was thinking we could allocate fifty thousand for the design phase wait no that is too much lets say thirty thousand for design and then twenty thousand for engineering plus a contingency of fifteen percent actually let me redo that whole thing total budget should be sixty thousand split as forty for engineering ten for design and ten as contingency",
+      "intent": "Budget thinking-out-loud with multiple corrections; final answer is the last one.",
+      "must_preserve": ["sixty thousand", "forty", "engineering", "ten", "design", "ten", "contingency"],
+      "mode_hints": {"casual": "HARD — should keep only the final budget numbers", "normal": "should stitch to final budget", "formal": "final budget only, possibly in table-ish form"}
+    },
+    {
+      "id": "28_numbers_short",
+      "category": "numbers_dates",
+      "length": "short",
+      "raw": "the meeting is at three thirty pm on tuesday and costs twenty five dollars",
+      "intent": "Short utterance with time, day, currency.",
+      "must_preserve": ["3:30 pm", "tuesday", "$25"],
+      "must_preserve_alts": [
+        ["3:30 pm", "3:30 p.m.", "three thirty pm", "three-thirty pm"],
+        ["$25", "$25.00", "twenty-five dollars", "twenty five dollars", "25 dollars"]
+      ],
+      "mode_hints": {"casual": "numerals natural: 3:30pm Tuesday, $25", "normal": "3:30 PM, Tuesday, $25", "formal": "3:30 p.m., Tuesday, $25.00 or similar"}
+    },
+    {
+      "id": "29_numbers_medium",
+      "category": "numbers_dates",
+      "length": "medium",
+      "raw": "the q one report shows revenue of one point two million up fifteen percent year over year while expenses came in at eight hundred thousand which is flat versus q four twenty twenty five",
+      "intent": "Financial recap with dollar figures, percentages, time ranges.",
+      "must_preserve": ["q1", "$1.2 million", "15%", "$800", "thousand", "q4 2025"],
+      "mode_hints": {"casual": "would-be casual but content is formal-flavored", "normal": "numerals + percent symbols", "formal": "fully formatted with currency symbols and proper notation"}
+    },
+    {
+      "id": "30_numbers_long",
+      "category": "numbers_dates",
+      "length": "long",
+      "raw": "for the project timeline we are looking at january fifteenth twenty twenty six for kickoff march first for the initial prototype review may first for the alpha release july fifteenth for beta august thirtieth for the rc and target ga date of september fifteenth which gives us about eight months of total runway with two months of buffer at the end",
+      "intent": "Detailed project timeline with seven specific dates spanning Jan-Sep 2026.",
+      "must_preserve": ["january 15", "march 1", "may 1", "july 15", "august 30", "september 15", "eight months", "two months"],
+      "mode_hints": {"casual": "narrative dates", "normal": "could be bulleted milestone list", "formal": "absolutely a milestone table or numbered list with header"}
+    },
+    {
+      "id": "31_tangent_short",
+      "category": "tangent",
+      "length": "short",
+      "raw": "the deploy went well by the way did you see the new mockups and yeah no issues so far",
+      "intent": "Main statement (deploy went well, no issues) with a tangent (mockups) in the middle.",
+      "must_preserve": ["deploy went well", "no issues"],
+      "must_preserve_alts": [
+        ["deploy went well", "deployment went well", "deployment was successful", "deploy was successful", "deployment succeeded"],
+        ["no issues", "without issues", "without any issues", "no problems", "without incident"]
+      ],
+      "mode_hints": {"casual": "preserve the aside or break it into two sentences", "normal": "split into 2 sentences — main idea, tangent, main idea", "formal": "reorganize to put main idea cleanly, tangent in separate sentence"}
+    },
+    {
+      "id": "32_tangent_medium",
+      "category": "tangent",
+      "length": "medium",
+      "raw": "im updating the dependency list and removing the unused crates which by the way is something we should do more regularly because it accumulates and makes the build slower and anyway after that im going to run the security audit",
+      "intent": "Main thread (updating deps, then running audit) with a tangent about regular dep cleanup.",
+      "must_preserve": ["updating the dependency list", "removing the unused crates", "run the security audit"],
+      "mode_hints": {"casual": "preserve the digression flow", "normal": "split tangent into parenthetical sentence", "formal": "restructure: main actions first, observation about cleanup separately"}
+    },
+    {
+      "id": "33_tangent_long",
+      "category": "tangent",
+      "length": "long",
+      "raw": "okay so the main thing i want to talk about is the launch plan for q two but before i get into that i want to flag that we are still understaffed on the qa side which is going to bite us at some point and also the design review backlog has grown to like twelve items which is way too many and we need to triage that this week so anyway the launch plan the goal is to ship by june first with full feature parity and we have three engineering sprints between now and then which should be enough if nothing major slips",
+      "intent": "Main topic (Q2 launch plan) interrupted by two tangents (qa staffing, design backlog) before returning.",
+      "must_preserve": ["launch plan", "q2", "understaffed", "qa", "design review backlog", "twelve items", "triage", "this week", "ship by june first", "full feature parity", "three engineering sprints"],
+      "mode_hints": {"casual": "preserve the natural digression structure", "normal": "split into main+tangents+main paragraphs", "formal": "restructure aggressively: main agenda + side concerns section + launch plan section"}
+    },
+    {
+      "id": "34_emphasis_short",
+      "category": "emphasis",
+      "length": "short",
+      "raw": "this is really really important we need to fix it now",
+      "intent": "Urgent prioritization statement with intensifier repetition.",
+      "must_preserve": ["really important", "fix it now"],
+      "must_preserve_alts": [
+        ["really important", "critically important", "extremely important", "very important"],
+        ["fix it now", "fix it immediately", "address it now", "address it immediately", "resolve it immediately", "addressed immediately"]
+      ],
+      "mode_hints": {"casual": "keep 'really really' or trim to one 'really'", "normal": "trim to one 'really' or 'very' for emphasis", "formal": "v2 prompt requires keeping 'really'; paraphrase to 'critically' is permitted via alts but not preferred"}
+    },
+    {
+      "id": "35_emphasis_medium",
+      "category": "emphasis",
+      "length": "medium",
+      "raw": "the user experience here is just so so bad and we have been ignoring it for way too long and frankly i am embarrassed every time i demo this part of the app to anyone outside the team",
+      "intent": "Strong negative assessment with emotional emphasis.",
+      "must_preserve": ["user experience", "bad", "ignoring it", "too long", "embarrassed", "demo"],
+      "must_preserve_alts": [
+        ["bad", "poor", "subpar", "inadequate", "unsatisfactory", "lacking"],
+        ["ignoring it", "neglecting it", "overlooking it", "disregarding it", "neglected"],
+        ["too long", "excessive duration", "unacceptable duration", "excessive time", "prolonged period", "unacceptable amount of time"],
+        ["demo", "demonstrate", "demonstration", "present", "presentation"]
+      ],
+      "mode_hints": {"casual": "preserve the emotional charge", "normal": "tone down slightly, keep substance", "formal": "v2 prompt requires intensity preservation; legitimate paraphrases captured via alts"}
+    },
+    {
+      "id": "36_emphasis_long",
+      "category": "emphasis",
+      "length": "long",
+      "raw": "i cannot stress enough how much this matters because every time we ship a release with this bug still in it we are telling our users that we do not care about their feedback and we have heard about this exact issue from at least seven different people over the last three months and every single time we have said yeah we will get to it and we have not and at some point that becomes a credibility problem that costs us users and the bug itself is not even hard to fix it is like a half day of work so there is no excuse",
+      "intent": "Strongly worded escalation about chronic bug deprioritization, with emotional emphasis throughout.",
+      "must_preserve": ["this matters", "ship a release", "bug still in it", "do not care", "feedback", "seven different people", "three months", "credibility problem", "costs us users", "half day of work", "no excuse"],
+      "must_preserve_alts": [
+        ["ship a release", "release", "shipping a release", "ship a version"],
+        ["do not care", "don't care"]
+      ],
+      "mode_hints": {"casual": "preserve emotional cadence", "normal": "moderate restructuring, keep emphasis where it matters", "formal": "DIFFICULT — restructure as a measured escalation memo; risk of stripping the human signal"}
+    },
+    {
+      "id": "37_mixed_short",
+      "category": "mixed_structure",
+      "length": "short",
+      "raw": "we shipped three things this week the cutover the migration and the docs",
+      "intent": "Brief narrative with embedded three-item list.",
+      "must_preserve": ["shipped three things this week", "cutover", "migration", "docs"],
+      "mode_hints": {"casual": "inline: 'this week — the cutover, the migration, and the docs'", "normal": "lead-in with bullets", "formal": "lead-in with numbered or bulleted list"}
+    },
+    {
+      "id": "38_mixed_medium",
+      "category": "mixed_structure",
+      "length": "medium",
+      "raw": "the post mortem found three root causes a missing test coverage on the migration path b inadequate review of the rollback procedure and c lack of monitoring on the actual production database the action items are to add property tests rewrite the rollback runbook and stand up a metrics dashboard by end of quarter",
+      "intent": "Post-mortem summary with three causes AND three action items, both as embedded lists.",
+      "must_preserve": ["post mortem", "missing test coverage", "migration path", "inadequate review", "rollback procedure", "lack of monitoring", "production database", "property tests", "rollback runbook", "metrics dashboard", "end of quarter"],
+      "must_preserve_alts": [
+        ["post mortem", "post-mortem", "postmortem"]
+      ],
+      "mode_hints": {"casual": "challenging — two lists embedded; probably becomes 2-3 sentences with semicolons", "normal": "two clear lists with lead-ins (Root causes: ... Action items: ...)", "formal": "two headers + bulleted/numbered lists each"}
+    },
+    {
+      "id": "39_mixed_long",
+      "category": "mixed_structure",
+      "length": "long",
+      "raw": "the quarterly review covers three main areas first product where we shipped the cutover the migration and the new dashboard and the user feedback has been positive overall second engineering where we addressed the tech debt around our cleanup pipeline and brought our test coverage from sixty to eighty five percent and reduced our build times by about thirty percent and third operations where we improved our deploy success rate from ninety two to ninety nine percent and cut our incident response time in half and reduced our on call burden through better automation our priorities for next quarter are to ship audio streaming complete the phase five work and start the international expansion planning",
+      "intent": "Quarterly review with three sections each containing sub-items, plus three forward-looking priorities.",
+      "must_preserve": ["quarterly review", "product", "cutover", "migration", "new dashboard", "user feedback", "engineering", "tech debt", "cleanup pipeline", "test coverage", "sixty to eighty five percent", "build times", "thirty percent", "operations", "deploy success rate", "ninety two to ninety nine percent", "incident response time", "on call burden", "audio streaming", "phase five", "international expansion"],
+      "mode_hints": {"casual": "very long — best as paragraphs by area", "normal": "three labeled paragraphs (Product: ... Engineering: ... Operations: ...) + a 'Next Quarter:' bulleted list", "formal": "full markdown structure: three subheaders + bulleted achievements + numbered next-quarter priorities"}
+    },
+
+    {
+      "id": "40_directions_short",
+      "category": "directions",
+      "length": "short",
+      "raw": "to get to the conference room go down the hall take a left at the elevator and it's the second door on the right",
+      "intent": "Simple turn-by-turn office navigation.",
+      "must_preserve": ["conference room", "down the hall", "left at the elevator", "second door on the right"],
+      "mode_hints": {"casual": "keep it conversational, maybe inline commas", "normal": "could bullet the steps if cued, else prose", "formal": "numbered steps"}
+    },
+    {
+      "id": "41_directions_medium",
+      "category": "directions",
+      "length": "medium",
+      "raw": "so to find my desk first you come in the main entrance and badge through then you go past the kitchen on your left and through the open seating area then turn right at the printer and i'm in the second pod from the window if you hit the engineering wall you've gone too far",
+      "intent": "Multi-step office wayfinding with landmarks and a sanity-check note.",
+      "must_preserve": ["main entrance", "badge through", "kitchen on your left", "open seating area", "right at the printer", "second pod from the window", "engineering wall", "gone too far"],
+      "mode_hints": {"casual": "prose with commas; the 'if you hit the wall' aside should stay", "normal": "bulleted steps + a closing parenthetical sanity check", "formal": "numbered steps + a 'Note:' line"}
+    },
+    {
+      "id": "42_directions_long",
+      "category": "directions",
+      "length": "long",
+      "raw": "okay here are the directions to my place from the airport so when you exit the terminal you'll head out toward ground transportation and grab a taxi or rideshare it's about a twenty five minute drive depending on traffic you'll take interstate ninety five north for about fifteen miles then exit at exit forty two for maple grove then you turn left at the bottom of the ramp onto maple avenue go straight for about two miles past three traffic lights then turn right onto oak street and i'm the fourth house on the left it's a blue two story with a red door and there's parking on the street or in the driveway if my car isn't there call me when you're five minutes out so i can put the dog away",
+      "intent": "Long detailed driving directions from airport to a house, with landmarks, distances, and a closing instruction.",
+      "must_preserve": ["airport", "ground transportation", "taxi or rideshare", "twenty five minute drive", "interstate ninety five north", "fifteen miles", "exit forty two", "maple grove", "left at the bottom of the ramp", "maple avenue", "two miles", "three traffic lights", "oak street", "fourth house on the left", "blue two story", "red door", "parking on the street", "driveway", "call me", "five minutes out", "put the dog away"],
+      "must_preserve_alts": [
+        ["twenty five minute drive", "25 minute drive", "25-minute drive"],
+        ["interstate ninety five north", "i-95 north", "i 95 north", "interstate 95 north"],
+        ["fifteen miles", "15 miles"],
+        ["exit forty two", "exit 42"],
+        ["two miles", "2 miles"],
+        ["three traffic lights", "3 traffic lights"],
+        ["five minutes out", "5 minutes out"]
+      ],
+      "mode_hints": {"casual": "all-prose with commas; keep the dog joke", "normal": "prose paragraph for the drive + bulleted final approach + a closing note about the call", "formal": "numbered driving steps + bulleted arrival details + 'Note:' line about the dog"}
+    },
+
+    {
+      "id": "43_outline_short",
+      "category": "project_outline",
+      "length": "short",
+      "raw": "the project has three phases first is research second is implementation and third is rollout each phase is about a month",
+      "intent": "Three-phase project outline with a duration note.",
+      "must_preserve": ["three phases", "research", "implementation", "rollout", "month"],
+      "must_preserve_alts": [
+        ["three phases", "3 phases"],
+        ["month", "about a month", "approximately a month"]
+      ],
+      "mode_hints": {"casual": "inline prose", "normal": "bulleted phases + the duration as a closing sentence", "formal": "numbered phases + duration note"}
+    },
+    {
+      "id": "44_outline_medium",
+      "category": "project_outline",
+      "length": "medium",
+      "raw": "the migration plan has three workstreams the first is schema changes which covers adding the new tables and backfilling the existing data the second is application changes which covers the new query paths and the feature flag and the third is rollout which is the gradual percentage based traffic shift and the monitoring dashboards we expect this to take about six weeks end to end",
+      "intent": "Three-workstream migration plan with sub-items per workstream and a total duration estimate.",
+      "must_preserve": ["three workstreams", "schema changes", "new tables", "backfilling", "application changes", "new query paths", "feature flag", "rollout", "percentage based traffic shift", "monitoring dashboards", "six weeks"],
+      "must_preserve_alts": [
+        ["three workstreams", "3 workstreams"],
+        ["six weeks", "6 weeks"]
+      ],
+      "mode_hints": {"casual": "prose with semicolons or short paragraphs", "normal": "three labeled bullets (Schema, Application, Rollout) with sub-items + closing duration", "formal": "three subheaders with bulleted sub-items + a duration section"}
+    },
+    {
+      "id": "45_outline_long",
+      "category": "project_outline",
+      "length": "long",
+      "raw": "okay let me lay out the full architecture for mockingbird v2 the foundation layer covers the audio capture which uses cpal and the voice activity detection which uses silero through the ort runtime and the speech to text which uses whisper rs with cuda the processing layer covers the deterministic preprocessor which strips fillers and stutters and renders verbal cues and the llm cleanup which uses ollama with three modes casual normal and formal the storage layer covers the sqlite database with rusqlite for the raw transcripts and the cleaned outputs and the prompt versions and finally the surface layer covers the tauri windows the system tray the global hotkey through the windows low level keyboard hook and the injection pipeline which does clipboard save restore around every paste",
+      "intent": "Full architecture description with four named layers each containing 3-5 components, naming specific libraries and concepts.",
+      "must_preserve": ["foundation layer", "audio capture", "cpal", "voice activity detection", "silero", "ort runtime", "speech to text", "whisper rs", "cuda", "processing layer", "deterministic preprocessor", "fillers", "stutters", "verbal cues", "llm cleanup", "ollama", "three modes", "casual", "normal", "formal", "storage layer", "sqlite", "rusqlite", "raw transcripts", "cleaned outputs", "prompt versions", "surface layer", "tauri", "system tray", "global hotkey", "low level keyboard hook", "injection pipeline", "clipboard save restore"],
+      "mode_hints": {"casual": "DANGER ZONE: long technical content. Must preserve every term verbatim. No replacement with a grocery-list-style example.", "normal": "four bulleted sections (Foundation/Processing/Storage/Surface) with nested bullets per component", "formal": "four ## subheaders with bullets; every library name verbatim"}
+    },
+
+    {
+      "id": "46_code_short",
+      "category": "code_dictation",
+      "length": "short",
+      "raw": "create a function called process input that takes a string parameter and returns a boolean",
+      "intent": "Function signature dictation.",
+      "must_preserve": ["function", "process input", "string parameter", "boolean"],
+      "must_preserve_alts": [
+        ["process input", "processInput", "process_input", "ProcessInput"]
+      ],
+      "mode_hints": {"casual": "prose; tolerate either camelCase or snake_case rendering", "normal": "single sentence; ideally render the identifier as code", "formal": "prose with the identifier in backticks or code-style"}
+    },
+    {
+      "id": "47_code_medium",
+      "category": "code_dictation",
+      "length": "medium",
+      "raw": "so for the cleanup module we need to add a new public function in llm cleaner dot rs called resolve prompt that takes the mode slug as an argument and returns a result wrapping the prompt body string and the version number it should look up via the mode repository and propagate any error through the app result type",
+      "intent": "Describing a code change with module path, function signature, return type, and error-propagation contract.",
+      "must_preserve": ["cleanup module", "public function", "llm cleaner", "resolve prompt", "mode slug", "argument", "result", "prompt body", "version number", "mode repository", "app result"],
+      "must_preserve_alts": [
+        ["llm cleaner", "llm_cleaner", "llm cleaner.rs", "llm_cleaner.rs"],
+        ["resolve prompt", "resolve_prompt", "resolvePrompt"],
+        ["mode slug", "mode_slug", "modeSlug"],
+        ["prompt body", "prompt_body", "promptBody"],
+        ["version number", "version"],
+        ["mode repository", "ModeRepository", "mode_repository"],
+        ["app result", "AppResult", "app_result"]
+      ],
+      "mode_hints": {"casual": "prose, technical terms verbatim", "normal": "prose, identifiers in backticks where natural", "formal": "prose with code-styled identifiers; no rephrasing of technical terms"}
+    },
+    {
+      "id": "48_code_long",
+      "category": "code_dictation",
+      "length": "long",
+      "raw": "alright the algorithm works like this you start by reading the raw whisper output then you pass it through the preprocessor which is a chain of regex passes that handle fillers like um and uh then stutter collapse like i i i became i then verbal cues like new line and bullet then quote handling and the output of the preprocessor goes into the llm via ollama with the resolved prompt body and the per mode temperature and the result gets stored in the cleaned column of the transcripts table along with the prompt id and the preprocessor version and the cleanup ms timing field for telemetry then finally we kick off the injection pipeline which saves the clipboard pastes our text and restores the clipboard after a short delay",
+      "intent": "End-to-end algorithm description spanning preprocessor, LLM call, DB columns, and injection.",
+      "must_preserve": ["raw whisper output", "preprocessor", "regex passes", "fillers", "um and uh", "stutter collapse", "verbal cues", "new line", "bullet", "quote handling", "llm", "ollama", "resolved prompt body", "per mode temperature", "cleaned column", "transcripts table", "prompt id", "preprocessor version", "cleanup ms", "telemetry", "injection pipeline", "saves the clipboard", "pastes our text", "restores the clipboard"],
+      "must_preserve_alts": [
+        ["prompt id", "prompt_id", "promptId"],
+        ["cleanup ms", "cleanup_ms", "cleanupMs"],
+        ["preprocessor version", "preprocessor_version", "preprocessorVersion"],
+        ["cleaned column", "cleaned"],
+        ["transcripts table", "transcripts"]
+      ],
+      "mode_hints": {"casual": "DANGER ZONE: long technical. Preserve every named entity. No regression to chat-message template.", "normal": "prose with paragraph breaks at stage boundaries (preprocessor / llm / storage / injection)", "formal": "## Algorithm + numbered stages or 4 paragraphs by stage"}
+    },
+
+    {
+      "id": "49_meeting_short",
+      "category": "meeting_notes",
+      "length": "short",
+      "raw": "from the standup john is taking the api work sarah has the migration and we need to follow up on the database issue by friday",
+      "intent": "Standup action items: two owners + one follow-up with a deadline.",
+      "must_preserve": ["standup", "john", "api work", "sarah", "migration", "database issue", "friday"],
+      "must_preserve_alts": [
+        ["api work", "API work", "API"]
+      ],
+      "mode_hints": {"casual": "prose", "normal": "3 bullets (John: ..., Sarah: ..., Follow-up: ...)", "formal": "## Action Items + numbered list"}
+    },
+    {
+      "id": "50_meeting_medium",
+      "category": "meeting_notes",
+      "length": "medium",
+      "raw": "okay from the product review meeting the decisions are we are shipping the new onboarding flow next week we are cutting the legacy import feature and we are delaying the analytics dashboard to q three the action items are priya owns the launch email and the release notes carlos owns the deprecation announcement for the legacy import and dana owns the q three planning doc by end of next week",
+      "intent": "Product review notes: three decisions + three action items with owners and a deadline.",
+      "must_preserve": ["product review", "decisions", "new onboarding flow", "next week", "cutting the legacy import", "delaying the analytics dashboard", "q three", "action items", "priya", "launch email", "release notes", "carlos", "deprecation announcement", "legacy import", "dana", "q three planning doc", "end of next week"],
+      "must_preserve_alts": [
+        ["q three", "Q3", "q3"]
+      ],
+      "mode_hints": {"casual": "two short paragraphs (decisions + actions)", "normal": "two labeled bullet sections (Decisions: ... / Action items: ...)", "formal": "## Decisions + bullets, ## Action Items + bullets with owner-prefix"}
+    },
+
+    {
+      "id": "51_decision_short",
+      "category": "decision_rationale",
+      "length": "short",
+      "raw": "we are going with postgresql over mysql because of the json support even though mysql has better tooling",
+      "intent": "Tech choice with a primary reason and an acknowledged tradeoff.",
+      "must_preserve": ["postgresql", "mysql", "json support", "better tooling"],
+      "must_preserve_alts": [
+        ["postgresql", "PostgreSQL", "Postgres"],
+        ["mysql", "MySQL"],
+        ["json support", "JSON support"]
+      ],
+      "mode_hints": {"casual": "single sentence with the tradeoff intact", "normal": "either one tight sentence or two short sentences", "formal": "two sentences: decision + tradeoff acknowledgment"}
+    },
+    {
+      "id": "52_decision_medium",
+      "category": "decision_rationale",
+      "length": "medium",
+      "raw": "so the decision on the cleanup architecture is we are going with a two stage pipeline the deterministic preprocessor first then the llm the reasons are first it lets us strip fillers without spending llm tokens second it lets the llm prompt focus on register lift instead of mechanical cleanup and third it gives us a cheap fallback if the llm is unavailable the tradeoff is two stages means two places to maintain and slightly more state in the database but we think that's worth it",
+      "intent": "Architecture decision with three numbered reasons and an explicit tradeoff acknowledgment.",
+      "must_preserve": ["cleanup architecture", "two stage pipeline", "deterministic preprocessor", "llm", "strip fillers", "llm tokens", "register lift", "mechanical cleanup", "cheap fallback", "llm is unavailable", "tradeoff", "two places to maintain", "more state in the database", "worth it"],
+      "must_preserve_alts": [
+        ["two stage pipeline", "two-stage pipeline", "2-stage pipeline"],
+        ["llm tokens", "LLM tokens"],
+        ["llm is unavailable", "LLM is unavailable", "the LLM is unavailable"]
+      ],
+      "mode_hints": {"casual": "prose with the tradeoff as a closing sentence", "normal": "decision sentence + bulleted reasons + a 'Tradeoff:' closing line", "formal": "## Decision + ## Rationale (numbered) + ## Tradeoffs"}
+    }
+  ]
+}

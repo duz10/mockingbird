@@ -11,8 +11,7 @@ use rusqlite::Connection;
 use tauri::State;
 
 use crate::commands::types::{
-    InsightsSnapshot, InsightsToday, LatencyBreakdown, LearningSummary,
-    ModeMixEntry, TopAppEntry,
+    InsightsSnapshot, InsightsToday, LatencyBreakdown, LearningSummary, ModeMixEntry, TopAppEntry,
 };
 use crate::commands::{into_err, lock_db, AppStateHandle};
 
@@ -22,9 +21,7 @@ use crate::commands::{into_err, lock_db, AppStateHandle};
 const TYPING_WPM: f64 = 40.0;
 
 #[tauri::command]
-pub fn insights_snapshot(
-    db: State<'_, AppStateHandle>,
-) -> Result<InsightsSnapshot, String> {
+pub fn insights_snapshot(db: State<'_, AppStateHandle>) -> Result<InsightsSnapshot, String> {
     let conn = lock_db(&db)?;
 
     let today = today_block(&conn).map_err(into_err)?;
@@ -221,8 +218,8 @@ fn learning_summary(conn: &Connection) -> rusqlite::Result<LearningSummary> {
         .unwrap_or(0);
     // Committed streak = number of most-recent runs with rolled_back=0.
     let mut committed_streak = 0_i64;
-    let mut stmt = conn
-        .prepare("SELECT rolled_back FROM learning_runs ORDER BY id DESC LIMIT 30")?;
+    let mut stmt =
+        conn.prepare("SELECT rolled_back FROM learning_runs ORDER BY id DESC LIMIT 30")?;
     let rows = stmt.query_map([], |r| r.get::<_, i64>(0))?;
     for r in rows {
         if r? == 0 {
@@ -268,7 +265,7 @@ mod tests {
     fn time_saved_estimate_matches_wpm() {
         // 40 words @ 40 wpm = 1 minute = 60000 ms.
         let ms = estimate_time_saved_ms(40);
-        assert!(ms >= 59_000 && ms <= 61_000, "got {ms}");
+        assert!((59_000..=61_000).contains(&ms), "got {ms}");
     }
 
     #[test]
