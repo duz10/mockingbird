@@ -12,22 +12,28 @@
 >   confirm with the human before touching anything.
 > **LATERAL EPICS DONE:** ADR 0022 (three-mode pipeline, **Accepted**
 >   2026-05-18 via empirical eval); ADR 0023 (Design Language v1, all 6
->   waves sealed 2026-05-17, mb-36q); **ADR 0024 (empirical mode tuning,
->   Accepted 2026-05-18, mb-e7s closed)**.
+>   waves sealed 2026-05-17, mb-36q); ADR 0024 (empirical mode tuning,
+>   Accepted 2026-05-18, mb-e7s closed); **ADR 0025 (optional remote
+>   ambient background — Unsplash provider, Accepted 2026-05-19,
+>   mb-biy closed)**.
 > **NEXT MACRO WORK:** `mb-xwi` – Phase 5/6/7 from PLAN §10 (Recording UX,
 >   History/Settings/About windows, polish + signing). Still ahead.
 > **NEXT P1 LATERAL:** `mb-2bi` – audio streaming + chunked Whisper
 >   (proper long-form fix). Standing P1. Required for true Wisprflow-
 >   parity latency on normal/formal modes per ADR 0024 acceptance.
-> **IN-FLIGHT THIS SESSION:** Unsplash photo background feature
->   shipped + readability polish landed (mb-biy, closed). Compliance
->   audit + dev creds + smoketest in
->   `docs/cleanup/unsplash-background-ship.md`. Two non-obvious
->   findings logged in LESSONS (2026-05-19): the `data-photo-bg`
->   token-override pattern for swapping glass tints without per-
->   component churn, and the stacking-context gotcha where in-flow
->   page chrome silently rendered BENEATH a `position: fixed;
->   z-index: 0` photo layer. ADR 0024 epic mb-e7s remains sealed.
+> **IN-FLIGHT THIS SESSION:** *(none — Unsplash photo background
+>   lateral-epic sealed: mb-biy closed, shipped in 24bb600, release
+>   exe rebuilt + verified. ADR 0025 charters the optional-remote-
+>   ambient-background decision. Three discretionary follow-ups
+>   filed as P3 bd issues: mb-eza (DPAPI migration for the API
+>   key), mb-ax9 (brand-glyph review), mb-yxh (ESLint v9 config
+>   migration — pre-existing, unrelated). Full ship + compliance
+>   log at `docs/cleanup/unsplash-background-ship.md`. Four
+>   LESSONS entries dated 2026-05-19 cover the design-system
+>   token-override pattern, the z-index:0 stacking-context trap,
+>   the workspace-root `target/` dir gotcha, and the Tauri
+>   release-binary asset-compression grep gotcha. ADR 0024 epic
+>   mb-e7s remains sealed.)*
 > **HOW TO RESUME:** `/agent code-puppy` → re-read this block → `bd ready`
 >   for the unblocked queue → start. If your prompt conflicts with anything
 >   above, STOP and ask before doing tool calls.

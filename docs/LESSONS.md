@@ -14,6 +14,58 @@ Format:
 
 ---
 
+## 2026-05-19 [unsplash-bg / release-build] Tauri release exe lives at WORKSPACE-ROOT `target/release/`, not `src-tauri/target/release/`
+
+- **Context:** Post-ship-build verification — went to `src-tauri/
+  target/release/mockingbird.exe` to spot-check the binary. Path
+  did not exist. Build had clearly succeeded (cargo printed
+  `Finished release profile [optimized] target(s) in 5m 18s`).
+  Spent a minute confused about where the artifact went.
+- **Finding:** The repo has a **Cargo workspace** rooted at the
+  repo root, with `src-tauri/` as one of its members. Workspace
+  builds drop artifacts at the WORKSPACE-ROOT `target/`, NOT at
+  the member's `target/`. So the actual exe path is:
+  `target\release\mockingbird.exe` (45.7 MB at ship), not
+  `src-tauri\target\release\...`. Same for `target\debug\`.
+- **Action:** Update any script / doc / muscle-memory that
+  assumes `src-tauri/target/`. `scripts/run-mockingbird.ps1`
+  already uses the workspace path correctly (it found the exe);
+  it was just my assumption that was wrong. For future ad-hoc
+  verification: `Get-ChildItem -Recurse -Filter mockingbird*.exe`
+  from the repo root is the fastest sanity-check.
+
+---
+
+## 2026-05-19 [unsplash-bg / release-build] Tauri compresses embedded UI assets in release builds — ASCII grep won't find JS content in the exe
+
+- **Context:** Verifying that a release-build rebuild actually
+  embedded the new UI bundle. Tried `[Encoding]::ASCII.GetString(
+  ReadAllBytes(exe))` then `.IndexOf('utm_source=mockingbird')`,
+  `.IndexOf('Photo by')`, `.IndexOf('settings.general.bg')` —
+  every literal string from the source missed. Briefly panicked
+  that the bundle wasn't embedded.
+- **Finding:** Tauri's release builds **compress** the embedded
+  UI assets (the contents of `ui/dist/`) — gzip or brotli, picked
+  by the bundler. So the JS/CSS contents inside the exe are
+  compressed binary blobs that ASCII grep cannot see. What DOES
+  survive as ASCII in the binary:
+  - **Asset filenames** (resource-map keys) — e.g.
+    `main-9NbkO0yY.js`, `main-Ckt336ix.css`. These uniquely
+    identify which vite build produced them.
+  - **CSP strings** and other `tauri.conf.json` config — these
+    are stored as plaintext config, not compressed.
+  - **Rust source string literals** — anything inlined from
+    `.rs` via `tracing!`, `format!`, etc.
+- **Action:** To verify a release exe has the right UI bundle,
+  grep for the hashed asset filenames + recent CSP additions —
+  NOT for source literals from `.tsx`/`.ts`/`.css`. The current
+  hash from `npm run build`'s last output line is what you want
+  to find. If those filenames + your latest CSP edits are in the
+  exe, the bundle is current. Trying to grep for `'Photo by'`
+  etc. is a false-negative trap.
+
+---
+
 ## 2026-05-19 [unsplash-bg] glass token override beats per-component rewrites for photo-vs-ambient modes
 
 - **Context:** Landed an optional Unsplash photo background. The
