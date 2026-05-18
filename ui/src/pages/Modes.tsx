@@ -230,6 +230,19 @@ export function ModesPage() {
   );
 }
 
+/**
+ * Renders the per-mode description paragraph, or nothing if the
+ * i18n key is unresolved (i.e. `t()` returned the key itself, which
+ * means no translation exists yet — better to render nothing than
+ * the raw "modes.desc.foo" string).
+ */
+function ModeDescription({ slug }: { slug: string }) {
+  const key = `modes.desc.${slug}`;
+  const text = t(key);
+  if (text === key) return null;
+  return <p className={styles.description}>{text}</p>;
+}
+
 type CardVariant = "transcription" | "command";
 
 interface ModeCardProps {
@@ -379,6 +392,15 @@ function ModeCard({
           )}
         </div>
       </header>
+
+      {/*
+        Per-mode description — short copy explaining what each mode is
+        FOR (vs the field grid below, which is HOW it's configured).
+        Pulled from i18n keyed by slug so future locale work is trivial.
+        If a slug ever lands without a description, `t()` returns the
+        key itself — visible in dev, harmless in prod.
+      */}
+      <ModeDescription slug={mode.slug} />
 
       <div className={styles.fields}>
         <div className={styles.field}>

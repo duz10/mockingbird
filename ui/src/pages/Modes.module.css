@@ -134,6 +134,16 @@
   gap: var(--s-3);
 }
 
+/* Per-mode description paragraph, sits between header and field grid.
+ * Muted body copy — should read as supporting context, not a label. */
+.description {
+  margin: 0;
+  font: var(--type-sm);
+  color: var(--on-surf-muted);
+  line-height: 1.5;
+  max-width: 72ch;
+}
+
 .hotkeyBadge {
   font-family: var(--font-mono);
   font-size: 12px;
