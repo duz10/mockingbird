@@ -44,8 +44,32 @@ use dictation::runtime::{default_normal_config, DictationRuntime};
 /// hook, spawns the dictation orchestrator thread, and registers
 /// every Tauri command the UI uses (see `commands::register`).
 pub fn run() {
-    let builder =
-        tauri::Builder::default().setup(|app| -> Result<(), Box<dyn std::error::Error>> {
+    let builder = tauri::Builder::default()
+        // Close-to-tray for the main window: clicking X should hide
+        // the window, not destroy it + exit the app. The tray icon
+        // (and tray menu "Open History") re-shows it. The recording
+        // overlay window keeps the default destroy-on-close behavior
+        // — it's a transient overlay, not a primary surface.
+        //
+        // Without this handler, X-close kills the whole process, the
+        // tray icon zombies until Windows GCs it, and the user has to
+        // re-launch the exe to use the app again. Reported as a UX
+        // bug post phase-mc kickoff (2026-05-18).
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    tracing::info!(
+                        window = %window.label(),
+                        "close requested on main window — hiding to tray"
+                    );
+                    api.prevent_close();
+                    if let Err(e) = window.hide() {
+                        tracing::warn!(error = ?e, "failed to hide main window on close");
+                    }
+                }
+            }
+        })
+        .setup(|app| -> Result<(), Box<dyn std::error::Error>> {
             let app_data = app.path().app_data_dir().map_err(box_err)?;
             std::fs::create_dir_all(&app_data)?;
 

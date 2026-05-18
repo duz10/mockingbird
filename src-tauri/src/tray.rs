@@ -4,6 +4,16 @@
 //! actually exits. Phase 5 (recording lifecycle) swaps in the real
 //! handlers for Open History / Pause / Settings, and adds icon-state
 //! transitions tied to recording state.
+//!
+//! IMPORTANT: the tray is owned entirely here — do NOT also declare
+//! a `trayIcon` block in `tauri.conf.json`. Doing so spawns a second,
+//! handler-less tray icon with the same id (Windows then renders
+//! TWO tray entries: one from config with the icon but no clicks,
+//! one from Rust with handlers but no icon). The icon for THIS tray
+//! is pulled from `app.default_window_icon()`, which Tauri loads from
+//! the `bundle.icon` array in tauri.conf.json — so the icon source
+//! of truth stays one file (the .ico/.png bundle), but only one
+//! tray gets created.
 
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
@@ -12,6 +22,11 @@ use tauri::{
 };
 
 use crate::error::{AppError, AppResult};
+
+/// Tooltip text shown when hovering the tray icon. Matches productName
+/// in tauri.conf.json on purpose — if the user has 30 tray icons,
+/// "Mockingbird" is what tells them which one is us.
+const TRAY_TOOLTIP: &str = "Mockingbird";
 
 /// Label of the main window declared in `tauri.conf.json`.
 /// Kept as a const so the tray wiring stays in one file.
@@ -39,7 +54,27 @@ pub fn register(app: &mut App) -> AppResult<()> {
         .build()
         .map_err(map_tauri)?;
 
+    // Pull the icon from the same bundle Tauri loads for the window
+    // (`bundle.icon` in tauri.conf.json — currently the MockingbirdMark
+    // mark, see ADR 0023 + assets/icons/mockingbird.svg). Single source
+    // of truth for both window + tray icons.
+    let icon = app
+        .default_window_icon()
+        .ok_or_else(|| {
+            AppError::Other(
+                "default window icon missing — check `bundle.icon` in tauri.conf.json"
+                    .into(),
+            )
+        })?
+        .clone();
+
     let _tray = TrayIconBuilder::with_id("main-tray")
+        .icon(icon)
+        .tooltip(TRAY_TOOLTIP)
+        // Left-click should toggle the window, not pop the menu —
+        // matches the menuOnLeftClick=false convention from the old
+        // config block and the Windows tray UX users expect.
+        .show_menu_on_left_click(false)
         .menu(&menu)
         .on_menu_event(|app, event| handle_menu_event(app, event.id().as_ref()))
         .on_tray_icon_event(|tray, event| {

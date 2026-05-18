@@ -48,13 +48,6 @@
     ],
     "security": {
       "csp": "default-src 'self'; connect-src 'self' http://localhost:11434 https://api.unsplash.com; img-src 'self' data: https://images.unsplash.com; style-src 'self' 'unsafe-inline'"
-    },
-    "trayIcon": {
-      "id": "main-tray",
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": false,
-      "menuOnLeftClick": false,
-      "tooltip": "Mockingbird"
     }
   },
   "bundle": {
