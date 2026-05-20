@@ -174,3 +174,98 @@ export interface RecordingState {
   /** Optional message — typically only set during error phase. */
   message?: string;
 }
+
+/* ------------------------------------------------------------------ */
+/* Meeting capture — Phase MC. Wire shapes mirror Rust serde derives  */
+/* in `src-tauri/src/meetings/` and `src-tauri/src/commands/meetings.rs`. */
+/* ------------------------------------------------------------------ */
+
+/** Persisted status of a meeting row (matches `MeetingStatus::as_db_str`). */
+export type MeetingStatus =
+  | "complete"
+  | "partial"
+  | "demoted"
+  | "interrupted"
+  | "failed";
+
+/** Which audio source(s) the meeting captured. */
+export type MeetingSourceKind = "mic" | "system" | "both";
+
+/** Result of `meeting_probe_sources`. Available BEFORE a meeting starts. */
+export interface MeetingSourceProbe {
+  micAvailable: boolean;
+  systemAvailable: boolean;
+}
+
+/** History-list row. Narrow on purpose — no transcript body. */
+export interface MeetingSummary {
+  uuid: string;
+  title: string | null;
+  startedAt: string;
+  totalDurationMs: number;
+  status: MeetingStatus;
+  source: MeetingSourceKind;
+}
+
+/**
+ * Detail view of one meeting. Mirror of `meetings::repo::MeetingDetail`.
+ * Any of the formatted-* fields can be null depending on `source` +
+ * `status` (e.g. system-only meeting has `formattedMic == null`).
+ */
+export interface MeetingDetail {
+  uuid: string;
+  title: string | null;
+  startedAt: string;
+  endedAt: string;
+  status: MeetingStatus;
+  errorMessage: string | null;
+  source: MeetingSourceKind;
+  totalDurationMs: number;
+  micDurationMs: number | null;
+  sysDurationMs: number | null;
+  formatterVersion: string;
+  whisperModelId: string;
+  formattedMic: string | null;
+  formattedSys: string | null;
+  formattedMerged: string | null;
+}
+
+/** One FTS5 hit returned by `search_meeting_transcripts`. */
+export interface MeetingMatch {
+  uuid: string;
+  title: string | null;
+  startedAt: string;
+  /** FTS5 snippet — has `<mark>...</mark>` around hits. */
+  snippet: string;
+  /** Which channel matched: `"mic"` | `"system"` | `"merged"`. */
+  channel: string;
+}
+
+/** Built-in LLM-pass prompts. Custom prompts ride as `{ custom: body }`. */
+export type BuiltInPromptId = "summary" | "action_items" | "cleaner_punctuation";
+
+/** Wire shape for `meeting_run_llm_pass.promptId`. */
+export type LlmPassPromptArg = BuiltInPromptId | { custom: string };
+
+/** Result of one LLM-pass run. Output is NOT persisted to DB. */
+export interface LlmPassResult {
+  /** Client-side handle — pass back in `include_llm_pass` for export. */
+  id: string;
+  text: string;
+  latencyMs: number;
+}
+
+/** Payload of the `meeting:state` event emitted by the Rust runtime. */
+export interface MeetingStateEvent {
+  /** `"started" | "transcribing" | "formatting" | "done" | "error" | "warn-already-running" | …` */
+  state: string;
+  uuid: string | null;
+  /** DB-form source string (`"mic" | "system" | "both"`), nullable on warn events. */
+  source: MeetingSourceKind | null;
+}
+
+/** Payload of `meetings:session-saved` — fires after the DB row commits. */
+export interface MeetingSessionSavedEvent {
+  uuid: string;
+  sessionRowid: number;
+}

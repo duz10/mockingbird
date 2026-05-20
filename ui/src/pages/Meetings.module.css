@@ -1,0 +1,415 @@
+/* Meetings page — two-pane layout like History.
+ *   left:  start/stop controls + search + meetings list
+ *   right: selected meeting detail (transcript tabs + actions)
+ *
+ * Most layout primitives are shared with History.module.css; styles
+ * defined here are meeting-specific (record-button states, source
+ * picker, transcript tabs, LLM-pass panel). DRY says: rather than
+ * copy-paste the History CSS we re-use what we can via global tokens
+ * and add the meeting-specific surfaces here.
+ *
+ * 600-line hard cap not even close to being a concern for this file. */
+
+.shell {
+  display: grid;
+  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+  gap: var(--s-4);
+  height: calc(100vh - 140px);
+  min-height: 480px;
+}
+
+@media (max-width: 980px) {
+  .shell {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+}
+
+.leftPane,
+.rightPane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  min-height: 0;
+}
+.rightPane {
+  overflow-y: auto;
+}
+
+/* ============================================================ */
+/* Record bar — sits above the search box. Holds source picker  */
+/* + the big primary start/stop button. Visually loud on        */
+/* purpose; it's the page's primary call-to-action.             */
+/* ============================================================ */
+
+.recordBar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  background: var(--surf-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+}
+
+.recordRow {
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+}
+
+.sourceSelect {
+  flex: 1;
+  padding: var(--s-2);
+  background: var(--surf-3);
+  color: var(--on-surf);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  font: var(--type-sm);
+  font-family: inherit;
+}
+.sourceSelect:focus {
+  outline: 2px solid var(--mode-normal);
+  outline-offset: 1px;
+  border-color: var(--mode-normal);
+}
+.sourceSelect:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.recordButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-4);
+  background: var(--mode-normal);
+  color: var(--on-mode);
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  font: var(--type-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out),
+              transform var(--dur-1) var(--ease-out);
+}
+.recordButton:hover { transform: translateY(-1px); }
+.recordButton:active { transform: translateY(0); }
+.recordButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.recordButtonStop {
+  background: var(--status-error, oklch(0.62 0.21 28));
+}
+
+/* Pulsing dot when recording. Honors reduced-motion (the @media
+ * rule disables the animation; the dot stays solid red, which is
+ * still clearly distinct from "idle"). */
+.recordDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: pulse 1.4s var(--ease-out) infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(1.18); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .recordDot { animation: none; }
+}
+
+.recordStatus {
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================ */
+/* Search input (mirrors History; copied because cross-page     */
+/* CSS imports are friction).                                   */
+/* ============================================================ */
+
+.searchBox {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.searchInput {
+  width: 100%;
+  padding: var(--s-2) var(--s-3) var(--s-2) calc(var(--s-3) + 18px);
+  background: var(--surf-2);
+  color: var(--on-surf);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  font: var(--type-sm);
+  font-family: inherit;
+}
+.searchInput:focus {
+  outline: 2px solid var(--mode-normal);
+  outline-offset: 1px;
+  border-color: var(--mode-normal);
+}
+.searchIcon {
+  position: absolute;
+  left: var(--s-2);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--on-surf-faint);
+  pointer-events: none;
+}
+
+/* ============================================================ */
+/* Meeting list rows                                            */
+/* ============================================================ */
+
+.list {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--surf-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: var(--s-3);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  background: transparent;
+  transition: background var(--dur-1) var(--ease-out);
+}
+.row:hover { background: var(--surf-3); }
+.row:focus-visible {
+  outline: 2px solid var(--mode-normal);
+  outline-offset: -2px;
+}
+.rowActive {
+  background: oklch(from var(--mode-normal) l c h / 0.18);
+}
+.rowActive:hover {
+  background: oklch(from var(--mode-normal) l c h / 0.24);
+}
+.row:last-child { border-bottom: none; }
+
+.rowHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s-2);
+}
+.rowTitle {
+  font: var(--type-sm);
+  font-weight: 600;
+  color: var(--on-surf);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rowTime {
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.rowMeta {
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+  font: var(--type-xs);
+  color: var(--on-surf-faint);
+}
+
+.snippet {
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  margin-top: var(--s-1);
+  /* FTS5 inserts <mark>...</mark>; let the browser style it. */
+}
+.snippet mark {
+  background: oklch(from var(--mode-normal) l c h / 0.30);
+  color: var(--on-surf);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* ============================================================ */
+/* Detail pane                                                  */
+/* ============================================================ */
+
+.detailHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+
+.detailTitle {
+  font: var(--type-xl);
+  font-weight: 600;
+  color: var(--on-surf);
+  margin: 0;
+}
+
+.detailActions {
+  display: flex;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+
+.metaGrid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--s-2) var(--s-4);
+  font: var(--type-sm);
+}
+.metaKey { color: var(--on-surf-muted); }
+.metaVal {
+  color: var(--on-surf);
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+
+/* Tabbed transcript view */
+.tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  padding: var(--s-2) var(--s-3);
+  background: transparent;
+  color: var(--on-surf-muted);
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font: var(--type-sm);
+  font-family: inherit;
+  transition: color var(--dur-1) var(--ease-out),
+              border-color var(--dur-1) var(--ease-out);
+}
+.tab:hover { color: var(--on-surf); }
+.tab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.tabActive {
+  color: var(--on-surf);
+  border-bottom-color: var(--mode-normal);
+}
+
+.transcript {
+  white-space: pre-wrap;
+  font: var(--type-md);
+  color: var(--on-surf);
+  background: var(--surf-3);
+  border-radius: var(--r-2);
+  padding: var(--s-3);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* ============================================================ */
+/* LLM-pass panel                                               */
+/* ============================================================ */
+
+.llmPanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  background: var(--surf-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+}
+
+.llmRow {
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.llmPromptSelect,
+.llmCustomInput {
+  flex: 1;
+  min-width: 200px;
+  padding: var(--s-2);
+  background: var(--surf-3);
+  color: var(--on-surf);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  font: var(--type-sm);
+  font-family: inherit;
+}
+.llmCustomInput { min-width: 280px; }
+
+.llmOutput {
+  white-space: pre-wrap;
+  font: var(--type-sm);
+  color: var(--on-surf);
+  background: var(--surf-3);
+  border-radius: var(--r-2);
+  padding: var(--s-3);
+  line-height: 1.55;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.llmIncludeRow {
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+}
+
+.llmInvariant {
+  font: var(--type-xs);
+  color: var(--on-surf-faint);
+  font-style: italic;
+  border-left: 2px solid var(--border);
+  padding-left: var(--s-2);
+}
+
+/* ============================================================ */
+/* Toast                                                        */
+/* ============================================================ */
+
+.toast {
+  position: fixed;
+  bottom: var(--s-5);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--s-2) var(--s-4);
+  background: var(--surf-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  font: var(--type-sm);
+  color: var(--on-surf);
+  box-shadow: var(--shadow-2);
+  z-index: 100;
+}
+
+/* Photo-background mode glass treatment, mirrors History. */
+:root[data-photo-bg] .leftPane {
+  background: var(--glass-tint-regular);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--shape-lg);
+  padding: var(--space-4);
+}

@@ -10,6 +10,7 @@ import "./design/global.css";
 import { App } from "./App";
 import { InsightsPage } from "./pages/Insights";
 import { HistoryPage } from "./pages/History";
+import { MeetingsPage } from "./pages/Meetings";
 import { DictionaryPage } from "./pages/Dictionary";
 import { ModesPage } from "./pages/Modes";
 import { SettingsPage } from "./pages/Settings";
@@ -27,6 +28,8 @@ createRoot(container).render(
           <Route path="/insights" element={<InsightsPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/history/:id" element={<HistoryPage />} />
+          <Route path="/meetings" element={<MeetingsPage />} />
+          <Route path="/meetings/:uuid" element={<MeetingsPage />} />
           <Route path="/dictionary" element={<DictionaryPage />} />
           <Route path="/modes" element={<ModesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
