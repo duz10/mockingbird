@@ -53,7 +53,12 @@ use crate::meetings::chunker::{ChunkWritten, ChunkerConfig, MeetingChunker};
 ///
 /// Persisted form matches the `meeting_sessions.source` column and the
 /// `SettingKey::MeetingDefaultSource` setting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// `Serialize`/`Deserialize` flow through the Tauri IPC boundary as
+/// lowercase strings (matches the DB column form so the wire and the
+/// storage agree).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum MeetingSource {
     Mic,
     System,

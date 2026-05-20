@@ -59,6 +59,7 @@
 pub mod activation;
 pub mod capture;
 pub mod chunker;
+pub mod clipboard;
 pub mod export;
 pub mod filler_words;
 pub mod formatter;
@@ -67,6 +68,7 @@ pub mod llm_pass;
 pub mod long_form_stt;
 pub mod overlay;
 pub mod persist;
+pub mod repo;
 pub mod runtime;
 
 #[cfg(target_os = "windows")]
@@ -78,4 +80,5 @@ pub mod loopback_windows;
 pub use capture::MeetingSource;
 pub use long_form_stt::TimedSegment;
 pub use persist::MeetingStatus;
+pub use repo::{MeetingDetail, MeetingMatch, MeetingSummary};
 pub use runtime::MeetingCaptureRuntime;

@@ -15,7 +15,12 @@ use super::capture::MeetingSource;
 use super::long_form_stt::TimedSegment;
 
 /// Persisted meeting status. Mirrors `meeting_sessions.status` column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `Serialize`/`Deserialize` flow through the Tauri IPC boundary as
+/// lowercase strings (matches the DB column form so the wire and the
+/// storage agree).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum MeetingStatus {
     Complete,
     /// One channel transcribed, the other failed. Partial-success.
