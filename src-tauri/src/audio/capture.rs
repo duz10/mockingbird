@@ -65,9 +65,43 @@ pub(super) type SampleProducer = <HeapRb<i16> as Split>::Prod;
 #[cfg(target_os = "windows")]
 type SampleConsumer = <HeapRb<i16> as Split>::Cons;
 
+/// Which endpoint a [`CpalCapture`] grabs at `start()`.
+///
+/// Phase 2 (dictation) only ever needs `Input`. Phase MC (ADR 0031)
+/// adds `Loopback`, which targets the default RENDER endpoint and
+/// relies on cpal 0.15's WASAPI backend transparently setting
+/// `AUDCLNT_STREAMFLAGS_LOOPBACK` when `build_input_stream` is
+/// invoked on a device with `data_flow() == eRender`.
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeviceSource {
+    Input,
+    Loopback,
+}
+
+#[cfg(target_os = "windows")]
+impl DeviceSource {
+    fn resolve(self, host: &Host) -> Option<Device> {
+        match self {
+            DeviceSource::Input => host.default_input_device(),
+            DeviceSource::Loopback => host.default_output_device(),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            DeviceSource::Input => "input",
+            DeviceSource::Loopback => "loopback",
+        }
+    }
+}
+
 #[cfg(target_os = "windows")]
 pub struct CpalCapture {
     host: Host,
+    /// Which endpoint to grab on `start()`. Set at construction; never
+    /// mutated after.
+    source: DeviceSource,
     /// Currently-active stream. None when stopped or pre-start.
     stream: Option<Stream>,
     /// Consumer half of the *current* ring.
@@ -93,6 +127,22 @@ pub struct CpalCapture {
 #[cfg(target_os = "windows")]
 impl CpalCapture {
     pub fn new() -> AppResult<Self> {
+        Self::with_source(DeviceSource::Input)
+    }
+
+    /// Phase MC (ADR 0031). Construct a capture handle that, on
+    /// `start()`, opens the default RENDER endpoint in loopback mode.
+    ///
+    /// Implementation note: cpal 0.15's WASAPI backend transparently
+    /// enables loopback recording when `build_input_stream` is invoked
+    /// on a device whose `data_flow() == eRender`. No explicit flag
+    /// plumbing is required at the cpal API level. See ADR 0031 for
+    /// the cpal source-line evidence.
+    pub fn new_loopback() -> AppResult<Self> {
+        Self::with_source(DeviceSource::Loopback)
+    }
+
+    fn with_source(source: DeviceSource) -> AppResult<Self> {
         let host = cpal::default_host();
         // Pre-start consumer: tied to an orphan ring that has no
         // producer. drain() on this returns 0 cleanly. Replaced on
@@ -101,6 +151,7 @@ impl CpalCapture {
         let (_orphan_producer, consumer) = rb.split();
         Ok(Self {
             host,
+            source,
             stream: None,
             consumer,
             current_device_name: None,
@@ -214,6 +265,7 @@ impl CpalCapture {
     fn spawn_watcher(&self, initial_name: Option<String>) -> JoinHandle<()> {
         let alive = self.watcher_alive.clone();
         let changed = self.device_changed.clone();
+        let source = self.source;
         std::thread::spawn(move || {
             let host = cpal::default_host();
             let mut current = initial_name;
@@ -222,15 +274,15 @@ impl CpalCapture {
                 if !alive.load(Ordering::Relaxed) {
                     break;
                 }
-                let next: Option<String> = host
-                    .default_input_device()
-                    .and_then(|d: Device| d.name().ok());
+                let next: Option<String> =
+                    source.resolve(&host).and_then(|d: Device| d.name().ok());
                 if next != current {
                     tracing::info!(
                         target: "audio",
+                        kind = source.label(),
                         old = ?current,
                         new = ?next,
-                        "default input device changed"
+                        "default device changed"
                     );
                     changed.store(true, Ordering::Relaxed);
                     current = next;
@@ -247,9 +299,9 @@ impl super::AudioCapture for CpalCapture {
             return Ok(());
         }
         let device = self
-            .host
-            .default_input_device()
-            .ok_or_else(|| AppError::Audio("no default input device".into()))?;
+            .source
+            .resolve(&self.host)
+            .ok_or_else(|| AppError::Audio(format!("no default {} device", self.source.label())))?;
         let device_name = device.name().ok();
 
         // Fresh ring per session — supports restart-after-stop, which
@@ -273,7 +325,12 @@ impl super::AudioCapture for CpalCapture {
         self.device_changed.store(false, Ordering::Relaxed);
         self.watcher_handle = Some(self.spawn_watcher(device_name.clone()));
 
-        tracing::info!(target: "audio", ?device_name, "capture started");
+        tracing::info!(
+            target: "audio",
+            kind = self.source.label(),
+            ?device_name,
+            "capture started"
+        );
         Ok(())
     }
 
