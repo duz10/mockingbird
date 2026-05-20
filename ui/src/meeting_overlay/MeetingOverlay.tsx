@@ -47,6 +47,14 @@ export function MeetingOverlay() {
   const [busy, setBusy] = useState<"starting" | "stopping" | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const recordStartRef = useRef<number | null>(null);
+  // a11y: the overlay opens as a non-focused window (focus:false in
+  // tauri.conf.json so it doesn't steal focus from the user's typing
+  // target). The window CAN'T receive OS focus on open, but it CAN
+  // route a programmatic focus() inside the webview — which is what
+  // a screen reader / keyboard-only user needs to start tabbing through
+  // the controls. Focus the source <select> on mount; the overlay is
+  // tiny enough that the Start button is two tab-stops away.
+  const sourceSelectRef = useRef<HTMLSelectElement | null>(null);
 
   /* -------- initial probe ----------------------------------------- */
 
@@ -61,6 +69,20 @@ export function MeetingOverlay() {
       }
     })();
   }, []);
+
+  /* -------- a11y: focus source picker on CHOOSE mount ------------- */
+
+  useEffect(() => {
+    if (mode !== "choose") return;
+    // Defer one tick so the ref attaches after React flushes the
+    // CHOOSE-mode tree. Without this, the ref can be null on the
+    // first render when transitioning from RECORDING → CHOOSE (the
+    // overlay window reopens to record another meeting).
+    const handle = window.setTimeout(() => {
+      sourceSelectRef.current?.focus();
+    }, 0);
+    return () => window.clearTimeout(handle);
+  }, [mode]);
 
   /* -------- Tauri event subscriptions ----------------------------- */
 
@@ -207,6 +229,7 @@ export function MeetingOverlay() {
         <span className={styles.title}>{t("meetingOverlay.title")}</span>
 
         <select
+          ref={sourceSelectRef}
           className={styles.select}
           value={source}
           onChange={(e) => setSource(e.target.value as MeetingSourceKind)}

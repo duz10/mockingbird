@@ -269,3 +269,13 @@ export interface MeetingSessionSavedEvent {
   uuid: string;
   sessionRowid: number;
 }
+
+/** Payload of `meeting:progress` — fires while the long-form STT
+ *  driver walks chunks. One event per chunk per channel; `chunksTotal`
+ *  is `null` until the capture-side `Receiver` closes (= no more
+ *  chunks coming), then becomes a fixed number. */
+export interface MeetingProgressEvent {
+  channel: "mic" | "system";
+  chunksDone: number;
+  chunksTotal: number | null;
+}

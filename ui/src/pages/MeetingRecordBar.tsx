@@ -26,6 +26,13 @@ export interface MeetingRecordBarProps {
   recordingPhase: string | null;
   startingOrStopping: "starting" | "stopping" | null;
   elapsedSec: number;
+  /** Per-channel chunk progress from `meeting:progress`. Optional;
+   *  when present + the phase is `"transcribing"`, render an inline
+   *  "transcribing N/M" chip. */
+  progress?: {
+    mic?: { done: number; total: number | null };
+    system?: { done: number; total: number | null };
+  };
   onStart: () => void;
   onStop: () => void;
 }
@@ -38,6 +45,7 @@ export function MeetingRecordBar({
   recordingPhase,
   startingOrStopping,
   elapsedSec,
+  progress,
   onStart,
   onStop,
 }: MeetingRecordBarProps) {
@@ -113,9 +121,56 @@ export function MeetingRecordBar({
           {recordingPhase && recordingPhase !== "started" ? (
             <span>· {recordingPhase}</span>
           ) : null}
+          {recordingPhase === "transcribing" && progress
+            ? renderProgressChip(progress)
+            : null}
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** Pure helper for the progress chip’s `"done/total"` text.
+ *
+ *  Per the master plan §Wave 5: format `"N/M"`, where `M` is `"?"`
+ *  while ANY channel's `chunksTotal` is null (capture-side sender
+ *  still open) and a concrete number once every channel reports its
+ *  total. When both channels are active we sum across them so the
+ *  chip stays compact.
+ *
+ *  Returns `null` when no channel has reported yet — the parent
+ *  uses that to decide whether to render the chip at all.
+ *
+ *  Exported so the vitest harness can hit the math directly without
+ *  having to spin up the React component (we don't have @testing-
+ *  library installed yet — deferred to Wave 5.5 a11y / Wave 6). */
+export function summarizeProgress(progress: {
+  mic?: { done: number; total: number | null };
+  system?: { done: number; total: number | null };
+}): { done: number; total: string } | null {
+  const channels = [progress.mic, progress.system].filter(
+    (c): c is { done: number; total: number | null } => c !== undefined,
+  );
+  if (channels.length === 0) return null;
+
+  const done = channels.reduce((sum, c) => sum + c.done, 0);
+  const anyUnknown = channels.some((c) => c.total === null);
+  const total = anyUnknown
+    ? "?"
+    : channels.reduce((sum, c) => sum + (c.total ?? 0), 0).toString();
+  return { done, total };
+}
+
+function renderProgressChip(progress: {
+  mic?: { done: number; total: number | null };
+  system?: { done: number; total: number | null };
+}): JSX.Element | null {
+  const summary = summarizeProgress(progress);
+  if (!summary) return null;
+  return (
+    <span>
+      · transcribing {summary.done}/{summary.total}
+    </span>
   );
 }
 

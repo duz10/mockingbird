@@ -42,6 +42,7 @@ import { isTauri } from "../lib/tauri";
 import type {
   MeetingDetail,
   MeetingMatch,
+  MeetingProgressEvent,
   MeetingSourceKind,
   MeetingSourceProbe,
   MeetingStateEvent,
@@ -83,6 +84,14 @@ export function MeetingsPage() {
   const [source, setSource] = useState<MeetingSourceKind>("mic");
   const [recordingUuid, setRecordingUuid] = useState<string | null>(null);
   const [recordingPhase, setRecordingPhase] = useState<string | null>(null);
+  // Per-channel chunk counters — reset on each fresh start. `null`
+  // total means the capture side hasn't closed the chunk sender yet
+  // (more chunks may still arrive), so the UI renders "4/?" until
+  // the driver's `chunks_total` flips to a concrete value.
+  const [progress, setProgress] = useState<{
+    mic?: { done: number; total: number | null };
+    system?: { done: number; total: number | null };
+  }>({});
   const [startingOrStopping, setStartingOrStopping] = useState<
     "starting" | "stopping" | null
   >(null);
@@ -147,6 +156,8 @@ export function MeetingsPage() {
           if (e.payload.state === "started" && e.payload.uuid) {
             setRecordingUuid(e.payload.uuid);
             recordStartTimeRef.current = Date.now();
+            // Fresh meeting — clear stale progress from the previous run.
+            setProgress({});
           } else if (
             e.payload.state === "done" ||
             e.payload.state === "error" ||
@@ -157,6 +168,20 @@ export function MeetingsPage() {
             setElapsedSec(0);
             setStartingOrStopping(null);
           }
+        }),
+      );
+
+      // Per-chunk progress from the long-form STT driver. Updates
+      // the record bar's status chip during the "transcribing" phase.
+      // Mirrors the per-channel ChannelProgress shape on the Rust side.
+      unlisteners.push(
+        await listen<MeetingProgressEvent>("meeting:progress", (e) => {
+          if (cancelled) return;
+          const { channel, chunksDone, chunksTotal } = e.payload;
+          setProgress((prev) => ({
+            ...prev,
+            [channel]: { done: chunksDone, total: chunksTotal },
+          }));
         }),
       );
 
@@ -403,6 +428,7 @@ export function MeetingsPage() {
             recordingPhase={recordingPhase}
             startingOrStopping={startingOrStopping}
             elapsedSec={elapsedSec}
+            progress={progress}
             onStart={handleStart}
             onStop={handleStop}
           />
