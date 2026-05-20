@@ -1,12 +1,12 @@
 # Phase MC — Meeting Capture (lateral feature epic)
 
-**Phase entry tag:** `phase-4-complete` (383+ tests, three-mode pipeline live, Ollama + Claude providers swappable; lateral epics ADR 0022/0023/0024 sealed)
+**Phase entry tag:** `phase-4-complete` (383+ tests, three-mode pipeline live, Ollama + Claude providers swappable; lateral epics ADR 0022/0023/0024 sealed). **Actual HEAD at entry:** `0ae3475` (post-`phase-4-complete`, includes lateral epics ADR 0025 "optional remote ambient background" and `mb-14l` tray/icon polish — neither touches the dictation pipeline, modes table, or migrations; both are dormant w.r.t. Phase MC scope).
 **Phase exit tag:** `phase-mc-complete` (target — adds `MeetingCapture` / `LongFormStt` / `Formatter` AppError variants, migration 011 `meeting_sessions` + `meeting_transcripts`, new `meetings/` module tree, **does not touch** the dictation state machine, modes table, or cleanup-provider trait)
 **Planner:** planning-agent (this doc)
 **Implementor:** code-puppy. **No sub-agents** required — every module is greenfield Rust + greenfield React under the existing crate/workspace; the bd-task fan-out for sub-agents was Phase 3's pattern (multi-file Win32 surgery) and doesn't apply here.
 **Estimated iterations:** 5–6
 
-> Lateral feature epic — *sibling* to the dictation pipeline, not a child. The dictation state machine, the `modes` table, the `CleanupProvider` trait, the existing `recording_window`, the hotkey hook driver, and migrations 001–010 are **sealed for this phase** (binding rule). Meeting Capture builds in parallel and reuses three primitives only: `audio::AudioCapture`, `stt::SpeechToText` (extended; see ADR 0025), and `cleanup::OllamaProvider`. Everything else is greenfield.
+> Lateral feature epic — *sibling* to the dictation pipeline, not a child. The dictation state machine, the `modes` table, the `CleanupProvider` trait, the existing `recording_window`, the hotkey hook driver, and migrations 001–010 are **sealed for this phase** (binding rule). Meeting Capture builds in parallel and reuses three primitives only: `audio::AudioCapture`, `stt::SpeechToText` (extended; see ADR 0030), and `cleanup::OllamaProvider`. Everything else is greenfield.
 
 ## Status
 
@@ -27,23 +27,23 @@ Phase MC adds a meeting-recording feature that lives alongside dictation. Trigge
 
 ## Pre-flight — ADRs authored in Wave 1
 
-### ADR 0025 — Meeting Capture is a sibling subsystem, not an extension of dictation
+### ADR 0026 — Meeting Capture is a sibling subsystem, not an extension of dictation
 
-The dictation feature is hold-to-talk, ≤300 s, three modes, one canonical "cleaned" pass that goes into the user's caret via clipboard injection. The meeting feature is push-to-start/push-to-stop, hours-long, no modes, no injection at all (transcripts live in the app, not in another window). The two pipelines share only audio capture, the Whisper STT primitive, and the Ollama HTTP client. Forcing them to share the hotkey state machine, the `modes` table, the cleanup-provider trait, or the recording-window overlay would (a) introduce conditional logic in every shared module ("is this dictation or meeting?") that makes refactors twice as expensive forever and (b) explode the dictation surface area's test matrix. ADR 0025 cements the boundary: shared primitives are `audio::AudioCapture`, `stt::SpeechToText`, and `cleanup::OllamaProvider`; everything else under `meetings/` is greenfield. Hooks `block-cross-module-coupling-meeting-dictation` (to be authored Wave 1) reject diffs that import `meetings::*` from `dictation::*` or vice versa, and that touch `hotkey/state.rs`, the `modes` table, or `cleanup/provider.rs` from inside `meetings/`.
+The dictation feature is hold-to-talk, ≤300 s, three modes, one canonical "cleaned" pass that goes into the user's caret via clipboard injection. The meeting feature is push-to-start/push-to-stop, hours-long, no modes, no injection at all (transcripts live in the app, not in another window). The two pipelines share only audio capture, the Whisper STT primitive, and the Ollama HTTP client. Forcing them to share the hotkey state machine, the `modes` table, the cleanup-provider trait, or the recording-window overlay would (a) introduce conditional logic in every shared module ("is this dictation or meeting?") that makes refactors twice as expensive forever and (b) explode the dictation surface area's test matrix. ADR 0026 cements the boundary: shared primitives are `audio::AudioCapture`, `stt::SpeechToText`, and `cleanup::OllamaProvider`; everything else under `meetings/` is greenfield. Hooks `block-cross-module-coupling-meeting-dictation` (to be authored Wave 1) reject diffs that import `meetings::*` from `dictation::*` or vice versa, and that touch `hotkey/state.rs`, the `modes` table, or `cleanup/provider.rs` from inside `meetings/`.
 
-### ADR 0026 — Double-tap activation via dedicated `WH_KEYBOARD_LL` listener (not the dictation hook)
+### ADR 0027 — Double-tap activation via dedicated `WH_KEYBOARD_LL` listener on a dedicated meetings thread
 
-The dictation hook (`hotkey/windows.rs`) is the *single* `WH_KEYBOARD_LL` install in the app today, and per ADR 0015 it must not do work in the callback. Adding double-tap discrimination on top of its tap-vs-hold discrimination would compound the state-machine fan-out and re-litigate the 80 ms threshold every time someone changes the meeting activation timing. Instead, Phase MC installs a **second** `WH_KEYBOARD_LL` on the same message-pump thread (Windows allows multiple hooks; they chain via `CallNextHookEx`). The new listener observes ONLY the configured meeting key (default `VK_PAUSE` = Pause/Break, fallback `VK_F23`), tracks press timestamps in a 2-element ring, and posts `MeetingActivation::Toggle` to the meetings channel when two press events arrive within 400 ms (configurable, clamp [150, 800] ms). The dictation hook continues to see its own configured key (default Right Alt) unchanged. Conflict probe: if Pause/Break is owned by another app's hotkey, fall back to F23 then F24 then "user picks" — same ladder as ADR 0019.
+The dictation hook (`hotkey/windows.rs`) is the *single* `WH_KEYBOARD_LL` install in the app today, and per ADR 0015 it must not do work in the callback. Adding double-tap discrimination on top of its tap-vs-hold discrimination would compound the state-machine fan-out and re-litigate the 80 ms threshold every time someone changes the meeting activation timing. Instead, Phase MC installs a **second** `WH_KEYBOARD_LL` on a **dedicated message-pump thread owned by the meetings runtime** (the dictation driver's thread is owned by `hotkey/driver.rs` and is sealed for this phase per the binding list; Windows permits multiple system-wide LL keyboard hooks — each is installed by its own thread, each runs its own `GetMessageW` loop, and Windows itself dispatches `WM_KEYBOARD_LL` events to every installer, chained via `CallNextHookEx` per-thread). The new listener observes ONLY the configured meeting key (default `VK_PAUSE` = Pause/Break, fallback `VK_F23`), tracks press timestamps in a 2-element ring, and posts `MeetingActivation::Toggle` to the meetings channel when two press events arrive within 400 ms (configurable, clamp [150, 800] ms). The dictation hook continues to see its own configured key (default Right Alt) unchanged. **Cost of the extra thread:** one Windows message-pump thread sitting in `GetMessageW`, sub-microsecond overhead per keystroke. **Benefit:** zero modifications to the sealed dictation driver — the binding list in this plan, and the `block-cross-module-coupling-meeting-dictation` hook authored in Wave 1, can both stay strict. Conflict probe: if Pause/Break is owned by another app's hotkey, fall back to F23 then F24 then "user picks" — same ladder as ADR 0019.
 
-### ADR 0027 — Two-channel capture via twin cpal streams + clock-aligned merge
+### ADR 0028 — Two-channel capture via twin cpal streams + clock-aligned merge
 
 CPAL streams are `!Send` on Windows but multiple streams can coexist on different devices. For "Both" mode, Phase MC opens two streams in the meeting thread: one against `host.default_input_device()` (mic, exactly as dictation does today) and one against the **default output device's loopback endpoint** (system audio). Each stream feeds a dedicated ringbuf (sized for the configured meeting ceiling — default 4 h, max 6 h; math: 6 × 3600 × 16000 × 2 bytes ≈ 690 MB per channel — these are allocated lazily, only when the user picks Both/System, and the buffer can spill to disk via the chunk-writer in ADR 0028). Each stream is timestamped at capture start (`Instant::now()` snapshot, stored on the meeting session row); after stop, the two PCM streams are processed independently (VAD → Whisper → formatter), then the two transcript sets are merged into a single chronological view by `(channel, segment_start_ms)`. WASAPI loopback availability is probed at "Both" / "System" selection time; if the OS reports no render endpoint or loopback is denied (rare; can happen with exclusive-mode audio), the UI demotes Both → Microphone-only with a toast.
 
-### ADR 0028 — Long-form chunked Whisper inference (closes `mb-2bi`)
+### ADR 0029 — Long-form chunked Whisper inference (closes `mb-2bi`)
 
-The dictation ring buffer is sized for 300 s and Whisper runs once over the whole sealed buffer. Neither scales to a 4-hour meeting. Phase MC ships the long-form path: during recording, the meeting-thread consumer drains the ringbuf every 30 s into **fixed 30-second PCM chunks** with **2-second leading overlap** (the second chunk starts at 28 s, the third at 58 s, etc.), each written to a temp WAV under `<appdata>\Mockingbird\meeting_audio\<uuid>\<chunk_index>.wav`. The ringbuf only ever holds ≤32 s of PCM live; the 690 MB ceiling in ADR 0027 is a worst-case-paranoid bound, not the actual RAM. After stop, each chunk is fed to `WhisperStt::transcribe_segments` (new method — see ADR 0029) sequentially; the chunker carries the **last 1 s of segment text** from chunk N as Whisper's `initial_prompt` for chunk N+1 (preserves context across the boundary). Overlapping segments are stitched: any segment whose start falls inside the overlap window of the previous chunk is dropped (the previous chunk already emitted it). The full audio is also concatenated to a single canonical `meeting.wav` for retention. Failure mode: if Whisper fails on chunk K, the formatter still runs on chunks 0..K-1, the session is marked `partial` (status enum value), and the user sees a "transcription incomplete after N minutes — retry?" affordance in the transcript view.
+The dictation ring buffer is sized for 300 s and Whisper runs once over the whole sealed buffer. Neither scales to a 4-hour meeting. Phase MC ships the long-form path: during recording, the meeting-thread consumer drains the ringbuf every 30 s into **fixed 30-second PCM chunks** with **2-second leading overlap** (the second chunk starts at 28 s, the third at 58 s, etc.), each written to a temp WAV under `<appdata>\Mockingbird\meeting_audio\<uuid>\<chunk_index>.wav`. The ringbuf only ever holds ≤32 s of PCM live; the 690 MB ceiling in ADR 0028 is a worst-case-paranoid bound, not the actual RAM. After stop, each chunk is fed to `WhisperStt::transcribe_segments` (new method — see ADR 0030) sequentially; the chunker carries the **last 1 s of segment text** from chunk N as Whisper's `initial_prompt` for chunk N+1 (preserves context across the boundary). Overlapping segments are stitched: any segment whose start falls inside the overlap window of the previous chunk is dropped (the previous chunk already emitted it). The full audio is also concatenated to a single canonical `meeting.wav` for retention. Failure mode: if Whisper fails on chunk K, the formatter still runs on chunks 0..K-1, the session is marked `partial` (status enum value), and the user sees a "transcription incomplete after N minutes — retry?" affordance in the transcript view.
 
-### ADR 0029 — Whisper segment exposure as a new STT-trait method
+### ADR 0030 — Whisper segment exposure as a new STT-trait method
 
 The current `SpeechToText` trait returns `Transcript { text, gpu_used, latency_ms, model_id }` — no segments. The deterministic formatter needs `(text, t0_ms, t1_ms)` triples per Whisper segment. Phase MC adds a sibling method `transcribe_segments(req) -> AppResult<TranscriptWithSegments>` that returns `Vec<TimedSegment { text, t0_ms, t1_ms }>` alongside the existing top-line text. The original `transcribe` stays untouched (dictation doesn't need segments and shouldn't pay the marginal cost of building the segment vec — it's small but it's also a sealed API surface for dictation's 383 tests). Implementation: whisper-rs already exposes `state.full_n_segments()`, `state.full_get_segment_text(i)`, `state.full_get_segment_t0(i)`, `state.full_get_segment_t1(i)`; the new method walks those and packages them. The dictation `transcribe` could be re-implemented as `transcribe_segments(...).map(|t| t.flatten())` after Phase MC ships, but the rewrite is **out of scope for MC** (would touch the dictation orchestrator and re-baseline its tests).
 
@@ -122,7 +122,7 @@ src-tauri/src/
     ├── mod.rs                  # ADD transcribe_segments to SpeechToText trait
     └── whisper.rs              # ADD WhisperStt::transcribe_segments impl
 
-src-tauri/src/db/migrations/
+src-tauri/migrations/
 └── 011_meeting_capture.sql     # NEW migration — meeting_sessions, meeting_transcripts
 
 ui/src/
@@ -410,14 +410,14 @@ Priority key: **P0** blocks the wave; **P1** must ship in the wave; **P2** ships
 
 | bd-task title (prefix `Phase MC:`) | priority | files |
 |-----------------------------------|----------|-------|
-| ADR 0025 — Meeting Capture is a sibling subsystem | P0 | `docs/adr/0025-meeting-sibling-subsystem.md` |
-| ADR 0026 — Double-tap activation via dedicated WH_KEYBOARD_LL listener | P0 | `docs/adr/0026-double-tap-activation.md` |
-| ADR 0027 — Two-channel capture via twin cpal streams | P0 | `docs/adr/0027-twin-stream-capture.md` |
-| ADR 0028 — Long-form chunked Whisper (closes `mb-2bi`) | P0 | `docs/adr/0028-long-form-chunked-whisper.md` |
-| ADR 0029 — Whisper segment exposure (`transcribe_segments`) | P0 | `docs/adr/0029-whisper-segment-exposure.md` |
+| ADR 0026 — Meeting Capture is a sibling subsystem | P0 | `docs/adr/0026-meeting-sibling-subsystem.md` |
+| ADR 0027 — Double-tap activation via dedicated WH_KEYBOARD_LL listener on a dedicated meetings thread | P0 | `docs/adr/0027-double-tap-activation.md` |
+| ADR 0028 — Two-channel capture via twin cpal streams | P0 | `docs/adr/0028-twin-stream-capture.md` |
+| ADR 0029 — Long-form chunked Whisper (closes `mb-2bi`) | P0 | `docs/adr/0029-long-form-chunked-whisper.md` |
+| ADR 0030 — Whisper segment exposure (`transcribe_segments`) | P0 | `docs/adr/0030-whisper-segment-exposure.md` |
 | Cargo deps (`crc32fast`) + AppError MeetingCapture/LongFormStt/Formatter variants + module scaffolds (traits in `mod.rs`, `todo!()` macOS/Linux stubs per binding rule §15) | P0 | `src-tauri/Cargo.toml`, `src-tauri/src/error.rs`, all files under `meetings/` |
 | New `SettingKey` variants + every-key-round-trips test extension | P0 | `src-tauri/src/settings/model.rs` |
-| Migration 011 authored + applied; tests in `src-tauri/tests/db_migrations.rs` extended to verify it | P0 | `src-tauri/src/db/migrations/011_meeting_capture.sql`, `src-tauri/tests/db_migrations.rs` |
+| Migration 011 authored + applied; tests in `src-tauri/tests/db_migrations.rs` extended to verify it | P0 | `src-tauri/migrations/011_meeting_capture.sql`, `src-tauri/tests/db_migrations.rs` |
 | Hook `block-cross-module-coupling-meeting-dictation` authored + dry-run-passes on Wave 1 diff | P1 | `.code_puppy/hooks/block-cross-module-coupling-meeting-dictation.toml` |
 
 ### Wave 2 — Pure state machine + formatter + filler-set + chunker (Iteration 2)
@@ -499,8 +499,8 @@ Priority key: **P0** blocks the wave; **P1** must ship in the wave; **P2** ships
 3. **Dictation regression:** All 383 existing tests still green; manual smoke of a dictation hold confirms no behavioural change.
 4. **Cargo gate:** `cargo check + clippy --release -D warnings + test --release + fmt --check` all four green. ~470–500 tests total.
 5. **Judges green:** all 5 new judges (`mc-formatter-deterministic`, `mc-long-form-stitched-losslessly`, `mc-two-channel-merged`, `mc-no-llm-in-critical-path`, `mc-dictation-untouched`) PASS; all carry-forward judges still PASS.
-6. **ADRs 0025–0029 present** with `Status: Accepted`.
-7. **bd `mb-2bi` closed** with link back to ADR 0028.
+6. **ADRs 0026–0030 present** with `Status: Accepted`.
+7. **bd `mb-2bi` closed** with link back to ADR 0029.
 8. **STATUS.md** updated: meeting capture epic marked sealed; `phase-mc-complete` tag recorded.
 9. **`git tag --list "phase-*"`** includes `phase-mc-complete`.
 
@@ -586,7 +586,7 @@ dictation. Bindings:
     transcript path. The deterministic formatter is the canonical pass.
 
 Reuse only: audio::AudioCapture trait (existing), stt::SpeechToText
-trait (extended with a new transcribe_segments method per ADR 0029),
+trait (extended with a new transcribe_segments method per ADR 0030),
 and cleanup::OllamaProvider's existing public constructor.
 
 Execute in the wave order documented in phase-meeting-capture.md:
@@ -614,7 +614,7 @@ mc-long-form-stitched-losslessly, mc-two-channel-merged,
 mc-no-llm-in-critical-path, mc-dictation-untouched.
 
 Open standing P1 mb-2bi (audio streaming + chunked Whisper) — Phase
-MC ADR 0028 is its closer. Close it in Wave 6 alongside the seal tag
+MC ADR 0029 is its closer. Close it in Wave 6 alongside the seal tag
 phase-mc-complete.
 
 If anything in this plan conflicts with the codebase as you read it,
