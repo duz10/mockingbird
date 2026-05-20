@@ -20,6 +20,7 @@ pub mod dictionary;
 pub mod insights;
 pub mod learning;
 pub mod legacy;
+pub mod meetings;
 pub mod modes;
 pub mod sessions;
 pub mod settings;
@@ -94,6 +95,17 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         system::open_path,
         system::app_paths,
         system::list_installed_models,
+        // Meetings (Phase MC Wave 4 — 10 commands per Section MC.6).
+        meetings::meeting_probe_sources,
+        meetings::meeting_start,
+        meetings::meeting_stop,
+        meetings::list_meetings,
+        meetings::get_meeting_detail,
+        meetings::delete_meeting,
+        meetings::search_meeting_transcripts,
+        meetings::meeting_export_markdown,
+        meetings::meeting_copy_to_clipboard,
+        meetings::meeting_run_llm_pass,
     ])
 }
 

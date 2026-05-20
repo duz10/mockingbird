@@ -38,6 +38,8 @@ use tauri::Manager;
 
 use commands::AppState;
 use dictation::runtime::{default_normal_config, DictationRuntime};
+#[cfg(target_os = "windows")]
+use meetings::runtime::{MeetingCaptureRuntime, MeetingRuntimeConfig};
 
 /// Build and run the Tauri application.
 ///
@@ -111,7 +113,11 @@ pub fn run() {
             // tears down the hook + threads cleanly.
             #[cfg(target_os = "windows")]
             {
-                match DictationRuntime::spawn(shared_conn, orchestrator_config, HashMap::new()) {
+                match DictationRuntime::spawn(
+                    shared_conn.clone(),
+                    orchestrator_config,
+                    HashMap::new(),
+                ) {
                     Ok(runtime) => {
                         // Plug the Tauri AppHandle into the recording
                         // window so it can show/hide the real webview
@@ -140,6 +146,51 @@ pub fn run() {
                 let _ = orchestrator_config;
                 let _ = &shared_conn;
                 tracing::warn!("dictation runtime is Windows-only; skipping");
+            }
+
+            // Phase MC Wave 4 — Meeting capture runtime. Non-fatal
+            // failure mirrors the dictation runtime: if the second
+            // WH_KEYBOARD_LL hook can't install, the app still works,
+            // the user just can't capture meetings. Both the runtime
+            // (to keep it alive) AND its shared bag (for IPC) are
+            // registered as managed state.
+            #[cfg(target_os = "windows")]
+            {
+                let chunk_base_dir = app_data.join("meetings");
+                if let Err(e) = std::fs::create_dir_all(&chunk_base_dir) {
+                    tracing::warn!(
+                        error = ?e,
+                        path = ?chunk_base_dir,
+                        "failed to create meetings chunk base dir"
+                    );
+                }
+                let mc_config = MeetingRuntimeConfig::defaults_with(chunk_base_dir);
+                match MeetingCaptureRuntime::spawn(
+                    shared_conn.clone(),
+                    mc_config,
+                    app.handle().clone(),
+                ) {
+                    Ok(mc_runtime) => {
+                        // Publish the cheaply-clonable shared bag for
+                        // commands::meetings::* to take via State<>.
+                        app.manage(mc_runtime.shared());
+                        // Hold the outer runtime alive for the
+                        // process lifetime. Tauri drops managed state
+                        // on shutdown, which fires the runtime's Drop
+                        // (stops the hotkey + persists any in-flight
+                        // meeting as Interrupted).
+                        app.manage(mc_runtime);
+                        tracing::info!(
+                            "🎙️ meeting capture runtime started; chord RightCtrl+M"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            error = ?e,
+                            "meeting capture runtime failed to start; app continues without it"
+                        );
+                    }
+                }
             }
 
             Ok(())
