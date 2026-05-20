@@ -14,6 +14,70 @@ Format:
 
 ---
 
+## 2026-05-20 [phase-mc-wave-1] Pre-existing migration test was stale since migration 005; release-LTO test compile is single-threaded death-march on this box
+
+- **Context:** Phase MC Wave 1 — landing migration 011, extending
+  `src-tauri/tests/db_migrations.rs` with FTS round-trip + cascade-
+  delete tests for the new meeting tables. Also ran the post-Wave-1
+  cargo gate.
+- **Finding 1 (stale test assertion).** `tests/db_migrations.rs` had
+  an assertion `assert_eq!(version, "4")` against `schema_meta`. That
+  test has been silently broken since migration 005 landed — apparently
+  the integration-test runner never actually ran live on this box
+  (see Finding 2 below; the test exe failed to launch with
+  `STATUS_ENTRYPOINT_NOT_FOUND` long before this assertion would have
+  fired). Wave 1 caught it on a careful read of the file and fixed it
+  forward to `"11"`, but the pattern is: **any assertion of a literal
+  schema_version in tests is a maintenance landmine.** Future fix idea:
+  assert against `db::migrations::LATEST_SCHEMA_VERSION` constant
+  (doesn't exist today; add it in Wave 2 or a future migration wave).
+- **Finding 2 (release LTO test compile is a death march).** On this
+  box, `cargo test --release` rebuilds every test crate with the
+  release LTO settings (`lto = "fat"`, codegen-units = 1) — a single-
+  threaded link-time-optimization pass per test exe, 13 exes total.
+  Empirical wall-clock: ~10m 30s end-to-end from `cargo clean`. With
+  warm artifacts (just my Wave 1 .rs files changed), still ~5 min
+  because LLVM has to re-link every dep-graph user of `mockingbird_lib`.
+  The shell-tool wrapper has a hard 270-second cap, so even the
+  background-mode invocation has to poll-and-wait for completion.
+  **Pattern:** for cargo gates in iteration, always run the cheap
+  checks first (`cargo check`, `cargo fmt --check`) in the foreground;
+  background the heavy ones (`cargo test --release [--no-run]`,
+  `cargo clippy --release`) with `background=true` and poll the
+  output log. Don't expect `timeout` parameters > 270s to actually
+  work in this tool.
+- **Finding 3 (LESSONS 2026-05-17 still applies).** Even with the
+  cargo-with-cuda wrapper, `cargo test --release` fails at first test-
+  exe launch with `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)`. Confirmed
+  by reading the 2026-05-17 LESSONS entry — known issue, not Phase MC's
+  fault. The documented fallback `cargo test --release --no-run` is
+  what we sealed Wave 1 on. **Carry forward:** every wave that adds
+  pure-Rust tests can seal on `--no-run`; waves that add DLL-touching
+  tests (Wave 2's 4 `transcribe_segments` tests, Wave 3's loopback
+  integration) need to either `#[ignore]` them or live on a machine
+  where the live-launch issue is resolved.
+- **Finding 4 (`cargo fmt` silently corrected pre-existing drift).**
+  Wave 1's `cargo fmt --check` flagged 6 files; 5 were Wave-1-introduced
+  enum/struct/string-literal style drifts, but the 6th was a multi-
+  line `&'static str` in `src/tray.rs` that pre-dated Phase MC. The
+  binding list doesn't seal `tray.rs`, so `cargo fmt` fixing it in the
+  Wave 1 commit is fine — but worth knowing: **`cargo fmt` is
+  non-idempotent across rustfmt versions**, so a clean `phase-N-complete`
+  tag does NOT guarantee `fmt --check` will pass at HEAD after a
+  toolchain bump. Add a note to the AGENTS.md cargo-gate section that
+  surprise fmt drift in non-binding files is normal and should be
+  committed as part of the wave-seal commit, not surfaced as a
+  separate ADR.
+- **Action:** (1) Add a `LATEST_SCHEMA_VERSION: u32` constant in
+  `db::migrations` and have `tests/db_migrations.rs` assert against it
+  instead of literals — file this for Wave 2 if cheap, else a future
+  migration wave. (2) Bake the "shell-tool 270s cap; use background
+  mode for cargo test --release" tip into the AGENTS.md
+  Build-environment section. (3) Carry the `--no-run` fallback gate
+  pattern into every Phase MC wave brief from this one forward.
+
+---
+
 ## 2026-05-19 [unsplash-bg / release-build] Tauri release exe lives at WORKSPACE-ROOT `target/release/`, not `src-tauri/target/release/`
 
 - **Context:** Post-ship-build verification — went to `src-tauri/

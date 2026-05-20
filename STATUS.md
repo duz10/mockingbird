@@ -21,24 +21,33 @@
 > **NEXT P1 LATERAL:** `mb-2bi` – audio streaming + chunked Whisper
 >   (proper long-form fix). Standing P1. Required for true Wisprflow-
 >   parity latency on normal/formal modes per ADR 0024 acceptance.
-> **IN-FLIGHT THIS SESSION (2026-05-20):** **Phase MC Wave 1 partially
->   landed.** Epic `mb-pdv` created with 9 Wave 1 sub-tasks (mb-j99,
->   mb-7q0, mb-1xh, mb-qjb, mb-gh4, mb-b7i, mb-5fo, mb-01h, mb-qig)
->   wired via parent-child links. Plan reconciled in commit `d540a64`
->   (ADR numbering shifted 0025-0029 → 0026-0030 because the previous
->   0025 slot was claimed by the Unsplash ambient-bg lateral epic;
->   migration path corrected `src-tauri/src/db/migrations/` →
->   `src-tauri/migrations/`; double-tap-activation thread strategy
->   switched from "same as dictation thread" to "dedicated meetings
->   thread" to keep `hotkey/driver.rs` sealed). All 5 charter ADRs
->   (0026-0030) authored + committed `3f6ca82` (1017 lines added,
->   152-191 each, follow template). **Status of Wave 1 closure:**
->   ADR tasks done; remaining are mb-b7i (Cargo deps + AppError +
->   meetings module scaffolds), mb-5fo (11 SettingKey variants),
->   mb-01h (migration 011 + db_migrations test), mb-qig (coupling
->   hook). No code changes yet — next session picks these up. Cargo
->   gate has not been run this session (no Rust touched). Dictation
->   pipeline + 383 tests untouched.
+> **IN-FLIGHT THIS SESSION (2026-05-20):** **Phase MC Wave 1 SEALED in
+>   commit `79414db`** (31 files, +2156 lines). Epic `mb-pdv` is on-
+>   track; all 9 Wave 1 sub-tasks closed (mb-j99/7q0/1xh/qjb/gh4 ADRs
+>   in `3f6ca82`; mb-b7i/5fo/01h/qig code in `79414db`). What's on disk
+>   now: 5 ADRs (0026-0030), `crc32fast` dep, 3 new `AppError` variants
+>   (MeetingCapture/LongFormStt/Formatter), 11 new MC `SettingKey`
+>   variants with round-trip + defaults tests, migration 011
+>   (`meeting_sessions` + `meeting_transcripts` + FTS5; schema 10→11)
+>   + 4 new migration tests (+2 stale-assertion fixes that have been
+>   broken since migration 005 landed; see LESSONS 2026-05-20),
+>   `src-tauri/src/meetings/` module tree (13 .rs + 3 prompt .md;
+>   types/trait sigs/struct skeletons real, bodies `todo!()`),
+>   `pub mod meetings;` in lib.rs, and the cross-module-coupling Python
+>   hook (registered in `.code_puppy/settings.json`; 9/9 dry-run cases
+>   pass). **Wave 2 brief authored at
+>   `docs/phases/phase-mc-wave2-brief.md`** with type defs, function
+>   sigs, 67-test specification (22 activation + 27 formatter + 2
+>   proptests + 14 chunker + 4 stt_segments), deviations, and the
+>   cargo-gate checklist. 5 Wave 2 bd-tasks open (mb-pdv.1…mb-pdv.5).
+>   **Cargo gate status:** `check` clean; `clippy --release -- -D
+>   warnings` clean; `fmt --check` clean; `test --release` BLOCKED by
+>   LESSONS 2026-05-17's `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)`
+>   known issue, sealed via documented fallback `test --release
+>   --no-run` (all 13 test crates compile clean in 10m 29s). Dictation
+>   pipeline + 383 baseline tests untouched; +30 new tests this wave
+>   (compiled clean, not live-run). mb-2bi still open (closes Wave 6
+>   alongside seal tag, per kickoff).
 > **HOW TO RESUME:** `/agent code-puppy` → re-read this block → `bd ready`
 >   for the unblocked queue → start. If your prompt conflicts with anything
 >   above, STOP and ask before doing tool calls.
