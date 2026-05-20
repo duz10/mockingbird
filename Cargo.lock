@@ -2271,6 +2271,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "cpal",
+ "crc32fast",
  "criterion",
  "hound",
  "mockall",

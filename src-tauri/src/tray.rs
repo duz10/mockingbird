@@ -62,8 +62,7 @@ pub fn register(app: &mut App) -> AppResult<()> {
         .default_window_icon()
         .ok_or_else(|| {
             AppError::Other(
-                "default window icon missing — check `bundle.icon` in tauri.conf.json"
-                    .into(),
+                "default window icon missing — check `bundle.icon` in tauri.conf.json".into(),
             )
         })?
         .clone();

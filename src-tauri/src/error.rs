@@ -71,6 +71,37 @@ pub enum AppError {
     #[error("secrets error: {0}")]
     Secrets(String),
 
+    /// Meeting-capture lifecycle failures.
+    ///
+    /// Sources: chord-hook install failure, twin-stream coordinator
+    /// startup (mic or loopback unavailable when required), persist
+    /// transaction failures, export I/O, overlay-window crashes. The
+    /// chunker writes WAVs and reports its own `Io` errors via the
+    /// existing variant; this one fires for higher-level meeting
+    /// lifecycle. Phase MC +.
+    #[error("meeting capture error: {0}")]
+    MeetingCapture(String),
+
+    /// Long-form chunked STT failures.
+    ///
+    /// Sources: chunk-WAV checksum mismatch (`crc32fast` verification),
+    /// `transcribe_segments` per-chunk errors that abort the whole
+    /// long-form pass, overlap-stitch boundary mis-alignment. Distinct
+    /// from `Stt` so the meeting pipeline can demote a partial-success
+    /// run without confusing dictation's per-utterance error path.
+    /// Phase MC +.
+    #[error("long-form stt error: {0}")]
+    LongFormStt(String),
+
+    /// Deterministic formatter failures.
+    ///
+    /// Sources: invariant violations the formatter detects in its own
+    /// input (e.g. a `TimedSegment` with `t1 < t0`). The formatter is
+    /// pure and deterministic; an error here is a contract bug in the
+    /// caller (`long_form_stt`), not a transient failure. Phase MC +.
+    #[error("formatter error: {0}")]
+    Formatter(String),
+
     /// Generic catch-all for early Phase 1; replaced by typed variants
     /// as concrete modules surface their errors.
     #[error("{0}")]
@@ -119,5 +150,29 @@ mod tests {
     fn secrets_displays_with_prefix() {
         let err = AppError::Secrets("DPAPI unprotect failed".to_string());
         assert_eq!(err.to_string(), "secrets error: DPAPI unprotect failed");
+    }
+
+    #[test]
+    fn meeting_capture_displays_with_prefix() {
+        let err = AppError::MeetingCapture("loopback endpoint unavailable".to_string());
+        assert_eq!(
+            err.to_string(),
+            "meeting capture error: loopback endpoint unavailable"
+        );
+    }
+
+    #[test]
+    fn long_form_stt_displays_with_prefix() {
+        let err = AppError::LongFormStt("chunk 4/12 crc32 mismatch".to_string());
+        assert_eq!(
+            err.to_string(),
+            "long-form stt error: chunk 4/12 crc32 mismatch"
+        );
+    }
+
+    #[test]
+    fn formatter_displays_with_prefix() {
+        let err = AppError::Formatter("segment t1 < t0".to_string());
+        assert_eq!(err.to_string(), "formatter error: segment t1 < t0");
     }
 }

@@ -15,9 +15,13 @@ fn fresh_db() -> Database {
 }
 
 #[test]
-fn schema_version_is_4_after_apply() {
-    // Bumped from 3 → 4 by migration 004 (injection_status column;
-    // Phase 3 Wave 4 bd mb-vs3).
+fn schema_version_is_11_after_apply() {
+    // Bump history: 3 → 4 (migration 004 injection_status; Phase 3
+    // Wave 4) → 5 (AI command modes) → 6/7/8 (prompt iterations) → 9
+    // (max_tokens bump) → 10 (ADR 0024 Wave C prompt v2) → 11 (Phase MC
+    // meeting_sessions + meeting_transcripts + FTS; ADR 0026 + 0027 +
+    // 0028 + 0029 + 0030). Bump this assert when the next migration
+    // lands.
     let db = fresh_db();
     let v: String = db
         .conn
@@ -27,7 +31,7 @@ fn schema_version_is_4_after_apply() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(v, "4");
+    assert_eq!(v, "11");
 }
 
 #[test]
@@ -50,6 +54,9 @@ fn all_expected_tables_exist() {
         "_history_prompts",
         "_history_dictionary",
         "_history_style_examples",
+        // Phase MC — sibling-subsystem tables (migration 011).
+        "meeting_sessions",
+        "meeting_transcripts",
     ];
     for t in expected {
         let n: i64 = db
@@ -65,8 +72,16 @@ fn all_expected_tables_exist() {
 }
 
 #[test]
-fn trigger_count_is_14() {
-    // 2 FTS5 triggers (transcripts_fts_insert/delete) + 4 tables * 3 audit = 14.
+fn trigger_count_is_16() {
+    // 2 dictation FTS5 triggers (transcripts_fts_insert/delete; mig 001)
+    // + 4 tables * 3 audit triggers = 12 (mig 002)
+    // + 2 meeting FTS5 triggers (meeting_transcripts_fts_insert/delete; mig 011)
+    // = 16 total.
+    //
+    // Bump this count whenever a migration adds or removes a trigger.
+    // The plus side of asserting an exact number: it catches an
+    // accidental "oh I'll just add another trigger" without a paired
+    // ADR / plan update.
     let db = fresh_db();
     let n: i64 = db
         .conn
@@ -76,7 +91,7 @@ fn trigger_count_is_14() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(n, 14);
+    assert_eq!(n, 16);
 }
 
 #[test]
@@ -185,7 +200,7 @@ fn fts5_round_trip_finds_inserted_transcript() {
 #[test]
 fn apply_all_is_idempotent() {
     let db = fresh_db();
-    // Second call must be a no-op (assertion: doesn't panic, schema_version still 4).
+    // Second call must be a no-op (assertion: doesn't panic, schema_version still 11).
     mockingbird_lib::db::apply_migrations(&db.conn).expect("second apply_migrations should be Ok");
     let v: String = db
         .conn
@@ -195,5 +210,107 @@ fn apply_all_is_idempotent() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(v, "4");
+    assert_eq!(v, "11");
+}
+
+/// Migration 011 ships the FTS5 mirror for meeting transcripts.
+/// End-to-end through the integration test crate (mirrors the
+/// existing `fts5_round_trip_finds_inserted_transcript` test for the
+/// dictation side).
+#[test]
+fn meeting_fts5_round_trip_finds_inserted_meeting_transcript() {
+    let db = fresh_db();
+
+    db.conn
+        .execute(
+            "INSERT INTO meeting_sessions (uuid, started_at, ended_at, status, source, \
+             total_duration_ms, hotkey_pressed, whisper_model_id, formatter_version) \
+             VALUES ('mtg-fts-uuid', '2026-05-20T10:00:00Z', '2026-05-20T10:05:00Z', \
+             'complete', 'both', 300000, 'VK_RCONTROL+VK_M', \
+             'whisper-large-v3-turbo-q5_0', 'mc-v1')",
+            [],
+        )
+        .unwrap();
+    db.conn
+        .execute(
+            "INSERT INTO meeting_transcripts (meeting_session_id, channel, stage, text) \
+             VALUES (1, 'merged', 'formatted', 'discussed the new pricing model in detail')",
+            [],
+        )
+        .unwrap();
+
+    let hit: String = db
+        .conn
+        .query_row(
+            "SELECT t.text FROM meeting_transcripts t \
+             JOIN meeting_transcripts_fts f ON f.rowid = t.id \
+             WHERE meeting_transcripts_fts MATCH 'pricing'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(hit, "discussed the new pricing model in detail");
+}
+
+/// FK enforcement on the meeting cascade: deleting a meeting_sessions
+/// row must delete its transcript children AND remove them from the
+/// FTS shadow table (via the DELETE trigger).
+#[test]
+fn meeting_transcripts_cascade_delete_clears_fts() {
+    let db = fresh_db();
+
+    db.conn
+        .execute(
+            "INSERT INTO meeting_sessions (uuid, started_at, ended_at, status, source, \
+             total_duration_ms, hotkey_pressed, whisper_model_id, formatter_version) \
+             VALUES ('mtg-cascade-uuid', '2026-05-20T11:00:00Z', '2026-05-20T11:00:30Z', \
+             'complete', 'mic', 30000, 'VK_RCONTROL+VK_M', \
+             'whisper-large-v3-turbo-q5_0', 'mc-v1')",
+            [],
+        )
+        .unwrap();
+    db.conn
+        .execute(
+            "INSERT INTO meeting_transcripts (meeting_session_id, channel, stage, text) \
+             VALUES (1, 'mic', 'formatted', 'unique sentinel phrase for cascade test')",
+            [],
+        )
+        .unwrap();
+
+    // Sanity: FTS finds it.
+    let n_before: i64 = db
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM meeting_transcripts_fts \
+             WHERE meeting_transcripts_fts MATCH 'sentinel'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n_before, 1);
+
+    // Cascade.
+    db.conn
+        .execute(
+            "DELETE FROM meeting_sessions WHERE uuid='mtg-cascade-uuid'",
+            [],
+        )
+        .unwrap();
+
+    // Both rows gone.
+    let n_transcripts: i64 = db
+        .conn
+        .query_row("SELECT COUNT(*) FROM meeting_transcripts", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n_transcripts, 0, "FK cascade did not clear transcripts");
+    let n_fts: i64 = db
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM meeting_transcripts_fts \
+             WHERE meeting_transcripts_fts MATCH 'sentinel'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n_fts, 0, "DELETE trigger did not clear FTS shadow row");
 }

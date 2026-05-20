@@ -122,7 +122,7 @@ src-tauri/src/
     ├── mod.rs                  # ADD transcribe_segments to SpeechToText trait
     └── whisper.rs              # ADD WhisperStt::transcribe_segments impl
 
-src-tauri/migrations/
+src-tauri/src/db/migrations/
 └── 011_meeting_capture.sql     # NEW migration — meeting_sessions, meeting_transcripts
 
 ui/src/
@@ -425,8 +425,8 @@ Priority key: **P0** blocks the wave; **P1** must ship in the wave; **P2** ships
 | ADR 0030 — Whisper segment exposure (`transcribe_segments`) | P0 | `docs/adr/0030-whisper-segment-exposure.md` |
 | Cargo deps (`crc32fast`) + AppError MeetingCapture/LongFormStt/Formatter variants + module scaffolds (traits in `mod.rs`, `todo!()` macOS/Linux stubs per binding rule §15) | P0 | `src-tauri/Cargo.toml`, `src-tauri/src/error.rs`, all files under `meetings/` |
 | New `SettingKey` variants + every-key-round-trips test extension | P0 | `src-tauri/src/settings/model.rs` |
-| Migration 011 authored + applied; tests in `src-tauri/tests/db_migrations.rs` extended to verify it | P0 | `src-tauri/migrations/011_meeting_capture.sql`, `src-tauri/tests/db_migrations.rs` |
-| Hook `block-cross-module-coupling-meeting-dictation` authored + dry-run-passes on Wave 1 diff | P1 | `.code_puppy/hooks/block-cross-module-coupling-meeting-dictation.toml` |
+| Migration 011 authored + applied; tests in `src-tauri/tests/db_migrations.rs` extended to verify it | P0 | `src-tauri/src/db/migrations/011_meeting_capture.sql`, `src-tauri/tests/db_migrations.rs` |
+| Hook `block-cross-module-coupling-meeting-dictation` authored + dry-run-passes on Wave 1 diff | P1 | `scripts/hooks/block-cross-module-coupling-meeting-dictation.py`, `.code_puppy/settings.json` (registration) |
 
 ### Wave 2 — Pure state machine + formatter + filler-set + chunker (Iteration 2)
 

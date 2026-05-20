@@ -21,6 +21,9 @@ pub mod hotkey;
 pub mod injection;
 pub mod learning;
 pub mod logging;
+// Phase MC — sibling subsystem to dictation (ADR 0026). Wave 1 ships
+// scaffolds + types + trait shapes; Waves 2-6 fill the bodies.
+pub mod meetings;
 pub mod recording_window;
 pub mod secrets;
 pub mod settings;

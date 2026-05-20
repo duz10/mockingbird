@@ -29,6 +29,52 @@ pub enum SettingKey {
     ClaudeApiKeyRef,
     AudioRetentionDays,
     LearningEnabled,
+
+    // ----- Phase MC — meeting capture settings (ADR 0026 lateral epic). -----
+    // The full Section MC.5 contract documents these. Defaults reflect
+    // the Right Ctrl + M chord choice (ADR 0027) and the 30 s chunk +
+    // 2 s overlap chunked-Whisper design (ADR 0029).
+    //
+    /// VK name string for the meeting hotkey modifier. Default
+    /// `"VK_RCONTROL"`. Allowed set: `RCtrl, LCtrl, RAlt, LAlt, RShift,
+    /// LShift, RWin, LWin`. Settings UI (Wave 5) clamps the picker.
+    /// Conflict probe (Wave 3) rejects if it equals the dictation VK.
+    MeetingHotkeyModifier,
+    /// VK name string for the meeting hotkey main key. Default
+    /// `"VK_M"`; ADR 0019 fallback ladder steps to `"VK_F13"` then
+    /// `"VK_F14"` then user-pick if M is claimed by another global hook.
+    MeetingHotkeyKey,
+    /// Default source preselected in the meeting overlay. One of
+    /// `"mic" | "system" | "both"`. Default `"mic"`.
+    MeetingDefaultSource,
+    /// Hard cap on meeting duration in seconds. Default 14_400 (4 h).
+    /// Clamped to `[60, 21600]` by the settings facade (Wave 4).
+    MeetingMaxDurationSeconds,
+    /// Whether the deterministic formatter strips fillers
+    /// ("um", "uh", "you know", …) by default. Default `true`.
+    MeetingFillerStripEnabled,
+    /// Gap in ms between segments that triggers a paragraph break.
+    /// Default 2_000. Clamped to `[500, 10_000]` by the settings facade.
+    MeetingParagraphGapMs,
+    /// Per-feature retention override for meeting audio blobs.
+    /// Defaults to the global `AudioRetentionDays` (30) if absent on
+    /// the settings facade's read path. Stored separately so a power
+    /// user can keep meetings 90 days while dictation stays at 30.
+    MeetingAudioRetentionDays,
+    /// Whether the LLM-pass UI affordance is available on the meeting
+    /// detail page. Default `true`. Disabling hides the panel; does
+    /// NOT remove the prompt markdown files from the bundle.
+    MeetingLlmPassEnabled,
+    /// UI state — last source the user picked in the overlay. Echoed
+    /// back as the preselected option on next open. One of
+    /// `"mic" | "system" | "both"`. Default `"mic"`.
+    MeetingLastSelectedSource,
+    /// Speaker label for the mic channel in merged-view exports.
+    /// Default `"You"`.
+    MeetingSpeakerLabelMic,
+    /// Speaker label for the system-loopback channel in merged-view
+    /// exports. Default `"Other(s)"`.
+    MeetingSpeakerLabelSys,
 }
 
 impl SettingKey {
@@ -42,6 +88,18 @@ impl SettingKey {
             Self::ClaudeApiKeyRef => "claude_api_key_ref",
             Self::AudioRetentionDays => "audio_retention_days",
             Self::LearningEnabled => "learning_enabled",
+            // Phase MC.
+            Self::MeetingHotkeyModifier => "meeting_hotkey_modifier",
+            Self::MeetingHotkeyKey => "meeting_hotkey_key",
+            Self::MeetingDefaultSource => "meeting_default_source",
+            Self::MeetingMaxDurationSeconds => "meeting_max_duration_seconds",
+            Self::MeetingFillerStripEnabled => "meeting_filler_strip_enabled",
+            Self::MeetingParagraphGapMs => "meeting_paragraph_gap_ms",
+            Self::MeetingAudioRetentionDays => "meeting_audio_retention_days",
+            Self::MeetingLlmPassEnabled => "meeting_llm_pass_enabled",
+            Self::MeetingLastSelectedSource => "meeting_last_selected_source",
+            Self::MeetingSpeakerLabelMic => "meeting_speaker_label_mic",
+            Self::MeetingSpeakerLabelSys => "meeting_speaker_label_sys",
         }
     }
 
@@ -55,6 +113,18 @@ impl SettingKey {
             "claude_api_key_ref" => Ok(Self::ClaudeApiKeyRef),
             "audio_retention_days" => Ok(Self::AudioRetentionDays),
             "learning_enabled" => Ok(Self::LearningEnabled),
+            // Phase MC.
+            "meeting_hotkey_modifier" => Ok(Self::MeetingHotkeyModifier),
+            "meeting_hotkey_key" => Ok(Self::MeetingHotkeyKey),
+            "meeting_default_source" => Ok(Self::MeetingDefaultSource),
+            "meeting_max_duration_seconds" => Ok(Self::MeetingMaxDurationSeconds),
+            "meeting_filler_strip_enabled" => Ok(Self::MeetingFillerStripEnabled),
+            "meeting_paragraph_gap_ms" => Ok(Self::MeetingParagraphGapMs),
+            "meeting_audio_retention_days" => Ok(Self::MeetingAudioRetentionDays),
+            "meeting_llm_pass_enabled" => Ok(Self::MeetingLlmPassEnabled),
+            "meeting_last_selected_source" => Ok(Self::MeetingLastSelectedSource),
+            "meeting_speaker_label_mic" => Ok(Self::MeetingSpeakerLabelMic),
+            "meeting_speaker_label_sys" => Ok(Self::MeetingSpeakerLabelSys),
             other => Err(AppError::Other(format!("unknown setting key: {other:?}"))),
         }
     }
@@ -69,6 +139,21 @@ impl SettingKey {
             Self::ClaudeApiKeyRef => serde_json::json!(null),
             Self::AudioRetentionDays => serde_json::json!(30),
             Self::LearningEnabled => serde_json::json!(true),
+            // Phase MC.
+            Self::MeetingHotkeyModifier => serde_json::json!("VK_RCONTROL"),
+            Self::MeetingHotkeyKey => serde_json::json!("VK_M"),
+            Self::MeetingDefaultSource => serde_json::json!("mic"),
+            Self::MeetingMaxDurationSeconds => serde_json::json!(14_400),
+            Self::MeetingFillerStripEnabled => serde_json::json!(true),
+            Self::MeetingParagraphGapMs => serde_json::json!(2_000),
+            // Null means "inherit AudioRetentionDays". Settings facade
+            // resolves the fallback on read; storing null here keeps
+            // the per-feature override explicit.
+            Self::MeetingAudioRetentionDays => serde_json::json!(null),
+            Self::MeetingLlmPassEnabled => serde_json::json!(true),
+            Self::MeetingLastSelectedSource => serde_json::json!("mic"),
+            Self::MeetingSpeakerLabelMic => serde_json::json!("You"),
+            Self::MeetingSpeakerLabelSys => serde_json::json!("Other(s)"),
         }
     }
 
@@ -84,6 +169,18 @@ impl SettingKey {
             Self::ClaudeApiKeyRef,
             Self::AudioRetentionDays,
             Self::LearningEnabled,
+            // Phase MC.
+            Self::MeetingHotkeyModifier,
+            Self::MeetingHotkeyKey,
+            Self::MeetingDefaultSource,
+            Self::MeetingMaxDurationSeconds,
+            Self::MeetingFillerStripEnabled,
+            Self::MeetingParagraphGapMs,
+            Self::MeetingAudioRetentionDays,
+            Self::MeetingLlmPassEnabled,
+            Self::MeetingLastSelectedSource,
+            Self::MeetingSpeakerLabelMic,
+            Self::MeetingSpeakerLabelSys,
         ]
     }
 }
@@ -124,5 +221,63 @@ mod tests {
         assert!(SettingKey::Theme.default_value().is_string());
         assert!(SettingKey::AudioRetentionDays.default_value().is_number());
         assert!(SettingKey::ClaudeApiKeyRef.default_value().is_null());
+    }
+
+    /// Phase MC — the meeting setting defaults must match the contract
+    /// documented in `docs/phases/phase-meeting-capture.md` Section
+    /// MC.5. Drift here means the Wave 3 conflict probe and the Wave 5
+    /// settings UI will silently disagree with the plan.
+    #[test]
+    fn meeting_settings_defaults_match_section_mc_5() {
+        use serde_json::json;
+        assert_eq!(
+            SettingKey::MeetingHotkeyModifier.default_value(),
+            json!("VK_RCONTROL")
+        );
+        assert_eq!(SettingKey::MeetingHotkeyKey.default_value(), json!("VK_M"));
+        assert_eq!(
+            SettingKey::MeetingDefaultSource.default_value(),
+            json!("mic")
+        );
+        assert_eq!(
+            SettingKey::MeetingMaxDurationSeconds.default_value(),
+            json!(14_400)
+        );
+        assert_eq!(
+            SettingKey::MeetingFillerStripEnabled.default_value(),
+            json!(true)
+        );
+        assert_eq!(
+            SettingKey::MeetingParagraphGapMs.default_value(),
+            json!(2_000)
+        );
+        assert!(SettingKey::MeetingAudioRetentionDays
+            .default_value()
+            .is_null());
+        assert_eq!(
+            SettingKey::MeetingLlmPassEnabled.default_value(),
+            json!(true)
+        );
+        assert_eq!(
+            SettingKey::MeetingLastSelectedSource.default_value(),
+            json!("mic")
+        );
+        assert_eq!(
+            SettingKey::MeetingSpeakerLabelMic.default_value(),
+            json!("You")
+        );
+        assert_eq!(
+            SettingKey::MeetingSpeakerLabelSys.default_value(),
+            json!("Other(s)")
+        );
+    }
+
+    /// `SettingKey::all()` must enumerate every variant. Coupled to
+    /// the variant count so adding a key without extending `all()`
+    /// fails the test. Bump the expected count when you add a key.
+    #[test]
+    fn all_enumerates_every_variant() {
+        // 8 original + 11 Phase MC = 19.
+        assert_eq!(SettingKey::all().len(), 19);
     }
 }

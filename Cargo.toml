@@ -107,6 +107,12 @@ windows        = { version = "0.56", features = [
 # Zero-allocation compile-time lookup. See ADR 0016.
 phf            = { version = "0.11", features = ["macros"] }
 
+# Phase MC — CRC32 for meeting chunk-WAV integrity verification.
+# Used by meetings/chunker.rs to stamp each rolled chunk; long_form_stt
+# verifies on read. Pure-Rust, sub-microsecond per chunk, no SIMD
+# autodetect surprises.
+crc32fast      = "1.4"
+
 # Phase 4 — Sync HTTP for cleanup providers (Ollama + Claude).
 # See ADR 0021: kept sync to fit the orchestrator's sync architecture
 # without dragging in a tokio runtime per dictation. `rustls-tls`

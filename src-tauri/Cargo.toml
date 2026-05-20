@@ -50,6 +50,9 @@ phf     = { workspace = true }
 # Phase 4 — sync HTTP for cleanup providers (ADR 0021).
 ureq    = { workspace = true }
 
+# Phase MC — CRC32 for meeting chunk-WAV integrity (ADR 0029).
+crc32fast = { workspace = true }
+
 [dev-dependencies]
 tempfile  = { workspace = true }
 rstest    = { workspace = true }

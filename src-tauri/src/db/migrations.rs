@@ -20,6 +20,9 @@ const MIGRATION_007: &str = include_str!("migrations/007_prompt_normal_v3.sql");
 const MIGRATION_008: &str = include_str!("migrations/008_wave2_three_modes.sql");
 const MIGRATION_009: &str = include_str!("migrations/009_bump_max_tokens.sql");
 const MIGRATION_010: &str = include_str!("migrations/010_adr0024_prompt_v2.sql");
+// Phase MC — sibling-subsystem meeting-capture schema (ADR 0026).
+// Purely additive; no prompt-body token substitution needed.
+const MIGRATION_011: &str = include_str!("migrations/011_meeting_capture.sql");
 
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
@@ -71,6 +74,17 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         // bumps. Token substitution required for the three new prompt
         // bodies.
         let prepared = substitute_prompt_bodies(MIGRATION_010);
+        conn.execute_batch(&prepared)?;
+    }
+    if current < 11 {
+        // Phase MC: meeting_sessions + meeting_transcripts + FTS5
+        // shadow table + insert/delete triggers. No prompt bodies; meeting
+        // LLM prompts live as markdown files under
+        // `src-tauri/src/meetings/prompts/` and are loaded at call-time
+        // by `meetings/llm_pass.rs`, NOT seeded into the DB. Run through
+        // the substituter anyway so the leftover-token guard catches
+        // accidental `__PROMPT_*_BODY__` leaks in the file.
+        let prepared = substitute_prompt_bodies(MIGRATION_011);
         conn.execute_batch(&prepared)?;
     }
     Ok(())
@@ -131,12 +145,11 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "10");
+        assert_eq!(v, "11");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
-    /// (Pre-existing test had a stale `"7"` assertion from when 007 was
-    /// latest; corrected here as part of migration 010.)
+    /// Bump the expected version string whenever a new migration lands.
     #[test]
     fn apply_all_is_idempotent() {
         let conn = Connection::open_in_memory().expect("open in-memory");
@@ -151,7 +164,99 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "10");
+        assert_eq!(v, "11");
+    }
+
+    /// Migration 011 ships the meeting-capture schema (ADR 0026).
+    /// Verifies all expected tables, the FTS5 virtual table, and a
+    /// minimal write→read round trip through the FTS shadow trigger.
+    #[test]
+    fn migration_011_ships_meeting_capture_schema() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+
+        // Tables present.
+        for t in [
+            "meeting_sessions",
+            "meeting_transcripts",
+            "meeting_transcripts_fts",
+        ] {
+            let n: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master \
+                     WHERE name=?1 AND (type='table' OR type='virtual table' OR type='view')",
+                    [t],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(n >= 1, "missing meeting table/virtual-table: {t}");
+        }
+
+        // Triggers present.
+        for trig in [
+            "meeting_transcripts_fts_insert",
+            "meeting_transcripts_fts_delete",
+        ] {
+            let n: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name=?1",
+                    [trig],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(n, 1, "missing meeting FTS trigger: {trig}");
+        }
+
+        // End-to-end: insert a meeting + a formatted transcript,
+        // round-trip the text through the FTS shadow table.
+        conn.execute(
+            "INSERT INTO meeting_sessions (uuid, started_at, ended_at, status, source, \
+             total_duration_ms, hotkey_pressed, whisper_model_id, formatter_version) \
+             VALUES ('mtg-test-uuid', '2026-05-20T00:00:00Z', '2026-05-20T00:01:00Z', \
+             'complete', 'mic', 60000, 'VK_RCONTROL+VK_M', \
+             'whisper-large-v3-turbo-q5_0', 'mc-v1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO meeting_transcripts (meeting_session_id, channel, stage, text) \
+             VALUES (1, 'mic', 'formatted', 'kickoff notes for the q3 planning meeting')",
+            [],
+        )
+        .unwrap();
+        let hit: String = conn
+            .query_row(
+                "SELECT t.text FROM meeting_transcripts t \
+                 JOIN meeting_transcripts_fts f ON f.rowid = t.id \
+                 WHERE meeting_transcripts_fts MATCH 'kickoff'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(hit.contains("kickoff notes"), "FTS hit text: {hit}");
+    }
+
+    /// The meeting schema must be append-only sibling to the existing
+    /// dictation schema. None of migration 011's CREATE statements
+    /// should reference the dictation tables (sessions, transcripts).
+    /// This is the static side of the `mc-dictation-untouched` judge.
+    #[test]
+    fn migration_011_does_not_touch_dictation_tables() {
+        let sql = MIGRATION_011.to_lowercase();
+        for forbidden in [
+            "alter table sessions",
+            "alter table transcripts",
+            "drop table sessions",
+            "drop table transcripts",
+            "alter table modes",
+            "insert into modes",
+        ] {
+            assert!(
+                !sql.contains(forbidden),
+                "migration 011 must not touch dictation surface: forbidden snippet found: {forbidden}"
+            );
+        }
     }
 
     /// Migration 010 (ADR 0024 Wave C) inserts the v2 prompts AND
