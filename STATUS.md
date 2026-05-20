@@ -21,19 +21,24 @@
 > **NEXT P1 LATERAL:** `mb-2bi` – audio streaming + chunked Whisper
 >   (proper long-form fix). Standing P1. Required for true Wisprflow-
 >   parity latency on normal/formal modes per ADR 0024 acceptance.
-> **IN-FLIGHT THIS SESSION:** *(none — Unsplash photo background
->   lateral-epic sealed: mb-biy closed, shipped in 24bb600, release
->   exe rebuilt + verified. ADR 0025 charters the optional-remote-
->   ambient-background decision. Three discretionary follow-ups
->   filed as P3 bd issues: mb-eza (DPAPI migration for the API
->   key), mb-ax9 (brand-glyph review), mb-yxh (ESLint v9 config
->   migration — pre-existing, unrelated). Full ship + compliance
->   log at `docs/cleanup/unsplash-background-ship.md`. Four
->   LESSONS entries dated 2026-05-19 cover the design-system
->   token-override pattern, the z-index:0 stacking-context trap,
->   the workspace-root `target/` dir gotcha, and the Tauri
->   release-binary asset-compression grep gotcha. ADR 0024 epic
->   mb-e7s remains sealed.)*
+> **IN-FLIGHT THIS SESSION (2026-05-20):** **Phase MC Wave 1 partially
+>   landed.** Epic `mb-pdv` created with 9 Wave 1 sub-tasks (mb-j99,
+>   mb-7q0, mb-1xh, mb-qjb, mb-gh4, mb-b7i, mb-5fo, mb-01h, mb-qig)
+>   wired via parent-child links. Plan reconciled in commit `d540a64`
+>   (ADR numbering shifted 0025-0029 → 0026-0030 because the previous
+>   0025 slot was claimed by the Unsplash ambient-bg lateral epic;
+>   migration path corrected `src-tauri/src/db/migrations/` →
+>   `src-tauri/migrations/`; double-tap-activation thread strategy
+>   switched from "same as dictation thread" to "dedicated meetings
+>   thread" to keep `hotkey/driver.rs` sealed). All 5 charter ADRs
+>   (0026-0030) authored + committed `3f6ca82` (1017 lines added,
+>   152-191 each, follow template). **Status of Wave 1 closure:**
+>   ADR tasks done; remaining are mb-b7i (Cargo deps + AppError +
+>   meetings module scaffolds), mb-5fo (11 SettingKey variants),
+>   mb-01h (migration 011 + db_migrations test), mb-qig (coupling
+>   hook). No code changes yet — next session picks these up. Cargo
+>   gate has not been run this session (no Rust touched). Dictation
+>   pipeline + 383 tests untouched.
 > **HOW TO RESUME:** `/agent code-puppy` → re-read this block → `bd ready`
 >   for the unblocked queue → start. If your prompt conflicts with anything
 >   above, STOP and ask before doing tool calls.
