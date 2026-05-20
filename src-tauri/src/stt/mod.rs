@@ -48,7 +48,12 @@ pub struct TranscribeRequest<'a> {
 /// Whisper.cpp emits per-segment timestamps in centiseconds; the trait
 /// surfaces them in milliseconds for ergonomic alignment with the rest
 /// of the meeting pipeline (which is millisecond-typed end-to-end).
-#[derive(Debug, Clone, PartialEq)]
+///
+/// `Serialize` + `Deserialize` added in Phase MC Wave 4 so the meeting
+/// `persist_meeting` path can JSON-encode the raw_segments stage row
+/// (`meeting_transcripts.text` for stage='raw_segments' is the
+/// `serde_json::to_string` of a `Vec<SttSegment>`).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SttSegment {
     pub text: String,
     pub t0_ms: u32,
