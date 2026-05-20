@@ -11,17 +11,13 @@
 
 use crate::error::AppResult;
 
-/// One transcribed segment from Whisper. Mirrors `whisper.cpp`'s
-/// per-segment output shape. Added to the existing `Transcript` shape
-/// in `stt::` as an additive sidecar in Wave 2 (ADR 0030).
-#[derive(Debug, Clone, PartialEq)]
-pub struct TimedSegment {
-    pub text: String,
-    /// Start time in milliseconds, relative to the chunk's first sample.
-    pub t0_ms: u32,
-    /// End time in milliseconds, relative to the chunk's first sample.
-    pub t1_ms: u32,
-}
+/// One transcribed segment from Whisper. Wave 2 makes this an alias
+/// for [`crate::stt::SttSegment`] (the canonical home for the type,
+/// per the deviation note in `docs/phases/phase-mc-wave2-brief.md`).
+/// Meetings keeps the local name `TimedSegment` for readability at
+/// call sites; the runtime / formatter / chunker code all consume it
+/// as a transparent re-export.
+pub use crate::stt::SttSegment as TimedSegment;
 
 /// Progress event emitted during long-form transcription. The runtime
 /// fans these out to the overlay window via Tauri's event bus.
@@ -75,6 +71,19 @@ mod tests {
             t1_ms: 500,
         };
         assert!(s.t1_ms > s.t0_ms);
+    }
+
+    /// Wave 2 alias check: TimedSegment IS SttSegment (no separate
+    /// type, just a re-export). This test pins the alias so a future
+    /// accidental fork of the type surfaces in CI.
+    #[test]
+    fn timed_segment_is_stt_segment_alias() {
+        let s: TimedSegment = crate::stt::SttSegment {
+            text: "x".into(),
+            t0_ms: 1,
+            t1_ms: 2,
+        };
+        assert_eq!(s.text, "x");
     }
 
     #[test]

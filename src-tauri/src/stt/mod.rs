@@ -43,8 +43,65 @@ pub struct TranscribeRequest<'a> {
     pub force_cpu: bool,
 }
 
+/// One Whisper segment with timing in milliseconds (ADR 0030).
+///
+/// Whisper.cpp emits per-segment timestamps in centiseconds; the trait
+/// surfaces them in milliseconds for ergonomic alignment with the rest
+/// of the meeting pipeline (which is millisecond-typed end-to-end).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SttSegment {
+    pub text: String,
+    pub t0_ms: u32,
+    pub t1_ms: u32,
+}
+
+/// Multi-segment STT pass output (ADR 0030).
+///
+/// Returned by [`SpeechToText::transcribe_segments`]. Carries the same
+/// top-line shape as [`Transcript`] plus a vector of timed segments
+/// (sorted by `t0_ms`, monotone non-decreasing).
+#[derive(Debug, Clone)]
+pub struct TranscriptWithSegments {
+    pub text: String,
+    pub segments: Vec<SttSegment>,
+    pub gpu_used: bool,
+    pub latency_ms: u64,
+    pub model_id: String,
+}
+
 pub trait SpeechToText: Send {
     fn transcribe(&mut self, req: TranscribeRequest<'_>) -> AppResult<Transcript>;
+
+    /// ADR 0030. Returns segments alongside the top-line text.
+    ///
+    /// Default impl falls back to a single-segment wrap of the
+    /// existing `transcribe` output — keeps the trait extension
+    /// non-breaking for any future external implementor (cloud-STT
+    /// layer, mocked test STT) without forcing them to author a real
+    /// segment walker. [`whisper::WhisperStt`] overrides this with a
+    /// proper walk of whisper.cpp's per-segment timestamps.
+    fn transcribe_segments(
+        &mut self,
+        req: TranscribeRequest<'_>,
+    ) -> AppResult<TranscriptWithSegments> {
+        let t = self.transcribe(req)?;
+        let single = SttSegment {
+            text: t.text.clone(),
+            t0_ms: 0,
+            // Wrap the whole utterance as a single segment spanning
+            // [0, latency_ms). The default impl is a fallback only;
+            // callers that need accurate per-Whisper-segment timing
+            // should target an impl that overrides this method.
+            t1_ms: t.latency_ms as u32,
+        };
+        Ok(TranscriptWithSegments {
+            text: t.text,
+            segments: vec![single],
+            gpu_used: t.gpu_used,
+            latency_ms: t.latency_ms,
+            model_id: t.model_id,
+        })
+    }
 }
 
 /// Construct the platform-default STT impl.

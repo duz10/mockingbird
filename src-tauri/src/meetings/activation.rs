@@ -150,9 +150,67 @@ impl Activation {
 
     /// Apply one input. Returns the resulting action.
     ///
-    /// Wave 1: `todo!()` — Wave 2 ships the implementation + ≥20 tests.
-    pub fn on_event(&mut self, _event: ActivationEvent) -> AppResult<ActivationAction> {
-        todo!("Wave 2: implement chord state machine per Section MC.1")
+    /// Total over the input enum: every (state, event) pair has a
+    /// defined transition per Section MC.1. The `AppResult` return
+    /// type is preserved for forward-compatibility with future
+    /// timing-window gestures (clock-skew warnings, etc.); Wave 2's
+    /// implementation never returns `Err`.
+    pub fn on_event(&mut self, event: ActivationEvent) -> AppResult<ActivationAction> {
+        // PauseToggle wins everywhere: it forces IDLE and updates the
+        // paused flag regardless of current state.
+        if let ActivationEvent::PauseToggle { paused } = event {
+            self.paused = paused;
+            self.state = ActivationState::Idle;
+            return Ok(ActivationAction::Noop);
+        }
+
+        // While paused, every key event + tick is a no-op. The state
+        // machine stays parked at IDLE (set by the PauseToggle that
+        // brought us here, or by `new()`).
+        if self.paused {
+            return Ok(ActivationAction::Noop);
+        }
+
+        // Tick is unused by the chord machine — input-enum symmetry only.
+        if matches!(event, ActivationEvent::Tick { .. }) {
+            return Ok(ActivationAction::Noop);
+        }
+
+        let action = match (self.state, event) {
+            // IDLE: only ModifierDown advances state.
+            (ActivationState::Idle, ActivationEvent::ModifierDown { .. }) => {
+                self.state = ActivationState::ModHeld;
+                ActivationAction::Noop
+            }
+            (ActivationState::Idle, _) => ActivationAction::Noop,
+
+            // MOD_HELD: MainKeyDown fires the toggle (the chord!).
+            (ActivationState::ModHeld, ActivationEvent::MainKeyDown { .. }) => {
+                self.state = ActivationState::MainPressed;
+                ActivationAction::MeetingToggle {
+                    source: self.last_source,
+                }
+            }
+            (ActivationState::ModHeld, ActivationEvent::ModifierUp { .. }) => {
+                self.state = ActivationState::Idle;
+                ActivationAction::Noop
+            }
+            (ActivationState::ModHeld, _) => ActivationAction::Noop,
+
+            // MAIN_PRESSED: chord fully held. Suppress key-repeat
+            // until MainKeyUp; ModifierUp aborts.
+            (ActivationState::MainPressed, ActivationEvent::MainKeyUp { .. }) => {
+                self.state = ActivationState::ModHeld;
+                ActivationAction::Noop
+            }
+            (ActivationState::MainPressed, ActivationEvent::ModifierUp { .. }) => {
+                self.state = ActivationState::Idle;
+                ActivationAction::Noop
+            }
+            (ActivationState::MainPressed, _) => ActivationAction::Noop,
+        };
+
+        Ok(action)
     }
 }
 
@@ -160,21 +218,279 @@ impl Activation {
 mod tests {
     use super::*;
 
-    /// Smoke: construct + read back. Wave 2's full test set replaces
-    /// this with the ≥20 transition tests; for now this keeps the
-    /// scaffold honest by exercising the public surface that exists.
+    // ---------- helpers ----------
+
+    /// Drive a sequence of events through the state machine and
+    /// collect the actions. Tests prefer this over hand-rolled
+    /// match-on-Ok-then-push loops.
+    fn drive(a: &mut Activation, events: &[ActivationEvent]) -> Vec<ActivationAction> {
+        events
+            .iter()
+            .map(|e| a.on_event(*e).expect("Wave 2 on_event never errs"))
+            .collect()
+    }
+
+    // The chord state machine ignores ts_ms; use a constant for
+    // readability. The few tests that exercise time-ordering still
+    // pass strictly-monotonic stamps to document the intent.
+    const T: u64 = 0;
+
+    fn mod_down() -> ActivationEvent {
+        ActivationEvent::ModifierDown { ts_ms: T }
+    }
+    fn mod_up() -> ActivationEvent {
+        ActivationEvent::ModifierUp { ts_ms: T }
+    }
+    fn main_down() -> ActivationEvent {
+        ActivationEvent::MainKeyDown { ts_ms: T }
+    }
+    fn main_up() -> ActivationEvent {
+        ActivationEvent::MainKeyUp { ts_ms: T }
+    }
+    fn tick() -> ActivationEvent {
+        ActivationEvent::Tick { ts_ms: T }
+    }
+    fn pause(p: bool) -> ActivationEvent {
+        ActivationEvent::PauseToggle { paused: p }
+    }
+    fn toggle(src: LastChosenSource) -> ActivationAction {
+        ActivationAction::MeetingToggle { source: src }
+    }
+    const NOOP: ActivationAction = ActivationAction::Noop;
+
+    // ---------- IDLE transitions ----------
+
+    #[test]
+    fn idle_modifier_down_goes_to_mod_held() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        assert_eq!(drive(&mut a, &[mod_down()]), vec![NOOP]);
+        assert_eq!(a.state(), ActivationState::ModHeld);
+    }
+
+    #[test]
+    fn idle_lone_main_keydown_is_noop() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        assert_eq!(drive(&mut a, &[main_down()]), vec![NOOP]);
+        assert_eq!(a.state(), ActivationState::Idle);
+    }
+
+    #[test]
+    fn idle_lone_main_keyup_is_noop() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        assert_eq!(drive(&mut a, &[main_up()]), vec![NOOP]);
+        assert_eq!(a.state(), ActivationState::Idle);
+    }
+
+    #[test]
+    fn idle_lone_modifier_up_is_noop() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        assert_eq!(drive(&mut a, &[mod_up()]), vec![NOOP]);
+        assert_eq!(a.state(), ActivationState::Idle);
+    }
+
+    // ---------- MOD_HELD transitions ----------
+
+    #[test]
+    fn mod_held_main_down_fires_meeting_toggle() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        let acts = drive(&mut a, &[mod_down(), main_down()]);
+        assert_eq!(acts, vec![NOOP, toggle(LastChosenSource::Mic)]);
+        assert_eq!(a.state(), ActivationState::MainPressed);
+    }
+
+    #[test]
+    fn mod_held_modifier_up_returns_to_idle() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        let acts = drive(&mut a, &[mod_down(), mod_up()]);
+        assert_eq!(acts, vec![NOOP, NOOP]);
+        assert_eq!(a.state(), ActivationState::Idle);
+    }
+
+    #[test]
+    fn mod_held_main_up_without_main_down_is_noop() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        let acts = drive(&mut a, &[mod_down(), main_up()]);
+        assert_eq!(acts, vec![NOOP, NOOP]);
+        assert_eq!(a.state(), ActivationState::ModHeld);
+    }
+
+    #[test]
+    fn mod_held_redundant_modifier_down_is_noop() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        let acts = drive(&mut a, &[mod_down(), mod_down()]);
+        assert_eq!(acts, vec![NOOP, NOOP]);
+        assert_eq!(a.state(), ActivationState::ModHeld);
+    }
+
+    // ---------- MAIN_PRESSED transitions ----------
+
+    #[test]
+    fn main_pressed_key_repeat_does_not_re_fire() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        let acts = drive(&mut a, &[mod_down(), main_down(), main_down(), main_down()]);
+        assert_eq!(acts, vec![NOOP, toggle(LastChosenSource::Mic), NOOP, NOOP]);
+        assert_eq!(a.state(), ActivationState::MainPressed);
+    }
+
+    #[test]
+    fn main_pressed_main_up_returns_to_mod_held() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        let acts = drive(&mut a, &[mod_down(), main_down(), main_up()]);
+        assert_eq!(acts, vec![NOOP, toggle(LastChosenSource::Mic), NOOP]);
+        assert_eq!(a.state(), ActivationState::ModHeld);
+    }
+
+    #[test]
+    fn main_pressed_modifier_up_returns_to_idle() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        let acts = drive(&mut a, &[mod_down(), main_down(), mod_up()]);
+        assert_eq!(acts, vec![NOOP, toggle(LastChosenSource::Mic), NOOP]);
+        assert_eq!(a.state(), ActivationState::Idle);
+    }
+
+    // ---------- Re-chord behaviour ----------
+
+    #[test]
+    fn release_and_re_press_fires_again() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        let acts = drive(&mut a, &[mod_down(), main_down(), main_up(), main_down()]);
+        assert_eq!(
+            acts,
+            vec![
+                NOOP,
+                toggle(LastChosenSource::Mic),
+                NOOP,
+                toggle(LastChosenSource::Mic),
+            ]
+        );
+        assert_eq!(a.state(), ActivationState::MainPressed);
+    }
+
+    #[test]
+    fn release_modifier_then_re_chord_fires_again() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        let acts = drive(
+            &mut a,
+            &[
+                mod_down(),
+                main_down(),
+                main_up(),
+                mod_up(),
+                mod_down(),
+                main_down(),
+            ],
+        );
+        assert_eq!(
+            acts,
+            vec![
+                NOOP,
+                toggle(LastChosenSource::Mic),
+                NOOP,
+                NOOP,
+                NOOP,
+                toggle(LastChosenSource::Mic),
+            ]
+        );
+        assert_eq!(a.state(), ActivationState::MainPressed);
+    }
+
+    // ---------- Tick is always a no-op ----------
+
+    #[test]
+    fn tick_in_idle_is_noop() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        assert_eq!(drive(&mut a, &[tick()]), vec![NOOP]);
+        assert_eq!(a.state(), ActivationState::Idle);
+    }
+
+    #[test]
+    fn tick_in_mod_held_is_noop() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        let acts = drive(&mut a, &[mod_down(), tick()]);
+        assert_eq!(acts, vec![NOOP, NOOP]);
+        assert_eq!(a.state(), ActivationState::ModHeld);
+    }
+
+    #[test]
+    fn tick_in_main_pressed_is_noop() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        let acts = drive(&mut a, &[mod_down(), main_down(), tick()]);
+        assert_eq!(acts, vec![NOOP, toggle(LastChosenSource::Mic), NOOP]);
+        assert_eq!(a.state(), ActivationState::MainPressed);
+    }
+
+    // ---------- Pause-toggle behaviour ----------
+
+    #[test]
+    fn pause_toggle_in_idle_resets_to_idle() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        assert_eq!(drive(&mut a, &[pause(true)]), vec![NOOP]);
+        assert_eq!(a.state(), ActivationState::Idle);
+        assert!(a.is_paused());
+    }
+
+    #[test]
+    fn pause_toggle_in_main_pressed_resets_to_idle() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        let acts = drive(&mut a, &[mod_down(), main_down(), pause(true)]);
+        assert_eq!(acts, vec![NOOP, toggle(LastChosenSource::Mic), NOOP]);
+        assert_eq!(a.state(), ActivationState::Idle);
+        assert!(a.is_paused());
+    }
+
+    #[test]
+    fn paused_suppresses_chord() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        let acts = drive(&mut a, &[pause(true), mod_down(), main_down()]);
+        assert_eq!(acts, vec![NOOP, NOOP, NOOP]);
+        assert_eq!(a.state(), ActivationState::Idle);
+        assert!(a.is_paused());
+    }
+
+    #[test]
+    fn unpaused_chord_resumes() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        let acts = drive(
+            &mut a,
+            &[pause(true), pause(false), mod_down(), main_down()],
+        );
+        assert_eq!(acts, vec![NOOP, NOOP, NOOP, toggle(LastChosenSource::Mic)]);
+        assert_eq!(a.state(), ActivationState::MainPressed);
+        assert!(!a.is_paused());
+    }
+
+    // ---------- last_source carry-through ----------
+
+    #[test]
+    fn set_last_source_affects_next_toggle() {
+        let mut a = Activation::new(LastChosenSource::Mic);
+        a.set_last_source(LastChosenSource::Both);
+        let acts = drive(&mut a, &[mod_down(), main_down()]);
+        assert_eq!(acts, vec![NOOP, toggle(LastChosenSource::Both)]);
+    }
+
+    #[test]
+    fn toggles_during_main_pressed_carry_current_src() {
+        // First chord fires with `Mic`; then the runtime updates the
+        // last-chosen source to `System` (e.g. user picked System in
+        // the overlay); the next chord must carry the new source.
+        let mut a = Activation::new(LastChosenSource::Mic);
+        let first = drive(&mut a, &[mod_down(), main_down(), main_up()]);
+        assert_eq!(first, vec![NOOP, toggle(LastChosenSource::Mic), NOOP]);
+
+        a.set_last_source(LastChosenSource::System);
+        let second = drive(&mut a, &[main_down()]);
+        assert_eq!(second, vec![toggle(LastChosenSource::System)]);
+        assert_eq!(a.state(), ActivationState::MainPressed);
+    }
+
+    // ---------- Wave-1 carry-forward smokes (kept; cheap insurance) ----------
+
     #[test]
     fn new_starts_idle_unpaused() {
         let a = Activation::new(LastChosenSource::Mic);
         assert_eq!(a.state(), ActivationState::Idle);
         assert!(!a.is_paused());
         assert_eq!(a.last_source(), LastChosenSource::Mic);
-    }
-
-    #[test]
-    fn set_last_source_updates() {
-        let mut a = Activation::new(LastChosenSource::Mic);
-        a.set_last_source(LastChosenSource::Both);
-        assert_eq!(a.last_source(), LastChosenSource::Both);
     }
 }

@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-use super::{SpeechToText, TranscribeRequest, Transcript};
+use super::{SpeechToText, SttSegment, TranscribeRequest, Transcript, TranscriptWithSegments};
 use crate::error::{AppError, AppResult};
 
 const MODEL_FILENAME: &str = "whisper-large-v3-turbo-q5_0.bin";
@@ -165,6 +165,86 @@ impl SpeechToText for WhisperStt {
             model_id: MODEL_ID.to_string(),
         })
     }
+
+    /// ADR 0030 override. Walks whisper.cpp's per-segment timestamps
+    /// instead of concatenating segment text into a single string.
+    ///
+    /// Timestamps from whisper.cpp are in centiseconds (10 ms units);
+    /// converted to ms here so callers don't have to know the
+    /// underlying unit.
+    fn transcribe_segments(
+        &mut self,
+        req: TranscribeRequest<'_>,
+    ) -> AppResult<TranscriptWithSegments> {
+        let started = Instant::now();
+
+        let audio_f32: Vec<f32> = req.audio.iter().map(|&s| s as f32 / 32768.0).collect();
+
+        if req.force_cpu && self.gpu_loaded {
+            tracing::warn!(
+                target: "stt",
+                "TranscribeRequest.force_cpu=true but context is GPU-loaded; \
+                 using GPU (per-call backend switching is not supported)."
+            );
+        }
+
+        let mut state = self
+            .ctx
+            .create_state()
+            .map_err(|e| AppError::Stt(format!("create_state: {e}")))?;
+
+        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        params.set_print_progress(false);
+        params.set_print_special(false);
+        params.set_print_realtime(false);
+        params.set_print_timestamps(false);
+        params.set_language(Some("en"));
+        if let Some(p) = req.initial_prompt {
+            params.set_initial_prompt(p);
+        }
+
+        state
+            .full(params, &audio_f32)
+            .map_err(|e| AppError::Stt(format!("whisper full: {e}")))?;
+
+        let n = state.full_n_segments();
+        let mut segments: Vec<SttSegment> = Vec::with_capacity(n.max(0) as usize);
+        let mut joined = String::new();
+        for i in 0..n {
+            let seg = state
+                .get_segment(i)
+                .ok_or_else(|| AppError::Stt(format!("missing segment {i}")))?;
+            let text = seg
+                .to_str_lossy()
+                .map_err(|e| AppError::Stt(format!("segment text {i}: {e}")))?
+                .into_owned();
+            // whisper.cpp returns centiseconds; convert to ms. Clamp
+            // to u32::MAX defensively (a 10-million-hour segment
+            // would overflow, which we'll cheerfully consider out of
+            // scope for v1).
+            let t0_cs = seg.start_timestamp().max(0) as u64;
+            let t1_cs = seg.end_timestamp().max(0) as u64;
+            let t0_ms = (t0_cs.saturating_mul(10)).min(u32::MAX as u64) as u32;
+            let t1_ms = (t1_cs.saturating_mul(10)).min(u32::MAX as u64) as u32;
+            if !joined.is_empty() {
+                joined.push(' ');
+            }
+            joined.push_str(text.trim());
+            segments.push(SttSegment {
+                text: text.trim().to_string(),
+                t0_ms,
+                t1_ms,
+            });
+        }
+
+        Ok(TranscriptWithSegments {
+            text: joined,
+            segments,
+            gpu_used: self.gpu_loaded,
+            latency_ms: started.elapsed().as_millis() as u64,
+            model_id: MODEL_ID.to_string(),
+        })
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -260,5 +340,118 @@ mod tests {
         let tx = stt.transcribe(req).unwrap();
         // Pure silence + a prompt shouldn't fabricate. Just verify it didn't error.
         assert_eq!(tx.model_id, MODEL_ID);
+    }
+
+    // ====================================================================
+    // ADR 0030 — transcribe_segments
+    //
+    // These four tests are gated behind `#[ignore]` because the test
+    // binary on this box dies at process load with
+    // STATUS_ENTRYPOINT_NOT_FOUND (LESSONS 2026-05-17). On a clean
+    // machine where `cargo test --release stt::tests::*` passes, run
+    // them via `cargo test --release stt::whisper::tests:: --
+    // --ignored`. The seal-time gate is `cargo test --release
+    // --no-run`, which compiles these without running them.
+    // ====================================================================
+
+    #[test]
+    #[ignore]
+    fn transcribe_segments_returns_at_least_one_segment() {
+        if !model_available() {
+            return;
+        }
+        // 3 s of silence is enough to make whisper.cpp emit at least
+        // one segment (it always emits >=1 segment per non-empty audio
+        // input; the segment text may be empty / `[BLANK_AUDIO]`).
+        let mut stt = WhisperStt::new().unwrap();
+        let req = TranscribeRequest {
+            audio: &vec![0i16; 3 * 16_000],
+            initial_prompt: None,
+            force_cpu: false,
+        };
+        let tx = stt.transcribe_segments(req).unwrap();
+        assert!(
+            !tx.segments.is_empty(),
+            "transcribe_segments must yield ≥1 segment"
+        );
+        assert_eq!(tx.model_id, MODEL_ID);
+    }
+
+    #[test]
+    #[ignore]
+    fn segment_t1_geq_t0() {
+        if !model_available() {
+            return;
+        }
+        let mut stt = WhisperStt::new().unwrap();
+        let req = TranscribeRequest {
+            audio: &vec![0i16; 3 * 16_000],
+            initial_prompt: None,
+            force_cpu: false,
+        };
+        let tx = stt.transcribe_segments(req).unwrap();
+        for (i, s) in tx.segments.iter().enumerate() {
+            assert!(
+                s.t1_ms >= s.t0_ms,
+                "segment {i} has t1_ms={} < t0_ms={}",
+                s.t1_ms,
+                s.t0_ms
+            );
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn segments_monotonic_in_t0() {
+        if !model_available() {
+            return;
+        }
+        // 5 s of silence should still surface a small number of
+        // segments (whisper.cpp groups silent frames into a handful).
+        let mut stt = WhisperStt::new().unwrap();
+        let req = TranscribeRequest {
+            audio: &vec![0i16; 5 * 16_000],
+            initial_prompt: None,
+            force_cpu: false,
+        };
+        let tx = stt.transcribe_segments(req).unwrap();
+        for w in tx.segments.windows(2) {
+            assert!(
+                w[0].t0_ms <= w[1].t0_ms,
+                "segments not monotonic in t0_ms: {} then {}",
+                w[0].t0_ms,
+                w[1].t0_ms
+            );
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn joined_segment_text_matches_top_line() {
+        if !model_available() {
+            return;
+        }
+        let mut stt = WhisperStt::new().unwrap();
+        let req = TranscribeRequest {
+            audio: &vec![0i16; 3 * 16_000],
+            initial_prompt: None,
+            force_cpu: false,
+        };
+        let tx = stt.transcribe_segments(req).unwrap();
+        let rebuilt = tx
+            .segments
+            .iter()
+            .map(|s| s.text.trim())
+            .collect::<Vec<_>>()
+            .join(" ");
+        // Compare on lowercased + whitespace-collapsed forms to avoid
+        // whisper.cpp's per-segment leading-space quirks.
+        fn norm(s: &str) -> String {
+            s.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+        }
+        assert_eq!(norm(&rebuilt), norm(&tx.text));
     }
 }
