@@ -103,6 +103,21 @@
 >   + 383 baseline tests untouched; **+68 net tests this wave**
 >   (compiled clean, not live-run); project test total at ~481.
 >   mb-2bi still open (closes Wave 6 alongside seal tag, per kickoff).
+> **WAVE 4 IN-FLIGHT (2026-05-20 + 2026-05-21):** Most of Wave 4 has
+>   landed. Closed beads: mb-pdv.14 (persist), mb-pdv.15 (runtime
+>   lifecycle), mb-pdv.16 (10 Tauri commands), mb-pdv.18 (QA-matrix
+>   template), and **mb-pdv.17 (UI: lib/meetings.ts typed IPC +
+>   pages/Meetings.tsx + MeetingDetail.tsx + MeetingRecordBar.tsx +
+>   Sidebar nav + MeetingsIcon + meeting_overlay window declared in
+>   tauri.conf.json + meeting_overlay.html + meeting_overlay.tsx +
+>   meeting_overlay/MeetingOverlay.tsx, +12 vitest tests = 25 total UI
+>   tests)** — closed in commits `daf054d` (main-window UI) + `e1bb92c`
+>   (overlay window). Cargo gate per LESSONS 2026-05-17 fallback:
+>   `check` clean, `clippy --release -- -D warnings` clean, `fmt
+>   --check` clean, `test --release --no-run` all 12 binaries link.
+>   Only Wave 4 bead still open: **mb-pdv.19 (Wave 5 brief)** — P2.
+>   Hands-on QA matrix run (mb-pdv.18 deliverable) is HUMAN-IN-LOOP
+>   and pending Dustin's session.
 > **HOW TO RESUME:** `/agent code-puppy` → re-read this block → `bd ready`
 >   for the unblocked queue → start. If your prompt conflicts with anything
 >   above, STOP and ask before doing tool calls.
