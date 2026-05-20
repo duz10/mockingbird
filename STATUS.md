@@ -21,8 +21,55 @@
 > **NEXT P1 LATERAL:** `mb-2bi` – audio streaming + chunked Whisper
 >   (proper long-form fix). Standing P1. Required for true Wisprflow-
 >   parity latency on normal/formal modes per ADR 0024 acceptance.
-> **IN-FLIGHT THIS SESSION (2026-05-20):** **Phase MC Wave 2 SEALED in
->   commit `bec0423`** (8 files, +1484/-73 lines). Epic `mb-pdv`
+> **IN-FLIGHT THIS SESSION (2026-05-20):** **Phase MC Wave 3 SEALED in
+>   commit `21f40d9`** (Wave 4 brief authored). All 6 Wave-3 tasks
+>   landed across three commits: `<earlier W3>` (loopback + capture),
+>   `73e0fa4` (long-form stitch driver + 23 tests), `21f40d9` (meetings
+>   hotkey installer + meeting collision probe + Wave 4 brief). What's
+>   on disk after W3: `meetings/loopback_windows.rs` is real (cpal
+>   loopback backend per ADR 0031, 7 tests, clean Drop); `meetings/
+>   capture.rs` is real (TwinStreamCapture coordinator owns mic +
+>   optional loopback, exposes one-shot `take_chunk_rx()`, 12 tests);
+>   `meetings/long_form_stt.rs` is real (chunked stitch driver per ADR
+>   0029 — walks chunks in arrival order, CRC32 verify, per-channel
+>   rolling initial_prompt ~224 tokens, overlap-window dedup for
+>   chunks N≥1, global-timeline shift; tests split across `long_form_
+>   stt_tests.rs` (11 integration) + `long_form_stt_pure_tests.rs` (12
+>   pure-helper) to stay under the 600-line cap; +23 tests total
+>   incl. lossless multi-chunk feed); `meetings/hotkey_installer.rs`
+>   is NEW (independent second WH_KEYBOARD_LL on its own `mockingbird-
+>   meeting-hotkey` thread with its own thread_local! storage; hook
+>   proc ALWAYS CallNextHookEx so the sealed dictation hook still
+>   fires; 11 unit tests on the pure classifier + 1 #[ignore]'d live
+>   install test); `hotkey/probe.rs` additively extended with
+>   `probe_meeting_main_vk` + `meeting_candidate_chain` + 3 collision
+>   tests (no edits to existing fns, sealed-file rule respected).
+>   **Wave 4 brief authored at `docs/phases/phase-mc-wave4-brief.md`**
+>   — 8 tasks (7 P0 autonomous + 1 P0 HUMAN-IN-LOOP QA matrix);
+>   covers persist.rs, runtime.rs full lifecycle wiring (start →
+>   capture → stop → long-form-stt → formatter → merge → persist →
+>   emit done; Drop marks `interrupted`), llm_pass.rs (fresh
+>   OllamaProvider per call via existing arg-less new()/with_base_url
+>   — NO CleanupProvider extension), export.rs + clipboard.rs (note:
+>   one-shot clipboard, NOT save/restore — meeting export is
+>   user-initiated paste target, not inline injection), 10 Tauri
+>   commands per Section MC.6, meeting_overlay Tauri window + React
+>   UI (Meetings.tsx + MeetingDetail.tsx + Sidebar nav). Cross-module
+>   boundary respected: hotkey/state.rs, hotkey/windows.rs, hotkey/
+>   driver.rs, dictation/, injection/, recording_window.rs, cleanup/
+>   provider.rs, cleanup/llm_cleaner.rs, migrations 001–010 — ALL
+>   untouched. **Cargo gate status:** `check --all-targets` clean (0
+>   errors, 0 warnings); `clippy --release --all-targets -- -D
+>   warnings` clean (25.85s); `fmt --check` clean; `test --release
+>   --no-run` all 13 binaries link clean (LESSONS 2026-05-17 fallback
+>   for 0xC0000139 still applies; documented in the wave brief). Test
+>   delta Wave 3: **+35 net tests** (12 capture + 23 long_form_stt +
+>   11 hotkey_installer + 3 probe − some overlap with Wave-1 carry-
+>   forwards counted once); project total at ~430. Phase-MC running
+>   delta: +103 tests (W2 +68 + W3 +35), inside the +90/+120 target.
+>   mb-2bi still open (closes Wave 6 alongside seal tag, per kickoff).
+>   *Original W2 anchor preserved below for historical context:* **Phase
+>   MC Wave 2 SEALED in commit `bec0423`** (8 files, +1484/-73 lines). Epic `mb-pdv`
 >   on-track; Wave 1 (`79414db`) + Wave 2 (`bec0423`) both sealed.
 >   What's on disk after W2: the chord activation state machine in
 >   `meetings/activation.rs` is real (verbatim Section MC.1 diagram,

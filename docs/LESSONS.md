@@ -14,6 +14,53 @@ Format:
 
 ---
 
+## 2026-05-20 [phase-mc-wave-3] two independent WH_KEYBOARD_LL hooks coexist iff the meeting hook ALWAYS CallNextHookEx; mpsc Receiver one-shot handoff via Option::take
+
+- **Context:** Phase MC Wave 3 — installing a SECOND `WH_KEYBOARD_LL`
+  hook for the meeting chord (RCtrl+M) without touching the sealed
+  dictation hook in `hotkey/windows.rs`. Two surprises along the way.
+- **Finding #1 (cohabiting LL hooks):** Two `WH_KEYBOARD_LL` hooks
+  installed on the same desktop work fine — they form a chain that
+  Windows walks in reverse-install order. BUT: the second hook MUST
+  call `CallNextHookEx(None, code, wparam, lparam)` unconditionally
+  (never return `LRESULT(1)` to suppress) or the FIRST-installed
+  hook stops seeing keystrokes. The dictation hook installs at app
+  boot first, then meetings second; if meetings ever suppressed,
+  dictation would die silently for that keystroke. The pure
+  classifier in `hotkey_installer.rs::classify_meeting_keystroke`
+  emits the event but the proc itself never branches on suppression
+  — keep it that way.
+- **Finding #2 (mpsc Receiver one-shot handoff):** `TwinStreamCapture`
+  owns a `Sender<ChannelChunk>` that both audio streams write to,
+  and `LongFormStt` needs *sole ownership* of the matching
+  `Receiver`. `std::sync::mpsc::Receiver` isn't clonable on purpose
+  (chunk ordering is the whole point of a single receiver). The
+  pattern that worked: store the receiver as `Option<Receiver<_>>`
+  and expose a `pub fn take_chunk_rx(&mut self) -> Option<Receiver>`
+  that uses `Option::take()`. Subsequent calls return `None` and
+  `try_recv_chunks()` becomes a no-op. Wave 4 runtime wiring calls
+  this exactly once, right after `start()` returns.
+- **Finding #3 (split when a test file blows the 600-line cap):** The
+  `long_form_stt` integration tests came in at 743 lines unsplit.
+  Rather than thinning the tests, I split by KIND (integration vs.
+  pure-helper) into `long_form_stt_tests.rs` (597 lines, the
+  StubStt-driven scenarios) and `long_form_stt_pure_tests.rs` (143
+  lines, the parse_seq + crc32 + tail_tokens unit tests). Both
+  files included via `#[path]` on a `#[cfg(test)] mod` declaration
+  in `long_form_stt.rs`. The split is cohesive (the test categories
+  have genuinely different scaffolding needs) — not a mechanical
+  split-just-to-hit-line-count, which AGENTS.md warns against.
+- **Action:**
+  - When designing a sibling hook in `hotkey/` (Phase 9 macOS, future
+    Mac Touch Bar, etc.), the cohabitation rule is the same: always
+    `CallNextHookEx`-equivalent on the platform's chain primitive.
+  - When a subsystem needs to consume an mpsc stream that another
+    subsystem owns, prefer `Option<Receiver<_>>` + `take()` over
+    inventing a new Sender. The compiler enforces single-consumer.
+  - The 600-line cap is a hard wall; budget for a `_tests.rs` split
+    when designing a test-heavy module (`#[path]` is the
+    Rust-idiomatic way to keep the inclusion explicit).
+
 ## 2026-05-20 [phase-mc-wave-2] whisper.cpp segment timestamps are CENTISECONDS, not ms; UTF-8-safe capitalization needs a char-walker not byte slicing; cpal::Stream is !Send on Windows
 
 - **Context:** Phase MC Wave 2 — implementing the chord activation
