@@ -14,6 +14,78 @@ Format:
 
 ---
 
+## 2026-05-20 [phase-mc-wave-2] whisper.cpp segment timestamps are CENTISECONDS, not ms; UTF-8-safe capitalization needs a char-walker not byte slicing; cpal::Stream is !Send on Windows
+
+- **Context:** Phase MC Wave 2 — implementing the chord activation
+  state machine, deterministic formatter, rolling chunker, and the
+  ADR 0030 `SpeechToText::transcribe_segments` extension. Author also
+  scouted Wave 3 (loopback + TwinStreamCapture + long-form driver).
+- **Finding 1 (whisper-rs timestamp units).** `whisper_rs::WhisperSegment::start_timestamp()` and `end_timestamp()` return `i64` **centiseconds** (10 ms units), not ms. whisper.cpp's C-side comment matches:
+  ```
+  /// # Returns
+  /// Start time in centiseconds (10s of milliseconds)
+  ```
+  Wave 2 multiplies by 10 with `saturating_mul` to convert to the ms
+  unit the rest of the meeting pipeline uses (`SttSegment.t0_ms`,
+  `t1_ms`). Anyone touching the long-form stitch in Wave 3 needs to
+  understand this — the chunker's `first_sample` is in samples (÷16
+  to ms at 16 kHz); the STT segment is in ms (post-conversion). Two
+  different timeline units inside the same function. Document loudly.
+- **Finding 2 (capitalization is harder than it looks).** The
+  formatter's sentence-capitalization walker MUST iterate `char`s
+  (not bytes) and treat non-alpha non-ws characters as **transparent**
+  for the next-uppercase flag. Otherwise:
+   - `s[0..1].make_ascii_uppercase()` panics on a multi-byte UTF-8
+     boundary (CJK, emoji, accented).
+   - A leading quote like `"hello"` consumes the next-uppercase flag
+     and you emit `"hello"` instead of `"Hello"`.
+  The right pattern is: walk chars; if char is alphabetic and the
+  flag is set, uppercase it + clear the flag; if char is whitespace,
+  set the flag iff the previous emitted char was `.!?`; otherwise
+  emit unchanged and keep the flag as-is. The formatter has the
+  reference impl; mirror it if you ever need similar normalization
+  elsewhere.
+- **Finding 3 (cpal::Stream is !Send on Windows).** While scouting
+  Wave 3, confirmed that `cpal::Stream` (used by `audio::CpalCapture`)
+  is NOT `Send` on Windows — WASAPI handles are thread-bound. This
+  forces `meetings::capture::TwinStreamCapture` to spawn a dedicated
+  **owner thread per stream** and communicate via crossbeam channels.
+  Don't try to put the mic + loopback streams in a struct that you
+  pass between threads; it won't compile. The brief at
+  `docs/phases/phase-mc-wave3-brief.md` codifies the design.
+- **Finding 4 (TimedSegment alias deviation).** The Wave 2 brief
+  originally proposed two types: `stt::SttSegment` (canonical) and
+  `meetings::long_form_stt::TimedSegment` (meetings-local rename).
+  Author chose to make `TimedSegment` a transparent `pub use` alias
+  for `SttSegment` instead — keeps the readable local name without
+  duplicating the type. A pin-test in `long_form_stt::tests` catches
+  any future accidental fork. Recorded as deviation #4 in the Wave 2
+  brief; lifted here for visibility.
+- **Finding 5 (proptest dev-dep re-imports).** Phase 1 added
+  `proptest = "1"` to dev-deps but the formatter is the first
+  Phase-MC module to actually use it. No `Cargo.toml` change needed
+  — just `use proptest::prelude::*;` inside `#[cfg(test)]`. If you
+  need it in a NEW crate later, double-check it's listed in that
+  crate's dev-deps before adding `proptest!`.
+- **Finding 6 (0xc0000139 reproduces in debug too).** Confirmed that
+  `cargo test --lib meetings::` in **debug** profile (not just
+  release) exits with `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)` on
+  this box. So it's not a release-LTO artifact; it's a DLL-load
+  failure at process start for the test runner specifically. The
+  documented fallback (`cargo test --release --no-run`) remains the
+  Wave-N seal gate until the box is rebuilt.
+- **Action:**
+  1. Wave 3 brief already captures all of the above in its
+     deviations + signatures + test specs.
+  2. ADR 0030's text mentions ms but doesn't call out the
+     centisecond-source unit explicitly. Wave 3 author: if you
+     touch ADR 0030 for any reason, add a clarifying paragraph.
+     (Not blocking; the impl docs the conversion in the code itself.)
+  3. For Phase 9 macOS port: `cpal::Stream` may also be `!Send` there;
+     plan on the same owner-thread design rather than something cuter.
+
+---
+
 ## 2026-05-20 [phase-mc-wave-1] Pre-existing migration test was stale since migration 005; release-LTO test compile is single-threaded death-march on this box
 
 - **Context:** Phase MC Wave 1 — landing migration 011, extending

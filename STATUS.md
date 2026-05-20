@@ -21,33 +21,41 @@
 > **NEXT P1 LATERAL:** `mb-2bi` – audio streaming + chunked Whisper
 >   (proper long-form fix). Standing P1. Required for true Wisprflow-
 >   parity latency on normal/formal modes per ADR 0024 acceptance.
-> **IN-FLIGHT THIS SESSION (2026-05-20):** **Phase MC Wave 1 SEALED in
->   commit `79414db`** (31 files, +2156 lines). Epic `mb-pdv` is on-
->   track; all 9 Wave 1 sub-tasks closed (mb-j99/7q0/1xh/qjb/gh4 ADRs
->   in `3f6ca82`; mb-b7i/5fo/01h/qig code in `79414db`). What's on disk
->   now: 5 ADRs (0026-0030), `crc32fast` dep, 3 new `AppError` variants
->   (MeetingCapture/LongFormStt/Formatter), 11 new MC `SettingKey`
->   variants with round-trip + defaults tests, migration 011
->   (`meeting_sessions` + `meeting_transcripts` + FTS5; schema 10→11)
->   + 4 new migration tests (+2 stale-assertion fixes that have been
->   broken since migration 005 landed; see LESSONS 2026-05-20),
->   `src-tauri/src/meetings/` module tree (13 .rs + 3 prompt .md;
->   types/trait sigs/struct skeletons real, bodies `todo!()`),
->   `pub mod meetings;` in lib.rs, and the cross-module-coupling Python
->   hook (registered in `.code_puppy/settings.json`; 9/9 dry-run cases
->   pass). **Wave 2 brief authored at
->   `docs/phases/phase-mc-wave2-brief.md`** with type defs, function
->   sigs, 67-test specification (22 activation + 27 formatter + 2
->   proptests + 14 chunker + 4 stt_segments), deviations, and the
->   cargo-gate checklist. 5 Wave 2 bd-tasks open (mb-pdv.1…mb-pdv.5).
->   **Cargo gate status:** `check` clean; `clippy --release -- -D
->   warnings` clean; `fmt --check` clean; `test --release` BLOCKED by
->   LESSONS 2026-05-17's `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)`
->   known issue, sealed via documented fallback `test --release
->   --no-run` (all 13 test crates compile clean in 10m 29s). Dictation
->   pipeline + 383 baseline tests untouched; +30 new tests this wave
->   (compiled clean, not live-run). mb-2bi still open (closes Wave 6
->   alongside seal tag, per kickoff).
+> **IN-FLIGHT THIS SESSION (2026-05-20):** **Phase MC Wave 2 SEALED in
+>   commit `bec0423`** (8 files, +1484/-73 lines). Epic `mb-pdv`
+>   on-track; Wave 1 (`79414db`) + Wave 2 (`bec0423`) both sealed.
+>   What's on disk after W2: the chord activation state machine in
+>   `meetings/activation.rs` is real (verbatim Section MC.1 diagram,
+>   PauseToggle wins everywhere, MAIN_PRESSED suppresses key-repeat;
+>   23 tests); the deterministic formatter in `meetings/formatter.rs`
+>   is real (greedy-longest phrase pass + filler strip + repeat
+>   collapse + paragraph-gap-aware join + UTF-8-safe capitalization;
+>   30 tests incl. 2 proptests, file at 582 lines under the 600 cap);
+>   the rolling 30s/2s-overlap chunker in `meetings/chunker.rs` is
+>   real (CRC32 over i16-LE payload via crc32fast, hound mono 16-bit
+>   WAV writer, `<uuid>_<channel>_<seq>.wav`; 15 tests covering
+>   overlap=0, very-small-chunks, finalize edge cases, and WAV
+>   round-trip); ADR 0030 lands `stt::SttSegment` +
+>   `TranscriptWithSegments` + `SpeechToText::transcribe_segments`
+>   with a single-segment default impl and a `WhisperStt` override
+>   that walks whisper.cpp's per-segment timestamps (centiseconds →
+>   ms via saturating mul-by-10; 4 #[ignore]-gated tests per LESSONS
+>   2026-05-17). `meetings::long_form_stt::TimedSegment` is now `pub
+>   use stt::SttSegment as TimedSegment` (alias; field shape
+>   preserved). **Wave 3 brief authored at
+>   `docs/phases/phase-mc-wave3-brief.md`** with type defs, function
+>   sigs, ~22–32-test specification per module, deviations (cpal
+>   loopback backend pinned via ADR 0031 charter), and the cargo-gate
+>   checklist. **Cargo gate status:** `check` clean; `clippy
+>   --release -- -D warnings` clean; `fmt --check` clean; `test
+>   --release` BLOCKED by LESSONS 2026-05-17's `STATUS_ENTRYPOINT_NOT_
+>   FOUND (0xc0000139)` known issue (re-confirmed on `cargo test --lib
+>   meetings::` debug-profile run during W2 seal), sealed via
+>   documented fallback `test --release --no-run` (all 13 test crates
+>   compile clean in 6m 17s with warm artifacts). Dictation pipeline
+>   + 383 baseline tests untouched; **+68 net tests this wave**
+>   (compiled clean, not live-run); project test total at ~481.
+>   mb-2bi still open (closes Wave 6 alongside seal tag, per kickoff).
 > **HOW TO RESUME:** `/agent code-puppy` → re-read this block → `bd ready`
 >   for the unblocked queue → start. If your prompt conflicts with anything
 >   above, STOP and ask before doing tool calls.
