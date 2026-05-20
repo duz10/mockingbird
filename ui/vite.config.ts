@@ -4,9 +4,11 @@ import { resolve } from "node:path";
 
 // Mockingbird UI build config.
 //
-// Two HTML entry points:
-//   - index.html      → main window (sidebar + Insights/History/Dictionary/Modes/Settings)
-//   - recording.html  → recording overlay (frameless, non-activating)
+// Three HTML entry points:
+//   - index.html             → main window (sidebar + pages)
+//   - recording.html         → dictation recording overlay (frameless)
+//   - meeting_overlay.html   → meeting activation overlay (frameless,
+//                                Phase MC; mirrors recording.html shape)
 //
 // We deliberately keep the build tiny — no chart libs, no @tanstack/*,
 // no router data layer; everything either ships in this repo or is
@@ -23,6 +25,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
         recording: resolve(__dirname, "recording.html"),
+        meeting_overlay: resolve(__dirname, "meeting_overlay.html"),
       },
       output: {
         // Stable chunk names so Tauri's CSP hash list (Phase 7) is
