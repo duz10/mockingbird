@@ -167,7 +167,10 @@ pub const POLL_INTERVAL: Duration = Duration::from_millis(50);
 pub struct TwinStreamCapture {
     mic_thread: Option<JoinHandle<AppResult<()>>>,
     sys_thread: Option<JoinHandle<AppResult<()>>>,
-    chunk_rx: Receiver<ChannelChunk>,
+    /// Wrapped in `Option` so `take_chunk_rx()` can hand sole
+    /// ownership to a consumer (e.g. `LongFormStt`). When `None`,
+    /// `try_recv_chunks` returns empty.
+    chunk_rx: Option<Receiver<ChannelChunk>>,
     /// Held to signal stop by drop. Per-thread (an `mpsc::Sender` is
     /// not broadcast-able; one stop sender per receiver is the
     /// idiomatic shape).
@@ -241,7 +244,7 @@ impl TwinStreamCapture {
         Ok(Self {
             mic_thread,
             sys_thread,
-            chunk_rx,
+            chunk_rx: Some(chunk_rx),
             mic_stop_tx,
             sys_stop_tx,
             stopped: false,
@@ -249,13 +252,28 @@ impl TwinStreamCapture {
     }
 
     /// Non-blocking pull of any chunks that rolled since the last call.
-    /// The runtime polls this at ~5 Hz.
+    /// Returns empty if [`take_chunk_rx`] has handed the receiver to
+    /// another owner.
+    ///
+    /// [`take_chunk_rx`]: Self::take_chunk_rx
     pub fn try_recv_chunks(&mut self) -> Vec<ChannelChunk> {
         let mut out = Vec::new();
-        while let Ok(c) = self.chunk_rx.try_recv() {
-            out.push(c);
+        if let Some(rx) = self.chunk_rx.as_ref() {
+            while let Ok(c) = rx.try_recv() {
+                out.push(c);
+            }
         }
         out
+    }
+
+    /// Hand sole ownership of the chunk receiver to a downstream
+    /// consumer (the long-form STT driver). After this call,
+    /// [`try_recv_chunks`] returns empty. Returns `None` on second
+    /// call.
+    ///
+    /// [`try_recv_chunks`]: Self::try_recv_chunks
+    pub fn take_chunk_rx(&mut self) -> Option<Receiver<ChannelChunk>> {
+        self.chunk_rx.take()
     }
 
     /// Stop both threads, flush trailing chunks via `chunker.finalize()`,
@@ -294,7 +312,9 @@ impl TwinStreamCapture {
             }
         }
 
-        // Threads have exited; the chunk_rx is now fully drained-able.
+        // Threads have exited; the chunk_rx (if we still own it) is
+        // now fully drained-able. If a consumer took it via
+        // `take_chunk_rx`, trailing chunks went to them already.
         let trailing = self.try_recv_chunks();
 
         if !errors.is_empty() {
