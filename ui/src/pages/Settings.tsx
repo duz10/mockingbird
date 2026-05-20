@@ -27,9 +27,10 @@ import { api } from "../lib/tauri";
 import type { LearningRun, SettingsSnapshot, ThemeChoice } from "../lib/types";
 import { formatRelative } from "../lib/format";
 
+import { SettingsMeetingTab } from "./SettingsMeetingTab";
 import styles from "./Settings.module.css";
 
-type Tab = "general" | "models" | "history" | "advanced";
+type Tab = "general" | "models" | "history" | "meeting" | "advanced";
 
 export function SettingsPage() {
   const settings = useAppStore((s) => s.settings);
@@ -78,6 +79,7 @@ export function SettingsPage() {
           <TabBtn id="general" active={tab} setActive={setTab} label={t("settings.tab.general")} />
           <TabBtn id="models" active={tab} setActive={setTab} label={t("settings.tab.models")} />
           <TabBtn id="history" active={tab} setActive={setTab} label={t("settings.tab.history")} />
+          <TabBtn id="meeting" active={tab} setActive={setTab} label={t("settings.tab.meeting")} />
           <TabBtn id="advanced" active={tab} setActive={setTab} label={t("settings.tab.advanced")} />
         </nav>
 
@@ -91,6 +93,7 @@ export function SettingsPage() {
           )}
           {tab === "models" && <ModelsPanel settings={settings} patch={patch} />}
           {tab === "history" && <HistoryPanel settings={settings} patch={patch} />}
+          {tab === "meeting" && <SettingsMeetingTab />}
           {tab === "advanced" && <AdvancedPanel settings={settings} patch={patch} />}
         </div>
       </div>

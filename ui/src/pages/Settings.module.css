@@ -143,6 +143,42 @@
   min-width: 140px;
 }
 
+/* Phase MC Wave 5 — controls used by SettingsMeetingTab. Same
+   visual language as the existing .select / .toggle to keep the
+   tabbed shell coherent. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+.input {
+  background: var(--surf-1);
+  color: var(--on-surf);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  padding: var(--s-1) var(--s-2);
+  font: var(--type-sm);
+  font-family: inherit;
+  min-width: 200px;
+}
+.sliderRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.sliderRow input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 160px;
+}
+.errorBanner {
+  background: var(--status-bad-soft, rgba(255, 80, 80, 0.12));
+  color: var(--status-bad, #d33);
+  border: 1px solid var(--status-bad, #d33);
+  border-radius: var(--r-2);
+  padding: var(--s-2) var(--s-3);
+  font: var(--type-sm);
+}
+
 .themePicker {
   display: inline-flex;
   background: var(--surf-3);

@@ -75,6 +75,12 @@ pub enum SettingKey {
     /// Speaker label for the system-loopback channel in merged-view
     /// exports. Default `"Other(s)"`.
     MeetingSpeakerLabelSys,
+    /// Whether the meeting hotkey is currently paused (mirror of the
+    /// tray-menu "Pause Meeting Hotkey" toggle). Default `false`.
+    /// Persisted so the choice survives app restart. Read once at
+    /// runtime spawn + written by `MeetingCaptureRuntime::
+    /// set_meeting_hotkey_paused`.
+    MeetingHotkeyPaused,
 }
 
 impl SettingKey {
@@ -100,6 +106,7 @@ impl SettingKey {
             Self::MeetingLastSelectedSource => "meeting_last_selected_source",
             Self::MeetingSpeakerLabelMic => "meeting_speaker_label_mic",
             Self::MeetingSpeakerLabelSys => "meeting_speaker_label_sys",
+            Self::MeetingHotkeyPaused => "meeting_hotkey_paused",
         }
     }
 
@@ -125,6 +132,7 @@ impl SettingKey {
             "meeting_last_selected_source" => Ok(Self::MeetingLastSelectedSource),
             "meeting_speaker_label_mic" => Ok(Self::MeetingSpeakerLabelMic),
             "meeting_speaker_label_sys" => Ok(Self::MeetingSpeakerLabelSys),
+            "meeting_hotkey_paused" => Ok(Self::MeetingHotkeyPaused),
             other => Err(AppError::Other(format!("unknown setting key: {other:?}"))),
         }
     }
@@ -154,6 +162,7 @@ impl SettingKey {
             Self::MeetingLastSelectedSource => serde_json::json!("mic"),
             Self::MeetingSpeakerLabelMic => serde_json::json!("You"),
             Self::MeetingSpeakerLabelSys => serde_json::json!("Other(s)"),
+            Self::MeetingHotkeyPaused => serde_json::json!(false),
         }
     }
 
@@ -181,6 +190,7 @@ impl SettingKey {
             Self::MeetingLastSelectedSource,
             Self::MeetingSpeakerLabelMic,
             Self::MeetingSpeakerLabelSys,
+            Self::MeetingHotkeyPaused,
         ]
     }
 }
@@ -277,7 +287,7 @@ mod tests {
     /// fails the test. Bump the expected count when you add a key.
     #[test]
     fn all_enumerates_every_variant() {
-        // 8 original + 11 Phase MC = 19.
-        assert_eq!(SettingKey::all().len(), 19);
+        // 8 original + 11 Phase MC + 1 Phase MC W5 (MeetingHotkeyPaused) = 20.
+        assert_eq!(SettingKey::all().len(), 20);
     }
 }

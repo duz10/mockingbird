@@ -16,12 +16,14 @@
 //! tray gets created.
 
 use tauri::{
-    menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
+    menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     App, AppHandle, Manager,
 };
 
 use crate::error::{AppError, AppResult};
+#[cfg(target_os = "windows")]
+use crate::meetings::runtime::MeetingCaptureRuntime;
 
 /// Tooltip text shown when hovering the tray icon. Matches productName
 /// in tauri.conf.json on purpose — if the user has 30 tray icons,
@@ -41,6 +43,27 @@ pub fn register(app: &mut App) -> AppResult<()> {
     let pause = MenuItemBuilder::with_id("pause", "Pause")
         .build(app)
         .map_err(map_tauri)?;
+    // Phase MC Wave 5 — "Pause Meeting Hotkey" check item. Its
+    // initial checked state mirrors `MeetingCaptureRuntime::
+    // is_meeting_hotkey_paused()` (which was hydrated from settings
+    // at spawn). The on-click handler toggles, and the resulting
+    // re-render is handled by tracking the cached handle (we just
+    // call `.set_checked()` on it inside the menu-event closure).
+    //
+    // On non-Windows builds the meetings runtime doesn't exist; the
+    // menu item is still rendered for UI parity but is checked=false
+    // and the click handler is a no-op log line.
+    #[cfg(target_os = "windows")]
+    let initial_meeting_paused = app
+        .try_state::<MeetingCaptureRuntime>()
+        .map(|s| s.is_meeting_hotkey_paused())
+        .unwrap_or(false);
+    #[cfg(not(target_os = "windows"))]
+    let initial_meeting_paused = false;
+    let pause_meeting = CheckMenuItemBuilder::with_id("pause_meeting", "Pause Meeting Hotkey")
+        .checked(initial_meeting_paused)
+        .build(app)
+        .map_err(map_tauri)?;
     let settings = MenuItemBuilder::with_id("settings", "Settings…")
         .build(app)
         .map_err(map_tauri)?;
@@ -49,8 +72,22 @@ pub fn register(app: &mut App) -> AppResult<()> {
         .build(app)
         .map_err(map_tauri)?;
 
+    // Stash the pause_meeting handle in a clone-friendly Arc so the
+    // on_menu_event closure can call `.set_checked(...)` after the
+    // user clicks. The handle itself is `Clone` (it's a thin wrapper
+    // around a Tauri-managed Resource id) so the .clone() into the
+    // closure is cheap.
+    let pause_meeting_for_handler = pause_meeting.clone();
+
     let menu = MenuBuilder::new(app)
-        .items(&[&open_history, &pause, &settings, &separator, &quit])
+        .items(&[
+            &open_history,
+            &pause,
+            &pause_meeting,
+            &settings,
+            &separator,
+            &quit,
+        ])
         .build()
         .map_err(map_tauri)?;
 
@@ -75,7 +112,17 @@ pub fn register(app: &mut App) -> AppResult<()> {
         // config block and the Windows tray UX users expect.
         .show_menu_on_left_click(false)
         .menu(&menu)
-        .on_menu_event(|app, event| handle_menu_event(app, event.id().as_ref()))
+        .on_menu_event(move |app, event| {
+            let id = event.id().as_ref();
+            // "pause_meeting" is special: it needs to flip the cached
+            // check-item handle's state in addition to the side
+            // effects. Other ids route through the pure helper.
+            if id == "pause_meeting" {
+                handle_pause_meeting_click(app, &pause_meeting_for_handler);
+            } else {
+                handle_menu_event(app, id);
+            }
+        })
         .on_tray_icon_event(|tray, event| {
             // Left-click on the tray icon toggles the main window. We
             // explicitly handle Up (not Down) because Down fires while
@@ -140,7 +187,10 @@ fn map_tauri(e: tauri::Error) -> AppError {
 /// Returns `true` if the id was recognized (covers "should we log a
 /// warn?" branch).
 pub fn handle_menu_event_pure(id: &str) -> bool {
-    matches!(id, "open_history" | "pause" | "settings" | "quit")
+    matches!(
+        id,
+        "open_history" | "pause" | "pause_meeting" | "settings" | "quit"
+    )
 }
 
 fn handle_menu_event(app: &AppHandle, id: &str) {
@@ -163,6 +213,41 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
     }
 }
 
+/// Toggle the "Pause Meeting Hotkey" check item. Reads the current
+/// state from the meeting-capture runtime, flips it, and writes the
+/// new state back (which persists to settings AND injects a
+/// PauseToggle event into the activation thread). Updates the
+/// menu-item's checkmark to match.
+///
+/// Tracing-only on non-Windows builds where the runtime is absent.
+fn handle_pause_meeting_click(app: &AppHandle, item: &tauri::menu::CheckMenuItem<tauri::Wry>) {
+    #[cfg(target_os = "windows")]
+    {
+        let Some(state) = app.try_state::<MeetingCaptureRuntime>() else {
+            tracing::warn!("tray: pause_meeting clicked but no meeting runtime");
+            // Best-effort: keep the checkbox visually consistent.
+            let _ = item.set_checked(false);
+            return;
+        };
+        let next = !state.is_meeting_hotkey_paused();
+        if let Err(e) = state.set_meeting_hotkey_paused(next) {
+            tracing::warn!(error = %e, "tray: set_meeting_hotkey_paused failed");
+            // Don't update the checkbox — the runtime state is the
+            // source of truth and we couldn't change it.
+            return;
+        }
+        if let Err(e) = item.set_checked(next) {
+            tracing::warn!(error = ?e, "tray: set_checked on pause_meeting failed");
+        }
+        tracing::info!(paused = next, "tray: pause_meeting toggled");
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app, item);
+        tracing::info!("tray: pause_meeting click ignored on non-Windows build");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +263,11 @@ mod tests {
     fn handle_menu_event_pure_rejects_unknown_ids() {
         assert!(!handle_menu_event_pure("garbage"));
         assert!(!handle_menu_event_pure(""));
+    }
+
+    #[test]
+    fn handle_menu_event_pure_recognizes_pause_meeting_id() {
+        // Phase MC Wave 5 — the new tray check-item.
+        assert!(handle_menu_event_pure("pause_meeting"));
     }
 }

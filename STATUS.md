@@ -103,21 +103,42 @@
 >   + 383 baseline tests untouched; **+68 net tests this wave**
 >   (compiled clean, not live-run); project test total at ~481.
 >   mb-2bi still open (closes Wave 6 alongside seal tag, per kickoff).
-> **WAVE 4 IN-FLIGHT (2026-05-20 + 2026-05-21):** Most of Wave 4 has
->   landed. Closed beads: mb-pdv.14 (persist), mb-pdv.15 (runtime
->   lifecycle), mb-pdv.16 (10 Tauri commands), mb-pdv.18 (QA-matrix
->   template), and **mb-pdv.17 (UI: lib/meetings.ts typed IPC +
->   pages/Meetings.tsx + MeetingDetail.tsx + MeetingRecordBar.tsx +
->   Sidebar nav + MeetingsIcon + meeting_overlay window declared in
->   tauri.conf.json + meeting_overlay.html + meeting_overlay.tsx +
->   meeting_overlay/MeetingOverlay.tsx, +12 vitest tests = 25 total UI
->   tests)** — closed in commits `daf054d` (main-window UI) + `e1bb92c`
->   (overlay window). Cargo gate per LESSONS 2026-05-17 fallback:
->   `check` clean, `clippy --release -- -D warnings` clean, `fmt
+> **WAVE 5 SEALED (2026-05-21):** Wave 5 lands the polish layer.
+>   All 6 Wave-5 beads closed: mb-pdv.19 (W6 brief, in commit
+>   `94a44d2`), mb-pdv.23 + mb-pdv.24 (progress chip + overlay
+>   autofocus, in commit `81c5a09`), and mb-pdv.20 (tray pause
+>   toggle + `SettingKey::MeetingHotkeyPaused` + `meeting_set_paused`/
+>   `meeting_is_paused` IPC), mb-pdv.21 (Settings UI tab extracted
+>   into `ui/src/pages/SettingsMeetingTab.tsx` + typed-meeting-
+>   settings IPC pair `meeting_settings_get_all`/`meeting_settings_set`
+>   + 11 vitest IPC-contract tests), mb-pdv.22 (`meeting_export_
+>   markdown` Save As via `tauri-plugin-dialog`), mb-pdv.25 (Rust-
+>   side overlay show/hide on `MeetingToggle`) all closed in the
+>   Wave-5 seal commit. **Wave 6 brief authored** at
+>   `docs/phases/phase-mc-wave6-brief.md`. **Cargo gate per
+>   LESSONS-2026-05-17 fallback:** `check --all-targets` clean,
+>   `clippy --release --all-targets -- -D warnings` clean, `fmt
 >   --check` clean, `test --release --no-run` all 12 binaries link.
->   Only Wave 4 bead still open: **mb-pdv.19 (Wave 5 brief)** — P2.
->   Hands-on QA matrix run (mb-pdv.18 deliverable) is HUMAN-IN-LOOP
->   and pending Dustin's session.
+>   **UI gate:** `tsc --noEmit` clean, `vitest run` 4 files / 45
+>   tests passing (+11 net). `npm run lint` still broken pending
+>   `mb-yxh` (ESLint v9 config migration; tracked, out of scope).
+>   Wave 5 deviations from brief: (1) Settings UI extracted from
+>   over-cap `Settings.tsx` (filed `mb-17d` to split the four
+>   remaining panels); (2) NEW typed-meeting-settings IPC pair
+>   instead of reusing the string-coerced legacy `update_setting`
+>   (cleanly carries booleans/numbers/null/strings); (3) IPC pair
+>   allowlists writable Meeting* keys, rejecting `MeetingHotkeyPaused`
+>   (dedicated cmd) and `MeetingLastSelectedSource` (runtime-managed);
+>   (4) `probe_meeting_hotkey` UI collision warning DROPPED — the
+>   meeting hotkey installer auto-falls-back via
+>   `meeting_candidate_chain`, making the pre-save warning vestigial;
+>   (5) Settings tab tests are IPC-contract tests (11), not
+>   component tests — `@testing-library/react` not installed; the
+>   component-mount path is reserved for Playwright in Wave 6.
+>   Phase MC running test delta: W1 +35 + W2 +68 + W3 +35 + W4 +25
+>   + W5 +13 = **+176 tests**; project total ~559 (surplus over
+>   the 470–500 target reflects UI IPC-contract paranoia). mb-2bi
+>   still open — closes Wave 6 alongside seal tag `phase-mc-complete`.
 > **HOW TO RESUME:** `/agent code-puppy` → re-read this block → `bd ready`
 >   for the unblocked queue → start. If your prompt conflicts with anything
 >   above, STOP and ask before doing tool calls.

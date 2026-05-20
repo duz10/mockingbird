@@ -339,7 +339,19 @@ export function MeetingsPage() {
     if (!detail) return;
     const llm = llmByUuid[detail.uuid];
     const id = llm?.includeInExport ? llm.result?.id : undefined;
-    const { path } = await meetings.exportMarkdown(detail.uuid, undefined, id);
+    // Phase MC Wave 5 — default-pass `promptUserForPath: true` so the
+    // Export button opens a native Save As… dialog. A null `path`
+    // comes back when the user cancelled.
+    const { path } = await meetings.exportMarkdown(
+      detail.uuid,
+      undefined,
+      id,
+      true,
+    );
+    if (path === null) {
+      showToast(t("meetings.exportCancelled"));
+      return;
+    }
     showToast(t("meetings.exported").replace("{path}", path));
   }, [detail, llmByUuid, showToast]);
 

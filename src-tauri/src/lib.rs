@@ -50,6 +50,10 @@ use meetings::runtime::{MeetingCaptureRuntime, MeetingRuntimeConfig};
 /// every Tauri command the UI uses (see `commands::register`).
 pub fn run() {
     let builder = tauri::Builder::default()
+        // Phase MC Wave 5 — tauri-plugin-dialog enables the native
+        // Save As… picker for `meeting_export_markdown`. Tauri 2
+        // moved dialogs out of core; this is the in-org replacement.
+        .plugin(tauri_plugin_dialog::init())
         // Close-to-tray for the main window: clicking X should hide
         // the window, not destroy it + exit the app. The tray icon
         // (and tray menu "Open History") re-shows it. The recording
@@ -107,7 +111,10 @@ pub fn run() {
             // WAL mode (set in Database::open) makes parallel access safe.
             let shared_conn = Arc::new(Mutex::new(database.conn));
             app.manage(AppState::new(shared_conn.clone()));
-            tray::register(app).map_err(box_err)?;
+            // Tray registration moved BELOW the runtime spawns so the
+            // tray menu can read `MeetingCaptureRuntime::
+            // is_meeting_hotkey_paused()` when building the initial
+            // "Pause Meeting Hotkey" check item. Phase MC Wave 5.
 
             // Spawn the full dictation pipeline. Drop-on-AppState-drop
             // tears down the hook + threads cleanly.
@@ -192,6 +199,12 @@ pub fn run() {
                     }
                 }
             }
+
+            // Register the tray now that both runtimes are in the
+            // managed-state registry. The tray menu-build path reads
+            // `MeetingCaptureRuntime::is_meeting_hotkey_paused()` to
+            // set the initial checkmark on "Pause Meeting Hotkey".
+            tray::register(app).map_err(box_err)?;
 
             Ok(())
         });

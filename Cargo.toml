@@ -14,6 +14,11 @@ repository = "TODO(repo-url)"  # Resolve pre-Phase-7 (Section -1 item 3)
 # Tauri v2 — desktop application shell.
 tauri          = { version = "2", features = ["tray-icon"] }
 tauri-build    = { version = "2" }
+# tauri-plugin-dialog: native save-as / open dialogs (Tauri 2 moved
+# these out of core). Phase MC Wave 5 uses it for the meeting export
+# Save As… picker. In-org crate, on the Mini Shai-Hulud known-good
+# list as of phase-4-complete.
+tauri-plugin-dialog = { version = "2", default-features = false }
 
 # Database — see ADR 0004 (rusqlite over sqlx).
 rusqlite       = { version = "0.31", features = ["bundled", "chrono", "uuid"] }

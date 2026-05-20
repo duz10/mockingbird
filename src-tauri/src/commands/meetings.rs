@@ -15,32 +15,30 @@
 //!   - `search_meeting_transcripts { query }`
 //!
 //! ## Export (read + render via [`meetings::export`] + [`meetings::clipboard`])
-//!   - `meeting_export_markdown   { uuid, dest_path?, include_llm_pass? }`
+//!   - `meeting_export_markdown   { uuid, dest_path?, prompt_user_for_path?, include_llm_pass? }`
 //!   - `meeting_copy_to_clipboard { uuid, include_llm_pass? }`
 //!   - `meeting_run_llm_pass      { uuid, prompt, model_id? }`
 //!     — IN-MEMORY cache only; **never persisted**
 //!     (judge `mc-no-llm-in-critical-path`).
 //!
-//! ## Wave 4 deviation from the plan
+//! ## Pause toggle (Phase MC Wave 5)
+//!   - `meeting_set_paused { paused: bool }` — idempotent;
+//!     persists to settings + injects PauseToggle into activation.
+//!   - `meeting_is_paused` — cheap in-memory read.
 //!
-//! Section MC.6 says `meeting_export_markdown` "writes a markdown file
-//! to a user-chosen path via `tauri::api::dialog`". That API moved to
-//! `tauri-plugin-dialog` in Tauri 2, and pulling in the dialog plugin
-//! is a non-trivial dep + capabilities change for a single command.
+//! ## Save-As wiring (Phase MC Wave 5)
 //!
-//! Wave 4 punts the picker to the UI: the command accepts an optional
-//! `dest_path` parameter; the UI uses an HTML `<input type=file>` (or
-//! the Wave 5 dialog plugin) to obtain it. When `dest_path` is
-//! `None`, the command writes to a default sticky location at
-//! `<app_data>/meetings/exports/<uuid>.md`. Either way the response
-//! is `{ path: string }` — same contract as the plan.
-//!
-//! Wave 5 will revisit if we add the dialog plugin globally.
+//! `meeting_export_markdown` now accepts a `prompt_user_for_path`
+//! flag. When set + no `dest_path`, the command opens a native Save
+//! As… dialog via `tauri-plugin-dialog`. User-cancel returns
+//! `{ path: null }` (not an error). The Wave 4 fallback paths
+//! (`dest_path` explicit OR default appdata location) are preserved
+//! verbatim so programmatic callers stay deterministic.
 
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Runtime, State};
 
 use crate::commands::{into_err, lock_db, AppStateHandle};
 use crate::meetings::capture::{probe_sources, MeetingSource, MeetingSourceProbe};
@@ -51,7 +49,7 @@ use crate::meetings::repo::{
     delete_meeting as repo_delete_meeting, list_meetings as repo_list_meetings,
     load_meeting_detail, search_meetings, MeetingDetail, MeetingMatch, MeetingSummary,
 };
-use crate::meetings::runtime::MeetingRuntimeShared;
+use crate::meetings::runtime::{MeetingCaptureRuntime, MeetingRuntimeShared};
 
 // --------------------------------------------------------------------
 // Wire types — `serde(rename_all = "camelCase")` matches the rest of
@@ -83,7 +81,11 @@ impl From<MeetingSourceProbe> for MeetingSourceProbeDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MeetingExportResult {
-    pub path: String,
+    /// `None` when the user cancelled the Save As… dialog (only
+    /// possible when `prompt_user_for_path` was `true`). UI treats
+    /// this as "export cancelled" and shows an info toast, not an
+    /// error.
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -185,6 +187,30 @@ pub fn meeting_stop(rt: State<'_, MeetingRuntimeShared>, uuid: String) -> Result
     rt.stop_meeting(&uuid).map_err(into_err)
 }
 
+/// Pause or unpause the meeting hotkey. Persisted to settings so the
+/// choice survives app restart. Tray + Settings UI both call this.
+///
+/// Note: the runtime owner here is `MeetingCaptureRuntime` (the outer
+/// type held in `app.manage(...)`), NOT `MeetingRuntimeShared` (the
+/// cheap clonable bag). The pause-toggle injection path lives on the
+/// outer type because it owns the `Sender<ActivationEvent>` clone
+/// that drives the activation thread — see `runtime.rs::spawn`.
+#[tauri::command]
+pub fn meeting_set_paused(
+    rt: State<'_, MeetingCaptureRuntime>,
+    paused: bool,
+) -> Result<(), String> {
+    rt.set_meeting_hotkey_paused(paused).map_err(into_err)
+}
+
+/// Read the current meeting hotkey paused state. Lock-free in-memory
+/// read — cheap enough to call from the tray's menu-build path on
+/// every right-click.
+#[tauri::command]
+pub fn meeting_is_paused(rt: State<'_, MeetingCaptureRuntime>) -> Result<bool, String> {
+    Ok(rt.is_meeting_hotkey_paused())
+}
+
 // --------------------------------------------------------------------
 // History commands
 // --------------------------------------------------------------------
@@ -241,32 +267,79 @@ pub fn search_meeting_transcripts(
 
 /// Render the meeting to Markdown and write it to disk.
 ///
-/// `dest_path` is optional; when `None` the file lands at
-/// `<app_data>/Mockingbird/meetings/exports/<uuid>.md`. See the
-/// module-level "Wave 4 deviation" note for why the picker dialog is
-/// UI-side.
+/// Path-resolution order:
+///   1. `dest_path` explicit — use it as-is, no dialog
+///   2. `prompt_user_for_path == Some(true)` — open a Save As… dialog
+///      via tauri-plugin-dialog (Phase MC Wave 5). User-cancel
+///      returns `Ok(MeetingExportResult { path: None })`.
+///   3. Default — write to
+///      `<app_data>/Mockingbird/meetings/exports/<uuid>.md`.
 ///
 /// `include_llm_pass` looks up the cached LLM-pass text by id; if
 /// the id isn't in the cache we error rather than silently producing
 /// a "no LLM pass" markdown (the user explicitly asked for it).
 #[tauri::command]
-pub fn meeting_export_markdown(
+pub fn meeting_export_markdown<R: Runtime>(
+    app_handle: AppHandle<R>,
     db: State<'_, AppStateHandle>,
     rt: State<'_, MeetingRuntimeShared>,
     uuid: String,
     dest_path: Option<String>,
+    prompt_user_for_path: Option<bool>,
     include_llm_pass: Option<IncludeLlmPass>,
 ) -> Result<MeetingExportResult, String> {
     let body = render_for_export(&db, &rt, &uuid, include_llm_pass.as_ref())?;
-    let path = resolve_export_path(dest_path.as_deref(), &uuid)?;
+
+    // Resolve target path. Save As… only fires when (a) the caller
+    // explicitly opted in via `prompt_user_for_path` AND (b) no
+    // `dest_path` was provided. Explicit dest always wins so
+    // programmatic callers stay deterministic.
+    let path = match (dest_path.as_deref(), prompt_user_for_path.unwrap_or(false)) {
+        (Some(p), _) => PathBuf::from(p),
+        (None, true) => match prompt_save_as(&app_handle, &uuid)? {
+            Some(p) => p,
+            None => return Ok(MeetingExportResult { path: None }),
+        },
+        (None, false) => resolve_export_path(None, &uuid)?,
+    };
+
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("create export dir {parent:?}: {e}"))?;
     }
     std::fs::write(&path, body.as_bytes()).map_err(|e| format!("write export {path:?}: {e}"))?;
     Ok(MeetingExportResult {
-        path: path.display().to_string(),
+        path: Some(path.display().to_string()),
     })
+}
+
+/// Block on a native Save As… dialog. Returns `Ok(None)` on user-
+/// cancel — NOT an error. Returns `Ok(Some(path))` on confirm.
+///
+/// The default file name is `meeting-<short-uuid>.md` so the user
+/// gets a sensible suggestion even if the meeting has no title.
+fn prompt_save_as<R: Runtime>(app: &AppHandle<R>, uuid: &str) -> Result<Option<PathBuf>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let short = uuid.split('-').next().unwrap_or(uuid);
+    let suggested = format!("meeting-{short}.md");
+    let picked = app
+        .dialog()
+        .file()
+        .add_filter("Markdown", &["md"])
+        .set_file_name(&suggested)
+        .blocking_save_file();
+    // tauri-plugin-dialog returns `Option<FilePath>`; FilePath has a
+    // `.into_path()` that returns `Result<PathBuf, _>` for Path-style
+    // entries and an error for URI-style ones (mobile). Desktop only,
+    // so the conversion is essentially infallible; we surface the
+    // error string anyway for diagnostics.
+    match picked {
+        None => Ok(None),
+        Some(fp) => fp
+            .into_path()
+            .map(Some)
+            .map_err(|e| format!("save-as dialog returned non-path FilePath: {e}")),
+    }
 }
 
 /// Render the meeting to Markdown and copy it to the clipboard (one-

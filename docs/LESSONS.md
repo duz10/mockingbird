@@ -14,6 +14,30 @@ Format:
 
 ---
 
+## 2026-05-21 [phase-mc-wave-5] Tauri 2 `tauri::command` macro: bare `AppHandle` fails when mixed with `State<'_, T>` — must use `AppHandle<R>` with `R: Runtime`
+
+- **Context:** Phase MC Wave 5 — adding `meeting_export_markdown(app: tauri::AppHandle, db: State<'_, AppStateHandle>, ...)`. Compiled fine in isolation in earlier exploration, blew up at `tauri::generate_handler!` expansion.
+- **Finding:** The error was `the trait bound "AppHandle: CommandArg<'_, R>" is not satisfied`. Tauri 2's command macro expands to a function generic over `R: Runtime`. The blanket impl is `impl<R: Runtime> CommandArg<'_, R> for AppHandle<R>` — it only matches when the AppHandle's runtime parameter equals the command's generic `R`. Bare `tauri::AppHandle` defaults to `AppHandle<Wry>`, so it only impls `CommandArg<'_, Wry>` not `CommandArg<'_, R>`. The mismatch is invisible until you mix `AppHandle` with another generic-over-R param like `State<'_, T>`. Renaming the param to `app_handle` does NOT help — Tauri 2 matches the runtime-injected params by TYPE shape, not by name.
+- **Action:** When a Tauri 2 command takes both an `AppHandle` AND a `State<'_, T>`, write the command as `pub fn cmd<R: Runtime>(app_handle: AppHandle<R>, db: State<'_, T>, ...)`. The same fix applies to helper fns the command delegates to (e.g. `fn prompt_save_as<R: Runtime>(app: &AppHandle<R>, ...)`). Bare `AppHandle` is fine ONLY if it's the sole `R`-generic param.
+
+---
+
+## 2026-05-21 [phase-mc-wave-5] legacy `update_setting(key: String, value: String)` IPC can't carry typed meeting settings cleanly — added a typed pair instead
+
+- **Context:** Phase MC Wave 5 — wiring the Settings UI to the 8+1 new `Meeting*` `SettingKey` variants. The Wave 5 brief implied reusing `commands/settings.rs::update_setting` / `get_settings`. The existing pair returns a fixed `SettingsSnapshot` struct (Phase-1 keys hardcoded) and accepts only `String` values — booleans get stringified to "1"/"0", nulls become empty strings, numbers parse defensively.
+- **Finding:** This doesn't work for `MeetingAudioRetentionDays: Option<i64>` (the `null` sentinel for "inherit from global" can't survive a `String` round-trip), and forces every new setting to expand the hardcoded `SettingsSnapshot` shape — violating OCP. The typed `Settings::new(conn).get(key)/set(key, value)` facade already exists (Wave 1) and handles JSON encoding correctly.
+- **Action:** Added a parallel `meeting_settings_get_all -> MeetingSettingsSnapshot` + `meeting_settings_set(key: String, value: serde_json::Value)` IPC pair. The `set` command allowlists writable Meeting* keys, REJECTS dictation keys and `MeetingHotkeyPaused` (which has a dedicated `meeting_set_paused` command that injects a `PauseToggle` activation event in addition to writing the setting). The legacy IPC stays untouched for dictation. Both IPC pairs coexist; UI picks the one matching the setting domain. If/when dictation settings ever need a similar treatment, the pattern is now established — don't extend the typed pair to handle dictation keys; mint a `dictation_settings_*` pair beside it.
+
+---
+
+## 2026-05-21 [phase-mc-wave-5] pre-existing 600-line cap violations surface as scope-creep traps mid-wave
+
+- **Context:** Phase MC Wave 5 — adding the Meeting tab to `Settings.tsx`. The file was already 671 lines at HEAD (pre-Phase-MC violation). Adding the tab brought it to 715. AGENTS.md cap is 600.
+- **Finding:** The right move is NOT to silently absorb a refactor of pre-existing dictation/general/etc panels into a current wave — that blows out the wave scope and the resulting commit becomes un-reviewable. The right move is also NOT to ignore the cap and push the count higher.
+- **Action:** Did the *minimum* refactor that the new work demanded (extract the Meeting tab into `ui/src/pages/SettingsMeetingTab.tsx`) and filed `mb-17d` for the rest. The Settings.tsx delta was +4 net lines (the new tab is a single import + tab-button + tab-panel line), which is a defensible Wave-5-scope cost. The four-way panel split is a follow-up. Future lateral epics: scan target files for cap violations at brief-authoring time; file refactor beads in the same epic so they get done OR explicitly deferred, not silently ignored.
+
+---
+
 ## 2026-05-20 [phase-mc-wave-3] two independent WH_KEYBOARD_LL hooks coexist iff the meeting hook ALWAYS CallNextHookEx; mpsc Receiver one-shot handoff via Option::take
 
 - **Context:** Phase MC Wave 3 — installing a SECOND `WH_KEYBOARD_LL`

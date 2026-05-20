@@ -94,14 +94,27 @@ export const meetings = {
 
   /* Export */
 
-  /** Write the meeting as a markdown file. If `destPath` is omitted
-   *  the Rust side picks `<appdata>/Mockingbird/meetings/exports/<uuid>.md`.
+  /** Write the meeting as a markdown file.
+   *
+   *  Path resolution (Phase MC Wave 5):
+   *    1. `destPath` explicit — used as-is.
+   *    2. `promptUserForPath` true — Rust opens a native Save As…
+   *       dialog. User-cancel resolves with `{ path: null }`.
+   *    3. Otherwise — default to
+   *       `<appdata>/Mockingbird/meetings/exports/<uuid>.md`.
+   *
    *  `llmPassId` (when set) injects the previously-cached LLM-pass
    *  text as a trailing section. */
-  exportMarkdown: (uuid: string, destPath?: string, llmPassId?: string) =>
-    invoke<{ path: string }>("meeting_export_markdown", {
+  exportMarkdown: (
+    uuid: string,
+    destPath?: string,
+    llmPassId?: string,
+    promptUserForPath = false,
+  ) =>
+    invoke<{ path: string | null }>("meeting_export_markdown", {
       uuid,
       destPath,
+      promptUserForPath,
       includeLlmPass: llmPassId ? { id: llmPassId } : undefined,
     }),
 
@@ -120,6 +133,18 @@ export const meetings = {
    *  judge `mc-no-llm-in-critical-path` invariant. */
   runLlmPass: (uuid: string, promptId: LlmPassPromptArg, modelId?: string) =>
     invoke<LlmPassResult>("meeting_run_llm_pass", { uuid, promptId, modelId }),
+
+  /** Toggle the meeting-hotkey pause flag. The Rust runtime both
+   *  persists the new value AND injects a `PauseToggle` activation
+   *  event so the in-flight key listener honours it without a
+   *  restart. The settings UI calls this for the toggle so the two
+   *  state stores stay consistent. */
+  setPaused: (paused: boolean) =>
+    invoke<void>("meeting_set_paused", { paused }),
+
+  /** Read the persisted meeting-hotkey pause flag. The Rust runtime
+   *  hydrates this from the typed settings table on boot. */
+  isPaused: () => invoke<boolean>("meeting_is_paused"),
 };
 
 /* ------------------------------------------------------------------ */
@@ -145,11 +170,15 @@ function fixtureFor<T>(command: string, args?: object): T {
       const fakeUuid = `fixture-${Date.now().toString(16)}`;
       return fixture(command, { uuid: fakeUuid }) as T;
     }
+    case "meeting_set_paused":
+      return fixture(command, undefined as unknown as T);
+    case "meeting_is_paused":
+      return fixture(command, false) as T;
     case "meeting_export_markdown":
       return fixture(command, {
         path:
           "C:\\Users\\you\\AppData\\Roaming\\Mockingbird\\meetings\\exports\\fixture.md",
-      }) as T;
+      } as { path: string | null }) as T;
     case "meeting_run_llm_pass":
       return fixture(command, {
         id: "fixture-llm-pass-id",

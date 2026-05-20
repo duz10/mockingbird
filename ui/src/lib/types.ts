@@ -270,6 +270,28 @@ export interface MeetingSessionSavedEvent {
   sessionRowid: number;
 }
 
+/** Phase MC Wave 5 — typed snapshot of the meeting-side `SettingKey`
+ *  registry. Mirrors `MeetingSettingsSnapshot` in
+ *  `src-tauri/src/commands/settings.rs`. Read via
+ *  `api.meeting_settings_get_all()`; individual fields are written
+ *  via `api.meeting_settings_set(key, value)` (key = the db string
+ *  per `SettingKey::as_str`). `hotkeyPaused` is read-only here —
+ *  changes go through `meetings.setPaused()` so the activation
+ *  channel gets the PauseToggle event too. */
+export interface MeetingSettingsSnapshot {
+  hotkeyModifier: string;
+  hotkeyKey: string;
+  defaultSource: "mic" | "system" | "both";
+  maxDurationSeconds: number;
+  fillerStripEnabled: boolean;
+  paragraphGapMs: number;
+  audioRetentionDays: number | null;
+  llmPassEnabled: boolean;
+  speakerLabelMic: string;
+  speakerLabelSys: string;
+  hotkeyPaused: boolean;
+}
+
 /** Payload of `meeting:progress` — fires while the long-form STT
  *  driver walks chunks. One event per chunk per channel; `chunksTotal`
  *  is `null` until the capture-side `Receiver` closes (= no more

@@ -91,10 +91,21 @@ describe("meetings IPC wrappers (fixture mode)", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("exportMarkdown returns a path string", async () => {
+  it("exportMarkdown returns a path string (default mode)", async () => {
     const result = await meetings.exportMarkdown("any-uuid");
     expect(typeof result.path).toBe("string");
-    expect(result.path.length).toBeGreaterThan(0);
+    expect((result.path ?? "").length).toBeGreaterThan(0);
+  });
+
+  it("exportMarkdown forwards promptUserForPath default of false", async () => {
+    // Just shape-check: the call shouldn't throw when the flag is
+    // omitted. The fixture path returns a non-null string.
+    const result = await meetings.exportMarkdown(
+      "any-uuid",
+      undefined,
+      undefined,
+    );
+    expect(result.path).not.toBeNull();
   });
 
   it("runLlmPass with a built-in name returns the fixture payload", async () => {

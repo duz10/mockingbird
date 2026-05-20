@@ -18,6 +18,7 @@ import type {
   DictionaryEntry,
   InsightsSnapshot,
   LearningRun,
+  MeetingSettingsSnapshot,
   ModeRow,
   SessionDetail,
   SessionSummary,
@@ -113,6 +114,12 @@ export const api = {
   update_setting: (key: string, value: string) =>
     invoke<void>("update_setting", { key, value }),
 
+  // Phase MC Wave 5 — typed meeting-settings IPC.
+  meeting_settings_get_all: () =>
+    invoke<MeetingSettingsSnapshot>("meeting_settings_get_all"),
+  meeting_settings_set: (key: string, value: unknown) =>
+    invoke<void>("meeting_settings_set", { key, value }),
+
   // Learning loop
   list_learning_runs: (limit: number) =>
     invoke<LearningRun[]>("list_learning_runs", { limit }),
@@ -160,6 +167,20 @@ function fixtureFor<T>(command: string, args?: object): T {
       return fixture(command, FIXTURES.activeMode) as T;
     case "get_settings":
       return fixture(command, FIXTURES.settings) as T;
+    case "meeting_settings_get_all":
+      return fixture(command, {
+        hotkeyModifier: "VK_RCONTROL",
+        hotkeyKey: "VK_M",
+        defaultSource: "mic",
+        maxDurationSeconds: 14_400,
+        fillerStripEnabled: true,
+        paragraphGapMs: 2000,
+        audioRetentionDays: null,
+        llmPassEnabled: true,
+        speakerLabelMic: "You",
+        speakerLabelSys: "Other(s)",
+        hotkeyPaused: false,
+      } as MeetingSettingsSnapshot) as T;
     case "list_learning_runs":
       return fixture(command, FIXTURES.learningRuns) as T;
     case "app_paths":
@@ -184,6 +205,7 @@ function fixtureFor<T>(command: string, args?: object): T {
     case "update_mode":
     case "set_active_mode":
     case "update_setting":
+    case "meeting_settings_set":
     case "report_correction":
     case "trigger_learning_run":
     case "open_path":

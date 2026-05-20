@@ -88,6 +88,9 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         // Settings (UI panel)
         settings::get_settings,
         settings::update_setting,
+        // Phase MC Wave 5 — typed meeting-settings IPC.
+        settings::meeting_settings_get_all,
+        settings::meeting_settings_set,
         // Learning
         learning::list_learning_runs,
         learning::trigger_learning_run,
@@ -95,7 +98,8 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         system::open_path,
         system::app_paths,
         system::list_installed_models,
-        // Meetings (Phase MC Wave 4 — 10 commands per Section MC.6).
+        // Meetings (Phase MC Wave 4 — 10 commands per Section MC.6;
+        // Phase MC Wave 5 — +2 for the tray pause-toggle wiring).
         meetings::meeting_probe_sources,
         meetings::meeting_start,
         meetings::meeting_stop,
@@ -106,6 +110,8 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         meetings::meeting_export_markdown,
         meetings::meeting_copy_to_clipboard,
         meetings::meeting_run_llm_pass,
+        meetings::meeting_set_paused,
+        meetings::meeting_is_paused,
     ])
 }
 

@@ -1,0 +1,334 @@
+// Phase MC Wave 5 — Meeting settings tab.
+//
+// Extracted from Settings.tsx to keep that file under the 600-line
+// cap (it was 671 lines at extraction time). Hosts the controls for
+// the meeting-side SettingKey variants per docs/phases/
+// phase-mc-wave5-brief.md §5.2.
+//
+// State source-of-truth: the typed Rust `Settings` facade, reached
+// via `api.meeting_settings_get_all()` / `api.meeting_settings_set()`.
+// `hotkeyPaused` is read-only here on purpose — toggling it has to
+// go through `meetings.setPaused()` so the activation thread gets
+// the PauseToggle event alongside the settings write.
+//
+// No tests for the JSX rendering — we don't ship @testing-library/
+// react. The IPC contract is exercised by `Settings.meeting.test.ts`
+// in this directory (pure mock-IPC round-trip).
+
+import { useCallback, useEffect, useState } from "react";
+
+import { Card, Spinner } from "../components/primitives";
+import { t } from "../i18n";
+import { meetings } from "../lib/meetings";
+import { api } from "../lib/tauri";
+import type { MeetingSettingsSnapshot } from "../lib/types";
+
+import styles from "./Settings.module.css";
+
+const MODIFIER_OPTIONS = [
+  "VK_RCONTROL",
+  "VK_LCONTROL",
+  "VK_RMENU", // Right Alt
+  "VK_LMENU", // Left Alt
+  "VK_F13",
+] as const;
+
+const MAIN_KEY_OPTIONS = ["VK_M", "VK_F13", "VK_F14", "VK_F15"] as const;
+
+const SOURCE_OPTIONS = ["mic", "system", "both"] as const;
+
+// `paragraph_gap_ms` is clamped server-side to [500, 10_000]; mirror
+// the same bounds on the slider so the user gets immediate feedback.
+const PARAGRAPH_GAP_MIN = 500;
+const PARAGRAPH_GAP_MAX = 10_000;
+const PARAGRAPH_GAP_STEP = 100;
+
+// Speaker labels are free text but absurdly long values would break
+// the export markdown header. 30 chars matches the master-plan call.
+const SPEAKER_LABEL_MAX_LENGTH = 30;
+
+export function SettingsMeetingTab() {
+  const [snap, setSnap] = useState<MeetingSettingsSnapshot | null>(null);
+  const [savingError, setSavingError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api.meeting_settings_get_all().then((s) => {
+      if (!cancelled) setSnap(s);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Patch one setting. Optimistic local update + persist; on persist
+  // error we revert + surface the error. The Rust side is the source
+  // of truth — the snapshot in state is a cache.
+  const patch = useCallback(
+    async <K extends keyof MeetingSettingsSnapshot>(
+      key: K,
+      value: MeetingSettingsSnapshot[K],
+      dbKey: string,
+    ) => {
+      setSnap((prev) => (prev ? { ...prev, [key]: value } : prev));
+      try {
+        await api.meeting_settings_set(dbKey, value);
+        setSavingError(null);
+      } catch (err) {
+        setSavingError(String(err));
+        // Reload from the server to recover from a partial write.
+        const fresh = await api.meeting_settings_get_all();
+        setSnap(fresh);
+      }
+    },
+    [],
+  );
+
+  // Pause toggle goes through the dedicated command so the runtime
+  // injects the PauseToggle activation event in addition to writing
+  // the setting. We optimistically flip the local state for snappy
+  // UI; the next snapshot refresh corrects any drift.
+  const togglePaused = useCallback(async () => {
+    if (!snap) return;
+    const next = !snap.hotkeyPaused;
+    setSnap({ ...snap, hotkeyPaused: next });
+    try {
+      await meetings.setPaused(next);
+      setSavingError(null);
+    } catch (err) {
+      setSavingError(String(err));
+      const fresh = await api.meeting_settings_get_all();
+      setSnap(fresh);
+    }
+  }, [snap]);
+
+  if (!snap) return <Spinner />;
+
+  return (
+    <div className={styles.stack}>
+      {savingError ? (
+        <div className={styles.errorBanner} role="alert">
+          {t("settings.meeting.saveError").replace("{error}", savingError)}
+        </div>
+      ) : null}
+
+      <Card title={t("settings.meeting.activation")}>
+        <Row label={t("settings.meeting.modifier")}>
+          <select
+            className={styles.select}
+            value={snap.hotkeyModifier}
+            onChange={(e) =>
+              void patch(
+                "hotkeyModifier",
+                e.target.value,
+                "meeting_hotkey_modifier",
+              )
+            }
+          >
+            {MODIFIER_OPTIONS.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </Row>
+        <Row label={t("settings.meeting.mainKey")}>
+          <select
+            className={styles.select}
+            value={snap.hotkeyKey}
+            onChange={(e) =>
+              void patch("hotkeyKey", e.target.value, "meeting_hotkey_key")
+            }
+          >
+            {MAIN_KEY_OPTIONS.map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
+          </select>
+        </Row>
+        <Row label={t("settings.meeting.hotkeyPaused")}>
+          <label className={styles.toggle}>
+            <input
+              type="checkbox"
+              checked={snap.hotkeyPaused}
+              onChange={() => void togglePaused()}
+            />
+            <span>
+              {snap.hotkeyPaused
+                ? t("settings.meeting.hotkeyPaused.on")
+                : t("settings.meeting.hotkeyPaused.off")}
+            </span>
+          </label>
+        </Row>
+      </Card>
+
+      <Card title={t("settings.meeting.transcript")}>
+        <Row label={t("settings.meeting.defaultSource")}>
+          <select
+            className={styles.select}
+            value={snap.defaultSource}
+            onChange={(e) =>
+              void patch(
+                "defaultSource",
+                e.target.value as MeetingSettingsSnapshot["defaultSource"],
+                "meeting_default_source",
+              )
+            }
+          >
+            {SOURCE_OPTIONS.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </Row>
+        <Row label={t("settings.meeting.fillerStrip")}>
+          <label className={styles.toggle}>
+            <input
+              type="checkbox"
+              checked={snap.fillerStripEnabled}
+              onChange={(e) =>
+                void patch(
+                  "fillerStripEnabled",
+                  e.target.checked,
+                  "meeting_filler_strip_enabled",
+                )
+              }
+            />
+            <span>
+              {snap.fillerStripEnabled
+                ? t("settings.meeting.fillerStrip.on")
+                : t("settings.meeting.fillerStrip.off")}
+            </span>
+          </label>
+        </Row>
+        <Row label={t("settings.meeting.paragraphGap")}>
+          <div className={styles.sliderRow}>
+            <input
+              type="range"
+              min={PARAGRAPH_GAP_MIN}
+              max={PARAGRAPH_GAP_MAX}
+              step={PARAGRAPH_GAP_STEP}
+              value={snap.paragraphGapMs}
+              onChange={(e) =>
+                void patch(
+                  "paragraphGapMs",
+                  parseInt(e.target.value, 10),
+                  "meeting_paragraph_gap_ms",
+                )
+              }
+            />
+            <span>{snap.paragraphGapMs} ms</span>
+          </div>
+        </Row>
+        <Row label={t("settings.meeting.speakerLabelMic")}>
+          <input
+            className={styles.input}
+            type="text"
+            maxLength={SPEAKER_LABEL_MAX_LENGTH}
+            value={snap.speakerLabelMic}
+            onChange={(e) =>
+              void patch(
+                "speakerLabelMic",
+                e.target.value,
+                "meeting_speaker_label_mic",
+              )
+            }
+          />
+        </Row>
+        <Row label={t("settings.meeting.speakerLabelSys")}>
+          <input
+            className={styles.input}
+            type="text"
+            maxLength={SPEAKER_LABEL_MAX_LENGTH}
+            value={snap.speakerLabelSys}
+            onChange={(e) =>
+              void patch(
+                "speakerLabelSys",
+                e.target.value,
+                "meeting_speaker_label_sys",
+              )
+            }
+          />
+        </Row>
+        <Row label={t("settings.meeting.llmPass")}>
+          <label className={styles.toggle}>
+            <input
+              type="checkbox"
+              checked={snap.llmPassEnabled}
+              onChange={(e) =>
+                void patch(
+                  "llmPassEnabled",
+                  e.target.checked,
+                  "meeting_llm_pass_enabled",
+                )
+              }
+            />
+            <span>
+              {snap.llmPassEnabled
+                ? t("settings.meeting.llmPass.on")
+                : t("settings.meeting.llmPass.off")}
+            </span>
+          </label>
+        </Row>
+      </Card>
+
+      <Card title={t("settings.meeting.audioRetention")}>
+        <Row label={t("settings.meeting.audioRetention.inherit")}>
+          <label className={styles.toggle}>
+            <input
+              type="checkbox"
+              checked={snap.audioRetentionDays === null}
+              onChange={(e) =>
+                void patch(
+                  "audioRetentionDays",
+                  e.target.checked ? null : 30,
+                  "meeting_audio_retention_days",
+                )
+              }
+            />
+            <span>
+              {snap.audioRetentionDays === null
+                ? t("settings.meeting.audioRetention.inherit.on")
+                : t("settings.meeting.audioRetention.inherit.off")}
+            </span>
+          </label>
+        </Row>
+        {snap.audioRetentionDays !== null ? (
+          <Row label={t("settings.meeting.audioRetention.days")}>
+            <input
+              className={styles.input}
+              type="number"
+              min={1}
+              max={3650}
+              value={snap.audioRetentionDays}
+              onChange={(e) =>
+                void patch(
+                  "audioRetentionDays",
+                  parseInt(e.target.value, 10) || 30,
+                  "meeting_audio_retention_days",
+                )
+              }
+            />
+          </Row>
+        ) : null}
+      </Card>
+    </div>
+  );
+}
+
+function Row({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={styles.row}>
+      <label className={styles.rowLabel}>{label}</label>
+      <div className={styles.rowControl}>{children}</div>
+    </div>
+  );
+}

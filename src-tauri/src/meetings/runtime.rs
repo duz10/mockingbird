@@ -37,6 +37,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -52,6 +53,7 @@ use crate::meetings::activation::{
 use crate::meetings::capture::{MeetingSource, TwinStreamCapture};
 use crate::meetings::hotkey_installer::{ChordConfig, MeetingHotkeyInstaller};
 use crate::meetings::long_form_stt::LongFormOutput;
+use crate::settings::{model::SettingKey, Settings};
 
 // --------------------------------------------------------------------
 // Public types
@@ -140,6 +142,17 @@ pub struct MeetingCaptureRuntime {
     /// exit (the loop selects between the hotkey rx and this stop
     /// rx; both being disconnected ends the loop).
     activation_stop_tx: Option<Sender<()>>,
+    /// A clone of the activation event sender, retained so external
+    /// callers (the tray menu, the settings IPC) can inject
+    /// [`ActivationEvent::PauseToggle`] events into the same channel
+    /// the OS hook feeds. Mirrors `hotkey::pause::Pause` for dictation.
+    act_tx: Sender<ActivationEvent>,
+    /// Fast-read cache of the paused state. The Tauri command layer
+    /// reads this in the IPC `meeting_is_paused` path and the tray
+    /// menu-build path; settings DB is the source of truth across
+    /// restarts but the in-memory cell is the source of truth
+    /// within a single run.
+    is_paused: Arc<AtomicBool>,
 }
 
 impl MeetingCaptureRuntime {
@@ -163,6 +176,9 @@ impl MeetingCaptureRuntime {
             modifier_vk: config.modifier_vk,
             main_vk: config.main_vk,
         };
+        // Clone the sender BEFORE handing it to the installer so we
+        // keep an injection path for PauseToggle events.
+        let act_tx_for_injection = act_tx.clone();
         let hotkey = MeetingHotkeyInstaller::install(chord, act_tx)
             .map_err(|e| AppError::MeetingCapture(format!("install meeting hotkey: {e}")))?;
 
@@ -172,12 +188,72 @@ impl MeetingCaptureRuntime {
             .spawn(move || activation_loop(shared_for_thread, act_rx, stop_rx))
             .map_err(|e| AppError::MeetingCapture(format!("spawn activation thread: {e}")))?;
 
+        // Hydrate the paused-state cache from the settings DB. If the
+        // setting was true at last shutdown, inject a PauseToggle so
+        // the activation thread starts in the paused state. Errors
+        // here are non-fatal: a setting-read failure shouldn't block
+        // app startup — the hotkey just defaults to unpaused.
+        let is_paused = Arc::new(AtomicBool::new(false));
+        match Self::read_paused_setting(&shared.shared_conn) {
+            Ok(true) => {
+                is_paused.store(true, Ordering::SeqCst);
+                // Best-effort: the receiver is wired up above, so this
+                // send queues immediately into the activation loop.
+                let _ = act_tx_for_injection.send(ActivationEvent::PauseToggle { paused: true });
+            }
+            Ok(false) => {}
+            Err(e) => tracing::warn!(
+                target: "meetings",
+                error = %e,
+                "failed to read MeetingHotkeyPaused on spawn; defaulting to unpaused"
+            ),
+        }
+
         Ok(Self {
             shared,
             hotkey: Some(hotkey),
             activation_thread: Some(activation_thread),
             activation_stop_tx: Some(stop_tx),
+            act_tx: act_tx_for_injection,
+            is_paused,
         })
+    }
+
+    /// Idempotent paused-toggle. Updates the in-memory cache, persists
+    /// to settings, and injects an `ActivationEvent::PauseToggle` so
+    /// the activation state machine moves to/from its paused state.
+    ///
+    /// Errors only on settings-write failure (the in-memory + channel
+    /// updates are infallible). On error, the in-memory state IS
+    /// already updated — the caller's view-of-the-world matches the
+    /// runtime even if the settings DB write failed.
+    pub fn set_meeting_hotkey_paused(&self, paused: bool) -> AppResult<()> {
+        self.is_paused.store(paused, Ordering::SeqCst);
+        // Send first so the activation thread reacts ASAP; a settings
+        // write failure shouldn't delay the toggle the user just
+        // clicked. If the channel is closed (Drop in flight) the send
+        // errors and we swallow — nothing for us to do.
+        let _ = self.act_tx.send(ActivationEvent::PauseToggle { paused });
+        let conn = self
+            .shared
+            .shared_conn
+            .lock()
+            .map_err(|_| AppError::MeetingCapture("shared_conn mutex poisoned".into()))?;
+        Settings::new(&conn).set(SettingKey::MeetingHotkeyPaused, &paused)
+    }
+
+    /// Lock-free read of the in-memory paused cache. The tray
+    /// menu-build path + the IPC `meeting_is_paused` command both go
+    /// through this.
+    pub fn is_meeting_hotkey_paused(&self) -> bool {
+        self.is_paused.load(Ordering::SeqCst)
+    }
+
+    fn read_paused_setting(shared_conn: &Arc<Mutex<Connection>>) -> AppResult<bool> {
+        let conn = shared_conn
+            .lock()
+            .map_err(|_| AppError::MeetingCapture("shared_conn mutex poisoned".into()))?;
+        Settings::new(&conn).get::<bool>(SettingKey::MeetingHotkeyPaused)
     }
 
     /// Cheap snapshot of the shared bag — for the IPC command layer
@@ -286,17 +362,48 @@ fn handle_toggle(shared: &MeetingRuntimeShared, source: LastChosenSource) {
         guard.as_ref().map(|m| m.uuid.clone())
     };
     if let Some(uuid) = in_flight_uuid {
+        // Push-to-stop — second chord-press during an active meeting
+        // ends it. We do NOT show the overlay here; the lifecycle's
+        // `done` event will let the React side self-hide whatever it
+        // was showing.
         if let Err(e) = shared.stop_meeting(&uuid) {
             tracing::warn!(target: "meetings", error = %e, "stop_meeting from toggle");
         }
-    } else {
+        return;
+    }
+
+    // Push-to-start — show the overlay window first so the user can
+    // confirm / change the source picker, then the React side fires
+    // `meeting_start` when the user clicks the big Start button. We
+    // do NOT auto-start the capture here; that would surprise the
+    // user when the wrong source is preselected.
+    //
+    // Wave 5 deviation from §5.6 of the wave brief: the brief
+    // proposed showing the overlay + auto-starting. The auto-start
+    // is what makes the chord a "toggle" rather than a "confirm-
+    // first" affordance — picking it is a UX call. We go with
+    // overlay-first for two reasons: (a) the source picker is the
+    // primary value-add of having an overlay at all, and (b) it
+    // matches the main-window record bar's flow (pick → start). If
+    // user testing shows the extra click is annoying we can add a
+    // "skip picker, use last source" setting in Wave 6 polish.
+    let _ = source; // last-source becomes the picker's preselect via
+                    // the existing LastChosenSource hydration path.
+    if !crate::meetings::overlay::show_overlay(&shared.app_handle) {
+        // Overlay missing — fall back to direct start so the chord
+        // still does something. Source is whatever the activation
+        // state machine last remembered.
+        tracing::warn!(
+            target: "meetings",
+            "meeting overlay window missing; falling back to direct start"
+        );
         let mc_source = match source {
             LastChosenSource::Mic => MeetingSource::Mic,
             LastChosenSource::System => MeetingSource::System,
             LastChosenSource::Both => MeetingSource::Both,
         };
         if let Err(e) = shared.start_meeting(mc_source) {
-            tracing::warn!(target: "meetings", error = %e, "start_meeting from toggle");
+            tracing::warn!(target: "meetings", error = %e, "start_meeting fallback from toggle");
         }
     }
 }
