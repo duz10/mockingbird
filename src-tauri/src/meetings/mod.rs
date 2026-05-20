@@ -62,6 +62,7 @@ pub mod chunker;
 pub mod export;
 pub mod filler_words;
 pub mod formatter;
+pub mod hotkey_installer;
 pub mod llm_pass;
 pub mod long_form_stt;
 pub mod overlay;

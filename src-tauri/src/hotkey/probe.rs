@@ -46,6 +46,13 @@ pub const VK_F24: u32 = 0x87;
 /// VK_SPACE — used with Ctrl+Shift modifiers as the final fallback.
 pub const VK_SPACE: u32 = 0x20;
 
+/// VK_M — Phase MC default meeting main-key.
+pub const VK_M: u32 = 0x4D;
+/// VK_F13 — Phase MC first fallback main-key (per ADR 0019 §MC.1).
+pub const VK_F13: u32 = 0x7C;
+/// VK_F14 — Phase MC second fallback main-key.
+pub const VK_F14: u32 = 0x7D;
+
 /// How long to wait for a synthetic event to round-trip through the
 /// hook. 50 ms is comfortably above measured kernel hook latency
 /// (~1–5 ms on a quiet system) without making startup feel sluggish
@@ -187,6 +194,62 @@ fn send_synthetic_keystroke(vk: u32) -> AppResult<()> {
     Ok(())
 }
 
+// =====================================================================
+// Phase MC — meeting hotkey collision probe (Wave 3 §3.5)
+// =====================================================================
+
+/// Phase MC fallback chain for the meeting main-key. Configured VK
+/// first, then VK_M, VK_F13, VK_F14 (deduped).
+///
+/// This is the meeting equivalent of [`candidate_chain`], with a
+/// different fallback set per ADR 0019 §MC.1 (the meeting modifier
+/// is right-handed Ctrl-shaped, so the main-key falls back to
+/// F13/F14 rather than F23/F24 to avoid stomping on dictation's
+/// fallback range).
+pub fn meeting_candidate_chain(configured_main_vk: u32) -> Vec<u32> {
+    let mut chain = vec![configured_main_vk];
+    for fb in [VK_M, VK_F13, VK_F14] {
+        if !chain.contains(&fb) {
+            chain.push(fb);
+        }
+    }
+    chain
+}
+
+/// Phase MC startup collision probe. Returns the first VK in the
+/// meeting fallback chain that **does not equal** the configured
+/// dictation main-key.
+///
+/// Unlike [`probe_with`], this is a pure value-comparison — there's
+/// no `SendInput` round-trip. The OS-level conflict probe ([`probe_live`])
+/// is for the dictation install; meeting startup just needs to verify
+/// its chord doesn't share its main-key VK with dictation (the
+/// independent second `WH_KEYBOARD_LL` hook handles its own delivery
+/// guarantee via [`super::probe::probe_live`] in Wave 4 if the user
+/// reports a dead meeting hotkey).
+///
+/// # Errors
+///
+/// `AppError::Hotkey` if every VK in the chain collides with
+/// `dictation_main_vk`. With a 4-entry chain and a single dictation
+/// VK that's structurally impossible — the error path is defensive.
+pub fn probe_meeting_main_vk(configured_main_vk: u32, dictation_main_vk: u32) -> AppResult<u32> {
+    let chain = meeting_candidate_chain(configured_main_vk);
+    for &vk in &chain {
+        if vk != dictation_main_vk {
+            return Ok(vk);
+        }
+    }
+    Err(AppError::Hotkey(format!(
+        "all meeting hotkey candidates ({}) collide with dictation main VK {dictation_main_vk:#x}",
+        chain
+            .iter()
+            .map(|vk| format!("{vk:#x}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,6 +344,35 @@ mod tests {
             Err(AppError::Hotkey(msg)) => assert!(msg.contains("simulated")),
             other => panic!("expected propagated error, got {other:?}"),
         }
+    }
+
+    // ---------- Phase MC meeting probe ----------
+
+    #[test]
+    fn probe_meeting_returns_configured_vk_when_no_collision() {
+        // configured = VK_M, dictation = VK_F23 (no collision)
+        let r = probe_meeting_main_vk(VK_M, VK_F23).unwrap();
+        assert_eq!(r, VK_M);
+    }
+
+    #[test]
+    fn probe_meeting_walks_chain_on_collision() {
+        // configured = VK_M, dictation = VK_M → first survivor is VK_F13
+        let r = probe_meeting_main_vk(VK_M, VK_M).unwrap();
+        assert_eq!(r, VK_F13);
+    }
+
+    #[test]
+    fn meeting_candidate_chain_dedupes_configured_match() {
+        // configured = VK_F13 → chain is [VK_F13, VK_M, VK_F14]
+        // (VK_F13 appears once, not as configured AND fallback).
+        let chain = meeting_candidate_chain(VK_F13);
+        assert_eq!(
+            chain.iter().filter(|&&vk| vk == VK_F13).count(),
+            1,
+            "chain must dedupe: {chain:?}"
+        );
+        assert_eq!(chain, vec![VK_F13, VK_M, VK_F14]);
     }
 
     #[test]
