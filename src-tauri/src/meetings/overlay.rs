@@ -58,6 +58,34 @@ pub fn show_overlay(app: &AppHandle) -> bool {
     true
 }
 
+/// Show the overlay WITHOUT emitting the CHOOSE-mode event. Used
+/// when the meeting has already started via a direct-start path
+/// (e.g. the main-window "Start Recording" button) and the React
+/// side will receive the recording state via the normal
+/// `meeting:state` event stream from the lifecycle layer.
+///
+/// Without this, the chord path's `show_overlay` would emit
+/// `meeting:overlay-open`, flipping the overlay into CHOOSE mode
+/// even though we're already past CHOOSE. That'd cause a flicker
+/// (CHOOSE → recording) the user would notice.
+///
+/// Returns `true` when the overlay window was found + show() was
+/// dispatched; `false` when the window is missing.
+pub fn force_show_for_recording(app: &AppHandle) -> bool {
+    let Some(window) = app.get_webview_window(MEETING_OVERLAY_LABEL) else {
+        tracing::warn!(
+            label = MEETING_OVERLAY_LABEL,
+            "meeting overlay window not found on direct-start path"
+        );
+        return false;
+    };
+    if let Err(e) = window.show() {
+        tracing::warn!(error = ?e, "force-show meeting overlay");
+        return false;
+    }
+    true
+}
+
 /// Hide the overlay window (no event — the React side self-clears
 /// state on `meeting:state == "done"`).
 pub fn hide_overlay(app: &AppHandle) {

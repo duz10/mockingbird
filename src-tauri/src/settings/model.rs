@@ -37,12 +37,15 @@ pub enum SettingKey {
     //
     /// VK name string for the meeting hotkey modifier. Default
     /// `"VK_RCONTROL"`. Allowed set: `RCtrl, LCtrl, RAlt, LAlt, RShift,
-    /// LShift, RWin, LWin`. Settings UI (Wave 5) clamps the picker.
+    /// LShift, RWin, LWin`. Settings UI clamps the picker.
     /// Conflict probe (Wave 3) rejects if it equals the dictation VK.
     MeetingHotkeyModifier,
     /// VK name string for the meeting hotkey main key. Default
-    /// `"VK_M"`; ADR 0019 fallback ladder steps to `"VK_F13"` then
-    /// `"VK_F14"` then user-pick if M is claimed by another global hook.
+    /// `"VK_OEM_PERIOD"` (the `.>` key) as of the mb-fc1 hotfix —
+    /// the original `"VK_M"` default collided with Microsoft 365
+    /// Copilot on Windows 11. ADR 0019 fallback ladder steps to
+    /// `"VK_F13"` then `"VK_F14"` then user-pick if the chosen key is
+    /// claimed by another global hook.
     MeetingHotkeyKey,
     /// Default source preselected in the meeting overlay. One of
     /// `"mic" | "system" | "both"`. Default `"mic"`.
@@ -149,7 +152,10 @@ impl SettingKey {
             Self::LearningEnabled => serde_json::json!(true),
             // Phase MC.
             Self::MeetingHotkeyModifier => serde_json::json!("VK_RCONTROL"),
-            Self::MeetingHotkeyKey => serde_json::json!("VK_M"),
+            // mb-fc1 hotfix: was "VK_M". Right Ctrl + Period is the
+            // post-Copilot-collision default. See ADR 0033 (chord
+            // collision hotfix).
+            Self::MeetingHotkeyKey => serde_json::json!("VK_OEM_PERIOD"),
             Self::MeetingDefaultSource => serde_json::json!("mic"),
             Self::MeetingMaxDurationSeconds => serde_json::json!(14_400),
             Self::MeetingFillerStripEnabled => serde_json::json!(true),
@@ -244,7 +250,10 @@ mod tests {
             SettingKey::MeetingHotkeyModifier.default_value(),
             json!("VK_RCONTROL")
         );
-        assert_eq!(SettingKey::MeetingHotkeyKey.default_value(), json!("VK_M"));
+        assert_eq!(
+            SettingKey::MeetingHotkeyKey.default_value(),
+            json!("VK_OEM_PERIOD")
+        );
         assert_eq!(
             SettingKey::MeetingDefaultSource.default_value(),
             json!("mic")

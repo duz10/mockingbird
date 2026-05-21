@@ -274,5 +274,6 @@
   "meetingOverlay.start": "Start",
   "meetingOverlay.cancel": "Cancel",
   "meetingOverlay.recording": "Recording",
-  "meetingOverlay.stop": "Stop"
+  "meetingOverlay.stop": "Stop",
+  "meetingOverlay.dismiss": "Hide overlay"
 }

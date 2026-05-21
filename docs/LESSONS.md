@@ -14,6 +14,68 @@ Format:
 
 ---
 
+## 2026-05-23 [mc-hotfix / mb-x1x] post-deploy live-fire surfaced 4 gaps the Wave-6 judges couldn't catch
+
+- **Context:** Same day as the ADR 0032 v1.1 polish ship. Dustin ran
+  the actual app end-to-end and four regressions surfaced in <30
+  minutes: source-probe stub on all boxes, stuck Stop button on
+  main-window-start, default chord stolen by Microsoft 365 Copilot,
+  overlay pill invisible on main-window start.
+- **Finding (1 — the meta-lesson):** Wave-6 judges (formatter
+  determinism, lossless stitch, two-channel merge, no-LLM-in-critical-
+  path, dictation-untouched) are all *static* / *file-diff* / *unit-
+  test* assertions. None of them exercise (a) a real cpal device
+  list, (b) a real Windows WH_KEYBOARD_LL hook against a real OS
+  with a real competing global-hook app installed (Copilot), (c)
+  React state transitions that depend on Tauri events the test
+  harness doesn't emit. The judges proved the *contracts* are
+  preserved; they did NOT prove the *integrations* work end-to-end on
+  a real Win11 box. A 5-minute human smoke test caught what 4 hours
+  of automated judging didn't. Smoke-test rituals belong in the seal
+  checklist for any phase that touches OS hooks or audio devices.
+- **Finding (2 — boring engineering):** Two bugs were hiding each
+  other. `lib.rs` boot path called `MeetingRuntimeConfig::
+  defaults_with()` instead of `from_settings()`, so the Settings UI
+  chord picker was a no-op (every chord-related test in the suite
+  used `defaults_with` directly and was therefore green). The `VK_M`
+  default collision with Copilot was only discoverable on a Windows
+  11 box with Microsoft 365 installed — Dustin's machine, not CI.
+  Combined: even if a user had noticed the Copilot collision and
+  changed the setting, the change wouldn't have taken effect at next
+  boot anyway. Lesson: **`from_settings`-vs-`defaults_with`-style
+  pairs need a test that the spawn path actually consults the DB**.
+  Added `from_settings_picks_up_user_customised_chord` for exactly
+  this reason.
+- **Finding (3 — Microsoft 365 Copilot specifically):** Copilot's
+  global chord handler on Windows 11 fires regardless of whether a
+  WH_KEYBOARD_LL hook returns 1 (consume) or 0 (pass-through) from
+  its callback. Either Copilot polls key state independently of the
+  hook chain, or it injects at a higher kernel callback level than
+  WH_KEYBOARD_LL, or it has a shell-registered global accelerator
+  that fires pre-hook. Action: **avoid `RCtrl + letter` defaults
+  for any global hotkey on Windows**. OEM punctuation
+  (`.`, `,`, `;`, `\`) is the safe-chord territory.
+- **Finding (4 — settings-DB sentinel rows are a real, ugly pattern):**
+  We added `_internal_mc_chord_copilot_hotfix_v1` as a marker in
+  `settings` so the one-shot migration doesn't keep checking on every
+  launch. This is technically a side-channel — `settings` is
+  semantically user-facing. It's annotated + scoped, and the
+  alternative (a real schema migration for a default-value flip)
+  felt heavier than the disease. Tolerate one-off; if we ever do a
+  second one, refactor to a dedicated `_internal_migrations`
+  scratch table.
+- **Action:** **Add a manual smoke-test checklist to any phase seal
+  whose scope touches OS hooks, audio devices, or live Tauri events.**
+  Specifically for MC: 5-minute Dustin-at-keyboard test on the actual
+  Windows 11 + Microsoft 365 box BEFORE the seal commit, not after.
+  We avoided this on Wave 6 because the Wave-5 QA matrix was so
+  thorough — but Wave 6 added the formatter/judges/STT changes and
+  was rubber-stamped through. **Five-attempt rule was respected
+  perfectly here:** Dustin found, Bernard diagnosed in 1 iteration,
+  ADR + fix + commit in the second iteration. No churn.
+
+---
+
 ## 2026-05-23 [mc-v1.1] post-seal audit found four polish gaps; ADR-chartered lateral epic vehicle worked cleanly
 
 - **Context:** Day after sealing Phase MC at `phase-mc-complete`,

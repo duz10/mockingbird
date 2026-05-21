@@ -255,6 +255,20 @@ export function MeetingOverlay() {
           >
             {busy === "stopping" ? "…" : t("meetingOverlay.stop")}
           </button>
+          {/* mb-fc1 hotfix: dismiss the pill WITHOUT stopping the
+              recording. The chord re-summons it, the Meetings page
+              also shows it via the started-event listener. Distinct
+              icon (× sized 14px) so the user can't confuse it with
+              the Stop button (red, labelled). */}
+          <button
+            type="button"
+            className={styles.btnCancel}
+            onClick={handleCancel}
+            aria-label={t("meetingOverlay.dismiss")}
+            title={t("meetingOverlay.dismiss")}
+          >
+            <XIcon size={14} />
+          </button>
         </div>
       </div>
     );

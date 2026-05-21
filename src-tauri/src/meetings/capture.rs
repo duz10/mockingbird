@@ -108,12 +108,51 @@ pub struct MeetingSourceProbe {
     pub system_available: bool,
 }
 
-/// Stub probe. Wave 4 replaces with a real cpal-driven open-test.
+/// Best-effort cpal-driven probe.
+///
+/// `mic_available` is `true` iff `host.default_input_device()` exists
+/// AND has a valid default input config. `system_available` is
+/// `true` iff `host.default_output_device()` exists AND has a valid
+/// default output config (the WASAPI loopback source).
+///
+/// We deliberately don't `play_input_stream()` the device here —
+/// opening WASAPI in loopback mode exclusively (`PLAY_LOOPBACK`)
+/// pulls audio frames, which would be visible in some recording-
+/// indicator UIs even though we'd immediately tear down. The
+/// `default_output_config()` call is cheap, infallible-on-success,
+/// and good enough to surface "no playback device" without making
+/// the OS think we're recording.
+///
+/// On non-Windows, both flags are `false`. Cross-platform abstraction
+/// (Principle 5): the trait lives behind `#[cfg(target_os = ...)]`
+/// even in Windows-only v1.
 pub fn probe_sources() -> AppResult<MeetingSourceProbe> {
-    Ok(MeetingSourceProbe {
-        mic_available: true,
-        system_available: false,
-    })
+    #[cfg(target_os = "windows")]
+    {
+        use cpal::traits::{DeviceTrait, HostTrait};
+        let host = cpal::default_host();
+        let mic_available = host
+            .default_input_device()
+            .and_then(|d| d.default_input_config().ok())
+            .is_some();
+        let system_available = host
+            .default_output_device()
+            .and_then(|d| d.default_output_config().ok())
+            .is_some();
+        Ok(MeetingSourceProbe {
+            mic_available,
+            system_available,
+        })
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // macOS/Linux loopback support is Phase 9 / future. Surface
+        // both as unavailable rather than lying.
+        Ok(MeetingSourceProbe {
+            mic_available: false,
+            system_available: false,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------

@@ -38,7 +38,32 @@ const MODIFIER_OPTIONS = [
   "VK_F13",
 ] as const;
 
-const MAIN_KEY_OPTIONS = ["VK_M", "VK_F13", "VK_F14", "VK_F15"] as const;
+// mb-fc1: VK_OEM_PERIOD is the post-Copilot-collision default (Right
+// Ctrl + `.`). Order intentionally puts it first so the picker shows
+// the current default selected on a fresh DB.
+const MAIN_KEY_OPTIONS = [
+  "VK_OEM_PERIOD",
+  "VK_OEM_COMMA",
+  "VK_OEM_1", // ;:
+  "VK_OEM_5", // \|
+  "VK_M",
+  "VK_F13",
+  "VK_F14",
+  "VK_F15",
+] as const;
+
+// Human labels for the main-key options. Mirrors `short_label()` in
+// `meetings/runtime.rs` so log lines and the picker agree.
+const MAIN_KEY_LABELS: Record<(typeof MAIN_KEY_OPTIONS)[number], string> = {
+  VK_OEM_PERIOD: "Period  .",
+  VK_OEM_COMMA: "Comma  ,",
+  VK_OEM_1: "Semicolon  ;",
+  VK_OEM_5: "Backslash  \\",
+  VK_M: "M",
+  VK_F13: "F13",
+  VK_F14: "F14",
+  VK_F15: "F15",
+};
 
 const SOURCE_OPTIONS = ["mic", "system", "both"] as const;
 
@@ -145,9 +170,17 @@ export function SettingsMeetingTab() {
               void patch("hotkeyKey", e.target.value, "meeting_hotkey_key")
             }
           >
+            {/* If the stored value isn't one of our curated options
+                (e.g. user hand-edited the DB to VK_F8), render it as
+                a passthrough so the picker doesn't appear broken. */}
+            {!(MAIN_KEY_OPTIONS as readonly string[]).includes(
+              snap.hotkeyKey,
+            ) ? (
+              <option value={snap.hotkeyKey}>{snap.hotkeyKey}</option>
+            ) : null}
             {MAIN_KEY_OPTIONS.map((k) => (
               <option key={k} value={k}>
-                {k}
+                {MAIN_KEY_LABELS[k]}
               </option>
             ))}
           </select>

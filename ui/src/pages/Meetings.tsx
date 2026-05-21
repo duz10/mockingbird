@@ -158,6 +158,17 @@ export function MeetingsPage() {
             recordStartTimeRef.current = Date.now();
             // Fresh meeting — clear stale progress from the previous run.
             setProgress({});
+            // mb-fc1 hotfix: the Settings → Start button path sets
+            // `startingOrStopping="starting"` and used to rely on the
+            // `done`/`error` event to clear it — but `done` only
+            // fires on stop, not on start. Result: after a
+            // successful start, the button stayed in the "starting…"
+            // state and the Stop click was a no-op because it was
+            // disabled. The chord-start path skipped
+            // `handleStart` entirely so the bug was invisible there.
+            // Now we clear the latch on the actual started event,
+            // which fires from both the button and the chord paths.
+            setStartingOrStopping(null);
           } else if (
             e.payload.state === "done" ||
             e.payload.state === "error" ||

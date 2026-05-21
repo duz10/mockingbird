@@ -46,13 +46,14 @@ use crate::meetings::activation::ActivationEvent;
 // Public types
 // ---------------------------------------------------------------------
 
-/// VK codes for the meeting chord. Default is `VK_RCONTROL + VK_M`
-/// (ADR 0019 §MC.1).
+/// VK codes for the meeting chord. Default is `VK_RCONTROL +
+/// VK_OEM_PERIOD` (the `.>` key) as of the mb-fc1 hotfix — the prior
+/// `VK_M` default collided with Microsoft 365 Copilot on Windows 11.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChordConfig {
     /// Modifier VK. Defaults to `0xA3` (VK_RCONTROL).
     pub modifier_vk: u32,
-    /// Main-key VK. Defaults to `0x4D` (`M`).
+    /// Main-key VK. Defaults to `0xBE` (VK_OEM_PERIOD).
     pub main_vk: u32,
 }
 
@@ -60,7 +61,7 @@ impl Default for ChordConfig {
     fn default() -> Self {
         Self {
             modifier_vk: 0xA3, // VK_RCONTROL
-            main_vk: 0x4D,     // 'M'
+            main_vk: 0xBE,     // VK_OEM_PERIOD (`.>`)
         }
     }
 }
@@ -220,7 +221,7 @@ mod win {
         pub(super) static MEETING_TX: RefCell<Option<Sender<ActivationEvent>>> =
             const { RefCell::new(None) };
         pub(super) static MEETING_CHORD: RefCell<ChordConfig> =
-            const { RefCell::new(ChordConfig { modifier_vk: 0xA3, main_vk: 0x4D }) };
+            const { RefCell::new(ChordConfig { modifier_vk: 0xA3, main_vk: 0xBE }) };
         pub(super) static MEETING_HHOOK: RefCell<Option<HHOOK>> =
             const { RefCell::new(None) };
         /// Anchor for elapsed-millis timestamps on `ActivationEvent`.

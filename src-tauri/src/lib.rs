@@ -171,7 +171,22 @@ pub fn run() {
                         "failed to create meetings chunk base dir"
                     );
                 }
-                let mc_config = MeetingRuntimeConfig::defaults_with(chunk_base_dir);
+                // mb-fc1: hydrate the chord + max-duration + default
+                // source from the settings DB rather than baking the
+                // defaults at startup. The pre-hotfix code path called
+                // `defaults_with` unconditionally, which made the
+                // Settings → Meetings tab chord picker a no-op.
+                let mc_config = {
+                    // The shared_conn mutex is fresh at this point in
+                    // startup — no other thread has touched it yet —
+                    // so a poisoned lock here means a previous panic
+                    // before us, which we can't recover from anyway.
+                    let guard = shared_conn
+                        .lock()
+                        .expect("shared_conn must be unpoisoned at startup");
+                    MeetingRuntimeConfig::from_settings(&guard, chunk_base_dir)
+                };
+                let chord_label = mc_config.hotkey_label.clone();
                 match MeetingCaptureRuntime::spawn(
                     shared_conn.clone(),
                     mc_config,
@@ -188,7 +203,8 @@ pub fn run() {
                         // meeting as Interrupted).
                         app.manage(mc_runtime);
                         tracing::info!(
-                            "🎙️ meeting capture runtime started; chord RightCtrl+M"
+                            chord = %chord_label,
+                            "🎙️ meeting capture runtime started"
                         );
                     }
                     Err(e) => {

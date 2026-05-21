@@ -171,6 +171,17 @@ pub fn meeting_start(
     let src = MeetingSource::from_db_str(&source)
         .ok_or_else(|| format!("unknown meeting source: {source:?} (want mic|system|both)"))?;
     let uuid = rt.start_meeting(src).map_err(into_err)?;
+    // mb-fc1 hotfix: the main-window "Start Recording" button is a
+    // direct-start path — the chord path shows the overlay before
+    // start (CHOOSE → start), but this path skips CHOOSE entirely.
+    // Without this nudge the overlay would stay hidden and the user
+    // would have no visual feedback that recording was running.
+    //
+    // `force_show_for_recording` deliberately does NOT emit
+    // `meeting:overlay-open` (the CHOOSE-mode trigger) — the
+    // recording-mode UI is driven by the `meeting:state="started"`
+    // event the lifecycle path already emits.
+    let _ = crate::meetings::overlay::force_show_for_recording(&rt.app_handle);
     Ok(MeetingStartResult { uuid })
 }
 

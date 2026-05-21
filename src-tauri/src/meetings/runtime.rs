@@ -84,16 +84,221 @@ pub struct MeetingRuntimeConfig {
 impl MeetingRuntimeConfig {
     /// Best-effort defaults — used by tests + as the fallback when
     /// settings haven't been populated yet.
+    ///
+    /// **mb-fc1 hotfix:** the chord default flipped from
+    /// `RCtrl + M` to `RCtrl + .` (`VK_OEM_PERIOD`) because the
+    /// original `M` collided with Microsoft 365 Copilot on Windows 11.
     pub fn defaults_with(chunk_base_dir: PathBuf) -> Self {
         Self {
             modifier_vk: 0xA3, // VK_RCONTROL
-            main_vk: 0x4D,     // 'M'
+            main_vk: 0xBE,     // VK_OEM_PERIOD
             max_duration_seconds: 14_400,
             default_source: LastChosenSource::Mic,
             chunk_base_dir,
             whisper_model_id: "whisper-large-v3-turbo-q5_0".to_string(),
             formatter_version: "mc-v1".to_string(),
-            hotkey_label: "RCtrl+M".to_string(),
+            hotkey_label: "RCtrl+.".to_string(),
+        }
+    }
+
+    /// Hydrate from the live settings DB. Reads
+    /// `MeetingHotkeyModifier` + `MeetingHotkeyKey` +
+    /// `MeetingMaxDurationSeconds` + `MeetingDefaultSource` and
+    /// overlays them onto [`defaults_with`].
+    ///
+    /// **Failure model:** any single-setting parse error logs a
+    /// `tracing::warn!` and falls back to the documented default for
+    /// that key. The runtime spawn must NOT fail just because the
+    /// user hand-edited the DB into an inconsistent state — better to
+    /// boot with the safe default and surface the corruption in the
+    /// settings UI than to refuse to start.
+    ///
+    /// Audit-trail context (mb-fc1, 2026-05-23): before this method
+    /// existed, `defaults_with` was called unconditionally and the
+    /// settings DB rows for the chord were dead writes — the
+    /// Settings → Meetings tab picker has been shipped since Wave 5
+    /// but never had teeth.
+    pub fn from_settings(conn: &Connection, chunk_base_dir: PathBuf) -> Self {
+        use super::vk_names::vk_name_to_code;
+        // One-shot data hotfix: pre-mb-fc1 installs persisted
+        // `"VK_M"` as the chord default. That key collides with the
+        // Microsoft 365 Copilot global chord on Windows 11. If the
+        // stored value is the literal old default *and* this DB has
+        // never been migrated, upgrade it once to the new safe
+        // default. Users who genuinely picked `VK_M` after the hotfix
+        // ships are protected: we set the marker row regardless, so
+        // we never re-migrate the same DB twice. If they re-pick
+        // `VK_M` post-hotfix, the marker is already present and we
+        // leave their choice alone.
+        upgrade_legacy_chord_default_once(conn);
+
+        let mut cfg = Self::defaults_with(chunk_base_dir);
+        let s = Settings::new(conn);
+
+        match s.get::<String>(SettingKey::MeetingHotkeyModifier) {
+            Ok(name) => match vk_name_to_code(&name) {
+                Ok(code) => cfg.modifier_vk = code,
+                Err(e) => tracing::warn!(
+                    target: "meetings",
+                    error = %e,
+                    name = %name,
+                    "MeetingHotkeyModifier parse failed; using default"
+                ),
+            },
+            Err(e) => tracing::warn!(
+                target: "meetings",
+                error = %e,
+                "MeetingHotkeyModifier read failed; using default"
+            ),
+        }
+        match s.get::<String>(SettingKey::MeetingHotkeyKey) {
+            Ok(name) => match vk_name_to_code(&name) {
+                Ok(code) => cfg.main_vk = code,
+                Err(e) => tracing::warn!(
+                    target: "meetings",
+                    error = %e,
+                    name = %name,
+                    "MeetingHotkeyKey parse failed; using default"
+                ),
+            },
+            Err(e) => tracing::warn!(
+                target: "meetings",
+                error = %e,
+                "MeetingHotkeyKey read failed; using default"
+            ),
+        }
+        if let Ok(max) = s.get::<i64>(SettingKey::MeetingMaxDurationSeconds) {
+            // Mirror the server-side clamp documented in the settings
+            // facade: [60, 21600]. The settings layer is supposed to
+            // enforce this on write, but a hand-edit could land an
+            // out-of-range value here. Clamp defensively.
+            cfg.max_duration_seconds = max.clamp(60, 21_600) as u32;
+        }
+        if let Ok(src) = s.get::<String>(SettingKey::MeetingDefaultSource) {
+            cfg.default_source = match src.as_str() {
+                "mic" => LastChosenSource::Mic,
+                "system" => LastChosenSource::System,
+                "both" => LastChosenSource::Both,
+                other => {
+                    tracing::warn!(
+                        target: "meetings",
+                        value = %other,
+                        "MeetingDefaultSource unknown; using Mic"
+                    );
+                    LastChosenSource::Mic
+                }
+            };
+        }
+        // Refresh the human-readable hotkey label from the resolved
+        // codes so logs + provenance rows match the live chord.
+        cfg.hotkey_label = format_hotkey_label(cfg.modifier_vk, cfg.main_vk);
+        cfg
+    }
+}
+
+/// Render a `MOD+KEY` label string from a pair of VK codes. Used
+/// for `tracing` logs and the `meeting_sessions.hotkey_pressed`
+/// provenance column. Pure: no DB, no allocation surprises.
+pub fn format_hotkey_label(modifier_vk: u32, main_vk: u32) -> String {
+    use super::vk_names::vk_code_to_name;
+    let m = vk_code_to_name(modifier_vk)
+        .map(short_label)
+        .unwrap_or_else(|| format!("VK_{modifier_vk:#X}"));
+    let k = vk_code_to_name(main_vk)
+        .map(short_label)
+        .unwrap_or_else(|| format!("VK_{main_vk:#X}"));
+    format!("{m}+{k}")
+}
+
+/// Marker key written to the raw `settings` table once we've done the
+/// mb-fc1 chord-default upgrade. Lives outside the typed
+/// [`SettingKey`] enum on purpose: it's bookkeeping, not user-facing
+/// configuration, and we don't want it appearing in settings UIs or
+/// reset-to-defaults flows.
+const CHORD_HOTFIX_MARKER_KEY: &str = "_internal_mc_chord_copilot_hotfix_v1";
+
+/// One-shot bookkeeping: upgrade `meeting_hotkey_key = "VK_M"` to
+/// `"VK_OEM_PERIOD"` on DBs that pre-date the mb-fc1 hotfix.
+///
+/// Behaviour matrix:
+///
+/// | marker present | row value      | action                          |
+/// |----------------|----------------|---------------------------------|
+/// | yes            | (any)          | no-op                           |
+/// | no             | absent         | write marker, leave key absent  |
+/// | no             | `"VK_M"`       | overwrite to `"VK_OEM_PERIOD"`, write marker |
+/// | no             | anything else  | write marker, leave row alone   |
+///
+/// All DB ops are best-effort: a failure here just means we'll try
+/// again next launch. We don't want a stale settings row to brick
+/// meeting capture entirely — that's worse than the original bug.
+pub(crate) fn upgrade_legacy_chord_default_once(conn: &Connection) {
+    let already_done: rusqlite::Result<i64> = conn.query_row(
+        "SELECT 1 FROM settings WHERE key = ?1",
+        rusqlite::params![CHORD_HOTFIX_MARKER_KEY],
+        |r| r.get(0),
+    );
+    if already_done.is_ok() {
+        return;
+    }
+
+    // If the meeting_hotkey_key row exists *and* equals the old
+    // default JSON literal, upgrade it. The settings facade JSON-
+    // encodes strings, so "VK_M" lands as the literal four-byte
+    // string `"VK_M"` (including the surrounding quotes).
+    let stored: rusqlite::Result<String> = conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        rusqlite::params!["meeting_hotkey_key"],
+        |r| r.get(0),
+    );
+    if let Ok(v) = stored {
+        if v == "\"VK_M\"" {
+            let _ = conn.execute(
+                "UPDATE settings SET value = ?1 WHERE key = ?2",
+                rusqlite::params!["\"VK_OEM_PERIOD\"", "meeting_hotkey_key"],
+            );
+            tracing::info!(
+                target: "meetings",
+                "upgraded legacy meeting chord default VK_M → VK_OEM_PERIOD (mb-fc1)"
+            );
+        }
+    }
+
+    // Write the marker regardless so we don't keep checking on every
+    // launch.
+    let _ = conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+        rusqlite::params![CHORD_HOTFIX_MARKER_KEY, "\"applied\""],
+    );
+}
+
+fn short_label(vk_name: &str) -> String {
+    // Pretty-print the common VK names for log readability. Anything
+    // not in this table falls through to the raw `VK_*` string —
+    // perfectly fine for a log line.
+    match vk_name {
+        "VK_RCONTROL" => "RCtrl".into(),
+        "VK_LCONTROL" => "LCtrl".into(),
+        "VK_RMENU" => "RAlt".into(),
+        "VK_LMENU" => "LAlt".into(),
+        "VK_RSHIFT" => "RShift".into(),
+        "VK_LSHIFT" => "LShift".into(),
+        "VK_RWIN" => "RWin".into(),
+        "VK_LWIN" => "LWin".into(),
+        "VK_OEM_PERIOD" => ".".into(),
+        "VK_OEM_COMMA" => ",".into(),
+        "VK_OEM_1" => ";".into(),
+        "VK_OEM_2" => "/".into(),
+        "VK_OEM_3" => "`".into(),
+        "VK_OEM_5" => "\\".into(),
+        "VK_OEM_6" => "]".into(),
+        "VK_OEM_MINUS" => "-".into(),
+        "VK_OEM_PLUS" => "=".into(),
+        "VK_SPACE" => "Space".into(),
+        other => {
+            // Strip the VK_ prefix for single-letter / F-key / digit
+            // cases so we get "M", "F13", "1" instead of "VK_M" etc.
+            other.strip_prefix("VK_").unwrap_or(other).into()
         }
     }
 }
@@ -429,16 +634,162 @@ mod tests {
         let cfg = MeetingRuntimeConfig::defaults_with(p.clone());
         assert_eq!(cfg.chunk_base_dir, p);
         assert_eq!(cfg.modifier_vk, 0xA3);
-        assert_eq!(cfg.main_vk, 0x4D);
-        assert_eq!(cfg.main_vk, b'M' as u32);
+        // mb-fc1 hotfix: main_vk default flipped from VK_M (0x4D) to
+        // VK_OEM_PERIOD (0xBE) due to Microsoft 365 Copilot chord
+        // collision on Windows 11.
+        assert_eq!(cfg.main_vk, 0xBE);
     }
 
     #[test]
     fn defaults_with_uses_canonical_provenance_strings() {
         let cfg = MeetingRuntimeConfig::defaults_with(PathBuf::from("."));
         assert_eq!(cfg.formatter_version, "mc-v1");
-        assert_eq!(cfg.hotkey_label, "RCtrl+M");
+        // Provenance label tracks the new chord default. Existing
+        // sessions in older DBs still carry "RCtrl+M" — that's fine,
+        // it's historical provenance, immutable by Principle 1.
+        assert_eq!(cfg.hotkey_label, "RCtrl+.");
         assert!(cfg.whisper_model_id.contains("whisper"));
+    }
+
+    #[test]
+    fn format_hotkey_label_pretty_prints_common_chords() {
+        assert_eq!(format_hotkey_label(0xA3, 0xBE), "RCtrl+.");
+        assert_eq!(format_hotkey_label(0xA3, 0x4D), "RCtrl+M");
+        assert_eq!(format_hotkey_label(0xA5, 0x7C), "RAlt+F13");
+        assert_eq!(format_hotkey_label(0xA2, 0xBC), "LCtrl+,");
+    }
+
+    #[test]
+    fn format_hotkey_label_falls_back_to_hex_for_unknowns() {
+        // 0x99 isn't in the supported VK table — we still emit
+        // something useful for the log line rather than panicking.
+        let s = format_hotkey_label(0xA3, 0x99);
+        assert!(s.starts_with("RCtrl+"), "got: {s}");
+        assert!(s.contains("99") || s.contains("0x99"), "got: {s}");
+    }
+
+    #[test]
+    fn from_settings_returns_defaults_on_fresh_db() {
+        // No settings rows written yet ⇒ every read falls through to
+        // the documented default, and `from_settings` should match
+        // `defaults_with` exactly.
+        let db = crate::db::Database::open_in_memory().expect("open db");
+        let cfg = MeetingRuntimeConfig::from_settings(&db.conn, PathBuf::from("."));
+        let baseline = MeetingRuntimeConfig::defaults_with(PathBuf::from("."));
+        assert_eq!(cfg.modifier_vk, baseline.modifier_vk);
+        assert_eq!(cfg.main_vk, baseline.main_vk);
+        assert_eq!(cfg.hotkey_label, baseline.hotkey_label);
+    }
+
+    #[test]
+    fn from_settings_picks_up_user_customised_chord() {
+        let db = crate::db::Database::open_in_memory().expect("open db");
+        let s = Settings::new(&db.conn);
+        s.set(SettingKey::MeetingHotkeyModifier, &"VK_RMENU".to_string())
+            .unwrap();
+        s.set(SettingKey::MeetingHotkeyKey, &"VK_F13".to_string())
+            .unwrap();
+        let cfg = MeetingRuntimeConfig::from_settings(&db.conn, PathBuf::from("."));
+        assert_eq!(cfg.modifier_vk, 0xA5); // RAlt
+        assert_eq!(cfg.main_vk, 0x7C); // F13
+        assert_eq!(cfg.hotkey_label, "RAlt+F13");
+    }
+
+    #[test]
+    fn from_settings_falls_back_to_default_on_bad_vk_name() {
+        // Hand-edited DB rot — the parser fails, we fall back rather
+        // than refusing to boot the meeting subsystem.
+        let db = crate::db::Database::open_in_memory().expect("open db");
+        let s = Settings::new(&db.conn);
+        s.set(
+            SettingKey::MeetingHotkeyKey,
+            &"VK_NOT_A_REAL_KEY".to_string(),
+        )
+        .unwrap();
+        let cfg = MeetingRuntimeConfig::from_settings(&db.conn, PathBuf::from("."));
+        // Default main_vk still wins.
+        assert_eq!(cfg.main_vk, 0xBE);
+    }
+
+    #[test]
+    fn from_settings_clamps_max_duration_to_documented_range() {
+        let db = crate::db::Database::open_in_memory().expect("open db");
+        let s = Settings::new(&db.conn);
+        // Use set_raw so we bypass any client-side clamp and prove the
+        // server-side defence is in place.
+        s.set_raw(
+            SettingKey::MeetingMaxDurationSeconds,
+            &serde_json::json!(99_999_999_i64),
+        )
+        .unwrap();
+        let cfg = MeetingRuntimeConfig::from_settings(&db.conn, PathBuf::from("."));
+        assert_eq!(cfg.max_duration_seconds, 21_600);
+    }
+
+    #[test]
+    fn legacy_vk_m_chord_is_upgraded_once_on_first_load() {
+        // Simulate the pre-mb-fc1 state: the meeting_hotkey_key row
+        // holds the old default `"VK_M"`.
+        let db = crate::db::Database::open_in_memory().expect("open db");
+        let s = Settings::new(&db.conn);
+        s.set(SettingKey::MeetingHotkeyKey, &"VK_M".to_string())
+            .unwrap();
+
+        // First load: should upgrade to VK_OEM_PERIOD.
+        let cfg = MeetingRuntimeConfig::from_settings(&db.conn, PathBuf::from("."));
+        assert_eq!(cfg.main_vk, 0xBE);
+        let post: String = s.get(SettingKey::MeetingHotkeyKey).unwrap();
+        assert_eq!(post, "VK_OEM_PERIOD");
+    }
+
+    #[test]
+    fn legacy_chord_upgrade_is_idempotent_and_respects_user_re_pick() {
+        let db = crate::db::Database::open_in_memory().expect("open db");
+        let s = Settings::new(&db.conn);
+        s.set(SettingKey::MeetingHotkeyKey, &"VK_M".to_string())
+            .unwrap();
+
+        // First load triggers the migration.
+        let _ = MeetingRuntimeConfig::from_settings(&db.conn, PathBuf::from("."));
+
+        // User deliberately re-picks VK_M after the migration. The
+        // marker row is already present, so we leave their choice
+        // alone on the next load.
+        s.set(SettingKey::MeetingHotkeyKey, &"VK_M".to_string())
+            .unwrap();
+        let cfg = MeetingRuntimeConfig::from_settings(&db.conn, PathBuf::from("."));
+        assert_eq!(cfg.main_vk, 0x4D, "second load must respect user re-pick");
+        let post: String = s.get(SettingKey::MeetingHotkeyKey).unwrap();
+        assert_eq!(post, "VK_M");
+    }
+
+    #[test]
+    fn legacy_chord_upgrade_leaves_custom_user_keys_alone() {
+        let db = crate::db::Database::open_in_memory().expect("open db");
+        let s = Settings::new(&db.conn);
+        s.set(SettingKey::MeetingHotkeyKey, &"VK_F13".to_string())
+            .unwrap();
+
+        let cfg = MeetingRuntimeConfig::from_settings(&db.conn, PathBuf::from("."));
+        assert_eq!(cfg.main_vk, 0x7C);
+        let post: String = s.get(SettingKey::MeetingHotkeyKey).unwrap();
+        assert_eq!(post, "VK_F13");
+    }
+
+    #[test]
+    fn from_settings_maps_default_source_strings() {
+        let db = crate::db::Database::open_in_memory().expect("open db");
+        let s = Settings::new(&db.conn);
+        for (raw, expected) in [
+            ("mic", LastChosenSource::Mic),
+            ("system", LastChosenSource::System),
+            ("both", LastChosenSource::Both),
+        ] {
+            s.set(SettingKey::MeetingDefaultSource, &raw.to_string())
+                .unwrap();
+            let cfg = MeetingRuntimeConfig::from_settings(&db.conn, PathBuf::from("."));
+            assert_eq!(cfg.default_source, expected, "source={raw}");
+        }
     }
 
     // The full spawn-then-drop test requires `tauri::test::mock_app()`

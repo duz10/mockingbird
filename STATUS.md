@@ -21,12 +21,57 @@
 >   `docs/judges/phase-mc/`)**; **ADR 0032 (MC v1.1 polish — live VU
 >   meters + LLM-ephemeral notice + MaxDuration UI + 'basically'
 >   filler, Accepted 2026-05-23, mb-1ir + 4 children all closed,
->   NO new tag — `phase-mc-complete` remains the seal)**.
+>   NO new tag — `phase-mc-complete` remains the seal)**;
+>   **ADR 0033 (MC chord-collision + UI-wires hotfix — VK_M⇒
+>   VK_OEM_PERIOD default, settings actually read at boot, cpal
+>   source probe, overlay auto-show from main-window start +
+>   recording-mode × dismiss button, Accepted 2026-05-23, mb-x1x
+>   epic; mb-dub deferred as P3 follow-up; NO new tag —
+>   `phase-mc-complete` remains the seal)**.
 > **NEXT MACRO WORK:** `mb-xwi` – Phase 5/6/7 from PLAN §10 (Recording UX,
 >   History/Settings/About windows, polish + signing). Still ahead.
 > **NO STANDING P1 LATERALS.** (mb-2bi closed via ADR 0029 / Phase MC.)
-> **IN-FLIGHT THIS SESSION (2026-05-23):** **MC v1.1 polish epic
->   SEALED.** ADR 0032 chartered + Accepted in one iteration after
+> **IN-FLIGHT THIS SESSION (2026-05-23, second iteration):** **mb-x1x
+>   MC chord/UI hotfix SEALED via ADR 0033.** Post-deploy session
+>   surfaced 4 user-reported regressions not covered by Wave-6 judges
+>   (no judge exercises real cpal probes, real OS hotkey hooks, or
+>   post-start UI state transitions). Fixes (additive only,
+>   sealed-file list untouched): (1) `meetings/capture.rs::
+>   probe_sources` replaced Wave-3 stub with real cpal
+>   `default_input_device` + `default_output_device` checks,
+>   `#[cfg(target_os)]`-gated, no stream open during probe; (2)
+>   `ui/src/pages/Meetings.tsx` clears `startingOrStopping` on
+>   `meeting:state="started"` event (Stop button latch fix); (3)
+>   default chord flipped `VK_M`⇒`VK_OEM_PERIOD` to dodge Microsoft
+>   365 Copilot collision — new `meetings/vk_names.rs` (22 tests,
+>   forward + reverse + lossless round-trip), `lib.rs` boot now calls
+>   `MeetingRuntimeConfig::from_settings()` instead of `defaults_with`
+>   (Settings picker was previously a no-op), one-shot migration
+>   `upgrade_legacy_chord_default_once` auto-flips legacy `VK_M`
+>   rows on next launch via sentinel `_internal_mc_chord_copilot_
+>   hotfix_v1` setting, +11 runtime tests covering the matrix;
+>   `SettingsMeetingTab.tsx` picker extended with `VK_OEM_{PERIOD,
+>   COMMA,1,5}` + human labels + passthrough sentinel for hand-
+>   edited DBs; (4) `meetings/overlay.rs::force_show_for_recording`
+>   (no `meeting:overlay-open` event — avoids CHOOSE-mode flicker),
+>   called from `commands::meetings::meeting_start`; `MeetingOverlay
+>   .tsx` adds × dismiss button + `meetingOverlay.dismiss` i18n.
+>   **Cargo gate:** `fmt --check` clean (1 rustfmt nit auto-fixed),
+>   `clippy --release -- -D warnings` clean (1 `is_ok()` lint
+>   auto-fixed), `test --release --no-run` all binaries link clean.
+>   **UI gate:** `tsc --noEmit` clean, `npm test` 55/55 passing,
+>   `npm run build` (vite prod) clean. ESLint blocked pre-hotfix by
+>   `mb-yxh`, not in scope. **Judge invariants preserved by
+>   construction:** `git diff --name-only phase-mc-start..HEAD`
+>   over the seal-binding list (hotkey, dictation, injection,
+>   recording_window, cleanup provider/llm_cleaner/ollama,
+>   migrations 001–010) remains EMPTY. **bd:** `mb-x1x` open (will
+>   close on commit), `mb-dub` P3 deferred (tray menu deep-link).
+>   *Prior in-flight block from earlier this day (MC v1.1 polish /
+>   ADR 0032) preserved verbatim below.*
+>
+> **IN-FLIGHT (2026-05-23, archived — MC v1.1 polish / ADR 0032):**
+>   MC v1.1 polish epic SEALED. ADR 0032 chartered + Accepted in one iteration after
 >   post-seal audit surfaced 4 gaps. Files touched (additive only,
 >   no sealed-list overlap): NEW `src-tauri/src/meetings/levels.rs`
 >   (compute_dbfs + lock-free LevelsState, 6 tests); `meetings/
