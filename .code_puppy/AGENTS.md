@@ -324,14 +324,33 @@ do all of this BEFORE any other tool call:
 
 1. `cp_read_file STATUS.md` — full file, it's slim now (~150 lines). It tells
    you what's sealed, what's in-flight, and how to resume.
-2. If the kickoff prompt's task conflicts with STATUS (e.g. asks you to execute
-   bootstrap, or to re-do a sealed phase / lateral-epic ADR), STOP and surface
-   the conflict via `ask_user_question` before any further tool calls.
+2. **Triage the kickoff prompt against STATUS.** Three cases — pick one and act:
+
+   **(a) Stale wrapper around a clear actionable request** — the most common
+   case. The kickoff text references a sealed phase / ADR / bootstrap, but
+   the human's actual message ALSO contains a concrete bug report, feature
+   ask, or follow-up question (often at the bottom, after "prior context"
+   boilerplate, or in a screenshot/log paste). **Treat the stale framing as
+   accidental boilerplate / `/goal` template noise and answer the actual
+   request.** Do not stop-and-ask just to confirm the obvious. A one-liner
+   acknowledgement ("ignoring stale Phase X kickoff, answering the bug
+report") is enough.
+
+   **(b) Genuinely ambiguous intent** — the kickoff conflicts with sealed
+   state AND there's no clear actionable embedded request, OR the request
+   could plausibly mean "reopen the seal". STOP and surface via
+   `ask_user_question` before any further tool calls. This is the original
+   2026-05-17-incident guard rail.
+
+   **(c) Clean kickoff, no conflict** — proceed normally.
+
 3. Otherwise proceed with the normal iteration ritual above (read PRODUCT-STATE,
    LESSONS PINNED, this file, phase doc / ADR, `bd ready`, `git log`, etc.).
 
-This ritual exists because of the 2026-05-17 stale-bootstrap-prompt incident.
-See LESSONS PINNED entry **P4** and the dated 2026-05-17 LESSONS entry.
+This ritual exists because of two incidents: the 2026-05-17 stale-bootstrap
+incident (over-execution of sealed work) AND the 2026-05-23 over-correction
+(stopping to ask when the body of the message contained a clear bug report).
+See LESSONS PINNED entry **P4**.
 
 ## Issue Tracking
 

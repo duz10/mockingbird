@@ -66,19 +66,32 @@ NOT at `src-tauri/target/release/`. Tauri 2 builds into the workspace root.
 Run via `powershell -File scripts\run-mockingbird.ps1` — never
 `Start-Process` the exe directly (missing `ORT_DYLIB_PATH` + CUDA bin on PATH).
 
-### P4. Session-start ritual is mandatory — stale prompts are real
+### P4. Session-start ritual is mandatory — stale prompts are real, AND so is over-correction
 
-2026-05-17 incident: a stale bootstrap prompt was acted on for ~half a
-session before the conflict with sealed-phase state was noticed. Before
-any tool call, EVEN if the human pastes a custom kickoff:
+Two incidents shaped this rule:
 
-1. Read `STATUS.md` SESSION ANCHOR (the slim top block) first.
-2. If the kickoff conflicts with sealed-phase state, STOP and surface
-   via `ask_user_question` before further tool calls.
-3. Then proceed with the normal start-of-iteration list.
+- **2026-05-17** — a stale bootstrap prompt was acted on for ~half a session
+  before the conflict with sealed-phase state was noticed. Lesson: detect
+  the conflict.
+- **2026-05-23** — Bernard detected a stale Phase MC kickoff (correctly!)
+  but then stopped-and-asked instead of answering the clear bug report
+  embedded in the same message. Lesson: detection without nuance is its
+  own waste of an iteration.
 
-Sealed phases are listed in `STATUS.md`. Phase tags `phase-N-complete`
-are authoritative.
+Before any tool call, EVEN if the human pastes a custom kickoff:
+
+1. Read `STATUS.md` SESSION ANCHOR first.
+2. **Triage** — three cases:
+   - **(a) Stale wrapper, clear request inside** → ignore the wrapper,
+     answer the request. One-liner acknowledgement, then go. (This is
+     the common case when a `/goal` template auto-prepends old context.)
+   - **(b) Genuinely ambiguous** → STOP and surface via `ask_user_question`.
+   - **(c) Clean kickoff** → proceed.
+3. Then the normal start-of-iteration list.
+
+Sealed phases are in `STATUS.md`. Phase tags `phase-N-complete` are
+authoritative. Full rule text: `.code_puppy/AGENTS.md` § "Session-start
+ritual".
 
 ### P5. PLAN §10 phases seal via `phase-N-complete` git tag — lateral epics seal via ADR
 
@@ -116,6 +129,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-23 | `[meta / session-start]`         | detected stale Phase MC kickoff but then over-corrected — added (a/b/c) triage |
 | 2026-05-23 | `[mc-hotfix / mb-x1x]`           | post-deploy live-fire surfaced 4 gaps the Wave-6 judges couldn't catch   |
 | 2026-05-23 | `[mc-v1.1]`                      | post-seal audit found four polish gaps; lateral epic vehicle worked      |
 | 2026-05-22 | `[phase-mc-retrospective]`       | Phase MC retrospective                                                   |
@@ -151,6 +165,35 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-23 [meta / session-start] detected stale Phase MC kickoff but then over-corrected
+
+- **Context:** Dustin sent a short bug report about the meeting overlay
+  pill not syncing + Stop button not responding. The message *also*
+  contained, above the bug report, a giant "You are implementing Phase
+  MC — Waves 1→6…" kickoff paragraph (likely an accidental paste or a
+  `/goal` template that wasn't trimmed).
+- **Finding 1 — detection worked, response didn't.** AGENTS.md P4 + the
+  session-start ritual correctly fired "stop, sealed phase" because
+  `phase-mc-complete` shipped six days earlier. But Bernard then
+  authored a long ask-the-human question tree instead of just
+  recognising that the bug report was the obvious actual request and
+  the Phase MC framing was paste noise. Net: one wasted iteration with
+  zero code changed.
+- **Finding 2 — "STOP and ask" is too coarse a rule.** It conflates
+  "genuinely ambiguous user intent" with "obviously stale wrapper around
+  a clear request." The first one needs a question; the second one
+  needs a one-line ack and then execution.
+- **Action:** Updated `.code_puppy/AGENTS.md` § Session-start ritual
+  rule #2 to a three-branch triage: (a) stale wrapper + clear ask →
+  answer the ask; (b) genuinely ambiguous → ask_user_question; (c)
+  clean → proceed. P4 in this file mirrors the change.
+- **Generalisable shape:** when two rules pull in opposite directions
+  ("don't re-execute sealed work" vs. "don't waste the human's time
+  with obvious questions"), the resolution is almost always a
+  triage-before-action step, not picking one rule to dominate.
 
 ---
 
