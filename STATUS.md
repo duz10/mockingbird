@@ -10,7 +10,7 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-05-23 (checkpoint after MC chord/UI hotfix).
+**Last consolidated:** 2026-05-23 (checkpoint after MC overlay event-delivery hotfix — ADR 0034 / mb-z5y).
 
 ## ✅ Sealed (do not re-execute)
 
@@ -34,14 +34,19 @@
 - ADR 0025 — Optional Unsplash ambient background (opt-in BYO-key)
 - ADR 0032 — MC v1.1 polish (VU meters, LLM-ephemeral notice, MaxDuration UI)
 - ADR 0033 — MC chord-collision hotfix (VK_M → VK_OEM_PERIOD + settings actually-read-at-boot + overlay UI wires)
+- ADR 0034 — MC overlay event-delivery hotfix (show-before-emit + `emit_to` re-broadcast + defensive latch clear + emit-state observability; fixes mb-z5y)
 
 If a kickoff prompt asks you to re-execute any of the above, **STOP** and surface
 the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently sealed".
 
 ## 🟢 Currently active
 
-**No in-flight epic.** Last commit (`a4e0ec3`) shipped the MC hotfix and closed
-`mb-x1x`. Tree is clean, release binary built (47.7 MB, 4m 49s), all gates green.
+**No in-flight epic.** Last commits: `a4e0ec3` (MC hotfix, closed `mb-x1x`) and
+this iteration's mb-z5y / ADR 0034 hotfix (overlay event delivery). Tree clean,
+cargo gate green (`fmt --check`, `clippy --release -D warnings`, `test --no-run`),
+vitest 55/55 pass. Live-exec verification of the fix is on Dustin (manual: launch
+binary, click Start in main meetings page, confirm overlay flips to RECORDING
+and Stop button enables).
 
 **Standing P1:** `mb-ez9` — empirical mode-prompt iteration across casual/normal/formal
 (in_progress; long-running quality improvement loop, picks up whenever Dustin has

@@ -362,14 +362,30 @@ impl MeetingRuntimeShared {
         uuid: Option<&str>,
         source: Option<MeetingSource>,
     ) {
-        let _ = self.app_handle.emit(
-            "meeting:state",
-            serde_json::json!({
-                "state": state,
-                "uuid": uuid,
-                "source": source.map(|s| s.as_db_str()),
-            }),
-        );
+        // mb-z5y: emit failures used to be swallowed by `let _ =` —
+        // that's how the cross-window event-delivery bug went
+        // un-diagnosed until live-fire. Trace both outcomes so a
+        // future regression here shows up in logs immediately
+        // (cf. dictation `recording_window.rs::emit_state`, which
+        // already logs on Err).
+        let payload = serde_json::json!({
+            "state": state,
+            "uuid": uuid,
+            "source": source.map(|s| s.as_db_str()),
+        });
+        match self.app_handle.emit("meeting:state", &payload) {
+            Ok(()) => tracing::debug!(
+                state = state,
+                uuid = uuid.unwrap_or(""),
+                "meeting:state broadcast"
+            ),
+            Err(e) => tracing::warn!(
+                error = ?e,
+                state = state,
+                uuid = uuid.unwrap_or(""),
+                "meeting:state emit failed"
+            ),
+        }
     }
 }
 

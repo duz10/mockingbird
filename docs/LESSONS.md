@@ -129,6 +129,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-23 | `[mc-hotfix / mb-z5y / ADR 0034]`| overlay stuck in CHOOSE — show-before-emit + emit_to + defensive clear   |
 | 2026-05-23 | `[meta / session-start]`         | detected stale Phase MC kickoff but then over-corrected — added (a/b/c) triage |
 | 2026-05-23 | `[mc-hotfix / mb-x1x]`           | post-deploy live-fire surfaced 4 gaps the Wave-6 judges couldn't catch   |
 | 2026-05-23 | `[mc-v1.1]`                      | post-seal audit found four polish gaps; lateral epic vehicle worked      |
@@ -165,6 +166,73 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-23 [mc-hotfix / mb-z5y / ADR 0034] overlay stuck in CHOOSE + Stop button frozen because broadcast `emit` raced the show() on the hidden meeting_overlay webview
+
+- **Context:** Post-`a4e0ec3` (ADR 0033) live-fire: user clicks **Start
+  recording** in main Meetings page → timer ticks (so `recordingUuid`
+  was set by the optimistic post-IPC update) BUT the overlay window
+  appears and stays in CHOOSE mode forever, the main-window **Stop**
+  button stays disabled, the overlay **×** button is unresponsive,
+  and the user has to taskkill. All four symptoms collapse to one
+  root cause: the `meeting:state="started"` event emitted by
+  `meetings::lifecycle::emit_state` is never observed by either
+  React listener.
+- **Finding:** In `commands::meetings::meeting_start` the lifecycle
+  path called `rt.start_meeting(src)` (which fires the broadcast
+  `app_handle.emit("meeting:state", ...)`) **before**
+  `force_show_for_recording`. The overlay window was declared
+  `visible: false` in `tauri.conf.json` and lives that way at app
+  boot. In Tauri 2.1.x, a broadcast `Emitter::emit` against a webview
+  that has been shown-then-hidden delivers normally — but against a
+  webview that has been hidden since boot, the event appears to be
+  dropped (listener registered, JS ran at boot, but no callback
+  fires). Show-then-emit lands; emit-then-show races. The collateral
+  damage on the main window's listener (which IS visible) suggests
+  Tauri's `emit` may serialize all-webview delivery and short-circuit
+  the whole broadcast when one target is in this state — couldn't
+  fully isolate from outside the framework.
+- **Killer detail:** `emit_state` was written
+  `let _ = self.app_handle.emit(...)` — silently discarding the
+  `Result`. There is no production log line confirming whether the
+  emit succeeded. The dictation side's equivalent
+  (`recording_window::emit_state`) does `if let Err(e) = ... warn!`,
+  but Phase MC was written first and that pattern hadn't been
+  observed-failed yet.
+- **Action — fix (ADR 0034):** Four layers, any one of which alone
+  would address the bug; together they harden:
+  1. **`meeting_start` IPC**: swap order — `force_show_for_recording`
+     BEFORE `rt.start_meeting()`. On `start_meeting` error, hide the
+     overlay so we don't strand a blank pill.
+  2. **Belt-and-suspenders `emit_to`**: after `start_meeting`
+     returns Ok, also `app_handle.emit_to(MEETING_OVERLAY_LABEL,
+     "meeting:state", payload)`. Listener is idempotent.
+  3. **Frontend defensive clear**: `Meetings.tsx::handleStart` now
+     clears `startingOrStopping` on IPC success, symmetric to the
+     existing optimistic `setRecordingUuid`. Stop button enables
+     immediately on IPC return regardless of event delivery.
+  4. **Observability**: `emit_state` logs `tracing::debug!` on Ok
+     and `tracing::warn!` on Err — matches dictation pattern.
+- **Generalization:** **In Tauri 2.x, the contract for broadcast
+  `Emitter::emit` against a hidden-since-boot webview is unreliable.**
+  When you must signal a webview around the moment of showing it,
+  either (a) show first and emit after, or (b) use targeted
+  `emit_to(label, …)` which appears to work in either ordering, or
+  (c) both. The cost is microseconds; the failure mode is total UI
+  freeze with no log line, so always (c).
+- **Meta:** Event delivery should be observable by default. The
+  Phase MC `let _ = emit(...)` pattern saved 5 LoC and cost ~3
+  iterations of "why isn't the listener firing?" debugging. The
+  AGENTS.md "7. No shortcuts" principle in action — `let _ =` on
+  an `emit` is the moral equivalent of `.unwrap()` in error code:
+  it's a shortcut that defers the bug to live-fire.
+- **Live-exec verification:** Cargo test runner on this box still
+  hits LESSONS-PINNED P2 (`STATUS_ENTRYPOINT_NOT_FOUND`), so the
+  fix is gated on `cargo test --no-run` + vitest 55/55 +
+  Dustin's manual repro of the original `mb-z5y` symptom on the
+  next rebuild.
 
 ---
 

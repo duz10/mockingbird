@@ -275,6 +275,15 @@ export function MeetingsPage() {
       const { uuid } = await meetings.start(source);
       setRecordingUuid(uuid);
       recordStartTimeRef.current = Date.now();
+      // mb-z5y defensive clear: we already optimistically set
+      // `recordingUuid` above (so the timer shows immediately).
+      // For consistency, also optimistically clear the
+      // starting/stopping latch here — otherwise the Stop button
+      // stays disabled until the `meeting:state="started"` event
+      // arrives, and the user is stranded if that event is ever
+      // lost in transit (cf. mb-fc1 / mb-z5y). The event listener
+      // also clears this latch, which makes both paths idempotent.
+      setStartingOrStopping(null);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("meeting_start failed", err);

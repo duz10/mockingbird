@@ -168,20 +168,58 @@ pub fn meeting_start(
     rt: State<'_, MeetingRuntimeShared>,
     source: String,
 ) -> Result<MeetingStartResult, String> {
+    use tauri::Emitter;
+
     let src = MeetingSource::from_db_str(&source)
         .ok_or_else(|| format!("unknown meeting source: {source:?} (want mic|system|both)"))?;
-    let uuid = rt.start_meeting(src).map_err(into_err)?;
-    // mb-fc1 hotfix: the main-window "Start Recording" button is a
-    // direct-start path — the chord path shows the overlay before
-    // start (CHOOSE → start), but this path skips CHOOSE entirely.
-    // Without this nudge the overlay would stay hidden and the user
-    // would have no visual feedback that recording was running.
+
+    // mb-z5y ordering fix: show the overlay window BEFORE the
+    // lifecycle path emits `meeting:state="started"`. The original
+    // ordering (start → show) emitted while the overlay was still
+    // `visible: false`, which in Tauri 2.1.x races with the show()
+    // such that the overlay's listener (mounted at app boot but
+    // whose webview was effectively dormant until show) can miss
+    // the event entirely. Showing first guarantees the webview is
+    // in the event-receive path when emit fires.
     //
     // `force_show_for_recording` deliberately does NOT emit
     // `meeting:overlay-open` (the CHOOSE-mode trigger) — the
     // recording-mode UI is driven by the `meeting:state="started"`
-    // event the lifecycle path already emits.
-    let _ = crate::meetings::overlay::force_show_for_recording(&rt.app_handle);
+    // event below.
+    let overlay_shown = crate::meetings::overlay::force_show_for_recording(&rt.app_handle);
+
+    let uuid = match rt.start_meeting(src) {
+        Ok(u) => u,
+        Err(e) => {
+            // Start failed — don't strand a blank overlay on screen.
+            if overlay_shown {
+                crate::meetings::overlay::hide_overlay(&rt.app_handle);
+            }
+            return Err(into_err(e));
+        }
+    };
+
+    // Belt-and-suspenders: re-emit `meeting:state="started"` to the
+    // overlay window specifically via `emit_to`. The broadcast
+    // `emit` inside `start_meeting` should already have reached the
+    // overlay (now that it's shown), but a window-targeted re-emit
+    // is the cheapest possible safety net and the listener is
+    // idempotent (setMode("recording") twice is a no-op).
+    if overlay_shown {
+        let payload = serde_json::json!({
+            "state": "started",
+            "uuid": &uuid,
+            "source": src.as_db_str(),
+        });
+        if let Err(e) = rt.app_handle.emit_to(
+            crate::meetings::overlay::MEETING_OVERLAY_LABEL,
+            "meeting:state",
+            payload,
+        ) {
+            tracing::warn!(error = ?e, "meeting:state emit_to overlay failed");
+        }
+    }
+
     Ok(MeetingStartResult { uuid })
 }
 
