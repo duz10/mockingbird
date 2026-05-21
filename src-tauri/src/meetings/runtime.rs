@@ -126,6 +126,12 @@ pub(crate) struct InFlightMeeting {
     pub capture: TwinStreamCapture,
     pub long_form_thread: JoinHandle<AppResult<LongFormOutput>>,
     pub chunk_dir: PathBuf,
+    /// ADR 0032 / mb-nig: tick-emitter thread that publishes
+    /// `meeting:tick { elapsedMs, micDb, sysDb }` to the overlay
+    /// every ~250ms. Cleared by `finalize_meeting` (sets `running`
+    /// to false, then `join()`s).
+    pub tick_running: Arc<std::sync::atomic::AtomicBool>,
+    pub tick_thread: Option<JoinHandle<()>>,
 }
 
 /// Long-lived owner of the meeting-capture subsystem.

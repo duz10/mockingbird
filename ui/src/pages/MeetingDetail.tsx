@@ -225,6 +225,67 @@ function TranscriptTabButton({
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Ephemeral-output notice (ADR 0032 / mb-rm7)                         */
+/* ------------------------------------------------------------------ */
+
+/** Persisted across sessions. Once dismissed the notice never renders
+ *  again for this user. Keyed under the meetings namespace so future
+ *  per-user UX flags can share the prefix without colliding. */
+const LLM_EPHEMERAL_ACK_KEY = "mockingbird.meetings.llmEphemeralAck";
+
+/** Read+write hook for the one-time "LLM output isn't saved" notice.
+ *  Returns `[acknowledged, acknowledge]`. `acknowledged === true`
+ *  means the user has clicked "Got it" before — never show the notice
+ *  again. SSR/JSDOM-safe: falls back to `acknowledged = true` if
+ *  `localStorage` is unavailable so we never block-render in tests. */
+function useEphemeralAck(): [boolean, () => void] {
+  const initial = readEphemeralAck();
+  const [ack, setAck] = useState(initial);
+  const acknowledge = () => {
+    try {
+      window.localStorage.setItem(LLM_EPHEMERAL_ACK_KEY, "1");
+    } catch {
+      // localStorage disabled / quota — best-effort.
+    }
+    setAck(true);
+  };
+  return [ack, acknowledge];
+}
+
+function readEphemeralAck(): boolean {
+  try {
+    return window.localStorage.getItem(LLM_EPHEMERAL_ACK_KEY) === "1";
+  } catch {
+    return true; // pretend ack'd; never block the panel in odd envs
+  }
+}
+
+/** Exported for vitest. Resets the localStorage flag so the next
+ *  mount renders the notice again. Not surfaced in any UI. */
+export function __resetEphemeralAckForTest(): void {
+  try {
+    window.localStorage.removeItem(LLM_EPHEMERAL_ACK_KEY);
+  } catch {
+    /* noop */
+  }
+}
+
+function LlmEphemeralNotice({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <aside className={styles.llmEphemeralNotice} role="note">
+      <span>{t("meetings.llm.ephemeralNotice.body")}</span>
+      <button
+        type="button"
+        className={styles.llmEphemeralDismiss}
+        onClick={onDismiss}
+      >
+        {t("meetings.llm.ephemeralNotice.dismiss")}
+      </button>
+    </aside>
+  );
+}
+
 function LlmPassPanel({
   state,
   onChange,
@@ -234,6 +295,7 @@ function LlmPassPanel({
   onChange: (patch: Partial<LlmPassUiState>) => void;
   onRun: () => void;
 }) {
+  const [ack, acknowledge] = useEphemeralAck();
   return (
     <div className={styles.llmPanel} aria-label="LLM pass">
       <div className={styles.llmRow}>
@@ -274,6 +336,10 @@ function LlmPassPanel({
           onChange={(e) => onChange({ customBody: e.target.value })}
           aria-label="Custom prompt body"
         />
+      ) : null}
+
+      {state.result && !ack ? (
+        <LlmEphemeralNotice onDismiss={acknowledge} />
       ) : null}
 
       {state.result ? (

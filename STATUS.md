@@ -18,11 +18,50 @@
 >   mb-biy closed); **Phase MC (Meeting Capture, sealed 2026-05-22
 >   at tag `phase-mc-complete`; ADRs 0026–0031 all Accepted; mb-pdv
 >   epic + standing P1 mb-2bi both closed; 5 judges in
->   `docs/judges/phase-mc/`)**.
+>   `docs/judges/phase-mc/`)**; **ADR 0032 (MC v1.1 polish — live VU
+>   meters + LLM-ephemeral notice + MaxDuration UI + 'basically'
+>   filler, Accepted 2026-05-23, mb-1ir + 4 children all closed,
+>   NO new tag — `phase-mc-complete` remains the seal)**.
 > **NEXT MACRO WORK:** `mb-xwi` – Phase 5/6/7 from PLAN §10 (Recording UX,
 >   History/Settings/About windows, polish + signing). Still ahead.
 > **NO STANDING P1 LATERALS.** (mb-2bi closed via ADR 0029 / Phase MC.)
-> **IN-FLIGHT THIS SESSION (2026-05-20):** **Phase MC Wave 3 SEALED in
+> **IN-FLIGHT THIS SESSION (2026-05-23):** **MC v1.1 polish epic
+>   SEALED.** ADR 0032 chartered + Accepted in one iteration after
+>   post-seal audit surfaced 4 gaps. Files touched (additive only,
+>   no sealed-list overlap): NEW `src-tauri/src/meetings/levels.rs`
+>   (compute_dbfs + lock-free LevelsState, 6 tests); `meetings/
+>   capture.rs` (TwinStreamCapture gains levels handle + accessor,
+>   owner thread updates after each drain, +1 test); `meetings/
+>   lifecycle.rs` (250ms tick-emitter thread per meeting, joined in
+>   finalize_meeting; +2 payload-shape tests); `meetings/runtime.rs`
+>   (InFlightMeeting carries the tick handle + running flag);
+>   `meetings/filler_words.rs` (added "basically" + 1 test);
+>   `meeting_overlay/MeetingOverlay.tsx` + .module.css (VuBars subc
+>   + dbfsToFill helper, +5 vitest); `pages/MeetingDetail.tsx`
+>   (LlmEphemeralNotice with localStorage `mockingbird.meetings.
+>   llmEphemeralAck` dismiss); `pages/SettingsMeetingTab.tsx`
+>   (MeetingMaxDurationSeconds row, server clamp mirrored via
+>   clampMaxDuration); `lib/meetings.ts` (clampMaxDuration +
+>   MIN/MAX consts, +5 vitest); `lib/types.ts` (MeetingTickEvent
+>   interface); `i18n/en.json` (5 new strings). **Cargo gate:**
+>   `check --all-targets` clean (26.93s), `clippy --release
+>   --all-targets -- -D warnings` clean (10.46s warm), `fmt --check`
+>   clean, `test --release --no-run` all 12 binaries link clean
+>   (5m34s). **UI gate:** `tsc --noEmit` clean (4.82s), `vitest run`
+>   5 files / 55 tests passing (+1 file, +10 tests vs Wave-5 baseline
+>   of 4/45). **Judge invariants preserved by construction:**
+>   `git diff --name-only phase-mc-start..HEAD` over the seal-binding
+>   list (hotkey, dictation, injection, recording_window, cleanup
+>   provider/llm_cleaner/ollama, migrations 001–010) is EMPTY;
+>   `lifecycle.rs` contains zero `OllamaProvider`/`LlmCleaner`
+>   constructions (only the existing module-doc forbid-block).
+>   All four child beads closed: mb-nig, mb-rm7, mb-mom, mb-tn5;
+>   epic mb-1ir closed. **No git tag created** — phase tags reserved
+>   for PLAN §10 boundaries (ADR 0023/0025/0032 precedent).
+>   *Prior in-flight block (2026-05-20, Wave 3 seal) preserved
+>   verbatim below for historical context.*
+
+> **IN-FLIGHT (2026-05-20, archived):** **Phase MC Wave 3 SEALED in
 >   commit `21f40d9`** (Wave 4 brief authored). All 6 Wave-3 tasks
 >   landed across three commits: `<earlier W3>` (loopback + capture),
 >   `73e0fa4` (long-form stitch driver + 23 tests), `21f40d9` (meetings

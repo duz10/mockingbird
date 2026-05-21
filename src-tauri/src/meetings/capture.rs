@@ -38,12 +38,14 @@
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::audio::AudioCapture;
 use crate::error::{AppError, AppResult};
 use crate::meetings::chunker::{ChunkWritten, ChunkerConfig, MeetingChunker};
+use crate::meetings::levels::LevelsState;
 
 // ---------------------------------------------------------------------
 // MeetingSource (carry-forward from Wave 1)
@@ -184,6 +186,10 @@ pub struct TwinStreamCapture {
     /// Tracks whether `stop()` has already executed; second call is
     /// a no-op. Also short-circuits `Drop`.
     stopped: bool,
+    /// Shared per-channel dBFS levels updated by the owner threads
+    /// after every drain. Read by the `lifecycle.rs` tick-emitter
+    /// thread every 250ms (ADR 0032 / mb-nig). Lock-free.
+    levels: Arc<LevelsState>,
 }
 
 impl TwinStreamCapture {
@@ -225,6 +231,7 @@ impl TwinStreamCapture {
             ));
         }
         let (chunk_tx, chunk_rx) = mpsc::channel::<ChannelChunk>();
+        let levels = LevelsState::new();
 
         let (mic_thread, mic_stop_tx) = spawn_channel_thread(
             Channel::Mic,
@@ -233,6 +240,7 @@ impl TwinStreamCapture {
             &chunk_dir,
             &config,
             &chunk_tx,
+            &levels,
         )?;
         let (sys_thread, sys_stop_tx) = spawn_channel_thread(
             Channel::Sys,
@@ -241,6 +249,7 @@ impl TwinStreamCapture {
             &chunk_dir,
             &config,
             &chunk_tx,
+            &levels,
         )?;
         // The originating chunk_tx is dropped here; the clones inside
         // the threads keep the channel alive until both threads exit.
@@ -253,7 +262,21 @@ impl TwinStreamCapture {
             mic_stop_tx,
             sys_stop_tx,
             stopped: false,
+            levels,
         })
+    }
+
+    /// Borrow the shared [`LevelsState`] so a separate thread (the
+    /// `lifecycle.rs` tick emitter) can read levels without holding
+    /// any reference into this struct. ADR 0032 / mb-nig.
+    pub fn levels_handle(&self) -> Arc<LevelsState> {
+        Arc::clone(&self.levels)
+    }
+
+    /// Snapshot the current per-channel dBFS levels. Inactive
+    /// channels report [`crate::meetings::levels::DBFS_NO_DATA`].
+    pub fn current_levels(&self) -> (f32, f32) {
+        self.levels.snapshot()
     }
 
     /// Non-blocking pull of any chunks that rolled since the last call.
@@ -364,6 +387,7 @@ fn spawn_channel_thread(
     chunk_dir: &std::path::Path,
     config: &ChunkerConfig,
     chunk_tx: &Sender<ChannelChunk>,
+    levels: &Arc<LevelsState>,
 ) -> AppResult<(Option<JoinHandle<AppResult<()>>>, Option<Sender<()>>)> {
     let Some(builder) = builder else {
         return Ok((None, None));
@@ -376,10 +400,11 @@ fn spawn_channel_thread(
     );
     let (stop_tx, stop_rx) = mpsc::channel::<()>();
     let tx = chunk_tx.clone();
+    let levels = Arc::clone(levels);
     let thread_name = format!("twin-stream-{}", channel.tag());
     let handle = std::thread::Builder::new()
         .name(thread_name)
-        .spawn(move || owner_thread_loop(channel, builder, chunker, stop_rx, tx))
+        .spawn(move || owner_thread_loop(channel, builder, chunker, stop_rx, tx, levels))
         .map_err(|e| AppError::MeetingCapture(format!("spawn {} thread: {e}", channel.tag())))?;
     Ok((Some(handle), Some(stop_tx)))
 }
@@ -393,6 +418,7 @@ fn owner_thread_loop(
     mut chunker: MeetingChunker,
     stop_rx: Receiver<()>,
     chunk_tx: Sender<ChannelChunk>,
+    levels: Arc<LevelsState>,
 ) -> AppResult<()> {
     let mut capture = builder()?;
     capture.start()?;
@@ -409,6 +435,10 @@ fn owner_thread_loop(
                 buf.clear();
                 let n = capture.drain(&mut buf)?;
                 if n > 0 {
+                    // ADR 0032 / mb-nig: update the per-channel dBFS
+                    // for the live VU display. Cheap O(n) scan over
+                    // the same buffer we already have hot in cache.
+                    levels.update(channel, &buf);
                     for cw in chunker.feed(&buf)? {
                         if chunk_tx.send(ChannelChunk { channel, chunk: cw }).is_err() {
                             // Consumer hung up. Stop gracefully.
@@ -425,6 +455,7 @@ fn owner_thread_loop(
     buf.clear();
     let n = capture.drain(&mut buf)?;
     if n > 0 {
+        levels.update(channel, &buf);
         for cw in chunker.feed(&buf)? {
             // Ignore send errors here; we're shutting down.
             let _ = chunk_tx.send(ChannelChunk { channel, chunk: cw });

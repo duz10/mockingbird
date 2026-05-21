@@ -23,10 +23,14 @@
 //! for "Export with LLM pass". The DB never sees the LLM output.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tauri::Emitter;
+
+use crate::meetings::levels::{LevelsState, DBFS_NO_DATA};
 
 use crate::error::{AppError, AppResult};
 use crate::meetings::capture::{MeetingSource, TwinStreamCapture};
@@ -98,6 +102,19 @@ impl MeetingRuntimeShared {
             })
             .map_err(|e| AppError::MeetingCapture(format!("spawn long-form thread: {e}")))?;
 
+        // ADR 0032 / mb-nig: per-meeting tick thread. Reads
+        // capture-side dBFS levels every 250ms and emits
+        // `meeting:tick` to the overlay window. Pure I/O — no LLM,
+        // no critical-path mutation.
+        let tick_running = Arc::new(AtomicBool::new(true));
+        let tick_thread = spawn_tick_emitter(
+            self.app_handle.clone(),
+            uuid.clone(),
+            started_at_instant,
+            capture.levels_handle(),
+            Arc::clone(&tick_running),
+        );
+
         let in_flight = InFlightMeeting {
             uuid: uuid.clone(),
             started_at_iso,
@@ -106,6 +123,8 @@ impl MeetingRuntimeShared {
             capture,
             long_form_thread,
             chunk_dir,
+            tick_running,
+            tick_thread: Some(tick_thread),
         };
         *guard = Some(in_flight);
         drop(guard);
@@ -189,7 +208,20 @@ impl MeetingRuntimeShared {
             mut capture,
             long_form_thread,
             chunk_dir,
+            tick_running,
+            mut tick_thread,
         } = in_flight;
+
+        // 0. Stop the tick emitter FIRST so the overlay stops
+        //    receiving live levels before we tear down capture.
+        tick_running.store(false, Ordering::Relaxed);
+        if let Some(h) = tick_thread.take() {
+            // Tick thread sleeps in 250ms increments; join is bounded.
+            if let Err(e) = h.join() {
+                tracing::warn!(target: "meetings", error = ?e, "tick thread join failed");
+            }
+        }
+
         if let Err(e) = capture.stop() {
             tracing::warn!(target: "meetings", error = %e, "capture.stop() reported errors");
         }
@@ -394,9 +426,92 @@ pub(crate) fn uuid_v4_simple() -> String {
     format!("{hi:016x}{lo:016x}")
 }
 
+// --------------------------------------------------------------------
+// Tick emitter (ADR 0032 / mb-nig)
+// --------------------------------------------------------------------
+
+/// Cadence for the `meeting:tick` event. 250ms is the sweet spot:
+/// fast enough for a VU bar to feel responsive (4 Hz update rate is
+/// well above visual fusion), slow enough that the per-tick Tauri
+/// IPC roundtrip is negligible (~0.1% CPU at idle).
+const TICK_INTERVAL: Duration = Duration::from_millis(250);
+
+/// Build the `meeting:tick` JSON payload. Pure for testability —
+/// the live emitter wraps this and pushes through `AppHandle::emit`.
+pub(crate) fn build_tick_payload(
+    uuid: &str,
+    elapsed_ms: u128,
+    levels: (f32, f32),
+) -> serde_json::Value {
+    let (mic_db, sys_db) = levels;
+    serde_json::json!({
+        "uuid": uuid,
+        "elapsedMs": elapsed_ms as u64,
+        "micDb": mic_db,
+        "sysDb": sys_db,
+    })
+}
+
+/// Spawn the per-meeting tick thread. The thread loops on
+/// `running.load(Relaxed)`, sleeping [`TICK_INTERVAL`] between
+/// emissions. `finalize_meeting` clears `running` and joins the
+/// handle (the join takes ≤ one tick interval).
+fn spawn_tick_emitter(
+    app_handle: tauri::AppHandle,
+    uuid: String,
+    started_at: Instant,
+    levels: Arc<LevelsState>,
+    running: Arc<AtomicBool>,
+) -> std::thread::JoinHandle<()> {
+    let thread_name = format!("mockingbird-meeting-tick-{uuid}");
+    std::thread::Builder::new()
+        .name(thread_name)
+        .spawn(move || {
+            // Emit a first tick immediately so the overlay shows
+            // a baseline state without waiting 250ms.
+            let payload = build_tick_payload(&uuid, 0, (DBFS_NO_DATA, DBFS_NO_DATA));
+            let _ = app_handle.emit("meeting:tick", payload);
+
+            while running.load(Ordering::Relaxed) {
+                std::thread::sleep(TICK_INTERVAL);
+                if !running.load(Ordering::Relaxed) {
+                    break;
+                }
+                let elapsed_ms = started_at.elapsed().as_millis();
+                let snap = levels.snapshot();
+                let payload = build_tick_payload(&uuid, elapsed_ms, snap);
+                // Best-effort emit — the overlay may have closed.
+                let _ = app_handle.emit("meeting:tick", payload);
+            }
+        })
+        .expect("spawn meeting tick thread")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_tick_payload_shape() {
+        // ADR 0032 / mb-nig: pin the JSON shape so the UI's typed
+        // MeetingTickEvent stays in sync with the Rust emitter.
+        let v = build_tick_payload("abc123", 1500, (-6.0, -100.0));
+        assert_eq!(v["uuid"], "abc123");
+        assert_eq!(v["elapsedMs"], 1500u64);
+        assert!((v["micDb"].as_f64().unwrap() - (-6.0)).abs() < 1e-3);
+        assert!((v["sysDb"].as_f64().unwrap() - (-100.0)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn build_tick_payload_initial_sentinel() {
+        // A fresh meeting that hasn't drained yet should serialize
+        // the no-data sentinel (0.0) so the UI can render flat bars
+        // (vs. a fully-dim "silence" bar).
+        let v = build_tick_payload("u", 0, (DBFS_NO_DATA, DBFS_NO_DATA));
+        assert_eq!(v["elapsedMs"], 0u64);
+        assert_eq!(v["micDb"].as_f64().unwrap(), 0.0);
+        assert_eq!(v["sysDb"].as_f64().unwrap(), 0.0);
+    }
 
     #[test]
     fn uuid_v4_simple_unique_and_hex() {

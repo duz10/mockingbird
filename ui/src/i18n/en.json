@@ -113,6 +113,8 @@
   "settings.meeting.fillerStrip": "Strip filler words (um, uh, like\u2026)",
   "settings.meeting.fillerStrip.on": "On",
   "settings.meeting.fillerStrip.off": "Off",
+  "settings.meeting.maxDuration": "Maximum meeting length",
+  "settings.meeting.maxDuration.unit": "seconds (60\u201321600)",
   "settings.meeting.paragraphGap": "Paragraph break gap",
   "settings.meeting.speakerLabelMic": "Mic speaker label",
   "settings.meeting.speakerLabelSys": "System speaker label",
@@ -264,6 +266,8 @@
   "meetings.llm.latency": "{ms} ms",
   "meetings.llm.includeInExport": "Include in export / copy",
   "meetings.llm.invariant": "LLM-pass output is held in memory only — it never touches the canonical transcript.",
+  "meetings.llm.ephemeralNotice.body": "This output isn\u2019t saved \u2014 export it now (Save As\u2026 or Copy) if you want to keep it.",
+  "meetings.llm.ephemeralNotice.dismiss": "Got it",
 
   "meetingOverlay.title": "Start a meeting",
   "meetingOverlay.subtitle": "Push to start. Push to stop. Stays on this machine.",

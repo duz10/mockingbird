@@ -19,7 +19,12 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Card, Spinner } from "../components/primitives";
 import { t } from "../i18n";
-import { meetings } from "../lib/meetings";
+import {
+  clampMaxDuration,
+  meetings,
+  MEETING_MAX_DURATION_MAX_SEC,
+  MEETING_MAX_DURATION_MIN_SEC,
+} from "../lib/meetings";
 import { api } from "../lib/tauri";
 import type { MeetingSettingsSnapshot } from "../lib/types";
 
@@ -202,6 +207,30 @@ export function SettingsMeetingTab() {
                 : t("settings.meeting.fillerStrip.off")}
             </span>
           </label>
+        </Row>
+        <Row label={t("settings.meeting.maxDuration")}>
+          {/* ADR 0032 / mb-mom: surface MeetingMaxDurationSeconds so
+              users can shorten the cap (self-imposed discipline) or
+              extend it for an all-hands. Server clamp is the source
+              of truth; clampMaxDuration mirrors it for UX. */}
+          <div className={styles.sliderRow}>
+            <input
+              className={styles.input}
+              type="number"
+              min={MEETING_MAX_DURATION_MIN_SEC}
+              max={MEETING_MAX_DURATION_MAX_SEC}
+              step={60}
+              value={snap.maxDurationSeconds}
+              onChange={(e) =>
+                void patch(
+                  "maxDurationSeconds",
+                  clampMaxDuration(parseInt(e.target.value, 10)),
+                  "meeting_max_duration_seconds",
+                )
+              }
+            />
+            <span>{t("settings.meeting.maxDuration.unit")}</span>
+          </div>
         </Row>
         <Row label={t("settings.meeting.paragraphGap")}>
           <div className={styles.sliderRow}>

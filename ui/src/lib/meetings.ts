@@ -319,3 +319,26 @@ export const MEETING_FIXTURES: {
   ],
   searchHits: [],
 };
+
+/* ------------------------------------------------------------------ */
+/* Settings helpers (ADR 0032 / mb-mom)                                */
+/* ------------------------------------------------------------------ */
+
+/** Server-enforced clamp for `MeetingMaxDurationSeconds`. Mirrors
+ *  the Rust-side range in `settings/model.rs`. Exported so the
+ *  Settings UI + any future kickoff form can share one source of
+ *  truth (DRY). */
+export const MEETING_MAX_DURATION_MIN_SEC = 60;
+export const MEETING_MAX_DURATION_MAX_SEC = 21_600; // 6 hours
+
+/** Clamp a user-entered max-duration value to `[60, 21600]`. NaN,
+ *  negative, and non-integer values all collapse to MIN. The Rust
+ *  side enforces the same range; this fn is a UX polish so the user
+ *  sees the clamped value before submitting. */
+export function clampMaxDuration(input: number): number {
+  if (!Number.isFinite(input)) return MEETING_MAX_DURATION_MIN_SEC;
+  const n = Math.floor(input);
+  if (n < MEETING_MAX_DURATION_MIN_SEC) return MEETING_MAX_DURATION_MIN_SEC;
+  if (n > MEETING_MAX_DURATION_MAX_SEC) return MEETING_MAX_DURATION_MAX_SEC;
+  return n;
+}

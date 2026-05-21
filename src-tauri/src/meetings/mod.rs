@@ -64,6 +64,7 @@ pub mod export;
 pub mod filler_words;
 pub mod formatter;
 pub mod hotkey_installer;
+pub mod levels;
 pub mod lifecycle;
 pub mod llm_pass;
 pub mod long_form_stt;

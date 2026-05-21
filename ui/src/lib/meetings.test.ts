@@ -7,7 +7,13 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
-import { meetings, MEETING_FIXTURES } from "./meetings";
+import {
+  clampMaxDuration,
+  meetings,
+  MEETING_FIXTURES,
+  MEETING_MAX_DURATION_MAX_SEC,
+  MEETING_MAX_DURATION_MIN_SEC,
+} from "./meetings";
 
 describe("meetings IPC wrappers (fixture mode)", () => {
   beforeEach(() => {
@@ -134,8 +140,46 @@ describe("meetings IPC wrappers (fixture mode)", () => {
     const result = await meetings.runLlmPass("any-uuid", "summary");
     expect(result.id).toBe("override-id");
     expect(result.text).toBe("OVERRIDE");
-    // Other commands NOT overridden — should still use defaults.
+    // Other commands NOT overridden �?" should still use defaults.
     const probe = await meetings.probeSources();
     expect(probe).toEqual(MEETING_FIXTURES.probe);
+  });
+});
+
+describe("clampMaxDuration (ADR 0032 / mb-mom)", () => {
+  it("floors below the minimum to MIN", () => {
+    expect(clampMaxDuration(0)).toBe(MEETING_MAX_DURATION_MIN_SEC);
+    expect(clampMaxDuration(-9999)).toBe(MEETING_MAX_DURATION_MIN_SEC);
+    expect(clampMaxDuration(59)).toBe(MEETING_MAX_DURATION_MIN_SEC);
+  });
+
+  it("ceils above the maximum to MAX", () => {
+    expect(clampMaxDuration(MEETING_MAX_DURATION_MAX_SEC + 1)).toBe(
+      MEETING_MAX_DURATION_MAX_SEC,
+    );
+    expect(clampMaxDuration(1_000_000)).toBe(MEETING_MAX_DURATION_MAX_SEC);
+  });
+
+  it("collapses NaN / Infinity to MIN", () => {
+    expect(clampMaxDuration(Number.NaN)).toBe(MEETING_MAX_DURATION_MIN_SEC);
+    expect(clampMaxDuration(Number.POSITIVE_INFINITY)).toBe(
+      MEETING_MAX_DURATION_MIN_SEC,
+    );
+    expect(clampMaxDuration(Number.NEGATIVE_INFINITY)).toBe(
+      MEETING_MAX_DURATION_MIN_SEC,
+    );
+  });
+
+  it("floors fractional inputs (Math.floor semantics)", () => {
+    expect(clampMaxDuration(120.9)).toBe(120);
+    expect(clampMaxDuration(3600.5)).toBe(3600);
+  });
+
+  it("passes through valid integers unchanged", () => {
+    expect(clampMaxDuration(60)).toBe(60);
+    expect(clampMaxDuration(3600)).toBe(3600);
+    expect(clampMaxDuration(MEETING_MAX_DURATION_MAX_SEC)).toBe(
+      MEETING_MAX_DURATION_MAX_SEC,
+    );
   });
 });

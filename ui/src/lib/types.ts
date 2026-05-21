@@ -301,3 +301,15 @@ export interface MeetingProgressEvent {
   chunksDone: number;
   chunksTotal: number | null;
 }
+
+/** Payload of `meeting:tick` — fires every ~250ms while a meeting
+ *  is in flight. ADR 0032 / mb-nig. `micDb` / `sysDb` are dBFS in
+ *  `[-100, 0]`; the value `0.0` (exactly) is the "no data yet"
+ *  sentinel for an inactive or as-yet-undrained channel — the UI
+ *  should render that as a flat bar rather than "silence". */
+export interface MeetingTickEvent {
+  uuid: string;
+  elapsedMs: number;
+  micDb: number;
+  sysDb: number;
+}

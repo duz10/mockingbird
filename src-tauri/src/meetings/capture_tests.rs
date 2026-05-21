@@ -447,3 +447,51 @@ fn channel_chunks_carry_correct_channel_tag() {
         }
     }
 }
+
+#[test]
+fn current_levels_reflects_per_channel_dbfs_after_drain() {
+    // ADR 0032 / mb-nig: TwinStreamCapture exposes per-channel dBFS
+    // levels so the lifecycle.rs tick emitter can forward them to
+    // the overlay. This test pins the shape end-to-end through the
+    // stub-capture seam.
+    use crate::meetings::levels::{DBFS_FLOOR, DBFS_NO_DATA};
+
+    let dir = tempfile::tempdir().unwrap();
+    // Mic: full-scale i16 → ~0 dBFS. Sys: silence → DBFS_FLOOR after
+    // the first non-empty drain.
+    let mic_feed = stub_feed(vec![vec![i16::MAX; 16_000]]);
+    let sys_feed = stub_feed(vec![vec![0i16; 16_000]]);
+    let mut twin = TwinStreamCapture::start_with(
+        "levels-test".into(),
+        dir.path().to_path_buf(),
+        test_config(),
+        Some(stub_builder(mic_feed)),
+        Some(stub_builder(sys_feed)),
+    )
+    .unwrap();
+
+    // Initial snapshot may race the first drain on a fast box but is
+    // always one of {(NO_DATA, NO_DATA), (~0, FLOOR)} — either is
+    // valid for the contract.
+    let _ = twin.current_levels();
+
+    // Wait until both channels have observed at least one drain by
+    // pulling chunks. With test_config (small windows + small batches)
+    // even one chunk per side guarantees the levels update fired.
+    let _ = wait_chunks(&mut twin, 2, Duration::from_secs(3));
+    let trailing = twin.stop().unwrap();
+    drop(trailing);
+
+    let (mic_db, sys_db) = twin.current_levels();
+    assert!(
+        (mic_db - 0.0).abs() < 0.5,
+        "mic should read ~0 dBFS post-drain, got {mic_db}"
+    );
+    assert_eq!(
+        sys_db, DBFS_FLOOR,
+        "sys all-zero should report DBFS_FLOOR, got {sys_db}"
+    );
+    // Sanity: neither channel should still be the no-data sentinel.
+    assert_ne!(mic_db, DBFS_NO_DATA);
+    assert_ne!(sys_db, DBFS_NO_DATA);
+}

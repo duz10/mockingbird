@@ -32,7 +32,27 @@ import type {
   MeetingSourceKind,
   MeetingSourceProbe,
   MeetingStateEvent,
+  MeetingTickEvent,
 } from "../lib/types";
+
+/** Sentinel returned by the Rust emitter when a channel has produced
+ *  no data yet (vs. "silence"). Mirrors `DBFS_NO_DATA` in
+ *  `src-tauri/src/meetings/levels.rs`. */
+const DBFS_NO_DATA = 0;
+/** Bottom of the dBFS scale we render. Mirrors `DBFS_FLOOR` in
+ *  `levels.rs`. -100 dBFS renders as a fully-dim bar. */
+const DBFS_FLOOR = -100;
+
+/** Map a dBFS reading in `[-100, 0]` to a `0..1` fill ratio for the
+ *  VU bar. The no-data sentinel collapses to `0` (flat bar). */
+export function dbfsToFill(db: number): number {
+  if (db === DBFS_NO_DATA) return 0;
+  if (db <= DBFS_FLOOR) return 0;
+  if (db >= 0) return 1;
+  // Linear in dB. Future iteration could switch to log-perceptual
+  // mapping but the eye reads linear dB just fine for a 100-pixel bar.
+  return (db - DBFS_FLOOR) / -DBFS_FLOOR;
+}
 
 import styles from "./MeetingOverlay.module.css";
 
@@ -46,6 +66,12 @@ export function MeetingOverlay() {
   const [elapsedSec, setElapsedSec] = useState(0);
   const [busy, setBusy] = useState<"starting" | "stopping" | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // ADR 0032 / mb-nig — live per-channel dBFS from `meeting:tick`.
+  // Initialised to the no-data sentinel so first render shows flat
+  // bars instead of "silence" (which would be misleading before any
+  // drain has happened).
+  const [micDb, setMicDb] = useState<number>(DBFS_NO_DATA);
+  const [sysDb, setSysDb] = useState<number>(DBFS_NO_DATA);
   const recordStartRef = useRef<number | null>(null);
   // a11y: the overlay opens as a non-focused window (focus:false in
   // tauri.conf.json so it doesn't steal focus from the user's typing
@@ -129,6 +155,15 @@ export function MeetingOverlay() {
           setErrorMsg(null);
         }),
       );
+
+      // ADR 0032 / mb-nig: live audio levels for the VU bars.
+      unlisteners.push(
+        await listen<MeetingTickEvent>("meeting:tick", (e) => {
+          if (cancelled) return;
+          setMicDb(e.payload.micDb);
+          setSysDb(e.payload.sysDb);
+        }),
+      );
     })();
 
     return () => {
@@ -207,6 +242,10 @@ export function MeetingOverlay() {
           <span className={styles.pulseDot} aria-hidden />
           <span className={styles.label}>{t("meetingOverlay.recording")}</span>
           <span className={styles.elapsed}>{formatStopwatch(elapsedSec)}</span>
+          {/* ADR 0032 / mb-nig: live VU bars. Hidden from the a11y
+              tree (purely decorative — the screen reader gets the
+              elapsed time + state from the role=status region). */}
+          <VuBars micDb={micDb} sysDb={sysDb} />
           <button
             type="button"
             className={`${styles.btn} ${styles.btnStop}`}
@@ -305,4 +344,32 @@ function formatStopwatch(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+/** Twin VU bars (mic + sys). Pure presentational; no IPC. Rendered
+ *  inside the recording-mode pill. ADR 0032 / mb-nig. */
+function VuBars({ micDb, sysDb }: { micDb: number; sysDb: number }) {
+  const micFill = dbfsToFill(micDb);
+  const sysFill = dbfsToFill(sysDb);
+  return (
+    <span className={styles.vuBars} aria-hidden="true">
+      <span className={styles.vuBar} title={`mic ${formatDb(micDb)}`}>
+        <span
+          className={styles.vuFill}
+          style={{ transform: `scaleX(${micFill})` }}
+        />
+      </span>
+      <span className={styles.vuBar} title={`sys ${formatDb(sysDb)}`}>
+        <span
+          className={styles.vuFill}
+          style={{ transform: `scaleX(${sysFill})` }}
+        />
+      </span>
+    </span>
+  );
+}
+
+function formatDb(db: number): string {
+  if (db === DBFS_NO_DATA) return "—";
+  return `${db.toFixed(0)} dB`;
 }

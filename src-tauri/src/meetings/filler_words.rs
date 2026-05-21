@@ -29,6 +29,10 @@ pub static FILLERS: Set<&'static str> = phf_set! {
               // exact match and "like" as a verb is rare relative to
               // its filler-use in meetings. Power users can opt out
               // via `MeetingFillerStripEnabled = false`.
+    "basically", // added in ADR 0032 / MC v1.1: called out in the
+                 // original plan filler list (mb-tn5) but missed
+                 // during initial set authoring. Same opt-out as
+                 // "like" applies.
     "hmm", "mhm", "mm",
 };
 
@@ -59,6 +63,14 @@ mod tests {
     fn um_uh_are_fillers() {
         assert!(FILLERS.contains("um"));
         assert!(FILLERS.contains("uh"));
+    }
+
+    #[test]
+    fn basically_is_a_filler() {
+        // mb-tn5 / ADR 0032: "basically" was named in the original
+        // Phase MC plan filler list but missed during the Wave 1
+        // implementation. Pin it here so it never regresses out.
+        assert!(FILLERS.contains("basically"));
     }
 
     #[test]

@@ -55,6 +55,43 @@
   -webkit-app-region: no-drag;
 }
 
+/* ADR 0032 / mb-nig: live VU bars for mic + sys.
+   - Two thin horizontal bars stacked vertically inside a small chip.
+   - Fill is set via `transform: scaleX(...)` on the inner span so we
+     only ever animate transform (cheap; no layout thrash).
+   - aria-hidden in the JSX — purely decorative. */
+.vuBars {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 32px;
+  -webkit-app-region: no-drag;
+}
+
+.vuBar {
+  position: relative;
+  display: block;
+  height: 4px;
+  background: var(--surf-2, rgba(255, 255, 255, 0.12));
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.vuFill {
+  position: absolute;
+  inset: 0;
+  background: var(--accent, #4ade80);
+  transform-origin: left center;
+  transform: scaleX(0);
+  transition: transform 120ms linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vuFill {
+    transition: none;
+  }
+}
+
 .select {
   flex: 1;
   min-width: 130px;

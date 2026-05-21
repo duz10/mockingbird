@@ -14,6 +14,46 @@ Format:
 
 ---
 
+## 2026-05-23 [mc-v1.1] post-seal audit found four polish gaps; ADR-chartered lateral epic vehicle worked cleanly
+
+- **Context:** Day after sealing Phase MC at `phase-mc-complete`,
+  Bernard ran a static audit against the master plan and found four
+  user-visible deferrals:
+  1. `meeting:tick` event + live VU meters never wired (PLAN §MC.6
+     spec; mb-nig).
+  2. "This LLM output isn't saved" first-time notice never added
+     (Risk 7 mitigation; mb-rm7).
+  3. `MeetingMaxDurationSeconds` setting persisted/clamped server-side
+     but never exposed in the Settings UI (mb-mom).
+  4. `"basically"` named in the default filler list but missed from
+     the `phf::Set` (mb-tn5).
+- **Finding:** the AGENTS.md "Permanently sealed" rules made the
+  recovery path obvious (ADR-charter → bd epic → wave brief → seal
+  via STATUS + ADR Accepted, NO new tag). The four gaps landed in a
+  single iteration as ADR 0032. The deciding factor for "one ADR vs.
+  four ADRs" was that all four share an audit origin + a single
+  judge-preservation argument; minting four ADRs for ~400 LoC would
+  be process bloat. The post-seal mistake to avoid is doing the audit
+  *without* a charter — the gaps rot in backlog for weeks and the
+  context to fix them evaporates.
+- **Action:** treat the "ADR + epic + no new tag" pattern as the
+  default for any post-seal polish work on a sealed phase. The
+  precedent is now ADR 0023 (Design Language v1, post-Phase-3) and
+  ADR 0032 (MC v1.1, post-Phase-MC). The pattern's load-bearing
+  invariant: the **seal tag stays at the original commit** so the
+  `mc-dictation-untouched`-style diff judges have a stable reference
+  point. New work files go through new ADRs that supersede only if
+  the *methodology* changes — not for adding more items.
+- **Bonus finding:** the `meeting:tick` emitter (lifecycle.rs +
+  capture.rs + levels.rs) is the natural reuse point for any future
+  meeting-side live-feedback feature (waveform view, transcribed-so-far
+  ticker, latency probe). Don't reinvent — extend.
+- **Bonus finding 2:** `cargo test --release --no-run` for the whole
+  workspace takes ~5m34s wall on a cold-ish artifact cache for this
+  project. Worth knowing for time-budgeting future iterations.
+
+---
+
 ## 2026-05-21 [phase-mc-wave-5] Tauri 2 `tauri::command` macro: bare `AppHandle` fails when mixed with `State<'_, T>` — must use `AppHandle<R>` with `R: Runtime`
 
 - **Context:** Phase MC Wave 5 — adding `meeting_export_markdown(app: tauri::AppHandle, db: State<'_, AppStateHandle>, ...)`. Compiled fine in isolation in earlier exploration, blew up at `tauri::generate_handler!` expansion.
