@@ -2,18 +2,23 @@
 
 ## Project context
 
-You are working on **Mockingbird**, a local-first voice dictation app for
-Windows (with Mac support planned for Phase 9). It replaces Wispr Flow with
-a fully local, privacy-respecting implementation.
+You are working on **Mockingbird**, a local-first voice dictation +
+meeting-capture app for Windows (Mac support planned for Phase 9). It
+replaces Wispr Flow with a fully local, privacy-respecting implementation.
 
-The complete architecture, data model, and build plan are in `PLAN.md`
-(currently `PLAN-mockingbird-v2.md` until Phase 0 renames it).
-**Read the PLAN spine every iteration** before starting work. The
-"do not skip" list in PLAN Section 12 is binding and is also
+**The fast onboarding path** (~10 min cold-start, do this every session):
+
+1. `STATUS.md` (~150 lines) — what's sealed, what's in flight, how to resume.
+2. `docs/PRODUCT-STATE.md` — comprehensive subsystem map. What ships, by area.
+3. `docs/LESSONS.md` PINNED block (top of file) — load-bearing gotchas.
+4. **This file** — rules, principles, never-do list.
+5. For active phase work: `docs/phases/phase{N}.md` + any wave briefs.
+   For active ADR-chartered epics: the chartering ADR (`docs/adr/`).
+
+The canonical full spec is in `PLAN-mockingbird-v2.md` — only re-read it if
+the phase doc or PRODUCT-STATE.md is silent on what you need.
+The "do not skip" list in PLAN Section 12 is binding and is also
 mechanically enforced by `.code_puppy/settings.json` hooks.
-
-For the current phase, read `docs/phases/phase{N}.md` (not the whole
-PLAN — keep token budget reasonable).
 
 ## Workflow
 
@@ -32,15 +37,16 @@ persistent state is:
 
 ### At the start of every iteration:
 
-1. Read AGENTS.md (this file)
-2. Read PLAN.md (spine)
-3. Read `docs/phases/phase{N}.md` for the current phase
-4. Read STATUS.md to see what's been completed
-5. Read `docs/LESSONS.md` — search for anything tagged the current phase
-6. Run `bd ready` to see unblocked tasks; `bd prime` for full workflow context
-7. Run `git log --oneline -20` and `git tag --list "phase-*"`
-8. Run `git status` for uncommitted changes
-9. THEN start work
+1. Read `STATUS.md` SESSION ANCHOR (top ~30 lines) — what's sealed, what's in-flight.
+2. Read `docs/PRODUCT-STATE.md` (skim — 3 min) if you don't already have the
+   product model in working memory.
+3. Read `docs/LESSONS.md` PINNED block (top of file).
+4. Read this file (AGENTS.md).
+5. For the current phase / active epic: `docs/phases/phase{N}.md` or the
+   chartering ADR.
+6. `bd ready` — unblocked work queue. `bd prime` for workflow context.
+7. `git log --oneline -20` + `git tag --list "phase-*"` + `git status`.
+8. THEN start work.
 
 ### Delegation
 
@@ -62,23 +68,29 @@ names but ships no implementations. Do not attempt to invoke them.
 
 ### At the end of every iteration (before exit):
 
-1. Update STATUS.md — check off completed tasks, add progress notes,
-   update cost line, blocked-on section, last-judge-run line
-2. Close completed beads (`bd close <id>`) and create new ones for any
-   work discovered mid-iteration (`bd create ... --type task`)
-3. If a non-obvious thing happened, append to `docs/LESSONS.md`
-4. Run the cargo gate via the Windows wrapper (see
-   "Build / run / test environment (Windows)" below):
-   `powershell -File scripts\cargo-with-cuda.ps1 fmt --check`,
-   `powershell -File scripts\cargo-with-cuda.ps1 clippy --release -- -D warnings`,
-   `powershell -File scripts\cargo-with-cuda.ps1 test --release`
-   (use `--no-run` fallback when the documented launch failure hits;
-   pure-Rust modules go through the throwaway-crate recipe — same section)
-5. Run `npm run lint`, `npm test` (whichever apply to your changes)
-6. Commit all changes with descriptive commit messages
-7. If phase is complete: `git tag phase-{N}-complete` after the final commit
-8. The `stop` hook will refuse exit if any of the above failed —
-   resolve before trying to exit again
+1. **STATUS.md** — update only if epic state changed (in-flight block) or a phase
+   sealed. STATUS.md is intentionally slim now; don't add session diary to it.
+2. **`docs/PRODUCT-STATE.md`** — update only if a subsystem shipped or materially
+   changed. This is the durable reference, not a journal.
+3. **`bd`** — close completed beads (`bd close <id>`), create new ones for any
+   work discovered mid-iteration (`bd create ... --type task --priority N`).
+4. **`docs/LESSONS.md`** — append a dated entry if a non-obvious thing happened.
+   If the finding would change how EVERY future session should work, also
+   promote it into the PINNED block at the top.
+5. **Cargo gate** via the Windows wrapper (see "Build / run / test environment"
+   section below):
+   - `powershell -File scripts\cargo-with-cuda.ps1 fmt --check`
+   - `powershell -File scripts\cargo-with-cuda.ps1 clippy --release -- -D warnings`
+   - `powershell -File scripts\cargo-with-cuda.ps1 test --release` (use `--no-run`
+     fallback when the documented launch failure hits; pure-Rust modules go
+     through the throwaway-crate recipe — same section)
+6. **UI gate:** `npx tsc --noEmit`, `npm test`, `npm run build` (whichever apply).
+   `npm run lint` is currently broken pending `mb-yxh` (ESLint v9 migration).
+7. **Commit** all changes with a descriptive message referencing the bead id +
+   ADR if any.
+8. **Tags:** `git tag phase-{N}-complete` ONLY when completing a numbered PLAN §10
+   phase. Lateral epics seal via Accepted ADR + STATUS update, NOT by a new tag.
+9. The `stop` hook will refuse exit if any of the above failed.
 
 ## Coding standards (summary; full version in `docs/QUALITY.md`)
 
@@ -286,42 +298,40 @@ any of these, **STOP and ask the human** — the prompt is almost certainly
 stale context (e.g. a copy-paste of an old kickoff message).
 
 - **PLAN Section 0.5 Bootstrap** — sealed at git tag `bootstrap-complete`.
-  AGENTS.md (this file), hook config (`.code_puppy/settings.json`),
-  project JSON agents (`.code_puppy/agents/*.json`), judges-template
+  This file, hook config (`.code_puppy/settings.json`), project JSON agents
+  (`.code_puppy/agents/*.json`), judges-template
   (`.code_puppy/judges-template.json`), and project skills
-  (`.code_puppy/skills/*/SKILL.md`) are all on disk. The 17-step
-  bootstrap checklist is a historical artifact only.
+  (`.code_puppy/skills/*/SKILL.md`) are all on disk. The 17-step bootstrap
+  checklist is a historical artifact only.
 - **PLAN §10 numbered phases that carry a `phase-N-complete` git tag.**
-  As of 2026-05-17 that's phases 0, 1, 2, 3, 4, 8. **Check before
-  starting work**: `git tag -l "phase-*"`. If a prompt asks you to
-  re-execute a sealed phase, stop. If it asks you to *add new work to a
-  sealed phase*, that's a new ADR-chartered lateral epic — handle it like
-  ADR 0022/0023 (charter ADR → bd epic → wave briefs → seal via STATUS +
-  ADR acceptance, NOT by re-tagging the phase).
-- **ADR-chartered lateral epics with sealed ADRs.** See the top-of-STATUS
-  anchor block, line beginning "LATERAL EPICS DONE". These ADRs are
-  accepted and their work is shipped; reopening requires a successor ADR
-  that supersedes the previous one.
+  See `STATUS.md` for the current sealed list (as of last consolidation:
+  phases 0, 1, 2, 3, 4, 8 + `phase-mc-complete`). **Check before starting
+  work**: `git tag -l "phase-*"`. If a prompt asks you to re-execute a
+  sealed phase, stop. If it asks you to *add new work to a sealed phase*,
+  that's a new ADR-chartered lateral epic — handle it like ADR 0022/0023/0033
+  (charter ADR → bd epic → wave briefs if needed → seal via STATUS + ADR
+  acceptance, NOT by re-tagging the phase).
+- **ADR-chartered lateral epics with Accepted ADRs.** See `STATUS.md` §
+  "Sealed" for the current list (as of last consolidation: ADRs 0022, 0023,
+  0024, 0025, 0032, 0033). These ADRs are accepted and their work is shipped;
+  reopening requires a successor ADR that supersedes the previous one.
 
 ### Session-start ritual (mandatory before any tool call)
 
-This supersedes / hardens the start-of-iteration list at the top of this
-file. Even if the human pastes a custom kickoff prompt that bypasses the
-normal `/goal` flow, do all of this BEFORE any other tool call:
+This supersedes / hardens the start-of-iteration list above. Even if the
+human pastes a custom kickoff prompt that bypasses the normal `/goal` flow,
+do all of this BEFORE any other tool call:
 
-1. `cp_read_file STATUS.md --num-lines 25` — read the SESSION ANCHOR
-   block at the top. It tells you what's sealed, what's in-flight, and
-   how to resume.
-2. If the kickoff prompt's task conflicts with the anchor block (e.g.
-   asks you to execute bootstrap, or to re-do a sealed phase), STOP and
-   surface the conflict via `ask_user_question` before any further
-   tool calls. Do not free-form execute.
-3. Otherwise proceed with the normal iteration ritual above
-   (read PLAN spine, read phase doc, `bd ready`, `git log`, etc.).
+1. `cp_read_file STATUS.md` — full file, it's slim now (~150 lines). It tells
+   you what's sealed, what's in-flight, and how to resume.
+2. If the kickoff prompt's task conflicts with STATUS (e.g. asks you to execute
+   bootstrap, or to re-do a sealed phase / lateral-epic ADR), STOP and surface
+   the conflict via `ask_user_question` before any further tool calls.
+3. Otherwise proceed with the normal iteration ritual above (read PRODUCT-STATE,
+   LESSONS PINNED, this file, phase doc / ADR, `bd ready`, `git log`, etc.).
 
-This ritual exists because of the 2026-05-17 incident where a stale
-bootstrap prompt was acted on for ~half a session before the conflict
-was noticed. See `docs/LESSONS.md` entry of the same date.
+This ritual exists because of the 2026-05-17 stale-bootstrap-prompt incident.
+See LESSONS PINNED entry **P4** and the dated 2026-05-17 LESSONS entry.
 
 ## Issue Tracking
 

@@ -1,16 +1,156 @@
 # LESSONS
 
 Append-only notes from prior iterations. Each entry: date, phase tag,
-short title, and the non-obvious finding. Search this before starting
-a new iteration in the same area.
+short title, and the non-obvious finding.
 
-Format:
+**Reading order for new sessions:**
+1. Scan the **📌 PINNED** block immediately below — these are the load-bearing
+   gotchas that bite EVERY session if forgotten.
+2. Skim the **TOC** below the pinned block.
+3. `grep` the body for your area (`rg -i 'cuda|whisper|ort|cargo'` etc.).
+
+**Append format for new entries:**
 ```
 ## YYYY-MM-DD [phase/iteration] short title
 - Context: what we were doing
 - Finding: the non-obvious thing
 - Action: what to do differently next time
 ```
+
+If a new lesson would change how EVERY future session should work,
+promote it into the PINNED block + leave the dated entry in the body.
+
+---
+
+## 📌 PINNED — read these every session
+
+These seven lessons are load-bearing. If you forget them, you will burn
+an hour rediscovering the same trap.
+
+### P1. ALL cargo invocations go through the Windows wrapper
+
+```
+powershell -File scripts\cargo-with-cuda.ps1 <cargo-args>
+```
+
+Plain `cargo` compiles but produces binaries that may not launch (missing
+MSVC + CUDA env). The wrapper:
+- Imports MSVC env via `vcvars64.bat`
+- Pins `CUDA_PATH` + `CUDA_PATH_V12_8` to v12.8 (ADR 0011)
+- Prepends `cmake` to PATH
+- Caps `CMAKE_BUILD_PARALLEL_LEVEL=4` (whisper-rs CUDA OOMs at 16)
+- Forwards args through `cmd.exe /c` for stream flattening
+
+Full details: AGENTS.md § "Build / run / test environment (Windows)".
+Use `powershell.exe`, NOT `pwsh` (not on PATH on this box).
+
+### P2. `cargo test --release` is broken on this box — use the fallback gate
+
+LESSONS 2026-05-17 [phase5-wave-I]: even with the wrapper, even with
+`ORT_DYLIB_PATH` set, the test runner exits `STATUS_ENTRYPOINT_NOT_FOUND`
+(0xc0000139). **The app binary launches fine** — only the test runner is
+affected. Sanctioned fallback for the cargo gate:
+
+1. `… cargo-with-cuda.ps1 check`
+2. `… cargo-with-cuda.ps1 clippy --release -- -D warnings`
+3. `… cargo-with-cuda.ps1 fmt --check`
+4. `… cargo-with-cuda.ps1 test --release --no-run` (link-only proof)
+
+For pure-Rust modules (no whisper-rs / ort / cuda deps), use the
+throwaway-crate recipe: copy source into `$env:TEMP\<modname>_tests\`,
+add only that module's real deps, run vanilla `cargo test` there.
+
+### P3. The release exe lives at WORKSPACE-ROOT `target/release/`
+
+NOT at `src-tauri/target/release/`. Tauri 2 builds into the workspace root.
+Run via `powershell -File scripts\run-mockingbird.ps1` — never
+`Start-Process` the exe directly (missing `ORT_DYLIB_PATH` + CUDA bin on PATH).
+
+### P4. Session-start ritual is mandatory — stale prompts are real
+
+2026-05-17 incident: a stale bootstrap prompt was acted on for ~half a
+session before the conflict with sealed-phase state was noticed. Before
+any tool call, EVEN if the human pastes a custom kickoff:
+
+1. Read `STATUS.md` SESSION ANCHOR (the slim top block) first.
+2. If the kickoff conflicts with sealed-phase state, STOP and surface
+   via `ask_user_question` before further tool calls.
+3. Then proceed with the normal start-of-iteration list.
+
+Sealed phases are listed in `STATUS.md`. Phase tags `phase-N-complete`
+are authoritative.
+
+### P5. PLAN §10 phases seal via `phase-N-complete` git tag — lateral epics seal via ADR
+
+Do not create new phase tags for ADR-chartered lateral epics (ADRs 0022,
+0023, 0024, 0025, 0032, 0033 all sealed without phase tags). New work
+against a sealed phase is a **charter-an-ADR-first** lateral epic, not a
+phase reopen. See `.code_puppy/AGENTS.md` § "Permanently sealed".
+
+### P6. PowerShell single-quote variable trap
+
+```powershell
+Test-Path '$env:USERPROFILE\foo'   # ✗ tests for the LITERAL string
+Test-Path "$env:USERPROFILE\foo"   # ✓ expands
+```
+
+Bernard hit this 2026-05-18 verifying the models dir; reported "missing"
+when the folder was present. Also use `"$home\foo"` not `'$home\foo'`.
+
+### P7. Wave-6 judges don't catch live-OS integration regressions
+
+2026-05-23 [mc-hotfix / mb-x1x]: all 5 Phase MC judges passed, but four
+user-visible regressions shipped (chord collision, latched Stop button,
+stub source-probe, missing overlay show). The judges are static / unit /
+file-diff assertions — they prove *contracts* hold, not that *integrations*
+work on a real Win11 box. **Any phase touching OS hooks, audio devices,
+or live Tauri events needs a 5-minute human smoke test BEFORE the seal
+commit**, not after. Add to the seal checklist for any future hook-or-
+audio phase.
+
+---
+
+## 📚 Table of Contents (chronological, newest first)
+
+Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
+
+| Date       | Tag                              | Title (truncated)                                                        |
+|------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-23 | `[mc-hotfix / mb-x1x]`           | post-deploy live-fire surfaced 4 gaps the Wave-6 judges couldn't catch   |
+| 2026-05-23 | `[mc-v1.1]`                      | post-seal audit found four polish gaps; lateral epic vehicle worked      |
+| 2026-05-22 | `[phase-mc-retrospective]`       | Phase MC retrospective                                                   |
+| 2026-05-21 | `[phase-mc-wave-5]`              | Tauri 2 `tauri::command` macro: bare AppHandle fails with `State<'_, T>` |
+| 2026-05-21 | `[phase-mc-wave-5]`              | legacy `update_setting` IPC can't carry typed meeting settings cleanly   |
+| 2026-05-21 | `[phase-mc-wave-5]`              | pre-existing 600-line cap violations are scope-creep traps mid-wave      |
+| 2026-05-20 | `[phase-mc-wave-3]`              | two independent WH_KEYBOARD_LL hooks coexist iff meeting hook chains     |
+| 2026-05-20 | `[phase-mc-wave-2]`              | whisper.cpp segment timestamps are CENTISECONDS not ms; UTF-8 capit.     |
+| 2026-05-20 | `[phase-mc-wave-1]`              | stale migration test since 005; release-LTO test compile single-threaded |
+| 2026-05-19 | `[unsplash-bg / release-build]`  | Tauri release exe lives at workspace-root target/release/                |
+| 2026-05-19 | `[unsplash-bg / release-build]`  | Tauri compresses embedded UI assets — ASCII grep won't find JS in exe    |
+| 2026-05-19 | `[unsplash-bg]`                  | glass token override beats per-component rewrites for photo modes        |
+| 2026-05-19 | `[unsplash-bg]`                  | z-index:0 photo trapped in-flow text BENEATH the photo                   |
+| 2026-05-18 | `[phase-mc-wave-0]`              | Build/test env conventions were tribal knowledge — surfaced to AGENTS.md |
+| 2026-05-18 | `[phase5-postship-9-followup]`   | ADR-0024 iter-1: corpus expansion revealed imperative-content failure    |
+| 2026-05-18 | `[phase5/6 UI sprint]`           | CSS Modules need vite-env.d.ts; commands.rs vs commands/ conflict; etc.  |
+| 2026-05-18 | `[phase-3-wave-5]`               | Orchestrator integration tests want stubbed traits, not real spawn       |
+| 2026-05-17 | `[phase5-postship-*]`            | (multiple) UI bundle stale, clipboard bitmap crash, Ollama 30s timeout,  |
+|            |                                  |   migration 006 SQL syntax, History metadata `—` rendering, etc.         |
+| 2026-05-17 | `[phase5-wave-I]`                | `cargo test --lib` exits 0xc0000139 even with cargo-with-cuda — PINNED   |
+| 2026-05-17 | `[phase3-wave4.9]`               | K32GetModuleBaseNameW silent zero; clipboard seq baseline; etc.          |
+| 2026-05-17 | `[phase3-wave4.8]`               | Silero v5 ONNX needs UNDOCUMENTED 64-sample context buffer               |
+| 2026-05-17 | `[phase-3-wave-4.5]`             | release exe path; cargo test doesn't see ensure_ort_dylib_set            |
+| 2026-05-17 | `[phase-3-wave-3/4]`             | WH_KEYBOARD_LL thread-local discipline; pure-vs-OS split; tick cadence   |
+| 2026-05-17 | `[phase-3-wave-2]`               | windows-rs 0.56 HWND is isize; GUI_SECUREINPUT not a real constant       |
+| 2026-05-17 | (multiple)                       | Session-start anchor; Vite CSS `@import`; bridge-then-cutover; ADR-0024  |
+| 2026-05-16 | `[phase-2]`                      | CUDA 12.8 install; whisper-rs 0.16 + bundled ggml; ort 2.0 RC + MSVC2022 |
+| 2026-05-16 | `[phase-2]`                      | Silero VAD model path; `Box<dyn Trait>`; cpal::Stream !Send; cpal::Host  |
+| 2026-05-15 | `[bootstrap]`                    | bd alongside STATUS.md; bd init TTY; PowerShell stderr; hook decode      |
+| 2026-05-15 | `[phase-0/1]`                    | rust-toolchain pinning; rustfmt with autocrlf; rusqlite 4-min check;     |
+|            |                                  |   #[cfg(test)] crate boundaries; SQL UNIQUE+NULL; CURRENT_TIMESTAMP res. |
+
+---
+
+## 📜 Body (chronological)
 
 ---
 
