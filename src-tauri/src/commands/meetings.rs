@@ -412,11 +412,15 @@ fn render_for_export(
     uuid: &str,
     include_llm_pass: Option<&IncludeLlmPass>,
 ) -> Result<String, String> {
-    let detail = {
+    let (detail, labels) = {
         let conn = lock_db(db)?;
-        load_meeting_detail(&conn, uuid)
+        let detail = load_meeting_detail(&conn, uuid)
             .map_err(into_err)?
-            .ok_or_else(|| format!("meeting not found: {uuid}"))?
+            .ok_or_else(|| format!("meeting not found: {uuid}"))?;
+        // Read speaker labels from settings inside the same lock so
+        // a concurrent settings write can't tear the view.
+        let labels = crate::meetings::merge::SpeakerLabels::load(&conn);
+        (detail, labels)
     };
     let llm_text = match include_llm_pass {
         None => None,
@@ -433,7 +437,7 @@ fn render_for_export(
             })?)
         }
     };
-    render_markdown(&detail, llm_text.as_deref()).map_err(into_err)
+    render_markdown(&detail, llm_text.as_deref(), &labels).map_err(into_err)
 }
 
 /// Prefer the merged channel (best for LLM passes), fall back to mic

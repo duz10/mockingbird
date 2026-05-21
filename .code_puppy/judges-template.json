@@ -63,6 +63,51 @@
       "applies_when": "phase == 2"
     },
     {
+      "id": "mc-formatter-deterministic",
+      "name": "Meeting formatter is deterministic (Phase MC)",
+      "description": "Verifies that the meeting transcript formatter is pure and deterministic: same input yields byte-identical output, and `format(format(x)) == format(x)` for any reasonable input. Hard-blocks the phase-mc-complete tag.",
+      "model": "anthropic/claude-sonnet-4-5",
+      "prompt": "Open docs/judges/phase-mc/mc-formatter-deterministic.md and follow its pass criteria. (1) Run `pwsh scripts/cargo-with-cuda.ps1 test --release --lib -- meetings::formatter::tests` and confirm all 31 unit tests + 2 proptests pass. (2) Run the static-purity grep against formatter.rs and filler_words.rs; expect zero matches for std::time / Instant / SystemTime / thread_rng / rand:: / Once / OnceCell / OnceLock / env:: / getenv. (3) Confirm FILLER_WORDS is a const-init phf::phf_set!, not a Lazy<HashSet>. Reply in JSON: {pass: bool, tests_passed: int, proptest_pass: bool, static_purity_clean: bool, phf_set_used: bool, notes: string}. FAIL blocks phase-mc-complete tag.",
+      "trigger": "phase_end",
+      "applies_when": "phase == 'mc'"
+    },
+    {
+      "id": "mc-long-form-stitched-losslessly",
+      "name": "Meeting long-form stitching is lossless (Phase MC)",
+      "description": "Verifies the chunked Whisper driver stitches multi-chunk feeds losslessly: every ground-truth word appears exactly once across chunk seams (no gaps, no duplicates from the 2s overlap region). Hard-blocks the phase-mc-complete tag per ADR 0029.",
+      "model": "anthropic/claude-sonnet-4-5",
+      "prompt": "Open docs/judges/phase-mc/mc-long-form-stitched-losslessly.md and follow its pass criteria. (1) Run `pwsh scripts/cargo-with-cuda.ps1 test --release --lib -- meetings::long_form_stt_tests meetings::long_form_stt_pure_tests` and confirm all 23 tests pass including lossless_synthetic_long_feed_no_gaps_no_dupes and two_channels_yield_independent_segment_streams. (2) Inspect the test source to confirm the lossless assertion really walks ground-truth segments and asserts exactly-once presence in the stitched output. Reply in JSON: {pass: bool, tests_passed: int, lossless_test_pass: bool, two_channel_test_pass: bool, notes: string}. FAIL blocks phase-mc-complete tag.",
+      "trigger": "phase_end",
+      "applies_when": "phase == 'mc'"
+    },
+    {
+      "id": "mc-two-channel-merged",
+      "name": "Two-channel merge correctness (Phase MC)",
+      "description": "Verifies the cross-channel chronological merge produces a single labeled transcript: mic vs system speaker labels round-trip from settings, paragraphs are in t0_ms order, mic wins on ties, and the export layer respects the merge output. Hard-blocks the phase-mc-complete tag per ADR 0028.",
+      "model": "anthropic/claude-sonnet-4-5",
+      "prompt": "Open docs/judges/phase-mc/mc-two-channel-merged.md and follow its pass criteria. (1) Run `pwsh scripts/cargo-with-cuda.ps1 test --release --lib -- meetings::merge::tests` and confirm all 12 merge tests pass including custom_labels_substitute_for_defaults and default_label_strings_match_settings_default_values. (2) Run the export tests both_renders_merged_when_present, both_falls_back_to_interleave_when_merge_missing, system_source_uses_custom_sys_label, both_fallback_uses_custom_labels_when_merged_missing. (3) Verify merge_two_channels signature takes a SpeakerLabels parameter (not hardcoded constants) and that lifecycle.rs + commands/meetings.rs both read SpeakerLabels::load(&conn) before calling the merge / render_markdown. Reply in JSON: {pass: bool, merge_tests_passed: int, export_tests_passed: int, signature_threads_labels: bool, notes: string}. FAIL blocks phase-mc-complete tag.",
+      "trigger": "phase_end",
+      "applies_when": "phase == 'mc'"
+    },
+    {
+      "id": "mc-no-llm-in-critical-path",
+      "name": "No LLM in meeting critical path (Phase MC)",
+      "description": "Verifies the recording-to-canonical-transcript pipeline never constructs an OllamaProvider, never imports crate::cleanup::*, and never gates the meeting:state=done emit on an LLM call. The optional LLM pass lives only in llm_pass.rs reachable via meeting_run_llm_pass. Hard-blocks the phase-mc-complete tag per ADR 0026.",
+      "model": "anthropic/claude-sonnet-4-5",
+      "prompt": "Open docs/judges/phase-mc/mc-no-llm-in-critical-path.md and follow its pass criteria. (1) Run `Select-String -Path src-tauri/src/meetings/*.rs -Pattern 'OllamaProvider'` and confirm every match is either in meetings/llm_pass.rs or in a doc-comment line that names the invariant. (2) Run `Select-String -Path src-tauri/src/meetings/*.rs -Pattern '^use crate::cleanup'` and confirm every match is in meetings/llm_pass.rs. (3) Static-grep the critical-path file set (lifecycle/runtime/persist/long_form_stt/formatter/merge/chunker/capture) for OllamaProvider / run_llm_pass / LlmCleaner / reqwest:: / ureq:: — expect zero live matches (doc-comment lines naming the invariant are OK). (4) Confirm migration 011_meeting_capture.sql has no llm_output / llm_text / llm_summary columns. Reply in JSON: {pass: bool, ollama_isolated_to_llm_pass: bool, cleanup_imports_isolated: bool, critical_path_clean: bool, schema_has_no_llm_column: bool, notes: string}. FAIL blocks phase-mc-complete tag.",
+      "trigger": "phase_end",
+      "applies_when": "phase == 'mc'"
+    },
+    {
+      "id": "mc-dictation-untouched",
+      "name": "Dictation subsystem untouched (Phase MC)",
+      "description": "Verifies Phase MC commits did not modify any sealed dictation file (hotkey state/windows/driver, dictation/, injection/, recording_window.rs, cleanup/provider.rs, cleanup/llm_cleaner.rs, migrations 001-010). Diff is scoped phase-mc-start..HEAD (NOT phase-4-complete..HEAD, since lateral epics legitimately touched some files between those refs). Hard-blocks the phase-mc-complete tag.",
+      "model": "anthropic/claude-sonnet-4-5",
+      "prompt": "Open docs/judges/phase-mc/mc-dictation-untouched.md and follow its pass criteria. (1) Run `git diff --name-only phase-mc-start..HEAD --` over the sealed file set; expect empty output (hotkey/probe.rs is ALLOWED per ADR 0027 — it's not in the seal set). (2) Run the same diff over src/db/migrations/001-010_*.sql; expect empty. (3) Confirm migration 011 has no INSERT INTO modes / ALTER TABLE modes. (4) `git diff phase-mc-start..HEAD -- src-tauri/src/cleanup/{provider,llm_cleaner,ollama}.rs` — expect empty diff. (5) Run the dictation/cleanup/injection test suite via cargo-with-cuda.ps1 and confirm zero regressions vs phase-4-complete. Reply in JSON: {pass: bool, sealed_files_untouched: bool, sealed_migrations_untouched: bool, no_modes_changes: bool, cleanup_untouched: bool, dictation_tests_green: bool, notes: string}. FAIL blocks phase-mc-complete tag.",
+      "trigger": "phase_end",
+      "applies_when": "phase == 'mc'"
+    },
+    {
       "id": "mb-supply-chain",
       "name": "Supply-chain hygiene",
       "description": "If package.json, package-lock.json, Cargo.toml, or Cargo.lock changed, audits the new deps against the IOC list and the project's banned-namespace rules.",

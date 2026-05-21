@@ -265,3 +265,5 @@
 {"id":"int-c6affe32","kind":"field_change","created_at":"2026-05-20T23:35:09.9237647Z","actor":"duz10","issue_id":"mb-pdv.25","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-ea528d00","kind":"field_change","created_at":"2026-05-20T23:35:09.9542381Z","actor":"duz10","issue_id":"mb-pdv.20","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-a6fe3616","kind":"field_change","created_at":"2026-05-20T23:35:10.4612354Z","actor":"duz10","issue_id":"mb-pdv.22","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-01677636","kind":"field_change","created_at":"2026-05-21T00:52:31.1697768Z","actor":"duz10","issue_id":"mb-2bi","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-133b4f02","kind":"field_change","created_at":"2026-05-21T00:52:31.1972662Z","actor":"duz10","issue_id":"mb-pdv","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}

@@ -20,6 +20,7 @@
 use crate::error::AppResult;
 
 use super::capture::MeetingSource;
+use super::merge::SpeakerLabels;
 use super::repo::MeetingDetail;
 
 /// Render the meeting to a Markdown string.
@@ -53,7 +54,11 @@ use super::repo::MeetingDetail;
 ///     courtesy of the formatter), else an interleaved best-effort
 ///     concat of `formatted_mic` (under `**You:**`) and
 ///     `formatted_sys` (under `**Other(s):**`).
-pub fn render_markdown(detail: &MeetingDetail, llm_pass_text: Option<&str>) -> AppResult<String> {
+pub fn render_markdown(
+    detail: &MeetingDetail,
+    llm_pass_text: Option<&str>,
+    labels: &SpeakerLabels,
+) -> AppResult<String> {
     let title = detail.title.as_deref().unwrap_or("Untitled meeting");
     let duration = format_duration_hms(detail.total_duration_ms);
 
@@ -75,7 +80,7 @@ pub fn render_markdown(detail: &MeetingDetail, llm_pass_text: Option<&str>) -> A
 
     out.push_str(&format!("# {title}\n\n"));
 
-    render_body(detail, &mut out);
+    render_body(detail, labels, &mut out);
 
     if let Some(llm) = llm_pass_text {
         // Ensure exactly one blank line before the section header
@@ -95,7 +100,9 @@ pub fn render_markdown(detail: &MeetingDetail, llm_pass_text: Option<&str>) -> A
     Ok(out)
 }
 
-fn render_body(detail: &MeetingDetail, out: &mut String) {
+fn render_body(detail: &MeetingDetail, labels: &SpeakerLabels, out: &mut String) {
+    let mic_label = labels.mic_md();
+    let sys_label = labels.sys_md();
     match detail.source {
         MeetingSource::Mic => {
             let body = detail
@@ -116,7 +123,8 @@ fn render_body(detail: &MeetingDetail, out: &mut String) {
                 if idx > 0 {
                     out.push_str("\n\n");
                 }
-                out.push_str("**Other(s):** ");
+                out.push_str(&sys_label);
+                out.push(' ');
                 out.push_str(para.trim());
             }
             out.push('\n');
@@ -129,15 +137,16 @@ fn render_body(detail: &MeetingDetail, out: &mut String) {
             }
             // Merged failed — best-effort interleave. NOT a strict
             // chronological merge (we don't have segment timestamps
-            // here); just `**You:**` block followed by `**Other(s):**`
-            // block. The UI labels this output as "merge unavailable
-            // — showing channels sequentially".
+            // here); just user-mic block followed by user-sys block.
+            // The UI labels this output as "merge unavailable —
+            // showing channels sequentially".
             if let Some(mic) = detail.formatted_mic.as_deref() {
                 for (idx, para) in mic.split("\n\n").enumerate() {
                     if idx > 0 {
                         out.push_str("\n\n");
                     }
-                    out.push_str("**You:** ");
+                    out.push_str(&mic_label);
+                    out.push(' ');
                     out.push_str(para.trim());
                 }
                 out.push('\n');
@@ -150,7 +159,8 @@ fn render_body(detail: &MeetingDetail, out: &mut String) {
                     if idx > 0 {
                         out.push_str("\n\n");
                     }
-                    out.push_str("**Other(s):** ");
+                    out.push_str(&sys_label);
+                    out.push(' ');
                     out.push_str(para.trim());
                 }
                 out.push('\n');
@@ -211,7 +221,7 @@ mod tests {
     #[test]
     fn frontmatter_round_trips() {
         let detail = fixture_detail();
-        let md = render_markdown(&detail, None).unwrap();
+        let md = render_markdown(&detail, None, &SpeakerLabels::default()).unwrap();
         // Frontmatter block: split on the second `---` line.
         let mut iter = md.split("---\n");
         let _first = iter.next();
@@ -239,7 +249,7 @@ mod tests {
     #[test]
     fn mic_only_renders_body_without_other_label() {
         let detail = fixture_detail();
-        let md = render_markdown(&detail, None).unwrap();
+        let md = render_markdown(&detail, None, &SpeakerLabels::default()).unwrap();
         assert!(md.contains("Hello world."));
         assert!(md.contains("Second paragraph."));
         assert!(
@@ -261,7 +271,7 @@ mod tests {
         detail.mic_duration_ms = None;
         detail.sys_duration_ms = Some(60_000);
 
-        let md = render_markdown(&detail, None).unwrap();
+        let md = render_markdown(&detail, None, &SpeakerLabels::default()).unwrap();
         assert!(md.contains("**Other(s):** First."));
         assert!(md.contains("**Other(s):** Second."));
     }
@@ -274,7 +284,7 @@ mod tests {
         detail.formatted_merged = Some("**You:** hi\n\n**Other(s):** hello".to_string());
         detail.sys_duration_ms = Some(60_000);
 
-        let md = render_markdown(&detail, None).unwrap();
+        let md = render_markdown(&detail, None, &SpeakerLabels::default()).unwrap();
         assert!(md.contains("**You:** hi"));
         assert!(md.contains("**Other(s):** hello"));
         // Body should be the merged stream — not a sequential interleave
@@ -296,7 +306,7 @@ mod tests {
         detail.formatted_merged = None;
         detail.sys_duration_ms = Some(60_000);
 
-        let md = render_markdown(&detail, None).unwrap();
+        let md = render_markdown(&detail, None, &SpeakerLabels::default()).unwrap();
         assert!(md.contains("**You:** Hello world."));
         assert!(md.contains("**You:** Second paragraph."));
         assert!(md.contains("**Other(s):** Sys body."));
@@ -305,7 +315,12 @@ mod tests {
     #[test]
     fn llm_pass_section_appended_when_present() {
         let detail = fixture_detail();
-        let md = render_markdown(&detail, Some("- bullet 1\n- bullet 2")).unwrap();
+        let md = render_markdown(
+            &detail,
+            Some("- bullet 1\n- bullet 2"),
+            &SpeakerLabels::default(),
+        )
+        .unwrap();
         assert!(md.contains("## LLM pass output"));
         assert!(md.ends_with("- bullet 1\n- bullet 2\n"));
     }
@@ -313,7 +328,7 @@ mod tests {
     #[test]
     fn llm_pass_section_omitted_when_none() {
         let detail = fixture_detail();
-        let md = render_markdown(&detail, None).unwrap();
+        let md = render_markdown(&detail, None, &SpeakerLabels::default()).unwrap();
         assert!(!md.contains("## LLM pass output"));
     }
 
@@ -321,7 +336,7 @@ mod tests {
     fn untitled_meeting_renders_fallback_title() {
         let mut detail = fixture_detail();
         detail.title = None;
-        let md = render_markdown(&detail, None).unwrap();
+        let md = render_markdown(&detail, None, &SpeakerLabels::default()).unwrap();
         assert!(md.contains("title: Untitled meeting"));
         assert!(md.contains("# Untitled meeting"));
     }
@@ -350,7 +365,55 @@ mod tests {
     fn export_with_no_mic_body_uses_placeholder() {
         let mut detail = fixture_detail();
         detail.formatted_mic = None;
-        let md = render_markdown(&detail, None).unwrap();
+        let md = render_markdown(&detail, None, &SpeakerLabels::default()).unwrap();
         assert!(md.contains("_(no transcript)_"));
+    }
+
+    #[test]
+    fn system_source_uses_custom_sys_label() {
+        let mut detail = fixture_detail();
+        detail.source = MeetingSource::System;
+        detail.formatted_mic = None;
+        detail.formatted_sys = Some("first paragraph\n\nsecond paragraph".to_string());
+        let labels = SpeakerLabels {
+            mic: "Dustin".to_string(),
+            sys: "Guests".to_string(),
+        };
+        let md = render_markdown(&detail, None, &labels).unwrap();
+        assert!(
+            md.contains("**Guests:** first paragraph"),
+            "custom sys label missing in output: {md}"
+        );
+        assert!(
+            md.contains("**Guests:** second paragraph"),
+            "second-paragraph sys label missing in output: {md}"
+        );
+        // The mic label MUST NOT leak into a system-only meeting.
+        assert!(
+            !md.contains("**Dustin:**"),
+            "mic label leaked into system-only meeting body: {md}"
+        );
+    }
+
+    #[test]
+    fn both_fallback_uses_custom_labels_when_merged_missing() {
+        let mut detail = fixture_detail();
+        detail.source = MeetingSource::Both;
+        detail.formatted_mic = Some("i spoke".to_string());
+        detail.formatted_sys = Some("they spoke".to_string());
+        detail.formatted_merged = None; // force the fallback path
+        let labels = SpeakerLabels {
+            mic: "Dustin".to_string(),
+            sys: "Team".to_string(),
+        };
+        let md = render_markdown(&detail, None, &labels).unwrap();
+        assert!(
+            md.contains("**Dustin:** i spoke"),
+            "custom mic label missing in fallback: {md}"
+        );
+        assert!(
+            md.contains("**Team:** they spoke"),
+            "custom sys label missing in fallback: {md}"
+        );
     }
 }

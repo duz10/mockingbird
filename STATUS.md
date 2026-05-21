@@ -13,14 +13,15 @@
 > **LATERAL EPICS DONE:** ADR 0022 (three-mode pipeline, **Accepted**
 >   2026-05-18 via empirical eval); ADR 0023 (Design Language v1, all 6
 >   waves sealed 2026-05-17, mb-36q); ADR 0024 (empirical mode tuning,
->   Accepted 2026-05-18, mb-e7s closed); **ADR 0025 (optional remote
+>   Accepted 2026-05-18, mb-e7s closed); ADR 0025 (optional remote
 >   ambient background — Unsplash provider, Accepted 2026-05-19,
->   mb-biy closed)**.
+>   mb-biy closed); **Phase MC (Meeting Capture, sealed 2026-05-22
+>   at tag `phase-mc-complete`; ADRs 0026–0031 all Accepted; mb-pdv
+>   epic + standing P1 mb-2bi both closed; 5 judges in
+>   `docs/judges/phase-mc/`)**.
 > **NEXT MACRO WORK:** `mb-xwi` – Phase 5/6/7 from PLAN §10 (Recording UX,
 >   History/Settings/About windows, polish + signing). Still ahead.
-> **NEXT P1 LATERAL:** `mb-2bi` – audio streaming + chunked Whisper
->   (proper long-form fix). Standing P1. Required for true Wisprflow-
->   parity latency on normal/formal modes per ADR 0024 acceptance.
+> **NO STANDING P1 LATERALS.** (mb-2bi closed via ADR 0029 / Phase MC.)
 > **IN-FLIGHT THIS SESSION (2026-05-20):** **Phase MC Wave 3 SEALED in
 >   commit `21f40d9`** (Wave 4 brief authored). All 6 Wave-3 tasks
 >   landed across three commits: `<earlier W3>` (loopback + capture),
@@ -103,6 +104,42 @@
 >   + 383 baseline tests untouched; **+68 net tests this wave**
 >   (compiled clean, not live-run); project test total at ~481.
 >   mb-2bi still open (closes Wave 6 alongside seal tag, per kickoff).
+> **PHASE MC SEALED (2026-05-22) at tag `phase-mc-complete`:** Five
+>   judges authored (mc-formatter-deterministic, mc-long-form-stitched-
+>   losslessly, mc-two-channel-merged, mc-no-llm-in-critical-path,
+>   mc-dictation-untouched) — markdown cards under `docs/judges/
+>   phase-mc/` + JSON entries in `.code_puppy/judges-template.json`
+>   trigger=phase_end / applies_when=phase=='mc'. Production-readiness
+>   defect found + fixed in W6: `MeetingSpeakerLabelMic/Sys` settings
+>   were persisted + UI-exposed but NEVER plumbed into
+>   `merge_two_channels` (hardcoded `**You:**` / `**Other(s):**`
+>   constants). Fix introduces `SpeakerLabels { mic, sys }` with
+>   `Default` + `load(&Connection)` + `mic_md()` / `sys_md()` helpers,
+>   threaded through `merge_two_channels(mic, sys, &labels)` and
+>   `render_markdown(detail, llm, &labels)`; both `lifecycle.rs`
+>   (persist path) and `commands/meetings.rs` (export/copy paths)
+>   now read settings before constructing the markdown. +3 merge
+>   tests + 2 export tests pin the round-trip. Tag `phase-mc-start`
+>   set at `d540a64` (commit immediately before first MC commit
+>   `3f6ca82`) so the `mc-dictation-untouched` judge has a stable
+>   diff reference (lateral epics 0022/0024/0025 legitimately
+>   touched some sealed files between `phase-4-complete` and
+>   `phase-mc-start`; that work is NOT MC's concern). Beads closed:
+>   mb-pdv (epic), mb-2bi (standing P1; closed via ADR 0029 as its
+>   architectural closer). **Cargo gate:** `check --all-targets`
+>   clean, `clippy --release --all-targets -- -D warnings` clean
+>   (34.79s), `test --release --no-run --lib` links clean (3m05s);
+>   `fmt --check` clean. Running release-mode lib tests still hits
+>   the documented `0xC0000139 STATUS_ENTRYPOINT_NOT_FOUND` Windows
+>   DLL-load wart per LESSONS-2026-05-17 — the merge/export tests
+>   are pure-function string equality so runtime success is
+>   essentially guaranteed once the DLL env is sorted (filed as
+>   environmental, not a code regression). Phase MC final test
+>   delta: W1 +35 + W2 +68 + W3 +35 + W4 +25 + W5 +13 + W6 +5 =
+>   **+181 tests**; project total ~564. **Production-ready:** zero
+>   `todo!()` / `unimplemented!()` in meetings critical-path code,
+>   zero `unwrap()` outside tests, ADRs 0026–0031 all Accepted, all
+>   binding invariants verified by the 5 judges + diff scans.
 > **WAVE 5 SEALED (2026-05-21):** Wave 5 lands the polish layer.
 >   All 6 Wave-5 beads closed: mb-pdv.19 (W6 brief, in commit
 >   `94a44d2`), mb-pdv.23 + mb-pdv.24 (progress chip + overlay

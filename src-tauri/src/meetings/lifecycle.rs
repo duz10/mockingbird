@@ -34,7 +34,7 @@ use crate::meetings::chunker::ChunkerConfig;
 use crate::meetings::filler_words::FILLERS;
 use crate::meetings::formatter::{format, FormatOpts};
 use crate::meetings::long_form_stt::{LongFormConfig, LongFormOutput, LongFormStt};
-use crate::meetings::merge::merge_two_channels;
+use crate::meetings::merge::{merge_two_channels, SpeakerLabels};
 use crate::meetings::persist::{persist_meeting, MeetingPersistRequest, MeetingStatus};
 use crate::meetings::runtime::{InFlightMeeting, MeetingRuntimeShared};
 
@@ -220,9 +220,22 @@ impl MeetingRuntimeShared {
             None
         };
         let formatted_merged = if source == MeetingSource::Both {
+            // Pull the user's speaker-name labels from settings at
+            // merge time so the persisted markdown reflects whatever
+            // the user has currently set. Read errors degrade to
+            // defaults (`You`/`Other(s)`) — never abort a meeting on
+            // a label-lookup glitch. See ADR 0028 §4.
+            let labels = {
+                let conn_guard = self
+                    .shared_conn
+                    .lock()
+                    .map_err(|_| AppError::MeetingCapture("shared_conn mutex poisoned".into()))?;
+                SpeakerLabels::load(&conn_guard)
+            };
             Some(merge_two_channels(
                 &output.mic_segments,
                 &output.sys_segments,
+                &labels,
             ))
         } else {
             None

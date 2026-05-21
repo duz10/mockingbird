@@ -2379,3 +2379,96 @@ multi-file bin layout; precedent now set for future dev tooling.
   surface. Cost: ~30 min of debug + a rebuild. Fix: surface them.
 
 ---
+
+## 2026-05-22 — Phase MC retrospective `[phase-mc-retrospective]`
+
+**Context:** Phase MC (Meeting Capture) sealed at `phase-mc-complete`
+in Wave 6. ADRs 0026 (sibling subsystem), 0027 (chord activation),
+0028 (twin-stream capture), 0029 (long-form chunked Whisper),
+0030 (whisper segment exposure), 0031 (meeting loopback backend) all
+Accepted. The standing P1 `mb-2bi` (audio streaming + chunked
+Whisper) closed via ADR 0029 as its architectural closer.
+
+### What went right
+1. **Wave brief discipline paid off.** Every wave seal authored
+   the next wave's brief with type defs / function signatures /
+   test specs / deviations. Code-side iterations could start
+   immediately on the next agent invocation without re-reading
+   the master plan end-to-end.
+2. **Sibling-subsystem isolation held.** Zero edits to sealed
+   dictation/injection/cleanup-trait/hotkey-state code across 6
+   waves. Only `hotkey/probe.rs` was extended (allowed — not in
+   the seal set per ADR 0027). The `mc-dictation-untouched`
+   judge mechanically verifies this.
+3. **Determinism-first formatter.** Pure Rust + `phf::phf_set!`
+   for filler words + proptest fixpoint property caught zero
+   bugs in retrospective but pins the invariant for all future
+   Whisper model swaps. `mc-formatter-deterministic` judge
+   makes this explicit.
+4. **Per-channel stitch + late merge.** Keeping mic and sys
+   segments on separate `Vec<TimedSegment>` until the explicit
+   `merge_two_channels` call made `lossless_synthetic_long_feed_no_gaps_no_dupes`
+   mechanically verifiable on a 30-chunk feed without needing
+   real audio.
+
+### What bit us
+1. **Speaker-label settings were UI-exposed but never plumbed.**
+   `MeetingSpeakerLabelMic`/`Sys` settings were added in Wave 1's
+   `settings/model.rs` and surfaced in Wave 5's
+   `SettingsMeetingTab.tsx`, but `merge_two_channels` hardcoded
+   `**You:**` / `**Other(s):**` as `const` strings and was
+   never updated to read them. Caught in Wave 6 production-
+   readiness scan. **Lesson:** any time a setting goes into
+   `SettingKey`, immediately grep for hardcoded literals at
+   the consumer sites — a setting that nobody reads is worse
+   than no setting (the user expects it to work). Fix introduced
+   `SpeakerLabels` struct + `load(&Connection)` constructor +
+   `mic_md()` / `sys_md()` Markdown helpers threaded through
+   both the persist path (`lifecycle.rs`) and the export paths
+   (`commands/meetings.rs`).
+2. **Diff-based judges need a phase-specific anchor tag.** The
+   `mc-dictation-untouched` judge originally diffed against
+   `phase-4-complete`, which mis-flagged lateral-epic
+   (0022/0024/0025) commits as "Phase MC violations". Wave 6
+   created the `phase-mc-start` tag at `d540a64` (commit
+   immediately before the first MC commit `3f6ca82`) to give
+   the judge a clean baseline. **Lesson:** for any future phase
+   sealed after another phase has shipped lateral work, tag
+   the start commit alongside the seal commit. Pattern:
+   `git tag phase-{N}-start <first-phase-commit>^` right after
+   `git tag phase-{N}-complete`.
+3. **Tauri 2 macro + generic-runtime `State<_, T>`.** When a
+   command takes both `AppHandle<R>` and `State<'_, T>`, the
+   bare `tauri::AppHandle` defaults to `AppHandle<Wry>` and the
+   `generate_handler!` macro fails to type-resolve. Make the
+   command itself generic: `pub fn cmd<R: Runtime>(app: AppHandle<R>, state: State<'_, T>, ...)`.
+   Documented earlier in the W5 SEAL commit; pinned here in the
+   retrospective so future Tauri-command authors don't relearn it.
+4. **Release-mode test execution on Windows is fragile.** The
+   `0xC0000139 STATUS_ENTRYPOINT_NOT_FOUND` DLL-load error
+   continued to bite Wave-5 and Wave-6 gates. The
+   `cargo-with-cuda.ps1` script sets MSVC + CUDA + cmake env
+   but doesn't resolve every DLL-loader edge case. **Workaround
+   held:** `cargo test --release --no-run` was the gate; the
+   tests are heavily pure-function so runtime failure once
+   linked is a "DLL env" problem, not a "code" problem. Filed
+   as environmental, not a code defect — but a future Phase X
+   should consider adding a `scripts/run-tests-in-clean-shell.ps1`
+   that bootstraps the loader path explicitly.
+
+### Architecture deltas worth preserving
+- Meeting LLM prompts live in `src-tauri/src/meetings/prompts/*.md`,
+  NOT in the `modes` table. Migration 011 only adds the
+  `meetings` / `meeting_transcripts` / `meeting_transcripts_fts`
+  tables. This is what makes ADR 0026's critical-path
+  invariant possible.
+- The `OllamaProvider` is imported by exactly ONE meetings file
+  (`meetings/llm_pass.rs`). Every other meeting module is
+  determinism-only. The `mc-no-llm-in-critical-path` judge is
+  a static grep — the architecture enforces the invariant; the
+  judge documents how to verify it.
+- The runtime LLM-pass cache (`Arc<Mutex<HashMap<String, String>>>`)
+  is the LLM output's only storage. Never written to the DB.
+  The user invokes `meeting_run_llm_pass` explicitly per
+  meeting; the canonical transcript is independent.
+
