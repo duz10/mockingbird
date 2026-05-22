@@ -1,0 +1,182 @@
+/* Command Center overlay (Phase 10 Wave 1A, ADR 0037).
+ *
+ * Same surface conventions as the recording + meeting overlays:
+ * transparent Tauri window, rounded pill, dark backdrop, the design
+ * system's token set. The orchestrator sets it to bottom-center and
+ * flips it non-activating in Win32; this stylesheet only handles
+ * paint.
+ */
+
+.root {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 100vw;
+  height: 100vh;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  user-select: none;
+  font-family: var(--font-body, system-ui, sans-serif);
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 480px;
+  padding: 14px 18px 16px 18px;
+  background: var(--surf-2);
+  color: var(--on-surf);
+  border: 1px solid color-mix(in oklab, var(--on-surf) 8%, transparent);
+  border-radius: 18px;
+  box-sizing: border-box;
+  /* Soft fade-in for first paint. The Win32 hwnd is flipped to
+   * non-activating elsewhere; this is purely a polish detail. */
+  animation: cc-fade-in 140ms ease-out;
+}
+
+@keyframes cc-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.welcomeBand {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid color-mix(in oklab, var(--on-surf) 6%, transparent);
+}
+
+.welcomeTitle {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--on-surf);
+}
+
+.welcomeBody {
+  margin: 0;
+  font-size: 0.78rem;
+  color: color-mix(in oklab, var(--on-surf) 70%, transparent);
+  line-height: 1.35;
+}
+
+.welcomeBody kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  margin: 0 1px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.7rem;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--on-surf) 8%, transparent);
+  border: 1px solid color-mix(in oklab, var(--on-surf) 14%, transparent);
+}
+
+.modePicker {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.modeTile {
+  /* Bare-button reset, then tile styling. */
+  appearance: none;
+  background: color-mix(in oklab, var(--on-surf) 4%, transparent);
+  color: var(--on-surf);
+  border: 1px solid color-mix(in oklab, var(--on-surf) 10%, transparent);
+  border-radius: 12px;
+  padding: 10px 8px 12px 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  text-align: left;
+  font: inherit;
+  transition: background 80ms ease-out, border-color 80ms ease-out, transform 60ms ease-out;
+}
+
+.modeTile:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--on-surf) 8%, transparent);
+  border-color: color-mix(in oklab, var(--on-surf) 18%, transparent);
+}
+
+.modeTile:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.modeTile:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.modeTile[data-launching="true"] {
+  background: color-mix(in oklab, var(--on-surf) 12%, transparent);
+}
+
+.modeTileTitle {
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+}
+
+.modeTileHint {
+  font-size: 0.72rem;
+  color: color-mix(in oklab, var(--on-surf) 65%, transparent);
+}
+
+.sessionCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sessionMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sessionKind {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.sessionElapsed {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.95rem;
+  color: color-mix(in oklab, var(--on-surf) 85%, transparent);
+}
+
+.stopButton {
+  appearance: none;
+  background: var(--terra-50, #B85C38);
+  color: white;
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 18px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 80ms ease-out;
+}
+
+.stopButton:hover {
+  background: var(--terra-60, #C97548);
+}
+
+.stopButton:active {
+  transform: translateY(1px);
+}

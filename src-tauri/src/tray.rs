@@ -40,6 +40,13 @@ pub fn register(app: &mut App) -> AppResult<()> {
     let open_history = MenuItemBuilder::with_id("open_history", "Open History")
         .build(app)
         .map_err(map_tauri)?;
+    // Phase 10 Wave 1A (ADR 0037): tray-entry for the Command
+    // Center, so users without the chord configured (or whose chord
+    // failed conflict-probe) still have a discoverable path.
+    let open_command_center =
+        MenuItemBuilder::with_id("open_command_center", "Open Command Center")
+            .build(app)
+            .map_err(map_tauri)?;
     let pause = MenuItemBuilder::with_id("pause", "Pause")
         .build(app)
         .map_err(map_tauri)?;
@@ -81,6 +88,7 @@ pub fn register(app: &mut App) -> AppResult<()> {
 
     let menu = MenuBuilder::new(app)
         .items(&[
+            &open_command_center,
             &open_history,
             &pause,
             &pause_meeting,
@@ -189,7 +197,7 @@ fn map_tauri(e: tauri::Error) -> AppError {
 pub fn handle_menu_event_pure(id: &str) -> bool {
     matches!(
         id,
-        "open_history" | "pause" | "pause_meeting" | "settings" | "quit"
+        "open_history" | "open_command_center" | "pause" | "pause_meeting" | "settings" | "quit"
     )
 }
 
@@ -203,6 +211,14 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
         "open_history" | "settings" => {
             tracing::info!(id = id, "tray: opening main window");
             show_main_window(app);
+        }
+        "open_command_center" => {
+            tracing::info!("tray: open command center");
+            if let Some(cc) = app.try_state::<crate::command_center::CommandCenter>() {
+                cc.open_via_tray();
+            } else {
+                tracing::warn!("tray: command center not registered");
+            }
         }
         "pause" => tracing::info!("tray: pause (stub, Phase 5 polish)"),
         "quit" => {
@@ -269,5 +285,11 @@ mod tests {
     fn handle_menu_event_pure_recognizes_pause_meeting_id() {
         // Phase MC Wave 5 — the new tray check-item.
         assert!(handle_menu_event_pure("pause_meeting"));
+    }
+
+    #[test]
+    fn handle_menu_event_pure_recognizes_open_command_center() {
+        // Phase 10 Wave 1A — ADR 0037 tray entry.
+        assert!(handle_menu_event_pure("open_command_center"));
     }
 }

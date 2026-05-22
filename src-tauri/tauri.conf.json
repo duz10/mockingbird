@@ -61,6 +61,23 @@
         "shadow": true,
         "visible": false,
         "center": true
+      },
+      {
+        "label": "command_center",
+        "title": "Mockingbird Command Center",
+        "url": "command_center.html",
+        "width": 520,
+        "height": 200,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "focus": false,
+        "skipTaskbar": true,
+        "acceptFirstMouse": false,
+        "shadow": true,
+        "visible": false,
+        "center": true
       }
     ],
     "security": {

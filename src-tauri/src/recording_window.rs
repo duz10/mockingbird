@@ -1,4 +1,4 @@
-//! Recording-window owner.
+﻿//! Recording-window owner.
 //!
 //! The recording window is a small **non-activating** Tauri webview
 //! (label `"recording"`, configured in `tauri.conf.json` with
@@ -140,6 +140,18 @@ pub struct RecordingWindow {
     /// `Option` so unit tests can construct a window without spinning
     /// up a full Tauri runtime.
     app: Arc<Mutex<Option<AppHandle>>>,
+    /// Phase 10 Wave 1A (ADR 0037 §5 — surgical touch authorized).
+    /// When the Command Center window is up, the dictation pip and
+    /// the CC would collide at bottom-center. The CC sets this flag
+    /// to `true` while it's visible; `show()` honors it by skipping
+    /// the actual webview `show()` while still emitting state events
+    /// (so any other listener — e.g. tests, future overlays — keeps
+    /// getting the pipeline-state stream).
+    ///
+    /// **Suppresses visibility only.** The dictation pipeline itself
+    /// (audio capture, STT, cleanup, injection) is unaffected. This
+    /// is a UI-collision avoidance flag, not a state-machine flag.
+    suppressed_for_command_center: Arc<AtomicBool>,
 }
 
 impl RecordingWindow {
@@ -147,6 +159,50 @@ impl RecordingWindow {
     /// later via [`Self::set_app_handle`].
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Phase 10 Wave 1A. Flip the suppression flag. When `true`, the
+    /// dictation pip's [`Self::show`] still emits the `listening`
+    /// state event but skips the actual webview show, leaving the
+    /// Command Center window's bottom-center slot uncontested. The
+    /// Command Center orchestrator flips this on when its window
+    /// opens and off when it closes.
+    pub fn set_suppressed_for_command_center(&self, suppressed: bool) {
+        let prior = self
+            .suppressed_for_command_center
+            .swap(suppressed, Ordering::SeqCst);
+        if prior != suppressed {
+            tracing::debug!(
+                target: "recording_window",
+                suppressed,
+                "command-center suppression flag toggled"
+            );
+            // If suppression is being lifted while we believe we're
+            // visible, re-issue the show() so the pip actually appears
+            // (the previous show() while suppressed was a no-op).
+            if !suppressed && self.visible.load(Ordering::SeqCst) {
+                self.with_window(|w| {
+                    let _ = w.show();
+                });
+            }
+            // Conversely, if suppression is being engaged while the
+            // pip is currently visible, hide the webview but DO NOT
+            // touch `visible` — the dictation pipeline still thinks
+            // it's recording, and when suppression lifts we need to
+            // restore the visual.
+            if suppressed && self.visible.load(Ordering::SeqCst) {
+                self.with_window(|w| {
+                    let _ = w.hide();
+                });
+            }
+        }
+    }
+
+    /// Current value of the suppression flag. Exposed for tests +
+    /// any future tray status surface that wants to display "pip
+    /// suppressed by Command Center".
+    pub fn is_suppressed_for_command_center(&self) -> bool {
+        self.suppressed_for_command_center.load(Ordering::SeqCst)
     }
 
     /// Wire up the Tauri app handle. Idempotent — last writer wins.
@@ -172,12 +228,23 @@ impl RecordingWindow {
     /// dictation. Benefit: the pretty pill actually appears.
     pub fn show(&self, mode_slug: &str) -> AppResult<()> {
         let was_hidden = !self.visible.swap(true, Ordering::SeqCst);
+        // Phase 10 Wave 1A: while the Command Center occupies the
+        // bottom-center slot, skip the actual webview show. The
+        // state-event stream still fires — the pipeline is recording,
+        // we're just hiding the pip until the CC closes.
+        let suppressed = self.suppressed_for_command_center.load(Ordering::SeqCst);
         if was_hidden {
-            tracing::info!(mode = %mode_slug, "🎙 recording window: SHOW");
+            tracing::info!(
+                mode = %mode_slug,
+                suppressed,
+                "🎙 recording window: SHOW"
+            );
             beep_best_effort(BEEP_START_HZ, BEEP_DURATION_MS);
-            self.with_window(|w| {
-                let _ = w.show();
-            });
+            if !suppressed {
+                self.with_window(|w| {
+                    let _ = w.show();
+                });
+            }
         }
         self.emit(state::LISTENING, Some(mode_slug), None);
 
@@ -388,5 +455,56 @@ mod tests {
         w.show("normal").unwrap();
         w.set_state(state::TRANSCRIBING, Some("normal"));
         assert!(w.is_visible());
+    }
+
+    // -------- Phase 10 Wave 1A — command-center suppression --------
+
+    #[test]
+    fn suppression_flag_defaults_to_false() {
+        let w = RecordingWindow::new();
+        assert!(!w.is_suppressed_for_command_center());
+    }
+
+    #[test]
+    fn suppression_flag_round_trips() {
+        let w = RecordingWindow::new();
+        w.set_suppressed_for_command_center(true);
+        assert!(w.is_suppressed_for_command_center());
+        w.set_suppressed_for_command_center(false);
+        assert!(!w.is_suppressed_for_command_center());
+    }
+
+    #[test]
+    fn suppression_does_not_change_visibility_state() {
+        // Setting the flag is purely about the webview show; the
+        // `visible` field tracks the dictation pipeline's belief
+        // about whether it's recording and must not flip just because
+        // the CC happens to be up.
+        let w = RecordingWindow::new();
+        w.show("normal").unwrap();
+        assert!(w.is_visible());
+        w.set_suppressed_for_command_center(true);
+        assert!(w.is_visible(), "visible flag must be unaffected");
+    }
+
+    #[test]
+    fn show_while_suppressed_still_flips_visible_flag() {
+        // The pipeline calls show() at StartCapture regardless of
+        // whether the CC is up. We honor the call (flip `visible`,
+        // emit the event burst) but skip the webview show. When the
+        // CC closes, the suppression-clear path re-issues the show().
+        let w = RecordingWindow::new();
+        w.set_suppressed_for_command_center(true);
+        w.show("normal").unwrap();
+        assert!(w.is_visible());
+        assert!(w.is_suppressed_for_command_center());
+    }
+
+    #[test]
+    fn suppression_clones_share_state() {
+        let w = RecordingWindow::new();
+        let w2 = w.clone();
+        w.set_suppressed_for_command_center(true);
+        assert!(w2.is_suppressed_for_command_center());
     }
 }

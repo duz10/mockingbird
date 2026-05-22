@@ -1,4 +1,4 @@
-#![allow(missing_docs)] // Enum variants are documented in docs/SETTINGS.md.
+﻿#![allow(missing_docs)] // Enum variants are documented in docs/SETTINGS.md.
 
 //! Typed setting keys — the registry of every known setting in the app.
 //!
@@ -84,6 +84,32 @@ pub enum SettingKey {
     /// runtime spawn + written by `MeetingCaptureRuntime::
     /// set_meeting_hotkey_paused`.
     MeetingHotkeyPaused,
+
+    // ----- Phase 10 Wave 1A — Unified Recording Command Center (ADR 0037). -----
+    //
+    // Three additive keys. No new migration; values land in the
+    // existing `settings` table via the `Settings` facade.
+    //
+    /// String chord descriptor for the Command Center hotkey.
+    /// Default `"RightCtrl+Space"`. Same parser as the meeting chord
+    /// picker (a `MODIFIER+KEY` pair where both sides are VK-name
+    /// strings — see [`crate::meetings::vk_names`]). Used by
+    /// `command_center::hotkey::install`.
+    CommandCenterChord,
+    /// One-shot "user has seen the Welcome variant of the Command
+    /// Center" flag. Default `false`; flips to `true` the first time
+    /// the Command Center is dismissed via any path (Esc, mode pick,
+    /// tray close). Boot path checks it to decide whether to call
+    /// `open_via_first_run()`.
+    CommandCenterSeenV1,
+    /// Whether the legacy `Right Ctrl + .` meeting chord is still
+    /// installed. Default `false` for new users. Existing users have
+    /// this auto-promoted to `true` by the one-shot migration in
+    /// `meetings/runtime.rs` (pattern verbatim from ADR 0033). When
+    /// `false`, `meetings/hotkey_installer.rs` skips the direct-chord
+    /// install; the user reaches Meeting capture via the Command
+    /// Center mode picker instead.
+    LegacyMeetingChordEnabled,
 }
 
 impl SettingKey {
@@ -110,6 +136,10 @@ impl SettingKey {
             Self::MeetingSpeakerLabelMic => "meeting_speaker_label_mic",
             Self::MeetingSpeakerLabelSys => "meeting_speaker_label_sys",
             Self::MeetingHotkeyPaused => "meeting_hotkey_paused",
+            // Phase 10 Wave 1A.
+            Self::CommandCenterChord => "command_center_chord",
+            Self::CommandCenterSeenV1 => "command_center_seen_v1",
+            Self::LegacyMeetingChordEnabled => "legacy_meeting_chord_enabled",
         }
     }
 
@@ -136,6 +166,10 @@ impl SettingKey {
             "meeting_speaker_label_mic" => Ok(Self::MeetingSpeakerLabelMic),
             "meeting_speaker_label_sys" => Ok(Self::MeetingSpeakerLabelSys),
             "meeting_hotkey_paused" => Ok(Self::MeetingHotkeyPaused),
+            // Phase 10 Wave 1A.
+            "command_center_chord" => Ok(Self::CommandCenterChord),
+            "command_center_seen_v1" => Ok(Self::CommandCenterSeenV1),
+            "legacy_meeting_chord_enabled" => Ok(Self::LegacyMeetingChordEnabled),
             other => Err(AppError::Other(format!("unknown setting key: {other:?}"))),
         }
     }
@@ -169,6 +203,18 @@ impl SettingKey {
             Self::MeetingSpeakerLabelMic => serde_json::json!("You"),
             Self::MeetingSpeakerLabelSys => serde_json::json!("Other(s)"),
             Self::MeetingHotkeyPaused => serde_json::json!(false),
+            // Phase 10 Wave 1A. Default chord per ADR 0037 §Q1; if it
+            // conflicts with another global hook at boot, the conflict
+            // probe logs a WARN and leaves the user to re-pick via
+            // Settings (existing meeting-chord pattern).
+            Self::CommandCenterChord => serde_json::json!("RightCtrl+Space"),
+            Self::CommandCenterSeenV1 => serde_json::json!(false),
+            // Default OFF for new users. The one-shot migration in
+            // `meetings/runtime.rs` flips this to `true` on first boot
+            // for any profile that has a non-default `meeting_hotkey_*`
+            // value (i.e. an existing user who has been driving the
+            // direct chord pre-CC).
+            Self::LegacyMeetingChordEnabled => serde_json::json!(false),
         }
     }
 
@@ -197,6 +243,10 @@ impl SettingKey {
             Self::MeetingSpeakerLabelMic,
             Self::MeetingSpeakerLabelSys,
             Self::MeetingHotkeyPaused,
+            // Phase 10 Wave 1A.
+            Self::CommandCenterChord,
+            Self::CommandCenterSeenV1,
+            Self::LegacyMeetingChordEnabled,
         ]
     }
 }
@@ -296,7 +346,28 @@ mod tests {
     /// fails the test. Bump the expected count when you add a key.
     #[test]
     fn all_enumerates_every_variant() {
-        // 8 original + 11 Phase MC + 1 Phase MC W5 (MeetingHotkeyPaused) = 20.
-        assert_eq!(SettingKey::all().len(), 20);
+        // 8 original + 11 Phase MC + 1 Phase MC W5 (MeetingHotkeyPaused)
+        //   + 3 Phase 10 W1A (CommandCenter* + LegacyMeetingChordEnabled) = 23.
+        assert_eq!(SettingKey::all().len(), 23);
+    }
+
+    /// Phase 10 Wave 1A defaults must match ADR 0037 §Decision items
+    /// Q1, Q4, Q5. Drift here breaks the conflict probe + first-run
+    /// auto-open + the legacy-chord migration.
+    #[test]
+    fn command_center_defaults_match_adr_0037() {
+        use serde_json::json;
+        assert_eq!(
+            SettingKey::CommandCenterChord.default_value(),
+            json!("RightCtrl+Space")
+        );
+        assert_eq!(
+            SettingKey::CommandCenterSeenV1.default_value(),
+            json!(false)
+        );
+        assert_eq!(
+            SettingKey::LegacyMeetingChordEnabled.default_value(),
+            json!(false)
+        );
     }
 }

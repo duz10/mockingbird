@@ -217,6 +217,59 @@ pub fn format_hotkey_label(modifier_vk: u32, main_vk: u32) -> String {
 /// reset-to-defaults flows.
 const CHORD_HOTFIX_MARKER_KEY: &str = "_internal_mc_chord_copilot_hotfix_v1";
 
+/// Phase 10 Wave 1A marker (ADR 0037). When this row exists the
+/// `LegacyMeetingChordEnabled` migration has run; we don't re-do it.
+const LEGACY_CHORD_MIGRATION_MARKER_KEY: &str = "_internal_p10w1a_legacy_chord_migration_v1";
+
+/// One-shot migration for ADR 0037 §Q5: existing users who have
+/// already used Meeting capture (i.e. have rows in `meeting_sessions`)
+/// get `legacy_meeting_chord_enabled = true` so their muscle memory
+/// keeps working. New installs leave the flag at its `false` default
+/// — they reach Meeting capture via the Command Center mode picker.
+///
+/// Behaviour matrix:
+///
+/// | marker present | meetings table has rows | action                          |
+/// |----------------|--------------------------|---------------------------------|
+/// | yes            | (any)                    | no-op                           |
+/// | no             | yes                      | set flag=true, write marker     |
+/// | no             | no                       | leave flag=false, write marker  |
+///
+/// Best-effort: a failure to write the migration just means it runs
+/// again next launch — idempotent.
+pub(crate) fn migrate_legacy_meeting_chord_flag_once(conn: &Connection) {
+    let already_done: rusqlite::Result<i64> = conn.query_row(
+        "SELECT 1 FROM settings WHERE key = ?1",
+        rusqlite::params![LEGACY_CHORD_MIGRATION_MARKER_KEY],
+        |r| r.get(0),
+    );
+    if already_done.is_ok() {
+        return;
+    }
+    // Probe for prior meeting use. Any single row is enough.
+    let has_meetings: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM meeting_sessions LIMIT 1)",
+            [],
+            |r| r.get::<_, i64>(0).map(|n| n != 0),
+        )
+        .unwrap_or(false);
+    if has_meetings {
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+            rusqlite::params!["legacy_meeting_chord_enabled", "true"],
+        );
+        tracing::info!(
+            target: "meetings",
+            "Phase 10 Wave 1A migration: existing meeting user detected, legacy chord enabled"
+        );
+    }
+    let _ = conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+        rusqlite::params![LEGACY_CHORD_MIGRATION_MARKER_KEY, "\"applied\""],
+    );
+}
+
 /// One-shot bookkeeping: upgrade `meeting_hotkey_key = "VK_M"` to
 /// `"VK_OEM_PERIOD"` on DBs that pre-date the mb-fc1 hotfix.
 ///
@@ -390,8 +443,46 @@ impl MeetingCaptureRuntime {
         // Clone the sender BEFORE handing it to the installer so we
         // keep an injection path for PauseToggle events.
         let act_tx_for_injection = act_tx.clone();
-        let hotkey = MeetingHotkeyInstaller::install(chord, act_tx)
-            .map_err(|e| AppError::MeetingCapture(format!("install meeting hotkey: {e}")))?;
+
+        // Phase 10 Wave 1A (ADR 0037 §Q5): run the one-shot legacy
+        // chord migration, then read the final flag. If false, we
+        // skip the direct-chord install — the user reaches Meeting
+        // capture via the Command Center mode picker instead. The
+        // channel + activation thread still run so programmatic
+        // start_meeting() / cancel_meeting() (which the CC drives)
+        // keeps working.
+        let legacy_chord_enabled = {
+            let guard = shared
+                .shared_conn
+                .lock()
+                .map_err(|_| AppError::MeetingCapture("shared_conn mutex poisoned".into()))?;
+            migrate_legacy_meeting_chord_flag_once(&guard);
+            Settings::new(&guard)
+                .get::<bool>(SettingKey::LegacyMeetingChordEnabled)
+                .unwrap_or(false)
+        };
+        let hotkey = if legacy_chord_enabled {
+            tracing::info!(
+                target: "meetings",
+                chord = %config.hotkey_label,
+                "legacy meeting chord enabled — installing direct hotkey"
+            );
+            Some(
+                MeetingHotkeyInstaller::install(chord, act_tx).map_err(|e| {
+                    AppError::MeetingCapture(format!("install meeting hotkey: {e}"))
+                })?,
+            )
+        } else {
+            tracing::info!(
+                target: "meetings",
+                "legacy meeting chord disabled — Meeting capture reachable via Command Center only"
+            );
+            // Drop the sender we'd have handed to the installer; the
+            // activation loop still owns its receiver and processes
+            // PauseToggle events from `act_tx_for_injection`.
+            drop(act_tx);
+            None
+        };
 
         let shared_for_thread = shared.clone();
         let activation_thread = thread::Builder::new()
@@ -422,7 +513,7 @@ impl MeetingCaptureRuntime {
 
         Ok(Self {
             shared,
-            hotkey: Some(hotkey),
+            hotkey,
             activation_thread: Some(activation_thread),
             activation_stop_tx: Some(stop_tx),
             act_tx: act_tx_for_injection,

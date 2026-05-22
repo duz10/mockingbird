@@ -1,4 +1,4 @@
-//! Mockingbird — local-first voice dictation for Windows.
+﻿//! Mockingbird — local-first voice dictation for Windows.
 //!
 //! Binary entry point is in `main.rs`; this library crate is what gets
 //! linked into the Tauri shell. See `PLAN-mockingbird-v2.md` for the
@@ -14,6 +14,8 @@ pub mod cleanup;
 // contract surface end users care about.
 #[allow(missing_docs)]
 pub mod commands;
+// Phase 10 Wave 1A — Unified Recording Command Center (ADR 0037).
+pub mod command_center;
 pub mod db;
 pub mod dictation;
 pub mod error;
@@ -24,6 +26,8 @@ pub mod logging;
 // Phase MC — sibling subsystem to dictation (ADR 0026). Wave 1 ships
 // scaffolds + types + trait shapes; Waves 2-6 fill the bodies.
 pub mod meetings;
+// Phase 10 Wave 1A — shared bottom-center overlay conventions.
+pub mod overlay_conventions;
 pub mod recording_window;
 pub mod secrets;
 pub mod settings;
@@ -216,10 +220,30 @@ pub fn run() {
                 }
             }
 
-            // Register the tray now that both runtimes are in the
-            // managed-state registry. The tray menu-build path reads
-            // `MeetingCaptureRuntime::is_meeting_hotkey_paused()` to
-            // set the initial checkmark on "Pause Meeting Hotkey".
+            // Phase 10 Wave 1A — spin up the Command Center after the
+            // dictation + meeting runtimes are registered, so the
+            // chord-fire → dispatch path can resolve them via managed
+            // state. First-run auto-open happens inside `spawn()` if
+            // `command_center_seen_v1 == false`.
+            let cc = command_center::CommandCenter::spawn(app.handle().clone(), shared_conn.clone());
+            // Attach the meeting runtime to the CC if it managed to
+            // boot. Late-binding keeps the CC alive even when meeting
+            // capture failed to install — the user still sees the
+            // mode picker, the Meeting tile just dispatches to a
+            // missing runtime and gets a graceful failure toast.
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(mc_shared) = app.try_state::<crate::meetings::runtime::MeetingRuntimeShared>() {
+                    cc.attach_meeting_runtime(mc_shared.inner().clone());
+                }
+            }
+            app.manage(cc);
+
+            // Register the tray now that both runtimes + the Command
+            // Center are in the managed-state registry. The tray menu-
+            // build path reads `MeetingCaptureRuntime::
+            // is_meeting_hotkey_paused()` to set the initial checkmark
+            // on "Pause Meeting Hotkey".
             tray::register(app).map_err(box_err)?;
 
             Ok(())
