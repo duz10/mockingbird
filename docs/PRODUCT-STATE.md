@@ -242,60 +242,87 @@ the ephemeral summary pass). Does NOT extend `CleanupProvider`.
 - Tray icon, single MockingbirdMark, hide-to-tray on X-close.
 - `tracing`-based logger writing to local files (no telemetry, Principle 4).
 
-### 3.15 `activity/` — Activity Capture (Phase 10, in-flight)
-Chartered by ADR 0036 (subsystem) + ADR 0037 (Command Center). Four
-waves shipped, two still ahead:
+### 3.15 `activity/` — Activity Capture (Phase 10, **sealed at `phase-10-complete`**)
+Chartered by ADR 0036 (subsystem) + ADR 0037 (Command Center).
+Shipped 2026-05-26. Privacy posture is opt-in everything: audio off by
+default, retention TTLs zero by default (no auto-delete), exclusion
+rules + secure-input guard fire at capture time (not post-hoc).
 
-- **Waves 1A + 1B (sealed)** — Command Center surface, `Activity` page,
-  migration 012 schema (`activity_sessions`, `activity_events`,
-  `activity_blocks`, `activity_summaries`), runtime modules
-  `lifecycle.rs` / `sampler.rs` / `runtime.rs` / `persist.rs` /
-  `activity_level.rs` + IDs in `ids.rs`. Foreground polling + idle
-  tracking write immutable rows to `activity_events`.
-- **Wave 2 (sealed)** — UIA deep snapshots via `uia/` (Probe trait +
-  Windows COM impl), multi-monitor attribution, v2 `snapshot_json`
-  payload (focused field, visible-text fragments, control summary,
-  password-field redaction).
-- **Wave 3 (sealed end-of-iteration following Wave 4 confirmation)** —
-  ADR 0040. Pure-Rust pipeline `segmenter.rs` (event normalization)
-  → `blocker.rs` (5-rule boundary heuristic: app-switch, large title
-  delta, idle ≥ 60s, monitor change, 30-min cap) → `abstractor.rs`
-  (LLM via OllamaProvider; templated fast-path for `no_payload`
-  Blocks) → `assembler.rs` (Markdown rendering, work-report variant).
-  Persistence + CRUD in `blocks_persist.rs`; orchestration, export
-  to file, clipboard in `export.rs`. Migration 013 adds
-  `activity_blocks.label` + an FTS5 contentless shadow over
-  `(label, generated_abstract)`. UI surface: Wave-3 Blocks panel on
-  the Activity detail view (rename / rewrite-abstract / delete /
-  regenerate / copy as Markdown), in sibling `ActivityBlocks.tsx`.
-  Provenance per Principle 2: every Block row records `prompt_version_sha`
-  + `source_event_ids` JSON.
-- **Wave 4 (code-complete, awaiting Wave-5 dispatch)** — ADR 0041.
-  Layer 2 audio capture, opt-in via `activity_audio_enabled` typed
-  setting (default OFF — privacy by default). Pure-Rust `audio.rs`
-  defines the `AudioPipeline` trait + `LongFormAudioPipeline` impl
-  that *wraps* (does not duplicate) Meeting Capture's WASAPI
-  twin-stream + `meetings::long_form_stt::LongFormStt` chunked
-  Whisper machinery (Principle 5 — no audio infra duplication; the
-  reuse is documented in ADR 0041). Per-channel transcript segments
-  (mic + system loopback) land in `activity_transcript_segments`
-  via `segments_persist.rs`, time-shifted from capture-relative to
-  global epoch-ms at insert. `block_audio_stitcher.rs` assigns each
-  segment to exactly one Block via the midpoint rule (the segment's
-  `(t0 + t1) / 2` falls inside `[block.start, block.end)`). The
-  abstractor swaps to `abstract_block.audio_aware.md` + a distinct
-  `abstract_v2_audio-XXXXXXXX` prompt-version family when a Block has
-  any audio attached; `user_edited` Blocks are still respected.
-  Migration 014 adds `audio_whisper_model` + `audio_chunk_window_ms`
-  provenance columns to `activity_sessions`. `activity_start(with_audio)`
-  IPC; Command Center reads the setting as the default at start time.
-  Settings General row exposes the toggle. 13 pure-module stitcher
-  tests via throwaway crate; all 6 cargo + UI gates green.
-- **Waves 5-6 (not started)** — hardening + encryption-at-rest
-  (Wave 5, gated on ADR 0038) + retention + crash recovery + PDF +
-  Settings depth; invariant judges + final `phase-10-complete` tag
-  (Wave 6). Wave 7 (Layer 3 screenshot + OCR) is optional post-seal
-  via successor ADR 0039.
+**Subsystem entry point.** `ActivityCaptureRuntime::spawn(conn, audio_chunk_base_dir)`
+from `lib.rs::setup`, immediately after `crash_recovery::recover_all`. The
+runtime owns one foreground sampler thread + the lifecycle FSM
+(`Idle ↔ Active ↔ Paused`); all DB writes go through `persist.rs` /
+`blocks_persist.rs` / `segments_persist.rs`, which gate every row with
+the matcher from `exclusion.rs` (loaded via `ExclusionMatcher::load`
+from `activity_exclusion_rules`).
+
+**Capture (Layer 1).** `sampler.rs` foreground-polls (1Hz default) +
+`activity_level.rs` tracks idle; UIA deep snapshots come from `uia/`
+(Probe trait + Windows COM impl; multi-monitor attribution + v2
+`snapshot_json` schema with focused-field, visible-text fragments,
+control summary, password-field redaction). `record_event` consults
+the exclusion matcher BEFORE INSERT — capture-time enforcement, not
+post-hoc scrubbing.
+
+**Summarization (Layer 1.5 — ADR 0040).** Pure-Rust pipeline
+`segmenter.rs` (event normalization) → `blocker.rs` (5-rule boundary
+heuristic: app-switch, large title delta, idle ≥ 60s, monitor change,
+30-min cap) → `abstractor.rs` (LLM via OllamaProvider with a
+templated fast-path for `no_payload` Blocks) → `assembler.rs` (Markdown
+rendering, work-report variant). Persistence + CRUD in `blocks_persist.rs`;
+export orchestration in `export.rs`. Migration 013 adds
+`activity_blocks.label` + an FTS5 contentless shadow over
+`(label, generated_abstract)`. Provenance per Principle 2: every Block
+records `prompt_version_sha` (`template_no_payload_v1` /
+`abstract_v1-XXXXXXXX` / `abstract_v2_audio-XXXXXXXX`) +
+`source_event_ids` JSON.
+
+**Optional audio (Layer 2 — ADR 0041).** Opt-in via `activity_audio_enabled`
+typed setting (default OFF). Pure-Rust `audio.rs` defines the
+`AudioPipeline` trait + `LongFormAudioPipeline` impl that *wraps*
+(does not duplicate) Meeting Capture's WASAPI twin-stream +
+`meetings::long_form_stt::LongFormStt` chunked Whisper machinery
+(Principle 5). Per-channel transcript segments land in
+`activity_transcript_segments` (migration 014) via `segments_persist.rs`,
+time-shifted from capture-relative to global epoch-ms at insert.
+`block_audio_stitcher.rs` assigns each segment to exactly one Block via
+the midpoint rule. The abstractor swaps to `abstract_block.audio_aware.md`
++ the `abstract_v2_audio-` fingerprint family when a Block has audio;
+`user_edited` Blocks are still respected.
+
+**Hardening (Wave 5 — ADRs 0042 / 0043 / 0044; migration 015).**
+- `exclusion.rs` — built-in rules seed (8 entries: 1Password, KeePass, LastPass, Bitwarden, consent.exe, LogonUI.exe, builtin-secure-input password-field guard, builtin-browser-bank regex). User-editable via Settings; reloads hot through `runtime.reload_exclusion_rules()`.
+- `retention.rs` — three independent TTLs (`events_days`, `segments_days`, `blocks_days`); sweep_once is one transaction; cascade-option-(a): when an `activity_events` row deletes, every Block that references it via `source_event_ids` JSON sets `raw_events_purged_at` (the abstract text survives intact).
+- `crash_recovery.rs` — boot sweep promotes `in_progress` sessions to `crashed_recovered`, deletes orphan chunk_dirs under `audio_chunk_base_dir`; idempotent.
+- `pdf_export.rs` — `printpdf` 0.7 two-mode render (`Full` shows time-stamped headers + abstracts; `WorkReport` strips times + apps, abstracts only). `pdf-extract` is a dev-only round-trip dep for the judge fixtures.
+
+**Command surface.** 16 `activity_*` IPC commands in `commands/mod.rs`
+(start / start_with_audio / pause / resume / stop / shutdown / list /
+get_detail / delete / list_blocks / rename_block / rewrite_abstract /
+delete_block / regenerate_block / export_blocks_markdown / export_pdf).
+
+**Front door.** Unified Recording Command Center (ADR 0037) is now the
+entry point for both Dictation and Meeting Capture. Legacy
+`Right Ctrl + .` Meeting chord respects `legacy_meeting_chord_enabled`
+(one-shot migration in `meetings/runtime.rs::migrate_legacy_meeting_chord_flag_once`
+flips it ON for existing users with prior meeting rows; new installs
+leave it OFF and reach Meeting Capture via the Command Center mode
+picker).
+
+**Invariant judges (Wave 6).** `docs/judges/phase-10/` contains six
+LLM-grader specs + `scripts\dry-run-phase10-judges.ps1` mechanical-layer
+rig: `exclusion-is-total`, `retention-preserves-abstracts`,
+`crash-recovery-idempotent`, `pdf-renders-correct-block-count`,
+`sealed-phases-untouched` (with verdict file at
+`sealed-phases-untouched-verdict.md`), `provenance-is-total`. All 6
+green on Wiggum loop iteration 1.
+
+**Deferred:** ADR 0038 (encryption-at-rest) RESERVED for v0.2.
+ADR 0039 (Layer 3 screenshot + OCR) optional post-seal via successor
+ADR.
+
+**Live-fire smoke test:** Dustin's post-seal step (LESSONS P7 pattern;
+judges prove invariants but not a clean OS bring-up).
 
 ---
 

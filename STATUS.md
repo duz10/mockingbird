@@ -10,7 +10,7 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-05-24 (MC v1.2 Stable Alpha seal — ADR 0035 + git tag `stable-alpha-v0.1`).
+**Last consolidated:** 2026-05-26 (Phase 10 Activity Capture sealed — git tag `phase-10-complete`).
 
 ## ✅ Sealed (do not re-execute)
 
@@ -26,6 +26,7 @@
 | `phase-mc-start` (anchor)| Stable diff reference for `mc-dictation-untouched` judge. |
 | `phase-mc-complete`      | Meeting Capture subsystem: chord activation, twin-stream capture, long-form chunked Whisper, deterministic formatter, two-channel merge, ephemeral LLM pass, overlay UI, Meetings/MeetingDetail pages, 5 invariant judges. |
 | `stable-alpha-v0.1`      | First user-visible stable build. MC subsystem at UX parity with PLAN (start/pause/stop/cancel/rename/auto-title/search/delete/export). Insights two-tab redesign. On-demand LLM pass on dictations. Reference checkpoint for distinguishing pre-/post-enhancement work in future sessions. |
+| `phase-10-complete`      | Activity Capture sibling subsystem (ADR 0036). Foreground polling + idle tracking + UIA v2 snapshots → LLM block summarization → optional per-block audio transcription → retention sweep + crash recovery + PDF export + capture-time exclusion. Unified Recording Command Center (ADR 0037) as the front door for both Dictation and Meeting Capture. 22 modules under `src-tauri/src/activity/`, migrations 012-015, 6 invariant judges (`docs/judges/phase-10/`) gated the seal. **Live-fire Win11 smoke test pending Dustin — judges don't catch live-OS regressions (LESSONS P7 pattern).** ADR 0038 (encryption-at-rest) RESERVED for v0.2. |
 
 **Lateral epics accepted via ADR** (no new phase tag — see `docs/adr/`):
 
@@ -39,49 +40,82 @@
 - ADR 0035 — MC v1.2 Stable Alpha (Tauri `capabilities/default.json` migration — the *real* root cause of mb-z5y class bugs; `meeting_cancel`; `meeting_rename`; `meeting_overlay_hide`; auto-derived meeting title; WASAPI loopback `build_stream` config-discovery fix; forensic JS-listener-ping beacon scheduled for removal in v1.3 — see `mb-xnn7`)
 - ADR 0036 — Activity Capture sibling-subsystem charter (Phase 10 numbered phase; Accepted 2026-05-24)
 - ADR 0037 — Unified Recording Command Center (Wave 1A charter + explicit boundary authorization for surgical edits to sealed Dictation + Meeting Capture surfaces; Accepted 2026-05-24)
+- ADR 0040 — Activity Capture Wave 3 abstractor pipeline (Accepted, sealed in `phase-10-complete`)
+- ADR 0041 — Activity Capture Wave 4 audio layer (Accepted, sealed in `phase-10-complete`)
+- ADR 0042 — Activity Capture retention cascade (Accepted, sealed in `phase-10-complete`)
+- ADR 0043 — Activity Capture exclusion list + built-in rules (Accepted, sealed in `phase-10-complete`)
+- ADR 0044 — Activity Capture PDF export via `printpdf` (Accepted, sealed in `phase-10-complete`)
 
 If a kickoff prompt asks you to re-execute any of the above, **STOP** and surface
 the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently sealed".
 
 ## 🟢 Currently active
 
-**Phase 10 — Activity Capture (sibling subsystem). Wave 5 — Hardening code-complete (sans encryption). Awaiting Dustin direction on Wave 6 (invariant judges + final seal) before final dispatch.**
+**No in-flight phase or chartered epic.** Phase 10 sealed at
+`phase-10-complete` (this consolidation). Live-fire Win11 smoke test
+is Dustin's post-seal step — judges don't catch live-OS regressions
+(LESSONS PINNED P7 pattern; same shape as the post-MC `mb-x1x` flow).
 
-Chartered 2026-05-25 (Bernard, Wave 0). Wave 0.5 — Command Center charter integration. Wave 1A — Command Center code (sealed end-of-1A, commit `33e2cca`). Wave 1B (this iteration) — migration 012, activity/* runtime modules, Activity-page UI, plus Wave 1A deferrals (command_center_chord Settings row + legacy_meeting_chord_enabled toggle). ADR 0036 + ADR 0037 both Accepted 2026-05-24 by Dustin. Numbered PLAN §10 phase mirroring Phase MC's container: numbered + ADR-chartered + per-wave seal tags + final `phase-10-complete` tag. Phase 9 stays reserved for the macOS cross-platform sweep.
-
-**Decision matrix (Wave 0.5):** Chord = `Right Ctrl + Space` (user-configurable, ADR 0019 probe); mutual-exclusion-while-recording = open Command Center showing SessionCard + Stop button, returns to mode picker after Stop; tray entry = yes ("Open Command Center"); legacy `Right Ctrl + .` meeting chord = user setting `legacy_meeting_chord_enabled` (default OFF; one-shot migration sets ON for existing users with the prior chord configured, mirrors ADR 0033); first-run = auto-open with Welcome header band, tracked via `command_center_seen_v1`.
-
-- **Charter ADRs:**
-  - [ADR 0036](docs/adr/0036-activity-capture-sibling-subsystem.md) — Activity Capture sibling-subsystem. **Status: Accepted (2026-05-24).**
-  - [ADR 0037](docs/adr/0037-unified-recording-command-center.md) — Unified Recording Command Center (Wave 1A charter + explicit boundary authorization for surgical edits to sealed Dictation + Meeting Capture surfaces). **Status: Accepted (2026-05-24).** Tie-breaker amendment: SessionCard shows most-recently-started concurrent session.
-- **Phase doc:** [`docs/phases/phase10.md`](docs/phases/phase10.md) — seven-wave brief (1A Command Center → 1B skeleton → 2 UIA depth → 3 summarization → 4 audio → 5 hardening → 6 judges + seal). Wave 7 (Layer 3 screenshot + OCR) is OPTIONAL post-seal via successor ADR 0039.
-- **Source plan:** [`mockingbird-activity-capture-plan.md`](mockingbird-activity-capture-plan.md) — vision doc; the implementation charter against it lives in ADRs 0036 + 0037.
-- **PLAN §10 amendment:** Phase 10 entry in `PLAN-mockingbird-v2.md` updated to include Wave 1A as the first wave, with Wave 1 re-lettered to 1B.
-- **Sub-ADRs deferred:** ADR 0038 (encryption-at-rest — Wave 5; SQLCipher / DPAPI-per-row / app-layer AES-GCM candidates pre-named; renumbered from 0037 after the Command Center charter took 0037). ADR 0039 (optional, post-seal — Layer 3 screenshot + OCR; renumbered from 0038 for the same reason).
-- **Bead epic:** `mb-a2w9` (status `in_progress`).
-- **Wave beads** (each P1, dependency-chained so each subsequent wave depends on its predecessor; the epic depends on all of them):
-  - `mb-jtbk` Wave 1A: Unified Recording Command Center ← `closed` (sealed at commit `33e2cca`; integration verified by Wave 1B's Command Center → Activity flow)
-  - `mb-hnl3` Wave 1B: Activity-Log Skeleton (titles-only) ← `closed` (sealed at commit `7333a98`; integration verified by Wave 2's UIA layer building cleanly on top of the skeleton)
-  - `mb-hr1u` Wave 2: UIA deep snapshots + multi-monitor ← `closed` (sealed at commit `9155f40`; integration verified by Wave 3's abstractor pipeline reading the v2 snapshot_json schema cleanly)
-  - `mb-pwup` Wave 3: Summarization pipeline ← `closed` (sealed at commit `bb77a09`; integration verified by Wave 4's audio-aware abstractor template selection + audio_aware fingerprint family building cleanly on top of the Wave-3 abstractor pipeline)
-  - `mb-g1w2` **Wave 4: Audio layer (Layer 2)** ← `closed` (sealed at commit `e3f90db`; integration verified by Wave 5's retention sweep cascading through `activity_transcript_segments` FK + PDF export reading segments alongside Blocks + crash recovery cleaning orphan chunk_dir subdirs)
-  - `mb-a6tz` **Wave 5: Hardening and polish (sans encryption — ADR 0038 deferred per Dustin's option B)** ← `in_progress` (code complete this iteration at commit `1740bdb`; five items shipped: (1) exclusion list with built-in rules + UI editor — ADR 0043; (2) retention TTLs + sweep daemon + cascade semantics — ADR 0042; (3) crash recovery boot sweep — orphan session promotion to `crashed_recovered` + orphan chunk_dir cleanup; (4) PDF export via `printpdf` 0.7 with two modes — ADR 0044; (5) `SettingsActivityHardeningRow.tsx` polishing the General tab; migration 015 adds `activity_exclusion_rules` table + `raw_events_purged_at` column; 9 new IPC commands; ADR 0038 stays RESERVED; Bernard stops here per kickoff to surface Wave 6 judge slate)
-  - `mb-8r5p` Wave 6: Invariant judges + final seal — **next; Bernard surfaces slate for Dustin's review before authoring**
-- **Parallel investigation bead (INDEPENDENT — not blocking Phase 10):** `mb-0n8c` (P2 chore) — root-cause `cargo test --release` `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)` on this box. Open since 2026-05-17 (LESSONS PINNED P2). 1-session timebox; falls back to wontfix-with-workaround if unresolved. Resolution would let every future phase run live test exec.
-
-**Wave 3 follow-ups (P3 backlog):**
+**Standing P3 follow-ups carried over from Phase 10:**
 - `mb-vfyd` — `activity/blocker.rs` is 669 lines, over the 600-line guideline; split candidate.
-- `mb-1fqu` — dictation: direct started-from-command-center param path (Wave 1A deferral #2, did not fall out cleanly in Wave 3 — scope-creep into the dictation orchestrator).
+- `mb-1fqu` — dictation: direct started-from-command-center param path (Wave 1A deferral #2).
+- `mb-fzeo` — phase10-deferral2: dictation runtime direct signal path (replace `cc_update_session` UI roundtrip).
+- `mb-mxal` — Activity Capture: consider relocating `mockingbird.db` from APPDATA Roaming to LOCALAPPDATA.
+- `mb-xnn7` — remove the `meeting_debug_listener_ping` IPC + its TS callers in `Meetings.tsx` / `MeetingOverlay.tsx` before the next MC enhancement epic ships.
 
-**Standing P3 follow-up:** `mb-xnn7` — remove the `meeting_debug_listener_ping`
-IPC + its TS callers in `Meetings.tsx` / `MeetingOverlay.tsx` before the next
-MC enhancement epic ships. The beacon was added in v1.2 as forensic evidence
-for JS-listener firing during the mb-z5y class of bug; it's not load-bearing
-and the noise should not survive the next iteration.
+**Parallel investigation bead (carryover, INDEPENDENT):** `mb-0n8c` (P2 chore) —
+root-cause `cargo test --release` `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)`
+on this box. Open since 2026-05-17 (LESSONS PINNED P2). Resolution would
+let every future phase run live test exec instead of the `--no-run`
+fallback.
+
+**Optional follow-on (post-seal):** ADR 0039 — Layer 3 (screenshot + OCR)
+for Activity Capture. Reserved, not chartered; pick up via a new ADR if
+the vision-grade signal becomes worth the cost. ADR 0038 (encryption-at-rest)
+remains RESERVED until at-rest secrets justify the SQLCipher / DPAPI / AES-GCM
+bake-off.
 
 ---
 
-### Previous in-flight summary (now sealed)
+### Previous in-flight summary (now sealed) — Phase 10
+
+**Phase 10 — Activity Capture (sibling subsystem). Sealed 2026-05-26 at
+`phase-10-complete`.**
+
+Chartered by ADR 0036 (subsystem) + ADR 0037 (Command Center). Numbered
+PLAN §10 phase mirroring Phase MC's container: numbered + ADR-chartered
++ per-wave seal commits + final `phase-10-complete` tag. Phase 9 stays
+reserved for the macOS cross-platform sweep.
+
+**Final wave ledger:**
+
+| Wave | Bead | Seal commit | Summary |
+|---|---|---|---|
+| 1A | `mb-jtbk` | `33e2cca` | Unified Recording Command Center (ADR 0037). |
+| 1B | `mb-hnl3` | `7333a98` | Activity-Log Skeleton (titles-only); migration 012. |
+| 2  | `mb-hr1u` | `9155f40` | UIA deep snapshots + multi-monitor; v2 `snapshot_json`. |
+| 3  | `mb-pwup` | `bb77a09` | LLM Block summarization (ADR 0040); migration 013. |
+| 4  | `mb-g1w2` | `e3f90db` | Audio Layer 2 — per-Block transcription (ADR 0041); migration 014. |
+| 5  | `mb-a6tz` | `1740bdb` | Hardening: exclusion list + retention sweep + crash recovery + PDF export (ADRs 0042/0043/0044); migration 015. |
+| 6.A | `mb-8r5p` | `95e57cd` | 6 invariant judges authored + dry-run rig. |
+| 6.B | `mb-8r5p` | `f7582d8` + this commit | 12 fixture tests + 2 rig fixes + sealed-phases LLM verdict + **SEAL**. |
+
+**Wiggum loop on Wave 6:** 6/6 judges green on iteration 1 (cap 3).
+Mechanical layer via `scripts\dry-run-phase10-judges.ps1`; LLM-grader
+verdict for `sealed-phases-untouched` in
+`docs/judges/phase-10/sealed-phases-untouched-verdict.md`.
+
+**ADR 0038 (encryption-at-rest):** RESERVED per Dustin's Wave 5 option B.
+Not chartered for v0.1; revisit when secrets-at-rest justify the
+SQLCipher / DPAPI-per-row / app-layer AES-GCM bake-off.
+
+**Live-fire Win11 smoke test:** Dustin's post-seal step (LESSONS P7
+pattern). Judges proved invariants; they do not prove a clean OS
+bring-up of a recording session.
+
+---
+
+### Previous in-flight summary (Phase MC + Stable Alpha)
 
 **Dictation polish — shipped 2026-05-24** (commit `dda676a`). Four-in-one
 lateral cleanup session:

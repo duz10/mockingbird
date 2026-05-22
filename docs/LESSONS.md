@@ -157,6 +157,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-26 | `[phase10-wave-6b / SEAL]`       | Phase 10 sealed at `phase-10-complete`; Wiggum loop went green on iteration 1 of 3; narrowing the `sealed-phases-untouched` base ref from `phase-mc-complete` → `stable-alpha-v0.1` excluded an unrelated lateral epic from grader scope |
 | 2026-05-26 | `[phase10-wave-4]`               | 270s hard cap on agent foreground tool calls; backgrounded `start /B` cmd children survive parent shell exit; `is_multiple_of` is unstable on i64; release-mode `debug_assert!` defeats `#[should_panic]` in throwaway crate runs |
 | 2026-05-25 | `[phase10-wave-2]`               | windows-rs MONITORINFOF_PRIMARY lives under UI/WindowsAndMessaging not Graphics/Gdi; serde camelCase isn't free; throwaway preamble must append not prepend |
 | 2026-05-25 | `[phase10-wave-1b]`              | typed-settings IPC has no UI wrapper; Pill `tone` is a token string not a union; `formatRelative` takes ISO not unix-ms |
@@ -201,6 +202,92 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-26 [phase10-wave-6b / SEAL] Phase 10 sealed; two non-obvious findings worth a future agent's time
+
+**Context:** Wave 6.B (mb-8r5p) — author the 12 fixture-mismatch tests
+called out by Wave 6.A's dry-run report, fix two rig bugs, run the
+LLM-grader portion of `sealed-phases-untouched`, then seal Phase 10
+at `phase-10-complete`. Wiggum loop cap was 3; went green on
+iteration 1.
+
+### Finding 1 — Diff-range scope matters as much as diff *content* in seal judges
+
+The Wave 6.A dry-run had `sealed-phases-untouched` C4 (sealed-migration
+modifications) checking `git diff --name-only phase-mc-complete..HEAD --
+...001..014`. That range includes the dictation-polish lateral epic
+(commit `dda676a`) + the MC v1.2 capabilities migration (commit
+`f298a5d`) that landed between MC seal and Phase 10 start — neither
+of which is Phase 10's responsibility. Folding them in would force the
+LLM grader to relitigate sealed lateral work.
+
+Dustin's Wave 6.B decision: narrow the base ref from `phase-mc-complete`
+to `stable-alpha-v0.1`. `stable-alpha-v0.1..HEAD` is EXACTLY Phase 10's
+footprint. Combined with `--diff-filter=M` (which excludes the
+legitimate ADDITIONS of migrations 012-015 during Phase 10), the C4
+check went from "INFO: 4 files, needs LLM classification" to
+"GREEN: empty diff".
+
+**Generalized rule:** when authoring a seal judge that asks "X is
+unchanged since Y", make Y the EARLIEST tag that fully predates the
+work being sealed AND fully postdates any sealed-lateral-epic work
+you don't want the grader to relitigate. For Phase 10 that was
+`stable-alpha-v0.1`, not `phase-mc-complete`, because the dictation
+polish epic ran in between.
+
+This also informs the LESSONS P7 distinction: judges prove invariants
+in a CONTROLLED scope. Widen the scope to "all changes since the
+last phase seal" and you'll see noise from unrelated work that the
+grader has to mentally subtract. Narrow the scope to exactly the
+phase under seal and the grader can answer the actual invariant
+question cleanly.
+
+### Finding 2 — Whole-file `IndexOf` checks shadow themselves in modules with multiple call sites
+
+Wave 6.A's `exclusion-is-total` C5 check used `IndexOf('check_excluded(')
+< IndexOf('insert_event(')` on the whole `runtime.rs` file to verify the
+matcher fires BEFORE persistence. Runtime.rs has FIVE `insert_event(`
+calls: one in `record_event` (the call site we care about) and four
+in earlier functions (`run_emit_control_event`, `emit_layer_error`,
+etc.) that have nothing to do with the exclusion matcher.
+
+The whole-file IndexOf hits the EARLIEST `insert_event(` in the file —
+which is in `run_emit_control_event` at offset 13085, well BEFORE
+`record_event`'s `check_excluded(` at offset ~17900. So the check
+structurally returned `ins < exc` and flagged BAD even though the
+actual call-site ordering is correct.
+
+**Fix:** scope the IndexOf to the body of `pub fn record_event`. Find
+the function start, find the closing `\n}` at the same indent level,
+then IndexOf within that substring only.
+
+**Generalized rule:** mechanical structural eyeball checks ("X precedes
+Y in the source") need to be scoped to the SMALLEST syntactic unit
+that the invariant lives within. Whole-file checks are correct only
+for invariants that genuinely span the file (e.g. "this file imports
+foo before bar"). For "function f consults matcher before DB write",
+the check belongs inside function f's body. The dry-run rig is
+NOT a substitute for the LLM grader — its job is to catch the obvious
+mechanical failures BEFORE the grader spend, but "obvious" still
+requires the right scope.
+
+### Process note — Wiggum loop went green on iteration 1
+
+The cap was 3 iterations per Dustin's Wave 6.B authorization (per the
+5-attempt rule). The loop terminated after iteration 1 because:
+1. The Wave 6.A dry-run report was honest about what was red.
+2. Each red had a one-line fix (author the named test; fix the named
+   rig bug).
+3. The judge files themselves were authored well enough that the
+   fixture authoring was a structured exercise, not a search.
+
+The seal commit's scorecard: **15 commits since `stable-alpha-v0.1`,
+7 ADRs (0036, 0037, 0040, 0041, 0042, 0043, 0044), 4 migrations
+(012-015), 22 modules under `src-tauri/src/activity/`,
+~22,400 LoC delta across `src-tauri/` + `ui/` + `docs/`.** Live-fire
+Win11 smoke test is Dustin's next step (LESSONS P7).
 
 ---
 
