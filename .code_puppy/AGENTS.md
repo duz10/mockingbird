@@ -66,6 +66,25 @@ Pack agents (pack-leader, bloodhound, shepherd, terrier, watchdog,
 retriever) are **DEPRECATED** in Code Puppy. The framework reserves the
 names but ships no implementations. Do not attempt to invoke them.
 
+**`session_id` discipline for `invoke_agent` (LESSONS P8):**
+
+- `session_id` is for **conversational refinement of ONE task**
+  (clarify-ask-respond rounds within a single scope of work). Use it
+  when you need to follow up with the sub-agent about the same
+  deliverable.
+- For **serial task handoffs** (Wave N → Wave N+1, or task A → task B
+  where each task has its own kickoff), **omit `session_id`**. Each
+  dispatch should be its own fresh sub-agent invocation with its own
+  clean kickoff anchor. Reusing `session_id` across serial tasks causes
+  the sub-agent's session-start ritual to anchor on the first message
+  in the session as "the kickoff" — which by dispatch #2+ is stale
+  relative to disk, triggering an endless stop-and-surface loop
+  (the 2026-05-25 Wave 1A incident; 8 attempts burned).
+- Keep dispatch prompts **short and pointer-style**: "implement X per
+  `<spec path on disk>`" rather than embedding the full spec. The spec
+  lives on disk; embedding it in the prompt makes the prompt body look
+  like potential stale charter work to the session-start triage.
+
 ### At the end of every iteration (before exit):
 
 1. **STATUS.md** — update only if epic state changed (in-flight block) or a phase

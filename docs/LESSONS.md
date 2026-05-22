@@ -121,6 +121,34 @@ or live Tauri events needs a 5-minute human smoke test BEFORE the seal
 commit**, not after. Add to the seal checklist for any future hook-or-
 audio phase.
 
+### P8. Sub-agent `session_id` continuity is a foot-gun across SERIAL task handoffs
+
+2026-05-25 [phase10 / Wave 1A dispatch loop]: Bernard tried to chain
+Phase 10 Waves 1A → 1B → 2 → 3 dispatches through code-puppy, reusing
+the same `session_id` across all dispatches expecting continuity to help.
+Each new dispatch in the accumulating session ran code-puppy's mandatory
+session-start ritual (P4), which triages "the kickoff prompt" against
+disk state. In a long session the "kickoff prompt" anchors on the FIRST
+user message — Bernard's original Wave 0 charter ask. That charter had
+already shipped (commits `613f336`, `13f3632`, `5fc89a2`), so code-puppy
+correctly detected "kickoff asks for Wave 0 work but it's already on
+disk → stale → STOP and surface." Bernard re-dispatched 6+ times with
+re-authorization preambles; each re-dispatch re-anchored on the same
+stale Wave 0 kickoff and stopped again. 8-attempt loop before escalation.
+
+**Rule:** `session_id` is for CONVERSATIONAL refinement of ONE task
+(clarify-ask-respond rounds). For SERIAL task handoffs (Wave N → Wave
+N+1 → Wave N+2), **omit `session_id`** so each dispatch is its own fresh
+session with its own clean kickoff anchor. The two patterns are NOT
+interchangeable.
+
+**Defense in depth:** keep code-puppy dispatch prompts short and
+pointer-style — "implement X per `<spec-path-on-disk>`" rather than
+embedding the full spec. The spec lives on disk, not in the prompt.
+That way nothing in the prompt body looks like stale charter work to
+the session-start triage. Long embedded specs invite false-positive
+stale-prompt detections even in fresh sessions.
+
 ---
 
 ## 📚 Table of Contents (chronological, newest first)
@@ -129,6 +157,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-25 | `[phase10 / meta / dispatch]`    | sub-agent session_id is conversational, NOT serial — PINNED P8           |
 | 2026-05-24 | `[meta / tooling]`               | bd create non-ASCII trap; git status --porcelain=v1 vs --short; findstr regex limits; triage-before-acting pattern |
 | 2026-05-24 | `[mc-v1.2 / ADR 0035]`           | MC Stable Alpha seal — capabilities migration is the real mb-z5y root cause; cancel/rename/auto-title; WASAPI loopback fix; stable-alpha-v0.1 tag |
 | 2026-05-24 | `[dictation-polish]`             | paste-trailing-space, History→Dictations, on-demand LLM pass, Insights 2-tab redesign |
@@ -169,6 +198,57 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-25 [phase10 / meta / dispatch] sub-agent session_id is a foot-gun across serial task handoffs
+
+- **Context:** Bernard (planning agent) tried to chain Phase 10 Waves
+  1A → 1B → 2 → 3 dispatches through code-puppy back-to-back, reusing
+  `session_id="code-puppy-session-214550"` across all of them, expecting
+  session continuity to help with the multi-wave handoff. Wave 0 + 0.5
+  had already shipped (charter ADRs 0036 + 0037 Accepted; phase10.md
+  + PLAN amendment + bead manifest all on disk at commit `5fc89a2`).
+
+- **Finding:** Each new dispatch in the accumulating session ran code-
+  puppy's mandatory session-start ritual (LESSONS P4), which anchors
+  "the kickoff prompt" on the FIRST user message in the session —
+  Bernard's original Wave 0 charter ask. Code-puppy correctly detected:
+  "kickoff asks for Wave 0 work, but Wave 0 is already on disk → stale
+  prompt → STOP and surface." Bernard then re-dispatched 6+ times with
+  re-authorization preambles trying to override the stale-detection;
+  each re-dispatch re-anchored on the same stale Wave 0 kickoff and
+  stopped again. 8-attempt loop before Bernard escalated.
+
+- **Compounding factor:** Anthropic API had a separate overloaded_error
+  window during the same hour (4 `req_011CbGy*` failures), which masked
+  the session-id issue as "just API flakiness" for the first 3-4
+  attempts. Diagnosis didn't crystallize until ~attempt 6, by which
+  point Dustin had to intervene.
+
+- **Action (PROMOTED to PINNED P8):** for SERIAL task handoffs through
+  sub-agents (Wave N → Wave N+1 → Wave N+2), **omit `session_id`** so
+  each dispatch is its own fresh code-puppy invocation with its own
+  clean kickoff anchor. Reserve `session_id` for CONVERSATIONAL
+  refinement of ONE task (clarify-ask-respond rounds within a single
+  scope of work). The two patterns are not interchangeable.
+
+- **Bonus action:** keep sub-agent dispatch prompts SHORT and pointer-
+  style — "implement X per `<spec path on disk>`" rather than embedding
+  the full spec. The spec lives on disk; embedding it in the prompt
+  makes the prompt body LOOK like potential stale charter work to the
+  session-start triage, increasing false-positive stale-prompt
+  detections. A 200-line prompt that re-states the ADR spec is
+  structurally indistinguishable from a charter prompt re-paste, even
+  in a fresh session.
+
+- **Recovery:** tree was clean — only docs+beads work had landed; no
+  Wave 1A code attempt reached disk. One staged `.beads/issues.jsonl`
+  change (benign `updated_at` bump on `mb-jtbk` from the in_progress
+  flips during the loop) was committed alongside this LESSONS entry.
+  Standing instruction for the next Wave 1A dispatch: fresh session,
+  short prompt, source-of-truth pointers to ADR 0037 + phase10.md
+  Wave 1A section.
 
 ---
 
