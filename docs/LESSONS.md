@@ -203,6 +203,42 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 ---
 
+## 2026-05-25 [phase10-wave-3] LLM block summarization shipped — two non-obvious findings
+
+**Context:** Wave 3 (mb-pwup) — turned the firehose of `activity_events` into
+human-readable Blocks. Pure-Rust pipeline `segmenter` → `blocker` →
+`abstractor` → `assembler`, persisted via `blocks_persist.rs`, exported via
+`export.rs`. ADR 0040 captures the five inline architecture calls.
+
+### Finding 1 — The `sha2` crate isn't pulled in transitively; reach for `crc32fast` instead for prompt fingerprints.
+
+Plan was a `sha256(prompt_text)[..16]` as the `prompt_version_sha`. `sha2`
+wasn't already in the dep graph, and adding a crypto dep just for a
+non-security fingerprint felt like a YAGNI violation. `crc32fast` is
+already pulled in (via zip/flate2), and a 32-bit CRC formatted as
+`abstract_v1-{:08x}` is plenty unique for "did the prompt text change?"
+provenance. Conclusion: when you need a non-cryptographic content
+fingerprint, prefer `crc32fast` over importing `sha2` for the first
+time. The provenance column is `prompt_version_sha` for historical
+consistency — the name is misleading but the schema is sealed.
+
+### Finding 2 — The Wave-2 `status.kind = "no_payload"` path needs an LLM-skip fast-path or you waste Ollama RTTs on game windows.
+
+Wave 2 shaping note #4 called this out, but the temptation while writing
+the abstractor was "just send everything through the same `OllamaProvider`
+call, the model can handle empty input." That's true but wasteful: each
+call is 200-800ms of GPU time per Block, and a 4-hour session can easily
+have 20+ game/locked-screen Blocks. The fix is a cheap heuristic in
+`abstractor::abstract_block`: if **every** event in the Block has
+`status.kind == "no_payload"` (or no snapshot at all), skip the LLM and
+emit a templated string (`"App: {primary_app}. No additional context
+available."`). The templated path still flows through the same
+provenance write — `prompt_version_sha` records `"template_v1"` instead
+of the LLM prompt's CRC, so a future re-run with a real model can
+detect and upgrade. Don't conflate "abstractor ran" with "LLM ran".
+
+---
+
 ## 2026-05-25 [phase10-wave-2] three small Rust + tooling paper-cuts while wiring UIA deep snapshots
 
 **Context:** Wave 2 (mb-hr1u) — promoted the activity sampler from titles-only

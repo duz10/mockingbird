@@ -242,6 +242,40 @@ the ephemeral summary pass). Does NOT extend `CleanupProvider`.
 - Tray icon, single MockingbirdMark, hide-to-tray on X-close.
 - `tracing`-based logger writing to local files (no telemetry, Principle 4).
 
+### 3.15 `activity/` — Activity Capture (Phase 10, in-flight)
+Chartered by ADR 0036 (subsystem) + ADR 0037 (Command Center). Three
+waves shipped, three still ahead:
+
+- **Waves 1A + 1B (sealed)** — Command Center surface, `Activity` page,
+  migration 012 schema (`activity_sessions`, `activity_events`,
+  `activity_blocks`, `activity_summaries`), runtime modules
+  `lifecycle.rs` / `sampler.rs` / `runtime.rs` / `persist.rs` /
+  `activity_level.rs` + IDs in `ids.rs`. Foreground polling + idle
+  tracking write immutable rows to `activity_events`.
+- **Wave 2 (sealed)** — UIA deep snapshots via `uia/` (Probe trait +
+  Windows COM impl), multi-monitor attribution, v2 `snapshot_json`
+  payload (focused field, visible-text fragments, control summary,
+  password-field redaction).
+- **Wave 3 (code-complete, awaiting Wave-4 buildable-upon confirmation)** —
+  ADR 0040. Pure-Rust pipeline `segmenter.rs` (event normalization)
+  → `blocker.rs` (5-rule boundary heuristic: app-switch, large title
+  delta, idle ≥ 60s, monitor change, 30-min cap) → `abstractor.rs`
+  (LLM via OllamaProvider; templated fast-path for `no_payload`
+  Blocks) → `assembler.rs` (Markdown rendering, work-report variant).
+  Persistence + CRUD in `blocks_persist.rs`; orchestration, export
+  to file, clipboard in `export.rs`. Migration 013 adds
+  `activity_blocks.label` + an FTS5 contentless shadow over
+  `(label, generated_abstract)`. UI surface: Wave-3 Blocks panel on
+  the Activity detail view (rename / rewrite-abstract / delete /
+  regenerate / copy as Markdown), in sibling `ActivityBlocks.tsx`.
+  Provenance per Principle 2: every Block row records `prompt_version_sha`
+  + `source_event_ids` JSON.
+- **Waves 4-6 (not started)** — audio Layer 2 (Wave 4); hardening +
+  encryption-at-rest (Wave 5, gated on ADR 0038) + retention + crash
+  recovery + PDF + Settings; invariant judges + final
+  `phase-10-complete` tag (Wave 6). Wave 7 (Layer 3 screenshot + OCR)
+  is optional post-seal via successor ADR 0039.
+
 ---
 
 ## 4. UI surface (React)

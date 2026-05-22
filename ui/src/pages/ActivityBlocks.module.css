@@ -1,0 +1,206 @@
+/* Wave-3 Blocks panel styles. Tokens come from `design/tokens.css`;
+ * no hard-coded colors. Visual rhythm matches Activity.module.css
+ * so the new panel doesn't drift from the rest of the page.
+ */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface-1);
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.heading {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.primaryBtn,
+.secondaryBtn,
+.dangerBtn,
+.tinyBtn {
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-2);
+  color: var(--text-1);
+  padding: 0.375rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.primaryBtn {
+  background: var(--accent-1);
+  color: var(--accent-1-contrast);
+  border-color: transparent;
+}
+
+.primaryBtn:disabled,
+.secondaryBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dangerBtn {
+  color: var(--status-error);
+}
+
+.tinyBtn {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.toast {
+  border: 1px solid var(--status-ok);
+  background: var(--surface-2);
+  color: var(--text-1);
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+}
+
+.error {
+  border: 1px solid var(--status-error);
+  background: var(--surface-2);
+  color: var(--status-error);
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+}
+
+.hint {
+  color: var(--text-2);
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.empty {
+  color: var(--text-2);
+  font-style: italic;
+  margin: 0;
+}
+
+.spinnerWrap {
+  display: flex;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.blocks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.card[data-edited] {
+  border-left: 3px solid var(--accent-1);
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.titleBtn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-1);
+  padding: 0;
+}
+
+.subtitle {
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  font-weight: normal;
+}
+
+.cardMeta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+}
+
+.cardBody {
+  margin: 0;
+}
+
+.abstract {
+  margin: 0;
+  color: var(--text-1);
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  cursor: text;
+}
+
+.cardFoot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.inlineEditRow {
+  display: flex;
+  gap: 0.375rem;
+  align-items: center;
+}
+
+.editAbstract {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.input,
+.textarea {
+  flex: 1;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+  color: var(--text-1);
+  padding: 0.375rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-family: inherit;
+}
+
+.textarea {
+  width: 100%;
+  resize: vertical;
+}

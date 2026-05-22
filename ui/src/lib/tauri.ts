@@ -294,6 +294,50 @@ function fixtureFor<T>(command: string, args?: object): T {
       }) as T;
     case "activity_start":
       return fixture(command, null as unknown as T);
+    // Phase 10 Wave 3 — Summarization + Block CRUD fixtures (ADR 0040).
+    case "activity_list_blocks":
+      return fixture(command, [
+        {
+          id: "fixture-blk-1",
+          sessionId: "fixture-activity-session-1",
+          startedAt: Date.now() - 44 * 60_000,
+          endedAt: Date.now() - 30 * 60_000,
+          primaryApp: "Code.exe",
+          label: null,
+          primaryTitle: "activity.rs \u2014 mockingbird",
+          generatedAbstract:
+            "The user edited the activity-capture module in their Rust IDE.",
+          userEdited: false,
+          sourceEventIds: '["fixture-evt-1"]',
+          promptVersionSha: "abstract_v1-deadbeef",
+          createdAt: Date.now() - 30 * 60_000,
+          updatedAt: Date.now() - 30 * 60_000,
+        },
+        {
+          id: "fixture-blk-2",
+          sessionId: "fixture-activity-session-1",
+          startedAt: Date.now() - 30 * 60_000,
+          endedAt: Date.now() - 15 * 60_000,
+          primaryApp: "chrome.exe",
+          label: null,
+          primaryTitle: "Activity Capture Plan \u2014 Notion",
+          generatedAbstract:
+            "The user reviewed the activity-capture plan document in Notion.",
+          userEdited: false,
+          sourceEventIds: '["fixture-evt-2"]',
+          promptVersionSha: "abstract_v1-deadbeef",
+          createdAt: Date.now() - 15 * 60_000,
+          updatedAt: Date.now() - 15 * 60_000,
+        },
+      ]) as T;
+    case "activity_regenerate_summary":
+    case "activity_render_work_report":
+      return fixture(
+        command,
+        "# Activity \u2014 fixture\n\n_Markdown summary fixture for browser preview._" as unknown as T,
+      );
+    case "activity_block_split":
+      return fixture(command, "fixture-blk-new" as unknown as T);
     case "get_setting": {
       // Typed-settings read. Browser-preview only — the real values
       // come from the typed-registry IPC inside the Tauri shell.
@@ -320,6 +364,12 @@ function fixtureFor<T>(command: string, args?: object): T {
     case "activity_resume":
     case "activity_stop":
     case "activity_delete_session":
+    case "activity_block_rename":
+    case "activity_block_rewrite_abstract":
+    case "activity_block_delete":
+    case "activity_block_merge":
+    case "activity_export_markdown":
+    case "activity_copy_to_clipboard":
       return fixture(command, undefined as unknown as T);
     default:
       throw new Error(`fixtureFor: no fixture for command "${command}"`);

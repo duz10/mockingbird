@@ -134,6 +134,17 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         activity::activity_list_sessions,
         activity::activity_get_session_detail,
         activity::activity_delete_session,
+        // Phase 10 Wave 3 — Summarization + Block CRUD + export (ADR 0040).
+        activity::activity_regenerate_summary,
+        activity::activity_list_blocks,
+        activity::activity_block_rename,
+        activity::activity_block_rewrite_abstract,
+        activity::activity_block_delete,
+        activity::activity_block_merge,
+        activity::activity_block_split,
+        activity::activity_export_markdown,
+        activity::activity_copy_to_clipboard,
+        activity::activity_render_work_report,
     ])
 }
 

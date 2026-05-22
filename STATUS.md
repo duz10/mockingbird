@@ -45,7 +45,7 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**Phase 10 — Activity Capture (sibling subsystem). Wave 2 — UIA Deep Snapshots + Multi-Monitor code-complete (`mb-hr1u` in_progress, awaiting Wave 3 dispatch for buildable-upon confirmation; `mb-hnl3` closed end-of-2 per Bernard's deferral).**
+**Phase 10 — Activity Capture (sibling subsystem). Wave 3 — LLM Block Summarization code-complete (`mb-pwup` in_progress, awaiting Wave 4 dispatch for buildable-upon confirmation; `mb-hr1u` closed end-of-3 per Bernard's preference).**
 
 Chartered 2026-05-25 (Bernard, Wave 0). Wave 0.5 — Command Center charter integration. Wave 1A — Command Center code (sealed end-of-1A, commit `33e2cca`). Wave 1B (this iteration) — migration 012, activity/* runtime modules, Activity-page UI, plus Wave 1A deferrals (command_center_chord Settings row + legacy_meeting_chord_enabled toggle). ADR 0036 + ADR 0037 both Accepted 2026-05-24 by Dustin. Numbered PLAN §10 phase mirroring Phase MC's container: numbered + ADR-chartered + per-wave seal tags + final `phase-10-complete` tag. Phase 9 stays reserved for the macOS cross-platform sweep.
 
@@ -62,12 +62,16 @@ Chartered 2026-05-25 (Bernard, Wave 0). Wave 0.5 — Command Center charter inte
 - **Wave beads** (each P1, dependency-chained so each subsequent wave depends on its predecessor; the epic depends on all of them):
   - `mb-jtbk` Wave 1A: Unified Recording Command Center ← `closed` (sealed at commit `33e2cca`; integration verified by Wave 1B's Command Center → Activity flow)
   - `mb-hnl3` Wave 1B: Activity-Log Skeleton (titles-only) ← `closed` (sealed at commit `7333a98`; integration verified by Wave 2's UIA layer building cleanly on top of the skeleton)
-  - `mb-hr1u` **Wave 2: UIA deep snapshots + multi-monitor** ← `in_progress` (code complete; UIA Probe trait + Windows COM impl + idle tracker + multi-monitor attribution + v2 snapshot_json schema; Wave 2 brief at `docs/phases/phase10-wave2-brief.md`; awaiting Wave 3 dispatch for buildable-upon confirmation)
-  - `mb-pwup` Wave 3: Summarization pipeline
+  - `mb-hr1u` Wave 2: UIA deep snapshots + multi-monitor ← `closed` (sealed at commit `9155f40`; integration verified by Wave 3's abstractor pipeline reading the v2 snapshot_json schema cleanly)
+  - `mb-pwup` **Wave 3: Summarization pipeline** ← `in_progress` (code complete; pure-Rust pipeline `segmenter` → `blocker` → `abstractor` → `assembler`; persistence in `blocks_persist.rs`; orchestration + Markdown export + clipboard in `export.rs`; 10 new IPC commands; Activity-page Wave-3 Blocks panel with rename / rewrite / delete / regenerate / copy; migration 013 adds `activity_blocks.label` + FTS5 contentless shadow over `(label, generated_abstract)`; ADR 0040 Accepted inline; 51 pure-module tests via throwaway crate all green (40 segmenter/blocker/assembler + 11 activity_level); awaiting Wave 4 dispatch for buildable-upon confirmation)
   - `mb-g1w2` Wave 4: Audio layer (Layer 2)
   - `mb-a6tz` Wave 5: Hardening and polish (charters ADR 0038, encryption-at-rest)
   - `mb-8r5p` Wave 6: Invariant judges + final seal
 - **Parallel investigation bead (INDEPENDENT — not blocking Phase 10):** `mb-0n8c` (P2 chore) — root-cause `cargo test --release` `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)` on this box. Open since 2026-05-17 (LESSONS PINNED P2). 1-session timebox; falls back to wontfix-with-workaround if unresolved. Resolution would let every future phase run live test exec.
+
+**Wave 3 follow-ups (P3 backlog):**
+- `mb-vfyd` — `activity/blocker.rs` is 669 lines, over the 600-line guideline; split candidate.
+- `mb-1fqu` — dictation: direct started-from-command-center param path (Wave 1A deferral #2, did not fall out cleanly in Wave 3 — scope-creep into the dictation orchestrator).
 
 **Standing P3 follow-up:** `mb-xnn7` — remove the `meeting_debug_listener_ping`
 IPC + its TS callers in `Meetings.tsx` / `MeetingOverlay.tsx` before the next

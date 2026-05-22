@@ -27,6 +27,10 @@ const MIGRATION_011: &str = include_str!("migrations/011_meeting_capture.sql");
 // (ADR 0036). Purely additive; no prompt-body substitution. Four new
 // tables, two immutability triggers; FTS5 deferred to Wave 3.
 const MIGRATION_012: &str = include_str!("migrations/012_activity_capture.sql");
+// Phase 10 Wave 3 — adds activity_blocks.label + FTS5 contentless
+// shadow over (label, generated_abstract). Migration sql comments
+// (ADR 0040 §Decision items 4 + 5) walk the design alternatives.
+const MIGRATION_013: &str = include_str!("migrations/013_activity_blocks_fts.sql");
 
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
@@ -102,6 +106,14 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         let prepared = substitute_prompt_bodies(MIGRATION_012);
         conn.execute_batch(&prepared)?;
     }
+    if current < 13 {
+        // Phase 10 Wave 3: adds activity_blocks.label + FTS5
+        // contentless shadow over (label, generated_abstract). ADR
+        // 0040 §Decision items 4 + 5. Substituter pass for the
+        // leftover-token guard.
+        let prepared = substitute_prompt_bodies(MIGRATION_013);
+        conn.execute_batch(&prepared)?;
+    }
     Ok(())
 }
 
@@ -160,7 +172,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "12");
+        assert_eq!(v, "13");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -179,7 +191,68 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "12");
+        assert_eq!(v, "13");
+    }
+
+    /// Migration 013 ships the activity-blocks FTS5 surface + the
+    /// `label` column. ADR 0040 §Decision items 4 + 5.
+    #[test]
+    fn migration_013_ships_activity_blocks_fts_and_label_column() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+
+        // `label` column exists.
+        let mut stmt = conn.prepare("PRAGMA table_info(activity_blocks)").unwrap();
+        let cols: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(
+            cols.iter().any(|c| c == "label"),
+            "activity_blocks.label missing; cols: {cols:?}"
+        );
+
+        // FTS5 virtual table exists.
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE name = 'activity_blocks_fts'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(n >= 1, "activity_blocks_fts virtual table missing");
+
+        // End-to-end: insert a session + a block, MATCH via FTS.
+        conn.execute(
+            "INSERT INTO activity_sessions (id, started_at, status, audio_enabled, \
+             screenshot_enabled, created_at, updated_at) \
+             VALUES ('s1', 1000, 'completed', 0, 0, 1000, 1000)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO activity_blocks (id, session_id, started_at, ended_at, \
+             primary_app, primary_title, generated_abstract, source_event_ids, \
+             prompt_version_sha, user_edited, label, created_at, updated_at) \
+             VALUES ('b1', 's1', 1000, 2000, 'code.exe', 'main.rs', \
+             'The user edited the dictation source file.', '[]', \
+             'abstract_v1-00000000', 0, 'rust review', 1000, 1000)",
+            [],
+        )
+        .unwrap();
+        let hit: String = conn
+            .query_row(
+                "SELECT t.generated_abstract FROM activity_blocks t \
+                 JOIN activity_blocks_fts f ON f.rowid = t.rowid \
+                 WHERE activity_blocks_fts MATCH 'dictation'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(hit.contains("dictation"));
     }
 
     /// Migration 012 ships the activity-capture schema (ADR 0036).

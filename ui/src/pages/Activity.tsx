@@ -27,6 +27,7 @@ import { EmptyState, PageHeader, Pill, Spinner } from "../components/primitives"
 import { ActivityIcon } from "../design/Icon";
 import { t } from "../i18n";
 import { activityApi, parseSnapshotJson } from "../lib/activity";
+import { ActivityBlocksPanel } from "./ActivityBlocks";
 import type {
   ActivityEventRow,
   ActivitySessionDetail,
@@ -281,6 +282,11 @@ function ActivityDetailView({ detail, onDelete }: DetailViewProps) {
           {t("activity.detail.delete")}
         </button>
       </header>
+
+      <ActivityBlocksPanel
+        sessionId={session.id}
+        canSummarize={session.status !== "in_progress"}
+      />
 
       {events.length === 0 ? (
         <EmptyState

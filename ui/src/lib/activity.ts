@@ -121,6 +121,31 @@ export interface ActivitySessionDetail {
   events: ActivityEventRow[];
 }
 
+/**
+ * One persisted Block row — the unit the Wave-3 abstractor pipeline
+ * produces. Mirrors `activity::blocks_persist::ActivityBlockRow`.
+ */
+export interface ActivityBlockRow {
+  id: string;
+  sessionId: string;
+  startedAt: number;
+  endedAt: number;
+  primaryApp: string;
+  /** User-set label. Null until the user renames via `block.rename`. */
+  label: string | null;
+  primaryTitle: string;
+  /** LLM-or-template summary. Null only if the abstractor emitted nothing. */
+  generatedAbstract: string | null;
+  /** True iff the user has touched label or generatedAbstract. */
+  userEdited: boolean;
+  /** JSON array of source `activity_events.id` rows (Principle 2). */
+  sourceEventIds: string;
+  /** Prompt-set fingerprint at write time. */
+  promptVersionSha: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ActivityRuntimeSnapshot {
   lifecycle: ActivityLifecycle;
   currentSessionId: string | null;
@@ -149,4 +174,51 @@ export const activityApi = {
     }),
   deleteSession: (sessionId: string): Promise<void> =>
     invoke("activity_delete_session", { sessionId }),
+
+  // -----------------------------------------------------------------
+  // Wave 3 — LLM block summarization + Block CRUD + export (ADR 0040).
+  // -----------------------------------------------------------------
+
+  /**
+   * Run the full Wave-3 pipeline against a session: normalize events,
+   * group into Blocks, abstract each, assemble Markdown, write to
+   * `summary_markdown`. Returns the resulting Markdown.
+   * User-edited Block rows are preserved across re-runs.
+   */
+  regenerateSummary: (sessionId: string): Promise<string> =>
+    invoke<string>("activity_regenerate_summary", { sessionId }),
+
+  /** List the Blocks for one session, chronologically. */
+  listBlocks: (sessionId: string): Promise<ActivityBlockRow[]> =>
+    invoke<ActivityBlockRow[]>("activity_list_blocks", { sessionId }),
+
+  /** Render the work-report Markdown variant on demand. */
+  renderWorkReport: (sessionId: string): Promise<string> =>
+    invoke<string>("activity_render_work_report", { sessionId }),
+
+  /** Write the stored `summary_markdown` to a destination path. */
+  exportMarkdown: (sessionId: string, destPath: string): Promise<void> =>
+    invoke("activity_export_markdown", { sessionId, destPath }),
+
+  /** Copy the stored `summary_markdown` to the system clipboard. */
+  copyToClipboard: (sessionId: string): Promise<void> =>
+    invoke("activity_copy_to_clipboard", { sessionId }),
+
+  block: {
+    /** Set a Block's user-facing label. Pass null to clear. */
+    rename: (blockId: string, newLabel: string | null): Promise<void> =>
+      invoke("activity_block_rename", { blockId, newLabel }),
+    /** Overwrite a Block's generated_abstract with user text. */
+    rewriteAbstract: (blockId: string, text: string): Promise<void> =>
+      invoke("activity_block_rewrite_abstract", { blockId, text }),
+    /** Delete one Block. */
+    delete: (blockId: string): Promise<void> =>
+      invoke("activity_block_delete", { blockId }),
+    /** Merge `sourceIds` into `targetId`. */
+    merge: (targetId: string, sourceIds: string[]): Promise<void> =>
+      invoke("activity_block_merge", { targetId, sourceIds }),
+    /** Split a Block at `splitAtMs`. Returns the new (right-half) Block id. */
+    split: (blockId: string, splitAtMs: number): Promise<string> =>
+      invoke<string>("activity_block_split", { blockId, splitAtMs }),
+  },
 };
