@@ -321,8 +321,26 @@ impl CommandCenter {
             "fsm step"
         );
         self.run_effect(effect);
-        // Always emit the latest state to the UI so React can re-render.
-        self.emit_state(next, first_run);
+        // Re-snapshot AFTER run_effect.
+        //
+        // INVARIANT: emit_state must broadcast the ACTUAL current FSM
+        // state, not the cached `next` value from this drive's apply()
+        // call.
+        //
+        // Why: several effects (DispatchStart for Meeting/Activity,
+        // and dispatch_start(Dictation) → Dismiss) call `self.drive(...)`
+        // recursively to feed back the runtime's reply. That inner
+        // drive() has already (a) updated the state mutex and (b)
+        // emitted its own state to the UI. If we then emit our
+        // captured (now-stale) `next`, the UI snaps backwards (e.g.
+        // ShowingSessionCard → Launching), all tiles disable, and
+        // the modal looks frozen.
+        //
+        // This is the mb-23rh / mb-7ju5 hotfix. The 1-line fix is the
+        // load below; the comment is the load-bearing part.
+        let actual = self.snapshot();
+        let actual_first_run = self.inner.first_run.load(Ordering::Relaxed);
+        self.emit_state(actual, actual_first_run);
         // First dismiss flips the "seen" setting. Cheap to do here
         // rather than in the FSM (which is pure).
         if matches!(input, CcInput::Dismiss) && first_run {

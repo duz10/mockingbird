@@ -15,7 +15,7 @@ fn fresh_db() -> Database {
 }
 
 #[test]
-fn schema_version_is_15_after_apply() {
+fn schema_version_is_16_after_apply() {
     // Bump history: 3 → 4 (migration 004 injection_status; Phase 3
     // Wave 4) → 5 (AI command modes) → 6/7/8 (prompt iterations) → 9
     // (max_tokens bump) → 10 (ADR 0024 Wave C prompt v2) → 11 (Phase MC
@@ -24,8 +24,11 @@ fn schema_version_is_15_after_apply() {
     // schema) → 13 (Phase 10 Wave 3 activity_blocks FTS5 + label) → 14
     // (Phase 10 Wave 4 activity_sessions audio-pipeline provenance) →
     // 15 (Phase 10 Wave 5 hardening — exclusion-rules table +
-    // activity_blocks.raw_events_purged_at; ADR 0042 + 0043). Bump
-    // this assert when the next migration lands.
+    // activity_blocks.raw_events_purged_at; ADR 0042 + 0043) → 16
+    // (post-phase-10 hotfix: add the missing
+    // `activity_blocks.primary_title` column referenced by every
+    // code path in `activity/`; mb-scla). Bump this assert when the
+    // next migration lands.
     let db = fresh_db();
     let v: String = db
         .conn
@@ -35,7 +38,7 @@ fn schema_version_is_15_after_apply() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(v, "15");
+    assert_eq!(v, "16");
 }
 
 #[test]

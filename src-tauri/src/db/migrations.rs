@@ -41,6 +41,14 @@ const MIGRATION_014: &str = include_str!("migrations/014_activity_audio_provenan
 // breadcrumb column. Purely additive; no triggers; idempotent run
 // via the schema_version gate.
 const MIGRATION_015: &str = include_str!("migrations/015_activity_wave5_hardening.sql");
+// Post-phase-10 hotfix — adds the missing `activity_blocks.primary_title`
+// column that migration 012 forgot but every code path in `activity/` has
+// always referenced (`blocks_persist.rs`, `blocker.rs`, `abstractor.rs`,
+// `assembler.rs`, `export.rs`, `pdf_export.rs`). Schema-vs-code drift
+// slipped past the Wave 6 judges because the cargo gate on this box runs
+// `test --release --no-run` (LESSONS P2); the link-clean check proves
+// types, not SQL. Purely additive ADD COLUMN; no triggers.
+const MIGRATION_016: &str = include_str!("migrations/016_activity_blocks_primary_title.sql");
 
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
@@ -140,6 +148,18 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         let prepared = substitute_prompt_bodies(MIGRATION_015);
         conn.execute_batch(&prepared)?;
     }
+    if current < 16 {
+        // Post-phase-10 hotfix: adds the missing
+        // `activity_blocks.primary_title` column referenced by every
+        // code path in `activity/`. Migration 012 forgot it; the
+        // schema-vs-code drift went unnoticed because the cargo gate
+        // on this box is `test --release --no-run` (LESSONS P2). The
+        // live-fire UI surfaced `no such column: primary_title` on
+        // the activity session detail page (mb-scla). Substituter
+        // pass for the leftover-token guard.
+        let prepared = substitute_prompt_bodies(MIGRATION_016);
+        conn.execute_batch(&prepared)?;
+    }
     Ok(())
 }
 
@@ -198,7 +218,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "15");
+        assert_eq!(v, "16");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -217,7 +237,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "15");
+        assert_eq!(v, "16");
     }
 
     /// Migration 015 ships the exclusion-rules table + raw_events_
@@ -253,6 +273,72 @@ mod tests {
             cols.iter().any(|c| c == "raw_events_purged_at"),
             "activity_blocks missing raw_events_purged_at column; got {cols:?}"
         );
+    }
+
+    /// Migration 016 ships the missing `activity_blocks.primary_title`
+    /// column that migration 012 forgot. Post-phase-10 hotfix for
+    /// mb-scla. Without this column, every read path through
+    /// `blocks_persist::list_blocks` raises
+    /// `no such column: primary_title` and the activity session
+    /// detail UI explodes.
+    ///
+    /// This test would have flagged the original drift had
+    /// `cargo test --release` run live on this box; it stays as a
+    /// guard against future schema-vs-code drift on the
+    /// `activity_blocks` table.
+    #[test]
+    fn migration_016_ships_activity_blocks_primary_title_column() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+
+        // Column exists.
+        let mut stmt = conn.prepare("PRAGMA table_info(activity_blocks)").unwrap();
+        let cols: Vec<(String, String, i64)> = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(1)?, // name
+                    row.get::<_, String>(2)?, // type
+                    row.get::<_, i64>(3)?,    // notnull
+                ))
+            })
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        let pt = cols
+            .iter()
+            .find(|(n, _, _)| n == "primary_title")
+            .expect("primary_title column should exist after migration 016");
+        assert_eq!(pt.1.to_uppercase(), "TEXT");
+        assert_eq!(pt.2, 1, "primary_title should be NOT NULL");
+
+        // Round-trip: insert a Block with primary_title, read it back.
+        // Proves the SELECT path in `blocks_persist::list_blocks`
+        // will succeed.
+        conn.execute(
+            "INSERT INTO activity_sessions (id, started_at, status, audio_enabled, \
+             screenshot_enabled, created_at, updated_at) \
+             VALUES ('s-pt', 1000, 'completed', 0, 0, 1000, 1000)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO activity_blocks (id, session_id, started_at, ended_at, \
+             primary_app, primary_title, generated_abstract, source_event_ids, \
+             prompt_version_sha, user_edited, label, created_at, updated_at) \
+             VALUES ('b-pt', 's-pt', 1000, 2000, 'code.exe', \
+             'editing migrations.rs', NULL, '[]', 'sha-x', 0, NULL, 1000, 1000)",
+            [],
+        )
+        .unwrap();
+        let title: String = conn
+            .query_row(
+                "SELECT primary_title FROM activity_blocks WHERE id = 'b-pt'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(title, "editing migrations.rs");
     }
 
     /// Migration 014 ships per-session audio-pipeline provenance

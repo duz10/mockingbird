@@ -157,6 +157,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-26 | `[phase10-hotfix / mb-scla / mb-23rh]` | Two post-seal Phase 10 hotfixes: (1) `activity_blocks.primary_title` schema-vs-code drift slipped past green judges because `cargo test --release` is `--no-run` on this box — judges check contracts, not runtime SQL; (2) Command Center FSM `drive()` emitted the captured pre-effect `next` AFTER a recursive inner drive() had already emitted the post-effect state, clobbering the UI back into `Launching` and locking all tiles |
 | 2026-05-26 | `[phase10-wave-6b / SEAL]`       | Phase 10 sealed at `phase-10-complete`; Wiggum loop went green on iteration 1 of 3; narrowing the `sealed-phases-untouched` base ref from `phase-mc-complete` → `stable-alpha-v0.1` excluded an unrelated lateral epic from grader scope |
 | 2026-05-26 | `[phase10-wave-4]`               | 270s hard cap on agent foreground tool calls; backgrounded `start /B` cmd children survive parent shell exit; `is_multiple_of` is unstable on i64; release-mode `debug_assert!` defeats `#[should_panic]` in throwaway crate runs |
 | 2026-05-25 | `[phase10-wave-2]`               | windows-rs MONITORINFOF_PRIMARY lives under UI/WindowsAndMessaging not Graphics/Gdi; serde camelCase isn't free; throwaway preamble must append not prepend |
@@ -202,6 +203,156 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-26 [phase10-hotfix / mb-scla / mb-23rh / mb-7ju5 / mb-7knd] Two post-seal Phase 10 papercuts and a load-bearing observation about the test gate
+
+**Context:** Dustin's first live-fire smoke test of `phase-10-complete`
+surfaced four P1/P2 bugs (Bernard's notes filed them as `mb-scla`,
+`mb-23rh`, `mb-7ju5`, `mb-7knd`). The seal stays put — these are hotfix
+commits on top of `phase-10-complete`. Both root causes are previously
+unseen failure modes worth recording.
+
+### Finding 1 — Schema-vs-code drift hides behind `--no-run`
+
+**Symptom:** Activity session detail UI exploded with
+`sqlite error: no such column: primary_title`. The column is touched
+in SIX activity modules (`blocks_persist.rs` INSERT + SELECT,
+`blocker.rs`, `abstractor.rs`, `assembler.rs`, `export.rs`,
+`pdf_export.rs`). Migration 012 — which created `activity_blocks` —
+never declared the column. Migrations 013 / 014 / 015 all added
+different columns; none added `primary_title`.
+
+**Why six Wave-6 judges + two extra fixture-test passes missed it:**
+
+1. The Wave 6.B `provenance-is-total` judge is a static / file-diff
+   reasoning check. It asserts that every `INSERT INTO activity_blocks`
+   call site provides a `prompt_version_sha` column (which it does).
+   It does NOT open SQLite and execute the INSERT to prove the schema
+   accepts it.
+2. The Wave 6.B `db/migrations.rs::migration_013_*` unit test does an
+   INSERT with `primary_title` in its body. It would have failed
+   loudly. But on this box `cargo test --release` exits
+   `STATUS_ENTRYPOINT_NOT_FOUND` (LESSONS P2), so the gated step is
+   `cargo test --release --no-run` — which proves the **linker** is
+   happy, not that **a single SQL statement runs**.
+3. CI for this project IS the developer's box. There is no second box
+   running `--no-run`-less tests.
+
+**The trap is generic:** a `--no-run` gate hides any class of bug
+where the Rust type system + trait surface is internally consistent
+but the *runtime contract* (SQL schema, JSON shape, file format,
+network protocol) is wrong. The cargo gate proves "Rust agrees with
+itself," not "Rust agrees with reality."
+
+**Defense in depth — what I did about it this session:**
+
+- Authored migration `016_activity_blocks_primary_title.sql` with
+  `ALTER TABLE … ADD COLUMN primary_title TEXT NOT NULL DEFAULT ''`.
+- Bumped both the inner unit test
+  (`db/migrations.rs::apply_all_brings_fresh_db_to_latest_version`)
+  and the integration test (`tests/db_migrations.rs::
+  schema_version_is_16_after_apply`) so the next drift triggers a
+  loud failure at the link-only level (the wrong constant in the
+  binary still fails the assertion at runtime when somebody DOES run
+  `--no-run`-less tests, e.g. on the macOS Phase 9 box).
+- **Used the throwaway-crate recipe (LESSONS P2) to actually run the
+  fix live.** Tiny `cargo new mb016_smoke`, depend only on rusqlite,
+  read every relevant migration off disk, exercise the exact
+  `blocks_persist::list_blocks` SELECT shape. Took ~30 seconds and
+  proved the fix end-to-end. **This recipe should be the default
+  for any schema / migration / pure-Rust change going forward —
+  not a fallback, the FIRST move.** The cargo gate is fine for
+  catching code that won't link; it is structurally incapable of
+  catching a schema column the Rust types don't reference.
+- Added a new `migration_016_ships_*` unit test that mirrors the
+  production SELECT shape. It will not run on this box until
+  `mb-0n8c` (the `--release` test runner bug) clears, but it is the
+  artifact a future agent would need if they revisit this.
+
+**Promotion candidate?** I considered promoting this finding into the
+PINNED block but decided against it. P2 already documents the
+`--no-run` workaround; what's new is the implication ("--no-run is
+structurally blind to runtime contracts"). The pattern fits better
+as a body entry whose lesson is "reach for the throwaway-crate
+recipe early on any schema/SQL/JSON-contract change." Future agents
+find this via P2's existing reference.
+
+### Finding 2 — Recursive `drive()` + post-effect `emit_state` clobbers the UI
+
+**Symptom:** Clicking the Activity tile (and probably Meeting too)
+in the Command Center caused the modal to lock up — all three tiles
+rendered disabled, only outside-padding clicks dismissed. The
+activity runtime *did* start (DB writes confirmed), but the UI
+showed `state == "launching"` forever.
+
+**Root cause:** `command_center/mod.rs::drive()` does
+
+```rust
+let (effect, next, first_run) = { lock + apply + write back };
+self.run_effect(effect);          // can recursively self.drive(...)
+self.emit_state(next, first_run); // ← captures pre-recursion `next`
+```
+
+For Activity / Meeting picks, `run_effect(DispatchStart{kind})` calls
+`dispatch_*_start()`, which on success calls
+`self.drive(CcInput::RuntimeReplied{success:true})`. The inner
+`drive()`:
+
+1. Transitions the FSM from `Launching{kind}` → `ShowingSessionCard{kind}`
+2. Emits the `sessionCard` payload to the UI
+
+Then control returns to the outer `drive()`, which dutifully emits
+its captured `next = Launching{kind}` — **clobbering** the inner's
+`sessionCard` emit. UI snaps backwards. CommandCenter.tsx renders
+`<ModePicker launchingKind={kind}>`, which disables all tiles
+(`disabled = launchingKind != null`).
+
+Dictation didn't visibly hit the bug because `dispatch_start(Dictation)`
+recursively drives `Dismiss` → `HideWindow`, and a hidden window can't
+show the stale Launching state.
+
+**Why no test caught it:** the FSM itself (`state.rs::apply`) is pure
+and has 40+ unit tests; they all pass. The bug is in the orchestrator
+(`mod.rs::drive`), which can't be unit-tested without a mock
+`AppHandle` — there are no orchestrator-level tests today. The Wave
+6 judges check FSM invariants + file-diff scope; neither catches
+"orchestrator emits stale state."
+
+**Fix:** re-snapshot AFTER `run_effect`:
+
+```rust
+self.run_effect(effect);
+let actual = self.snapshot();
+let actual_first_run = self.inner.first_run.load(Ordering::Relaxed);
+self.emit_state(actual, actual_first_run);
+```
+
+One load each from the existing state mutex + atomic. Idempotent —
+when `run_effect` didn't recurse, `actual == next` and the UI sees
+the same payload it would have. When it did recurse, the UI sees
+the latest payload twice (harmless: React's `setState` collapses
+identical-shape snapshots).
+
+**Generalization worth keeping in head:** any "capture local → mutate
+world → emit local" loop is a clobber waiting to happen if the
+mutation step can re-enter the same loop. The fix is always the
+same: re-read the world before the emit. Resist the urge to refactor
+to a queue / event-bus until you've actually seen the pattern fire
+twice.
+
+### Process — diagnostic notes Bernard left in the kickoff cut iteration cost in half
+
+The kickoff brief for this session included Bernard's per-bead
+diagnoses ("primary_title isn't in migration 012", "the UI side has
+ZERO callers of cc_update_session", "the FSM transitions through
+Launching → ShowingSessionCard"). Two of those three were directly
+correct; the third pointed me at the right module even though the
+exact root cause was different. That kind of "here's what I looked
+at and where I got stuck" pre-work is worth its weight in iterations
+when the kickoff is human-authored. Worth modeling in future
+hotfix briefs.
 
 ---
 
