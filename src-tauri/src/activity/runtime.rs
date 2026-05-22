@@ -31,17 +31,29 @@
 //! hook in Wave 2) would balloon the runtime footprint without
 //! changing the design.
 
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
 
 use crate::error::{AppError, AppResult};
 
+use super::audio::{self, AudioPipeline};
+use super::block_audio_stitcher::TranscriptChannel;
 use super::lifecycle::{
     apply as lifecycle_apply, LifecycleEffect, LifecycleInput, LifecycleState, Transition,
 };
-use super::persist::{finalize_session, insert_event, insert_session, SessionStatus};
+use super::persist::{
+    finalize_session, insert_event, insert_session_with_options, set_session_audio_provenance,
+    SessionStatus,
+};
 use super::sampler::{make_default_sampler, Sampler, SamplerEvent};
+use super::segments_persist::insert_segments_bulk;
+
+/// Closure shape for the audio-pipeline factory. Production uses
+/// [`audio::start_default`]; tests inject a stub builder.
+pub type AudioFactory =
+    Box<dyn Fn(&str, &Path) -> AppResult<Box<dyn AudioPipeline + Send>> + Send + Sync>;
 
 /// Shared activity-capture handle. Clone-cheap.
 #[derive(Clone)]
@@ -53,6 +65,14 @@ struct Inner {
     state: Mutex<RuntimeState>,
     conn: Arc<Mutex<Connection>>,
     sampler: Mutex<Box<dyn Sampler>>,
+    /// Parent directory under which per-session audio chunk
+    /// subdirectories are created. Mirrors the meetings runtime's
+    /// `chunk_base_dir` shape. Empty `PathBuf` is a sentinel meaning
+    /// "audio capture not wired" — the unit tests use this default.
+    audio_chunk_base_dir: PathBuf,
+    /// Factory closure that builds an audio pipeline per session.
+    /// Production wires [`audio::start_default`]; tests override.
+    audio_factory: AudioFactory,
 }
 
 /// All of the mutable orchestrator state that needs to move together
@@ -61,30 +81,87 @@ struct Inner {
 struct RuntimeState {
     lifecycle: LifecycleState,
     current_session: Option<String>,
+    /// Set by [`ActivityCaptureRuntime::start_with_audio`] just before
+    /// the FSM step that drives `OpenSession`. Read by
+    /// `run_open_session`, then cleared. Carrying it on the state
+    /// rather than as an arg lets us reuse the existing
+    /// `LifecycleInput::Start` shape without adding a new variant
+    /// (and without inventing a parallel `StartWithAudio` lifecycle
+    /// path which would multiply the FSM transition matrix).
+    pending_audio: bool,
+    /// Active audio pipeline for the in-flight session. `None` when
+    /// the session is non-audio OR when no session is in flight.
+    audio_pipeline: Option<Box<dyn AudioPipeline + Send>>,
 }
 
 impl ActivityCaptureRuntime {
     /// Spin up the runtime with the platform-default sampler.
-    pub fn spawn(conn: Arc<Mutex<Connection>>) -> Self {
-        Self::with_sampler(conn, make_default_sampler())
+    /// `audio_chunk_base_dir` is the parent directory under which
+    /// per-session audio chunk subdirs land; pass an empty PathBuf
+    /// to disable audio entirely (the toggle still works, the
+    /// pipeline just fails fast).
+    pub fn spawn(conn: Arc<Mutex<Connection>>, audio_chunk_base_dir: PathBuf) -> Self {
+        Self::with_components(
+            conn,
+            make_default_sampler(),
+            audio_chunk_base_dir,
+            default_audio_factory(),
+        )
     }
 
-    /// Spin up with a caller-provided sampler. Used by tests.
+    /// Spin up with a caller-provided sampler. Tests pass
+    /// [`InertSampler`]; production goes through [`Self::spawn`].
+    /// Audio defaults to the production factory + an empty chunk dir.
     pub fn with_sampler(conn: Arc<Mutex<Connection>>, sampler: Box<dyn Sampler>) -> Self {
+        Self::with_components(conn, sampler, PathBuf::new(), default_audio_factory())
+    }
+
+    /// Full constructor — tests use this when they need a custom
+    /// audio factory in addition to a custom sampler. Production
+    /// path is [`Self::spawn`].
+    pub fn with_components(
+        conn: Arc<Mutex<Connection>>,
+        sampler: Box<dyn Sampler>,
+        audio_chunk_base_dir: PathBuf,
+        audio_factory: AudioFactory,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 state: Mutex::new(RuntimeState {
                     lifecycle: LifecycleState::Idle,
                     current_session: None,
+                    pending_audio: false,
+                    audio_pipeline: None,
                 }),
                 conn,
                 sampler: Mutex::new(sampler),
+                audio_chunk_base_dir,
+                audio_factory,
             }),
         }
     }
 
-    /// User clicked "Activity" in the Command Center.
+    /// User clicked "Activity" in the Command Center. Audio is OFF
+    /// for sessions opened this way.
     pub fn start(&self) -> AppResult<()> {
+        self.start_with_audio(false)
+    }
+
+    /// Start a session with the Wave-4 audio toggle in the requested
+    /// state. The Command Center + the IPC layer read the
+    /// `activity_audio_enabled` setting and pass the result here.
+    /// FSM-equivalent to [`Self::start`] otherwise.
+    pub fn start_with_audio(&self, audio_enabled: bool) -> AppResult<()> {
+        // Stash the pending flag before driving the FSM. The OpenSession
+        // effect reads it (and clears it) inside the locked critical
+        // section of `run_open_session`.
+        {
+            let mut g =
+                self.inner.state.lock().map_err(|_| {
+                    AppError::Activity("activity runtime mutex poisoned".to_string())
+                })?;
+            g.pending_audio = audio_enabled;
+        }
         self.drive(LifecycleInput::Start)
     }
 
@@ -181,11 +258,23 @@ impl ActivityCaptureRuntime {
 
     fn run_open_session(&self) -> AppResult<()> {
         let started_at = now_ms();
+
+        // Take the pending-audio flag (set by start_with_audio).
+        // Clearing it here means a future Start call must re-set it,
+        // so a stale flag from a previous session can never bleed in.
+        let audio_enabled = {
+            let mut g =
+                self.inner.state.lock().map_err(|_| {
+                    AppError::Activity("activity runtime mutex poisoned".to_string())
+                })?;
+            std::mem::replace(&mut g.pending_audio, false)
+        };
+
         let id = {
             let conn = self.inner.conn.lock().map_err(|_| {
                 AppError::Activity("db mutex poisoned during open_session".to_string())
             })?;
-            insert_session(&conn, started_at)?
+            insert_session_with_options(&conn, started_at, audio_enabled)?
         };
 
         // Stash the new id BEFORE we start the sampler — the
@@ -197,6 +286,33 @@ impl ActivityCaptureRuntime {
                     AppError::Activity("activity runtime mutex poisoned".to_string())
                 })?;
             g.current_session = Some(id.clone());
+        }
+
+        // Spawn the audio pipeline if the user requested audio for
+        // this session. Failure is non-fatal: the visual timeline
+        // still runs; we just emit a `layer_error` event and continue.
+        // This matches the sampler's degradation contract below.
+        if audio_enabled {
+            match (self.inner.audio_factory)(&id, &self.inner.audio_chunk_base_dir) {
+                Ok(pipeline) => {
+                    if let Ok(mut g) = self.inner.state.lock() {
+                        g.audio_pipeline = Some(pipeline);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        target: "activity",
+                        error = %e,
+                        %id,
+                        "audio pipeline failed to start; session continues without audio"
+                    );
+                    let _ = self.emit_layer_error(
+                        &id,
+                        &format!("audio pipeline failed: {e}"),
+                        started_at,
+                    );
+                }
+            }
         }
 
         // Spawn the sampler. Failure here is non-fatal: we still
@@ -250,13 +366,36 @@ impl ActivityCaptureRuntime {
             s.stop();
         }
 
+        // Take the audio pipeline (if any) OUT of the mutex before
+        // calling .stop() — stop() can block for seconds joining the
+        // long-form worker thread, and we don't want to hold the
+        // runtime lock for that long.
+        let pipeline = if let Ok(mut g) = self.inner.state.lock() {
+            g.audio_pipeline.take()
+        } else {
+            None
+        };
+
         let Some(sid) = session_id else {
+            // No session in flight; drop the pipeline so we don't
+            // leak any thread.
+            if let Some(p) = pipeline {
+                let _ = p.stop();
+            }
             tracing::debug!(
                 target: "activity",
                 "close requested with no active session — nothing to do"
             );
             return Ok(());
         };
+
+        // Persist audio results FIRST (before finalize_session changes
+        // the session row's `status`) so the row's audit + provenance
+        // make sense in any partial-failure case.
+        if let Some(p) = pipeline {
+            self.persist_audio_results(sid, p);
+        }
+
         {
             let conn =
                 self.inner.conn.lock().map_err(|_| {
@@ -277,6 +416,110 @@ impl ActivityCaptureRuntime {
             ?status,
             "activity session closed"
         );
+        Ok(())
+    }
+
+    /// Drain the audio pipeline, persist segments + provenance.
+    /// Errors are logged + swallowed because a session that produced
+    /// no audio (Whisper failed, mic mute) should still finalize.
+    fn persist_audio_results(&self, session_id: &str, pipeline: Box<dyn AudioPipeline + Send>) {
+        let output = match pipeline.stop() {
+            Ok(o) => o,
+            Err(e) => {
+                tracing::warn!(
+                    target: "activity::audio",
+                    error = %e,
+                    %session_id,
+                    "audio pipeline stop failed; no segments persisted"
+                );
+                return;
+            }
+        };
+        let now = now_ms();
+
+        // Look up the session's started_at so we can shift the
+        // capture-relative (0-based) Whisper timestamps into the
+        // epoch-ms coordinate system the blocker / stitcher use.
+        // Without this, stitching would always fail (segments would
+        // sit in [0, duration] while Blocks live near now()).
+        let session_started_at_ms: i64 = match self.inner.conn.lock() {
+            Ok(conn) => conn
+                .query_row(
+                    "SELECT started_at FROM activity_sessions WHERE id = ?1",
+                    rusqlite::params![session_id],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0),
+            Err(_) => 0,
+        };
+
+        // Convert RawSegments to the persist tuple shape (now epoch-ms).
+        // We do this outside the DB lock to keep the critical section short.
+        let rows: Vec<(i64, i64, String, TranscriptChannel)> = output
+            .segments
+            .into_iter()
+            .map(|s| {
+                (
+                    session_started_at_ms.saturating_add(s.started_at_ms),
+                    session_started_at_ms.saturating_add(s.ended_at_ms),
+                    s.text,
+                    s.channel,
+                )
+            })
+            .collect();
+        let segment_count = rows.len();
+
+        let res = (|| -> AppResult<()> {
+            let mut conn = self.inner.conn.lock().map_err(|_| {
+                AppError::Activity("db mutex poisoned during audio persist".to_string())
+            })?;
+            if !rows.is_empty() {
+                insert_segments_bulk(&mut conn, session_id, &rows, now)?;
+            }
+            if let Some(prov) = &output.provenance {
+                set_session_audio_provenance(
+                    &conn,
+                    session_id,
+                    &prov.whisper_model,
+                    prov.chunk_window_ms,
+                    now,
+                )?;
+            }
+            Ok(())
+        })();
+        match res {
+            Ok(()) => tracing::info!(
+                target: "activity::audio",
+                %session_id,
+                segment_count,
+                "persisted activity audio segments"
+            ),
+            Err(e) => tracing::warn!(
+                target: "activity::audio",
+                error = %e,
+                %session_id,
+                "failed to persist audio segments / provenance"
+            ),
+        }
+    }
+
+    /// Helper that emits a `layer_error` event under the current
+    /// session id. Used when a sub-layer (audio, sampler) fails at
+    /// startup so the timeline records the degradation rather than
+    /// silently losing context.
+    fn emit_layer_error(&self, session_id: &str, message: &str, ts_ms: i64) -> AppResult<()> {
+        let conn = self.inner.conn.lock().map_err(|_| {
+            AppError::Activity("db mutex poisoned during layer_error emit".to_string())
+        })?;
+        insert_event(
+            &conn,
+            session_id,
+            ts_ms,
+            "layer_error",
+            None,
+            None,
+            Some(&format!("{{\"message\":{}}}", json_escape_string(message))),
+        )?;
         Ok(())
     }
 
@@ -373,6 +616,17 @@ fn json_escape_string(s: &str) -> String {
     }
     out.push('"');
     out
+}
+
+/// The production audio factory — delegates to
+/// [`audio::start_default`]. Tests substitute their own via
+/// [`ActivityCaptureRuntime::with_components`].
+fn default_audio_factory() -> AudioFactory {
+    Box::new(
+        |session_id: &str, base_dir: &Path| -> AppResult<Box<dyn AudioPipeline + Send>> {
+            audio::start_default(session_id, base_dir)
+        },
+    )
 }
 
 fn now_ms() -> i64 {

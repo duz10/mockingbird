@@ -157,6 +157,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-26 | `[phase10-wave-4]`               | 270s hard cap on agent foreground tool calls; backgrounded `start /B` cmd children survive parent shell exit; `is_multiple_of` is unstable on i64; release-mode `debug_assert!` defeats `#[should_panic]` in throwaway crate runs |
 | 2026-05-25 | `[phase10-wave-2]`               | windows-rs MONITORINFOF_PRIMARY lives under UI/WindowsAndMessaging not Graphics/Gdi; serde camelCase isn't free; throwaway preamble must append not prepend |
 | 2026-05-25 | `[phase10-wave-1b]`              | typed-settings IPC has no UI wrapper; Pill `tone` is a token string not a union; `formatRelative` takes ISO not unix-ms |
 | 2026-05-25 | `[phase10 / meta / dispatch]`    | sub-agent session_id is conversational, NOT serial — PINNED P8           |
@@ -200,6 +201,91 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-26 [phase10-wave-4] Audio Layer 2 shipped — four small tooling/Rust paper-cuts worth recording
+
+**Context:** Wave 4 (mb-g1w2) — wired per-Block audio transcription into
+Activity Capture by *wrapping* the sealed Meeting Capture infrastructure
+(`audio::capture::Capture` twin-stream + `meetings::long_form_stt::LongFormStt`
+chunked Whisper) rather than duplicating it. New pure-Rust modules:
+`activity/audio.rs` (`AudioPipeline` trait + `LongFormAudioPipeline` impl +
+`StubAudioPipeline` for tests), `activity/segments_persist.rs`,
+`activity/block_audio_stitcher.rs` (midpoint-rule attribution). Migration
+014 added two provenance columns. ADR 0041 Accepted inline.
+
+### Finding 1 — 270s hard cap on agent foreground tool calls
+
+The Code Puppy shell tool kills any single foreground command at
+exactly ~270 seconds, even when the requested timeout is 1500s+ and
+the child process is still doing useful work. `cargo test --release
+--no-run` from a cold cache takes 5–7 minutes here, well past the cap.
+
+**Action**: use `start /B cmd /c "<command> > <log> 2>&1"` from a `cmd.exe`
+shell to detach the cargo invocation completely from the agent's shell
+lifetime. The orphaned `cmd.exe` + its `cargo.exe` / `rustc.exe`
+children keep running after the agent foreground returns. Then poll
+the log file + `Get-Process cargo,rustc` in subsequent short tool
+calls (≤ 240s each) until processes hit zero. Bernard burned 4
+attempts (each killed at 270s on the dot, identical `execution_time=270.84`)
+before figuring out the cap was the agent shell, not cargo.
+
+Also note: the agent's `background: true` mode does NOT survive the
+way you'd expect either — the parent powershell exits cleanly, but the
+child cargo gets killed alongside it. `start /B cmd /c "..."` from
+plain `cmd.exe` (NOT `powershell -Command "start ..."`) is the
+pattern that actually detaches. Verified 2026-05-26 by checking
+`Get-Process cargo,rustc -ErrorAction SilentlyContinue` showed
+live PIDs minutes after the foreground call returned.
+
+### Finding 2 — `i64::is_multiple_of` is unstable; trait import is the diagnostic, not the cure
+
+```
+error[E0599]: no method named `is_multiple_of` found for type `i64`
+help: trait `Integer` which provides `is_multiple_of` is implemented but not in scope;
+      perhaps you want to import it
+```
+
+The rustc help points you at `use num_integer::Integer` but in our
+workspace `num-integer` is a transitive dep we don't directly depend
+on, and adding it just to test a stitcher property is silly.
+`<u32>::is_multiple_of` IS in std (stable on unsigned ints in 1.85)
+but the signed-int version isn't there yet. Use `% 2 == 0` for tests;
+clippy's `manual_is_multiple_of` lint doesn't fire on `i64` so you
+stay green.
+
+### Finding 3 — `debug_assert!` + `#[should_panic]` is a footgun under release
+
+The `block_audio_stitcher::stitch` precondition ("blocks must be
+chronologically ordered") was originally a `debug_assert!` with a
+`#[should_panic(expected = "chronologically ordered")]` test. The
+throwaway crate runs `cargo test --release` (LESSONS P1 / `scripts\
+throwaway-test.ps1`), where `debug_assert!` is compiled out — so the
+test never panics and the suite goes red on a phantom failure.
+
+**Action**: when a precondition is also load-bearing for memory-safety
+or correctness of subsequent calls (here: `binary_search_by` on an
+unsorted slice is UB-adjacent — it returns garbage indices, mis-attributing
+segments to wrong Blocks), promote it to a plain `assert!`. Don't
+gate correctness invariants on `debug_assertions`. The runtime cost
+(O(B) walk for a sortedness check on session close) is negligible.
+
+### Finding 4 — Whisper segment timestamps are capture-relative ms, NOT epoch ms
+
+Obvious in hindsight, but the meeting-capture infra hands you
+`LongFormOutput.mic_segments[].t0_ms` / `t1_ms` (u32) that are
+relative to the start of capture (`first_sample == 0`). Activity
+Blocks are stamped in *epoch* ms. If you persist transcript segments
+without the offset shift, the block_audio_stitcher silently routes
+zero segments to every Block because the coordinate systems disagree
+by ~`session.started_at` ms.
+
+**Action**: at insert time in the runtime, query
+`SELECT started_at FROM activity_sessions WHERE id = ?` and add the
+result to each segment's `t0_ms`/`t1_ms` before persisting. This is a
+one-time per-session lookup, so the cost is nothing. Documented in
+ADR 0041 § "Coordinate system".
 
 ---
 

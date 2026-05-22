@@ -28,12 +28,18 @@ use std::path::Path;
 use rusqlite::Connection;
 
 use crate::activity::{
-    abstractor::{abstract_block_with_provider, current_prompt_set_sha, BlockAbstract},
+    abstractor::{
+        abstract_block_audio_aware_with_provider, abstract_block_with_provider,
+        current_prompt_set_sha, current_prompt_set_sha_audio, AudioExcerpt, BlockAbstract,
+        BlockAudioContext,
+    },
     assembler::{assemble, assemble_work_report, AbstractedBlock},
+    block_audio_stitcher::{stitch, BlockAudioBundle, StitchBlock},
     blocker::{to_blocks, Block},
     blocks_persist::{list_blocks, update_session_summary, ActivityBlockRow},
     persist::get_session_detail,
     segmenter::normalize,
+    segments_persist::list_segments,
 };
 use crate::cleanup::ollama::OllamaProvider;
 use crate::cleanup::provider::CleanupProvider;
@@ -68,9 +74,46 @@ pub fn regenerate_summary_with_provider(
     // 3. Abstract per Block, respecting prior user edits.
     let existing = list_blocks(conn, session_id)?;
     let prompt_set_sha = current_prompt_set_sha();
+    let audio_prompt_sha = current_prompt_set_sha_audio();
     let now_ms = session_ended_at.unwrap_or(session_started_at);
-    let abstracted =
-        abstract_blocks_respecting_user_edits(&blocks, &existing, provider, &prompt_set_sha);
+
+    // Wave 4: load transcript segments (if any), stitch onto Blocks
+    // via the midpoint rule (ADR 0041), and project to per-Block
+    // audio context. Sessions with `audio_enabled = 0` produce an
+    // empty segment list — the stitcher returns empty bundles —
+    // and every Block routes through the v1 (no-audio) path.
+    let segments = list_segments(conn, session_id)?;
+    let stitcher_input: Vec<_> = segments
+        .iter()
+        .filter_map(|r| r.to_stitcher_input())
+        .collect();
+    let stitch_blocks: Vec<StitchBlock> = blocks
+        .iter()
+        .enumerate()
+        .map(|(i, b)| StitchBlock {
+            // The stitcher's `id` is only echoed back to us so a
+            // simple index-based id is fine; we re-correlate via
+            // the parallel Vec ordering below.
+            id: i.to_string(),
+            started_at: b.started_at,
+            ended_at: b.ended_at,
+        })
+        .collect();
+    let bundles = stitch(&stitch_blocks, &stitcher_input);
+    let audio_contexts: Vec<BlockAudioContext> = bundles
+        .iter()
+        .zip(blocks.iter())
+        .map(|(bundle, block)| bundle_to_context(bundle, block.started_at))
+        .collect();
+
+    let abstracted = abstract_blocks_respecting_user_edits(
+        &blocks,
+        &existing,
+        &audio_contexts,
+        provider,
+        &prompt_set_sha,
+        &audio_prompt_sha,
+    );
 
     // 4. Replace block rows. Trade-off: we delete + re-insert rather
     //    than try to UPDATE in place. Reason: the blocker can change
@@ -194,11 +237,21 @@ struct AbstractedBlockWithProvenance {
 fn abstract_blocks_respecting_user_edits(
     blocks: &[Block],
     existing: &[ActivityBlockRow],
+    audio_contexts: &[BlockAudioContext],
     provider: &dyn CleanupProvider,
     prompt_set_sha: &str,
+    audio_prompt_sha: &str,
 ) -> Vec<AbstractedBlockWithProvenance> {
+    debug_assert_eq!(
+        blocks.len(),
+        audio_contexts.len(),
+        "audio_contexts must zip 1:1 with blocks; got {} blocks vs {} contexts",
+        blocks.len(),
+        audio_contexts.len()
+    );
+    let empty_audio = BlockAudioContext::default();
     let mut out = Vec::with_capacity(blocks.len());
-    for b in blocks {
+    for (idx, b) in blocks.iter().enumerate() {
         // Match by `started_at` proximity (≤ 1s tolerance). This is
         // loose enough to survive heuristic-tuning re-runs that
         // shift Block boundaries by a few hundred ms.
@@ -215,13 +268,21 @@ fn abstract_blocks_respecting_user_edits(
             });
             continue;
         }
-        let res: BlockAbstract = match abstract_block_with_provider(b, provider, prompt_set_sha) {
+        // Wave 4: route through the audio-aware abstractor. The
+        // implementation itself falls back to the v1 path when the
+        // bundle is empty — so v1 sessions naturally re-acquire the
+        // v1 fingerprint even though they're calling the audio-aware
+        // entry point.
+        let audio = audio_contexts.get(idx).unwrap_or(&empty_audio);
+        let res: BlockAbstract = match abstract_block_audio_aware_with_provider(
+            b,
+            audio,
+            provider,
+            audio_prompt_sha,
+            prompt_set_sha,
+        ) {
             Ok(r) => r,
             Err(e) => {
-                // Defensive — `abstract_block_with_provider` itself
-                // already falls back internally. If we reach here,
-                // it's a real persist-layer surprise. Log + carry
-                // on with a None abstract.
                 tracing::warn!(
                     target: "activity::export",
                     error = %e,
@@ -247,6 +308,42 @@ fn abstract_blocks_respecting_user_edits(
         });
     }
     out
+}
+
+/// Project a stitcher bundle to the abstractor's audio context.
+/// Translates session-relative ms timestamps to Block-relative
+/// seconds so the prompt's `[t+SS]` markers read naturally.
+fn bundle_to_context(bundle: &BlockAudioBundle, block_started_at_ms: i64) -> BlockAudioContext {
+    BlockAudioContext {
+        mic_excerpts: bundle
+            .mic_segments
+            .iter()
+            .map(|s| AudioExcerpt {
+                offset_seconds: ((s.started_at - block_started_at_ms).max(0)) / 1_000,
+                text: s.text.clone(),
+            })
+            .collect(),
+        sys_excerpts: bundle
+            .sys_segments
+            .iter()
+            .map(|s| AudioExcerpt {
+                offset_seconds: ((s.started_at - block_started_at_ms).max(0)) / 1_000,
+                text: s.text.clone(),
+            })
+            .collect(),
+    }
+}
+
+#[allow(dead_code)] // killed by abstract_block_with_provider going through audio-aware path
+fn _silence_unused_v1_abstract_path(
+    b: &Block,
+    provider: &dyn CleanupProvider,
+    sha: &str,
+) -> AppResult<BlockAbstract> {
+    // Kept around as a single-call escape hatch in case a future
+    // caller needs the no-audio path explicitly. Wave 4 routes
+    // everything through the audio-aware path.
+    abstract_block_with_provider(b, provider, sha)
 }
 
 fn to_assembler_blocks(src: &[AbstractedBlockWithProvenance]) -> Vec<AbstractedBlock> {

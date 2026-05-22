@@ -24,7 +24,9 @@ use crate::activity::{
         ActivitySessionRow,
     },
     runtime::ActivityCaptureRuntime,
+    segments_persist::{list_segments, ActivityTranscriptSegmentRow},
 };
+use crate::settings::{model::SettingKey, Settings};
 
 use super::{into_err, lock_db, AppStateHandle};
 
@@ -47,11 +49,32 @@ const LIST_LIMIT_MAX: i64 = 500;
 /// Idempotent: calling this from a non-Idle state is a no-op (the
 /// FSM enforces). Returns the session id on success — that's either
 /// the newly-created session OR the already-running session.
+///
+/// `with_audio` controls the Wave-4 audio toggle for THIS session.
+/// When `None`, the function reads the `activity_audio_enabled`
+/// setting (default `false`). UI surfaces (Command Center, Settings)
+/// pass an explicit boolean when they know what the user picked;
+/// keyboard-shortcut / programmatic callers leave it `None` to honor
+/// the persisted default.
 #[tauri::command]
 pub fn activity_start(
+    state: State<'_, AppStateHandle>,
     runtime: State<'_, ActivityCaptureRuntime>,
+    with_audio: Option<bool>,
 ) -> Result<Option<String>, String> {
-    runtime.start().map_err(into_err)?;
+    let resolved = match with_audio {
+        Some(v) => v,
+        None => {
+            // Fall back to the persisted setting. Read in its own
+            // short critical section so we don't hold the DB lock
+            // across the FSM step.
+            let conn = lock_db(&state)?;
+            Settings::new(&conn)
+                .get::<bool>(SettingKey::ActivityAudioEnabled)
+                .map_err(into_err)?
+        }
+    };
+    runtime.start_with_audio(resolved).map_err(into_err)?;
     Ok(runtime.current_session_id())
 }
 
@@ -262,4 +285,21 @@ pub fn activity_render_work_report(
 ) -> Result<String, String> {
     let conn = lock_db(&state)?;
     render_work_report(&conn, &session_id).map_err(into_err)
+}
+
+// ===========================================================================
+// Phase 10 Wave 4 — audio transcript surface.
+// ===========================================================================
+
+/// List all transcript segments for one session, chronologically.
+/// Audio-disabled sessions return an empty Vec. The Activity detail
+/// page renders these as a side-by-side timeline next to the visual
+/// Blocks; an empty list means "no audio captured".
+#[tauri::command]
+pub fn activity_list_transcript_segments(
+    state: State<'_, AppStateHandle>,
+    session_id: String,
+) -> Result<Vec<ActivityTranscriptSegmentRow>, String> {
+    let conn = lock_db(&state)?;
+    list_segments(&conn, &session_id).map_err(into_err)
 }

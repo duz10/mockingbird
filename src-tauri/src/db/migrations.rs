@@ -31,6 +31,10 @@ const MIGRATION_012: &str = include_str!("migrations/012_activity_capture.sql");
 // shadow over (label, generated_abstract). Migration sql comments
 // (ADR 0040 §Decision items 4 + 5) walk the design alternatives.
 const MIGRATION_013: &str = include_str!("migrations/013_activity_blocks_fts.sql");
+// Phase 10 Wave 4 — per-session audio-pipeline provenance columns on
+// activity_sessions (audio_whisper_model + audio_chunk_window_ms).
+// Purely additive ADD COLUMN, NULL-defaulted. ADR 0041.
+const MIGRATION_014: &str = include_str!("migrations/014_activity_audio_provenance.sql");
 
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
@@ -114,6 +118,14 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         let prepared = substitute_prompt_bodies(MIGRATION_013);
         conn.execute_batch(&prepared)?;
     }
+    if current < 14 {
+        // Phase 10 Wave 4: adds activity_sessions.audio_whisper_model
+        // + audio_chunk_window_ms for per-session audio-pipeline
+        // provenance (ADR 0041, Principle 2). Pure ADD COLUMN; the
+        // substituter pass catches accidental prompt-token leaks.
+        let prepared = substitute_prompt_bodies(MIGRATION_014);
+        conn.execute_batch(&prepared)?;
+    }
     Ok(())
 }
 
@@ -172,7 +184,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "13");
+        assert_eq!(v, "14");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -191,7 +203,74 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "13");
+        assert_eq!(v, "14");
+    }
+
+    /// Migration 014 ships per-session audio-pipeline provenance
+    /// columns. ADR 0041; Wave 4 writes these when `audio_enabled = 1`.
+    /// Pre-Wave-4 sessions stay NULL forever (no audio = no provenance).
+    #[test]
+    fn migration_014_ships_activity_audio_provenance_columns() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(activity_sessions)")
+            .unwrap();
+        let cols: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        for c in ["audio_whisper_model", "audio_chunk_window_ms"] {
+            assert!(
+                cols.iter().any(|x| x == c),
+                "missing activity_sessions.{c}; cols: {cols:?}"
+            );
+        }
+
+        // Round-trip: insert a session with the new columns populated,
+        // read it back. Proves the columns are writable and the
+        // types line up.
+        conn.execute(
+            "INSERT INTO activity_sessions (id, started_at, status, audio_enabled, \
+             screenshot_enabled, audio_whisper_model, audio_chunk_window_ms, \
+             created_at, updated_at) \
+             VALUES ('s-audio', 1000, 'in_progress', 1, 0, \
+             'whisper-large-v3-turbo-q5_0', 30000, 1000, 1000)",
+            [],
+        )
+        .unwrap();
+        let (model, win): (String, i64) = conn
+            .query_row(
+                "SELECT audio_whisper_model, audio_chunk_window_ms \
+                 FROM activity_sessions WHERE id = 's-audio'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(model, "whisper-large-v3-turbo-q5_0");
+        assert_eq!(win, 30_000);
+    }
+
+    /// Migration 014 must stay in its sibling-subsystem lane.
+    #[test]
+    fn migration_014_does_not_touch_dictation_or_meeting_tables() {
+        let sql = MIGRATION_014.to_lowercase();
+        for forbidden in [
+            "alter table sessions",
+            "alter table transcripts",
+            "alter table modes",
+            "alter table meeting_sessions",
+            "alter table meeting_transcripts",
+            "drop table",
+        ] {
+            assert!(
+                !sql.contains(forbidden),
+                "migration 014 must stay in its sibling-subsystem lane: forbidden snippet found: {forbidden}"
+            );
+        }
     }
 
     /// Migration 013 ships the activity-blocks FTS5 surface + the

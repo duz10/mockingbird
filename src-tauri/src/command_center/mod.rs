@@ -531,7 +531,9 @@ impl CommandCenter {
 
     /// Phase 10 Wave 1B — dispatch Activity tile pick. The runtime
     /// is registered as managed state at boot (lib.rs::run). We hit
-    /// `start()`, then drive the FSM forward with the result.
+    /// `start_with_audio()` (Phase 10 Wave 4: honors
+    /// `ActivityAudioEnabled`), then drive the FSM forward with the
+    /// result.
     fn dispatch_activity_start(&self) {
         let Some(rt) = self
             .inner
@@ -546,7 +548,23 @@ impl CommandCenter {
             self.drive(CcInput::RuntimeReplied { success: false });
             return;
         };
-        match rt.start() {
+        // Wave 4: read the audio setting in its own short critical
+        // section so the CC dispatch path doesn't hold the DB lock
+        // across the FSM step. Best-effort: a setting-read failure
+        // logs + falls back to audio-off (the safe default).
+        let with_audio = self
+            .inner
+            .app
+            .try_state::<crate::commands::AppStateHandle>()
+            .and_then(|s| {
+                s.db.lock().ok().map(|conn| {
+                    crate::settings::Settings::new(&conn)
+                        .get::<bool>(crate::settings::model::SettingKey::ActivityAudioEnabled)
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+        match rt.start_with_audio(with_audio) {
             Ok(()) => {
                 let sid = rt.current_session_id();
                 tracing::info!(

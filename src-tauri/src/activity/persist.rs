@@ -99,17 +99,61 @@ pub struct ActivitySessionDetail {
     pub events: Vec<ActivityEventRow>,
 }
 
-/// Insert a new `in_progress` session row. Returns the assigned id.
+/// Insert a new `in_progress` session row with audio disabled.
+/// Returns the assigned id. Convenience wrapper around
+/// [`insert_session_with_options`] used by call sites (and tests)
+/// that have no opinion on the Wave-4 audio toggle.
 pub fn insert_session(conn: &Connection, started_at_ms: i64) -> AppResult<String> {
+    insert_session_with_options(conn, started_at_ms, false)
+}
+
+/// Insert a new `in_progress` session row, recording the Wave-4
+/// audio-capture toggle. Returns the assigned id. The runtime
+/// (which knows whether `activity_audio_enabled` was on at start)
+/// calls this; everyone else calls [`insert_session`].
+pub fn insert_session_with_options(
+    conn: &Connection,
+    started_at_ms: i64,
+    audio_enabled: bool,
+) -> AppResult<String> {
     let id = new_session_id();
     let now = started_at_ms;
     conn.execute(
         "INSERT INTO activity_sessions \
          (id, started_at, status, audio_enabled, screenshot_enabled, created_at, updated_at) \
-         VALUES (?1, ?2, 'in_progress', 0, 0, ?3, ?3)",
-        params![id, started_at_ms, now],
+         VALUES (?1, ?2, 'in_progress', ?3, 0, ?4, ?4)",
+        params![id, started_at_ms, audio_enabled as i64, now],
     )?;
     Ok(id)
+}
+
+/// Stamp the Wave-4 audio-pipeline provenance columns
+/// (`audio_whisper_model` + `audio_chunk_window_ms`) on an existing
+/// session row. Called from the runtime's close path when audio was
+/// active. Principle 2: provenance is total.
+///
+/// Updates `updated_at` to `now_ms` so a downstream query can
+/// distinguish "audio finalized at" from "session row created at".
+/// Does NOT touch the `audio_enabled` column — that's set at session
+/// open and immutable thereafter.
+pub fn set_session_audio_provenance(
+    conn: &Connection,
+    session_id: &str,
+    whisper_model: &str,
+    chunk_window_ms: i64,
+    now_ms: i64,
+) -> AppResult<()> {
+    let n = conn.execute(
+        "UPDATE activity_sessions SET audio_whisper_model = ?1, \
+         audio_chunk_window_ms = ?2, updated_at = ?3 WHERE id = ?4",
+        params![whisper_model, chunk_window_ms, now_ms, session_id],
+    )?;
+    if n == 0 {
+        return Err(AppError::ActivityPersist(format!(
+            "no such activity session: {session_id}"
+        )));
+    }
+    Ok(())
 }
 
 /// Mark a session as terminated. The orchestrator should pass

@@ -233,9 +233,23 @@ pub fn run() {
             // (Activity sessions exist; the user can stop them via
             // the CC). Registered BEFORE the Command Center so the
             // CC can dispatch into it via managed state immediately.
-            let activity_runtime = ActivityCaptureRuntime::spawn(shared_conn.clone());
+            //
+            // Phase 10 Wave 4: pass an `activity_audio` chunk base
+            // dir sibling to the meetings one. The directory exists
+            // even when audio is disabled; per-session subdirs are
+            // created + GC'd by the orchestrator (ADR 0041).
+            let activity_audio_dir = app_data.join("activity_audio");
+            if let Err(e) = std::fs::create_dir_all(&activity_audio_dir) {
+                tracing::warn!(
+                    error = ?e,
+                    path = ?activity_audio_dir,
+                    "failed to create activity audio chunk dir; audio will fail if enabled"
+                );
+            }
+            let activity_runtime =
+                ActivityCaptureRuntime::spawn(shared_conn.clone(), activity_audio_dir);
             app.manage(activity_runtime);
-            tracing::info!("📊 activity-capture runtime registered");
+            tracing::info!("\u{1f4ca} activity-capture runtime registered");
 
             // Phase 10 Wave 1A — spin up the Command Center after the
             // dictation + meeting runtimes are registered, so the

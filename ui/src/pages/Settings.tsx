@@ -28,6 +28,7 @@ import type { LearningRun, SettingsSnapshot, ThemeChoice } from "../lib/types";
 import { formatRelative } from "../lib/format";
 
 import { CommandCenterChordRow } from "./SettingsCommandCenterRow";
+import { SettingsActivityAudioRow } from "./SettingsActivityAudioRow";
 import { SettingsMeetingTab } from "./SettingsMeetingTab";
 import styles from "./Settings.module.css";
 
@@ -262,6 +263,11 @@ function GeneralPanel({
           `command_center::parse_chord` on the Rust side. A bad chord
           falls back to the default without breaking the app. */}
       <CommandCenterChordRow />
+      {/* Phase 10 Wave 4 — Activity Capture audio toggle (ADR 0041).
+          Default OFF (privacy by default). The Command Center reads
+          this at session-start time; the IPC `activity_start` defaults
+          to it when no explicit `withAudio` is passed. */}
+      <SettingsActivityAudioRow />
       </Card>
       <BackgroundCard />
     </>

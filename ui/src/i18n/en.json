@@ -225,6 +225,8 @@
   "settings.general.reducedMotion.help": "Disables waveform animation, slide-in, and pulses. Honors system preference automatically.",
   "settings.general.cmdCenterChord": "Command Center shortcut",
   "settings.general.cmdCenterChord.help": "Global chord that opens the Command Center. Format: <modifier>+<key>, e.g. RightCtrl+Space.",
+  "settings.activity.audio": "Activity Capture: record audio",
+  "settings.activity.audio.help": "When enabled, Activity sessions also record your microphone and system audio for per-block transcription. Off by default; everything stays local.",
   "settings.meeting.legacyChord": "Direct meeting hotkey",
   "settings.meeting.legacyChord.help": "When enabled, the meeting chord starts/stops a meeting directly without opening the Command Center.",
   "settings.meeting.legacyChord.restore": "Restore legacy chord behavior",

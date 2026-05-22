@@ -47,10 +47,12 @@ const DEFAULT_MAX_TOKENS: u32 = 256; // one sentence; the prompt caps it at 25 w
 /// `include_str!` so it's baked into the binary, no IO needed.
 const ABSTRACT_PROMPT_BODY: &str = include_str!("prompts/abstract_block.md");
 
-/// Reserved for Wave 4; included in the prompt-set SHA so a future
-/// content change automatically updates the hash without us having
-/// to remember to bump it. Wave 3 never reads from this file at
-/// runtime — only its bytes contribute to provenance.
+/// Wave 4: audio-aware prompt body. The abstractor's audio path uses
+/// THIS body when a Block has overlapping transcript segments
+/// (ADR 0041 §Decision item 4). Also included in the v1 prompt-set
+/// SHA so a v1-without-audio Block's fingerprint changes when this
+/// file changes — useful for provenance even though the v1 path
+/// doesn't read the audio body.
 const ABSTRACT_AUDIO_AWARE_PROMPT_BODY: &str =
     include_str!("prompts/abstract_block.audio_aware.md");
 
@@ -94,6 +96,42 @@ pub fn current_prompt_set_sha() -> String {
     h.update(b"\nabstract_block.audio_aware.md:");
     h.update(ABSTRACT_AUDIO_AWARE_PROMPT_BODY.as_bytes());
     format!("abstract_v1-{:08x}", h.finalize())
+}
+
+/// Wave 4 audio-aware fingerprint family. CRC32 of the audio-aware
+/// prompt body alone (NOT the v1 body) — a Block whose abstract was
+/// generated via the audio-aware prompt carries this value in
+/// `activity_blocks.prompt_version_sha`, distinguishing it from the
+/// v1 family in DB queries (ADR 0041 §Decision item 4).
+pub fn current_prompt_set_sha_audio() -> String {
+    let mut h = crc32fast::Hasher::new();
+    h.update(b"abstract_block.audio_aware.md:");
+    h.update(ABSTRACT_AUDIO_AWARE_PROMPT_BODY.as_bytes());
+    format!("abstract_v2_audio-{:08x}", h.finalize())
+}
+
+/// One transcript excerpt fed to the audio-aware prompt. Times are
+/// **seconds relative to the Block start** (not the session) so the
+/// `[t+SS]` markers in the prompt are easy to read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioExcerpt {
+    pub offset_seconds: i64,
+    pub text: String,
+}
+
+/// Bundle of audio context for one Block, ready for the audio-aware
+/// prompt. The abstractor builds these from the stitcher's output
+/// (`block_audio_stitcher::BlockAudioBundle`) in [`crate::activity::export`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BlockAudioContext {
+    pub mic_excerpts: Vec<AudioExcerpt>,
+    pub sys_excerpts: Vec<AudioExcerpt>,
+}
+
+impl BlockAudioContext {
+    pub fn is_empty(&self) -> bool {
+        self.mic_excerpts.is_empty() && self.sys_excerpts.is_empty()
+    }
 }
 
 /// The structured Block context the LLM sees. Owns all of its
@@ -176,6 +214,68 @@ pub fn abstract_block_with_provider(
 pub fn abstract_block(block: &Block, prompt_set_sha: &str) -> AppResult<BlockAbstract> {
     let provider = OllamaProvider::new();
     abstract_block_with_provider(block, &provider, prompt_set_sha)
+}
+
+/// Wave 4 audio-aware variant. Routes to the audio-aware prompt when
+/// `audio` is non-empty (ADR 0041 §Decision item 4) and falls back
+/// to the regular Wave-3 path when not. The provenance fingerprint
+/// returned in [`BlockAbstract::prompt_version_sha`] is the audio v2
+/// family when the audio path runs and the Wave-3 family otherwise.
+///
+/// `audio_prompt_sha` should be the value of
+/// [`current_prompt_set_sha_audio`] precomputed once per session.
+pub fn abstract_block_audio_aware_with_provider(
+    block: &Block,
+    audio: &BlockAudioContext,
+    provider: &dyn CleanupProvider,
+    audio_prompt_sha: &str,
+    fallback_prompt_sha: &str,
+) -> AppResult<BlockAbstract> {
+    // No audio ⇒ use the regular path with the v1 fingerprint. This
+    // is what makes the audio toggle non-destructive for Blocks that
+    // happen to fall in silent stretches of an audio-enabled session.
+    if audio.is_empty() {
+        return abstract_block_with_provider(block, provider, fallback_prompt_sha);
+    }
+
+    let context = build_context(block);
+
+    // Password fields short-circuit no matter the audio (Principle 8
+    // spirit: secure-input fields abort injection — here, they abort
+    // LLM context too). The template still describes activity
+    // generically.
+    if context.password_field_active {
+        return Ok(template_abstract(&context));
+    }
+
+    let user_block = render_user_block_audio_aware(&context, audio);
+    let full_prompt = format!("{ABSTRACT_AUDIO_AWARE_PROMPT_BODY}\n\n```\n{user_block}\n```");
+
+    let req = CleanupRequest {
+        prompt: full_prompt.as_str(),
+        raw_transcript: user_block.as_str(),
+        model_id: DEFAULT_MODEL_ID,
+        temperature: DEFAULT_TEMPERATURE,
+        max_tokens: DEFAULT_MAX_TOKENS,
+        mode_slug: "activity:abstract-block-audio",
+    };
+
+    match provider.cleanup(req) {
+        Ok(result) => Ok(BlockAbstract {
+            text: clean_response(&result.text),
+            prompt_version_sha: audio_prompt_sha.to_string(),
+            used_llm: true,
+        }),
+        Err(e) => {
+            tracing::warn!(
+                target: "activity::abstractor",
+                error = %e,
+                app = %context.app,
+                "audio-aware LLM abstraction failed; falling back to deterministic template"
+            );
+            Ok(template_abstract(&context))
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +397,77 @@ fn populate_from_v2(ctx: &mut BlockContext, v: &serde_json::Value) {
 /// goes inside the triple-backtick fence after the bundled prompt
 /// body. Format matches the examples in `prompts/abstract_block.md`
 /// (key: value lines plus the structured `focusedField` line).
+/// Audio-aware variant of [`render_user_block`]. Identical scaffolding
+/// but appends `screenContext: locked` when there's no visual payload
+/// (ADR 0041 §Decision item 6) plus the `micExcerpts` /
+/// `systemExcerpts` listings. Kept as a sibling function rather than
+/// branching inside `render_user_block` because the wire shape is
+/// different (the audio-aware prompt expects the audio keys; the v1
+/// prompt would be confused by them).
+fn render_user_block_audio_aware(ctx: &BlockContext, audio: &BlockAudioContext) -> String {
+    let mut s = String::with_capacity(1024);
+    s.push_str(&format!("app: {}\n", ctx.app));
+    s.push_str(&format!("title: {}\n", ctx.title));
+    s.push_str(&format!("duration: {}\n", ctx.duration_human));
+    if let Some(m) = &ctx.monitor_name {
+        s.push_str(&format!("monitor: {m}\n"));
+    }
+    if let Some(ff) = &ctx.focused_field {
+        s.push_str(&format!(
+            "focusedField: {{ controlType: \"{}\", name: \"{}\", value: \"{}\" }}\n",
+            ff.control_type, ff.name, ff.value
+        ));
+    } else {
+        s.push_str("focusedField: null\n");
+    }
+    if !ctx.visible_text_fragments.is_empty() {
+        const MAX_FRAGMENTS: usize = 12;
+        let preview: Vec<String> = ctx
+            .visible_text_fragments
+            .iter()
+            .take(MAX_FRAGMENTS)
+            .map(|f| format!("{f:?}"))
+            .collect();
+        s.push_str(&format!("visibleTextFragments: [{}]\n", preview.join(", ")));
+    } else {
+        s.push_str("visibleTextFragments: []\n");
+    }
+    if !ctx.has_real_payload {
+        // Audio-only-without-visual case (ADR 0041 §Decision item 6).
+        // Tells the prompt to lead with the audio rather than the
+        // (empty) visual.
+        s.push_str("screenContext: locked\n");
+    }
+    if ctx.password_field_active {
+        s.push_str("note: a password field was focused \u{2014} content redacted.\n");
+    }
+    s.push_str(&render_excerpts("micExcerpts", &audio.mic_excerpts));
+    s.push_str(&render_excerpts("systemExcerpts", &audio.sys_excerpts));
+    s
+}
+
+fn render_excerpts(label: &str, excerpts: &[AudioExcerpt]) -> String {
+    if excerpts.is_empty() {
+        return format!("{label}: []\n");
+    }
+    // Cap the per-channel excerpt count so a very chatty Block
+    // doesn't blow the LLM context. The prompt only needs flavor;
+    // dumping 200 segments hurts quality.
+    const MAX_EXCERPTS: usize = 20;
+    let mut out = format!("{label}:\n");
+    for ex in excerpts.iter().take(MAX_EXCERPTS) {
+        let safe = ex.text.replace('"', "'");
+        out.push_str(&format!("[t+{}] \"{}\"\n", ex.offset_seconds, safe.trim()));
+    }
+    if excerpts.len() > MAX_EXCERPTS {
+        out.push_str(&format!(
+            "\u{2026} (+{} more excerpts truncated)\n",
+            excerpts.len() - MAX_EXCERPTS
+        ));
+    }
+    out
+}
+
 fn render_user_block(ctx: &BlockContext) -> String {
     let mut s = String::with_capacity(512);
     s.push_str(&format!("app: {}\n", ctx.app));
@@ -580,6 +751,149 @@ mod tests {
         assert!(ctx.focused_field.is_some());
         assert_eq!(ctx.visible_text_fragments, vec!["hello", "world"]);
         assert!(ctx.has_real_payload);
+    }
+
+    #[test]
+    fn current_prompt_set_sha_audio_is_deterministic_and_v2_prefixed() {
+        let a = current_prompt_set_sha_audio();
+        let b = current_prompt_set_sha_audio();
+        assert_eq!(a, b);
+        assert!(
+            a.starts_with("abstract_v2_audio-"),
+            "audio sha should carry the v2 schema major: {a}"
+        );
+        // Distinct from the v1 family (covers ADR 0041 §Decision item 4).
+        assert_ne!(a, current_prompt_set_sha());
+    }
+
+    #[test]
+    fn audio_aware_empty_audio_falls_back_to_v1_path() {
+        let snap = r#"{"schema":"v2","app":"code.exe","title":"main.rs","status":{"kind":"ok"}}"#;
+        let block = block_with(
+            vec![focus_event("code.exe", "main.rs", 0, Some(snap))],
+            "code.exe",
+            "main.rs",
+            60_000,
+        );
+        let provider = StubProvider {
+            response: Ok("The user edited main.rs.".into()),
+        };
+        let out = abstract_block_audio_aware_with_provider(
+            &block,
+            &BlockAudioContext::default(),
+            &provider,
+            "v2-sha",
+            "v1-sha",
+        )
+        .unwrap();
+        // No audio ⇒ v1 path ⇒ v1 sha stamped.
+        assert_eq!(out.prompt_version_sha, "v1-sha");
+        assert!(out.used_llm);
+    }
+
+    #[test]
+    fn audio_aware_with_audio_uses_v2_fingerprint_and_renders_excerpts() {
+        let snap = r#"{"schema":"v2","app":"chrome.exe","title":"Zoom","status":{"kind":"ok"}}"#;
+        let block = block_with(
+            vec![focus_event("chrome.exe", "Zoom", 0, Some(snap))],
+            "chrome.exe",
+            "Zoom",
+            22 * 60_000,
+        );
+        let audio = BlockAudioContext {
+            mic_excerpts: vec![AudioExcerpt {
+                offset_seconds: 45,
+                text: "ship Wave 4 by Friday".into(),
+            }],
+            sys_excerpts: vec![AudioExcerpt {
+                offset_seconds: 10,
+                text: "let's start with the roadmap".into(),
+            }],
+        };
+        let provider = StubProvider {
+            response: Ok("You attended a sync where the call opened with the roadmap.".into()),
+        };
+        let out =
+            abstract_block_audio_aware_with_provider(&block, &audio, &provider, "v2-sha", "v1-sha")
+                .unwrap();
+        assert_eq!(out.prompt_version_sha, "v2-sha");
+        assert!(out.used_llm);
+    }
+
+    #[test]
+    fn audio_aware_locked_screen_path_renders_screen_context_marker() {
+        // No-payload visual + audio present ⇒ audio-only path: prompt
+        // should still run but include screenContext: locked.
+        let snap = r#"{"schema":"v2","app":"explorer.exe","title":"locked","status":{"kind":"no_payload"}}"#;
+        let block = block_with(
+            vec![focus_event("explorer.exe", "locked", 0, Some(snap))],
+            "explorer.exe",
+            "locked",
+            8 * 60_000,
+        );
+        let audio = BlockAudioContext {
+            mic_excerpts: vec![],
+            sys_excerpts: vec![AudioExcerpt {
+                offset_seconds: 30,
+                text: "the patient's vitals are stable".into(),
+            }],
+        };
+        let provider = StubProvider {
+            response: Ok("On a locked screen, the call discussed stable vitals.".into()),
+        };
+        let out =
+            abstract_block_audio_aware_with_provider(&block, &audio, &provider, "v2-sha", "v1-sha")
+                .unwrap();
+        // Audio is present ⇒ v2 path ⇒ v2 sha (NOT the template sentinel).
+        assert_eq!(out.prompt_version_sha, "v2-sha");
+        assert!(out.used_llm);
+    }
+
+    #[test]
+    fn audio_aware_password_field_still_short_circuits() {
+        let snap = r#"{"schema":"v2","app":"chrome.exe","title":"Login","status":{"kind":"ok"},"passwordFieldActive":true}"#;
+        let block = block_with(
+            vec![focus_event("chrome.exe", "Login", 0, Some(snap))],
+            "chrome.exe",
+            "Login",
+            30_000,
+        );
+        let audio = BlockAudioContext {
+            mic_excerpts: vec![AudioExcerpt {
+                offset_seconds: 5,
+                text: "my password is".into(),
+            }],
+            sys_excerpts: vec![],
+        };
+        let provider = StubProvider {
+            response: Ok("SHOULD NOT BE CALLED".into()),
+        };
+        let out =
+            abstract_block_audio_aware_with_provider(&block, &audio, &provider, "v2-sha", "v1-sha")
+                .unwrap();
+        assert!(
+            !out.used_llm,
+            "password-field must short-circuit even with audio"
+        );
+        assert_eq!(out.prompt_version_sha, TEMPLATE_NO_PAYLOAD_SHA);
+    }
+
+    #[test]
+    fn render_excerpts_truncates_after_max_and_escapes_quotes() {
+        let excerpts: Vec<AudioExcerpt> = (0..25)
+            .map(|i| AudioExcerpt {
+                offset_seconds: i,
+                text: format!("line \"{i}\""),
+            })
+            .collect();
+        let rendered = render_excerpts("micExcerpts", &excerpts);
+        assert!(rendered.starts_with("micExcerpts:\n"));
+        // 20 lines + label + truncation hint.
+        assert_eq!(rendered.matches("[t+").count(), 20);
+        assert!(rendered.contains("+5 more excerpts truncated"));
+        // No embedded double-quote (it should have been swapped for ').
+        let body_only = rendered.trim_start_matches("micExcerpts:\n");
+        assert!(!body_only.lines().take(20).any(|l| l.contains("\\\"")));
     }
 
     #[test]

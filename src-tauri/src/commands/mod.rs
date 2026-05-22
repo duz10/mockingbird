@@ -145,6 +145,8 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         activity::activity_export_markdown,
         activity::activity_copy_to_clipboard,
         activity::activity_render_work_report,
+        // Phase 10 Wave 4 — Activity audio (ADR 0041).
+        activity::activity_list_transcript_segments,
     ])
 }
 

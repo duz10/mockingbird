@@ -110,6 +110,17 @@ pub enum SettingKey {
     /// install; the user reaches Meeting capture via the Command
     /// Center mode picker instead.
     LegacyMeetingChordEnabled,
+
+    // ----- Phase 10 Wave 4 — Activity Layer 2 (audio). -----
+    //
+    /// Whether Activity Capture sessions also record mic + system
+    /// audio for per-Block transcription (ADR 0041 / Wave 4). Default
+    /// `false` (privacy by default — Principle 4 spirit). When `true`,
+    /// each session reuses the Meeting Capture twin-stream + chunked-
+    /// Whisper pipeline; transcript segments land in
+    /// `activity_transcript_segments` and the audio-aware abstractor
+    /// prompt is used at summarization time.
+    ActivityAudioEnabled,
 }
 
 impl SettingKey {
@@ -140,6 +151,8 @@ impl SettingKey {
             Self::CommandCenterChord => "command_center_chord",
             Self::CommandCenterSeenV1 => "command_center_seen_v1",
             Self::LegacyMeetingChordEnabled => "legacy_meeting_chord_enabled",
+            // Phase 10 Wave 4.
+            Self::ActivityAudioEnabled => "activity_audio_enabled",
         }
     }
 
@@ -170,6 +183,8 @@ impl SettingKey {
             "command_center_chord" => Ok(Self::CommandCenterChord),
             "command_center_seen_v1" => Ok(Self::CommandCenterSeenV1),
             "legacy_meeting_chord_enabled" => Ok(Self::LegacyMeetingChordEnabled),
+            // Phase 10 Wave 4.
+            "activity_audio_enabled" => Ok(Self::ActivityAudioEnabled),
             other => Err(AppError::Other(format!("unknown setting key: {other:?}"))),
         }
     }
@@ -215,6 +230,10 @@ impl SettingKey {
             // value (i.e. an existing user who has been driving the
             // direct chord pre-CC).
             Self::LegacyMeetingChordEnabled => serde_json::json!(false),
+            // Phase 10 Wave 4. Privacy by default — Principle 4 spirit.
+            // The user opts in via Settings; the Command Center reads
+            // this value at start time.
+            Self::ActivityAudioEnabled => serde_json::json!(false),
         }
     }
 
@@ -247,6 +266,8 @@ impl SettingKey {
             Self::CommandCenterChord,
             Self::CommandCenterSeenV1,
             Self::LegacyMeetingChordEnabled,
+            // Phase 10 Wave 4.
+            Self::ActivityAudioEnabled,
         ]
     }
 }
@@ -347,8 +368,9 @@ mod tests {
     #[test]
     fn all_enumerates_every_variant() {
         // 8 original + 11 Phase MC + 1 Phase MC W5 (MeetingHotkeyPaused)
-        //   + 3 Phase 10 W1A (CommandCenter* + LegacyMeetingChordEnabled) = 23.
-        assert_eq!(SettingKey::all().len(), 23);
+        //   + 3 Phase 10 W1A (CommandCenter* + LegacyMeetingChordEnabled)
+        //   + 1 Phase 10 W4 (ActivityAudioEnabled) = 24.
+        assert_eq!(SettingKey::all().len(), 24);
     }
 
     /// Phase 10 Wave 1A defaults must match ADR 0037 §Decision items

@@ -64,6 +64,8 @@
 pub mod abstractor;
 pub mod activity_level;
 pub mod assembler;
+pub mod audio;
+pub mod block_audio_stitcher;
 pub mod blocker;
 pub mod blocks_persist;
 pub mod export;
@@ -73,6 +75,7 @@ pub mod persist;
 pub mod runtime;
 pub mod sampler;
 pub mod segmenter;
+pub mod segments_persist;
 pub mod uia;
 
 pub use activity_level::{ActivityLevel, IdleTracker, IdleTransition};

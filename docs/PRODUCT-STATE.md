@@ -243,8 +243,8 @@ the ephemeral summary pass). Does NOT extend `CleanupProvider`.
 - `tracing`-based logger writing to local files (no telemetry, Principle 4).
 
 ### 3.15 `activity/` — Activity Capture (Phase 10, in-flight)
-Chartered by ADR 0036 (subsystem) + ADR 0037 (Command Center). Three
-waves shipped, three still ahead:
+Chartered by ADR 0036 (subsystem) + ADR 0037 (Command Center). Four
+waves shipped, two still ahead:
 
 - **Waves 1A + 1B (sealed)** — Command Center surface, `Activity` page,
   migration 012 schema (`activity_sessions`, `activity_events`,
@@ -256,7 +256,7 @@ waves shipped, three still ahead:
   Windows COM impl), multi-monitor attribution, v2 `snapshot_json`
   payload (focused field, visible-text fragments, control summary,
   password-field redaction).
-- **Wave 3 (code-complete, awaiting Wave-4 buildable-upon confirmation)** —
+- **Wave 3 (sealed end-of-iteration following Wave 4 confirmation)** —
   ADR 0040. Pure-Rust pipeline `segmenter.rs` (event normalization)
   → `blocker.rs` (5-rule boundary heuristic: app-switch, large title
   delta, idle ≥ 60s, monitor change, 30-min cap) → `abstractor.rs`
@@ -270,11 +270,32 @@ waves shipped, three still ahead:
   regenerate / copy as Markdown), in sibling `ActivityBlocks.tsx`.
   Provenance per Principle 2: every Block row records `prompt_version_sha`
   + `source_event_ids` JSON.
-- **Waves 4-6 (not started)** — audio Layer 2 (Wave 4); hardening +
-  encryption-at-rest (Wave 5, gated on ADR 0038) + retention + crash
-  recovery + PDF + Settings; invariant judges + final
-  `phase-10-complete` tag (Wave 6). Wave 7 (Layer 3 screenshot + OCR)
-  is optional post-seal via successor ADR 0039.
+- **Wave 4 (code-complete, awaiting Wave-5 dispatch)** — ADR 0041.
+  Layer 2 audio capture, opt-in via `activity_audio_enabled` typed
+  setting (default OFF — privacy by default). Pure-Rust `audio.rs`
+  defines the `AudioPipeline` trait + `LongFormAudioPipeline` impl
+  that *wraps* (does not duplicate) Meeting Capture's WASAPI
+  twin-stream + `meetings::long_form_stt::LongFormStt` chunked
+  Whisper machinery (Principle 5 — no audio infra duplication; the
+  reuse is documented in ADR 0041). Per-channel transcript segments
+  (mic + system loopback) land in `activity_transcript_segments`
+  via `segments_persist.rs`, time-shifted from capture-relative to
+  global epoch-ms at insert. `block_audio_stitcher.rs` assigns each
+  segment to exactly one Block via the midpoint rule (the segment's
+  `(t0 + t1) / 2` falls inside `[block.start, block.end)`). The
+  abstractor swaps to `abstract_block.audio_aware.md` + a distinct
+  `abstract_v2_audio-XXXXXXXX` prompt-version family when a Block has
+  any audio attached; `user_edited` Blocks are still respected.
+  Migration 014 adds `audio_whisper_model` + `audio_chunk_window_ms`
+  provenance columns to `activity_sessions`. `activity_start(with_audio)`
+  IPC; Command Center reads the setting as the default at start time.
+  Settings General row exposes the toggle. 13 pure-module stitcher
+  tests via throwaway crate; all 6 cargo + UI gates green.
+- **Waves 5-6 (not started)** — hardening + encryption-at-rest
+  (Wave 5, gated on ADR 0038) + retention + crash recovery + PDF +
+  Settings depth; invariant judges + final `phase-10-complete` tag
+  (Wave 6). Wave 7 (Layer 3 screenshot + OCR) is optional post-seal
+  via successor ADR 0039.
 
 ---
 
