@@ -547,4 +547,223 @@ mod tests {
         let v = get_session_summary(&c, "ghost").unwrap();
         assert!(v.is_none());
     }
+
+    // ----------------------------------------------------------
+    // Phase 10 Wave 6.B — provenance-is-total judge fixtures.
+    // ADR 0044 / AGENTS.md Principle 2 ("provenance is total").
+    // ----------------------------------------------------------
+
+    /// Seed one session + N blocks with the given `prompt_version_sha`
+    /// values. Each block gets an `[event_id]` source list pointing
+    /// at a freshly-inserted event row (so the FK walk in C5 is
+    /// satisfied for the non-purged path).
+    fn seed_session_with_blocks(c: &Connection, shas: &[&str]) -> (String, Vec<String>) {
+        use crate::activity::persist::{insert_event, insert_session};
+        let sid = insert_session(c, 1_000).unwrap();
+        let mut block_ids = Vec::new();
+        for (i, sha) in shas.iter().enumerate() {
+            let ts = 1_000 + (i as i64) * 1_000;
+            let eid =
+                insert_event(c, &sid, ts, "app_switch", Some("a.exe"), Some("t"), None).unwrap();
+            let src_json = serde_json::to_string(&vec![eid]).unwrap();
+            let bid = insert_block(
+                c,
+                &sid,
+                ts,
+                ts + 500,
+                "a.exe",
+                "t",
+                Some("summary"),
+                &src_json,
+                sha,
+                ts,
+            )
+            .unwrap();
+            block_ids.push(bid);
+        }
+        (sid, block_ids)
+    }
+
+    #[test]
+    fn all_blocks_have_prompt_version_sha() {
+        let c = fresh_db();
+        let _ = seed_session_with_blocks(
+            &c,
+            &[
+                "template_no_payload_v1",
+                "abstract_v1-deadbeef",
+                "abstract_v2_audio-cafef00d",
+            ],
+        );
+        let n: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM activity_blocks \
+                 WHERE prompt_version_sha IS NULL OR prompt_version_sha = ''",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            n, 0,
+            "every block must carry a non-empty prompt_version_sha"
+        );
+    }
+
+    #[test]
+    fn prompt_version_sha_is_known_family() {
+        let c = fresh_db();
+        let _ = seed_session_with_blocks(
+            &c,
+            &[
+                "template_no_payload_v1",
+                "abstract_v1-deadbeef",
+                "abstract_v2_audio-cafef00d",
+                // 40-hex LLM-prompt SHA fallback (criterion 3 escape hatch).
+                "abcdef0123456789abcdef0123456789abcdef01",
+            ],
+        );
+        let v1_re = regex::Regex::new(r"^abstract_v1-[0-9a-f]{8}$").unwrap();
+        let v2_re = regex::Regex::new(r"^abstract_v2_audio-[0-9a-f]{8}$").unwrap();
+        let sha_re = regex::Regex::new(r"^[0-9a-f]{40,64}$").unwrap();
+        let mut stmt = c
+            .prepare("SELECT prompt_version_sha FROM activity_blocks")
+            .unwrap();
+        let rows: Vec<String> = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(!rows.is_empty(), "fixture must seed at least one block");
+        for v in rows {
+            let ok = v == "template_no_payload_v1"
+                || v1_re.is_match(&v)
+                || v2_re.is_match(&v)
+                || sha_re.is_match(&v);
+            assert!(ok, "unknown prompt_version_sha family: {v:?}");
+        }
+    }
+
+    #[test]
+    fn source_event_ids_is_valid_json_array_of_strings() {
+        let c = fresh_db();
+        let _ = seed_session_with_blocks(&c, &["template_no_payload_v1", "abstract_v1-deadbeef"]);
+        // Also seed a block with an empty (but parseable) array — the
+        // template-no-payload path produces these.
+        use crate::activity::persist::insert_session;
+        let sid = insert_session(&c, 9_000).unwrap();
+        insert_block(
+            &c,
+            &sid,
+            9_000,
+            9_500,
+            "a.exe",
+            "t",
+            None,
+            "[]",
+            "template_no_payload_v1",
+            9_000,
+        )
+        .unwrap();
+
+        let mut stmt = c
+            .prepare("SELECT id, source_event_ids FROM activity_blocks")
+            .unwrap();
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(!rows.is_empty());
+        for (bid, json) in rows {
+            let parsed: Result<Vec<String>, _> = serde_json::from_str(&json);
+            assert!(
+                parsed.is_ok(),
+                "block {bid} source_event_ids is not a JSON array of strings: {json:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn source_event_ids_reference_existing_rows_or_block_is_purged() {
+        let c = fresh_db();
+        let (sid, block_ids) =
+            seed_session_with_blocks(&c, &["abstract_v1-deadbeef", "abstract_v1-cafef00d"]);
+        // Sanity: both blocks' source events exist (FK walk OK).
+        for bid in &block_ids {
+            let json: String = c
+                .query_row(
+                    "SELECT source_event_ids FROM activity_blocks WHERE id = ?1",
+                    params![bid],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let ids: Vec<String> = serde_json::from_str(&json).unwrap();
+            for eid in &ids {
+                let n: i64 = c
+                    .query_row(
+                        "SELECT COUNT(*) FROM activity_events WHERE id = ?1",
+                        params![eid],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(n, 1, "event id {eid} referenced by block {bid} missing");
+            }
+        }
+
+        // Now delete one block's underlying events + mark the block as
+        // purged. The carve-out: dangling refs are legal iff
+        // raw_events_purged_at IS NOT NULL.
+        let purged_block = &block_ids[0];
+        let json: String = c
+            .query_row(
+                "SELECT source_event_ids FROM activity_blocks WHERE id = ?1",
+                params![purged_block],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let ids: Vec<String> = serde_json::from_str(&json).unwrap();
+        for eid in &ids {
+            c.execute("DELETE FROM activity_events WHERE id = ?1", params![eid])
+                .unwrap();
+        }
+        c.execute(
+            "UPDATE activity_blocks SET raw_events_purged_at = ?1 WHERE id = ?2",
+            params![999_999i64, purged_block],
+        )
+        .unwrap();
+
+        // Run the judge's invariant: every block either has a live FK
+        // walk OR raw_events_purged_at is set.
+        let mut stmt = c
+            .prepare(
+                "SELECT id, source_event_ids, raw_events_purged_at \
+                 FROM activity_blocks WHERE session_id = ?1",
+            )
+            .unwrap();
+        let rows: Vec<(String, String, Option<i64>)> = stmt
+            .query_map(params![sid], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        for (bid, json, purged_at) in rows {
+            let ids: Vec<String> = serde_json::from_str(&json).unwrap();
+            if ids.is_empty() {
+                continue;
+            }
+            let all_present = ids.iter().all(|eid| {
+                let n: i64 = c
+                    .query_row(
+                        "SELECT COUNT(*) FROM activity_events WHERE id = ?1",
+                        params![eid],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                n == 1
+            });
+            assert!(
+                all_present || purged_at.is_some(),
+                "block {bid} has dangling source_event_ids AND raw_events_purged_at is NULL"
+            );
+        }
+    }
 }

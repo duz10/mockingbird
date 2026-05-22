@@ -1,6 +1,6 @@
 # Judge: sealed-phases-untouched (Phase 10)
 
-**Target:** the **diff** between `phase-mc-complete` and `HEAD`,
+**Target:** the **diff** between `stable-alpha-v0.1` and `HEAD`,
 scoped to the Dictation subsystem
 (`src-tauri/src/dictation/*`, `src-tauri/src/injection/*`,
 `src-tauri/src/cleanup/{provider,llm_cleaner,ollama}.rs`), the
@@ -23,14 +23,22 @@ raw-immutability trigger, and the sealed migrations 001-014.
 - Tauri capabilities migration (continuation of ADR 0035).
 
 Anything **outside** that boundary that has changed since
-`phase-mc-complete` is a seal violation.
+`stable-alpha-v0.1` is a seal violation.
 
-**Question:** Did Phase 10's commits (`phase-mc-complete..HEAD`)
+**Diff-range note (Wave 6.B):** the base ref is `stable-alpha-v0.1`,
+NOT `phase-mc-complete`. Between those two tags, the dictation-polish
+lateral epic (commit `dda676a` + the `f298a5d` MC v1.2 capabilities work)
+landed — those edits are NOT Phase 10's concern, and folding them into
+this judge's diff would force the LLM grader to relitigate a sealed
+lateral epic. `stable-alpha-v0.1..HEAD` is exactly Phase 10's footprint.
+
+**Question:** Did Phase 10's commits (`stable-alpha-v0.1..HEAD`)
 stay within ADR 0037's authorization boundary? Specifically:
 
 - (a) Is the Dictation module's public API surface (function
   signatures + public types in `dictation/mod.rs`,
-  `dictation/dictation.rs`, `injection/*`) **unchanged**?
+  `dictation/dictation.rs`, `injection/*`) **unchanged** since
+  `stable-alpha-v0.1`?
 - (b) Is the Meeting Capture pipeline's *shape* unchanged — i.e.
   twin-stream capture into `LongFormStt::run_long_form`,
   per-channel stitching, then `merge_two_channels`, then the
@@ -39,12 +47,12 @@ stay within ADR 0037's authorization boundary? Specifically:
 - (c) Has the `transcripts` table raw-immutability invariant
   (Principle 1) been preserved — no new `UPDATE` statements
   introduced against `stage = 'raw'` rows anywhere in the diff?
-- (d) Have migrations 001-014 stayed byte-identical after their
-  respective phase-seal tags? (Migration 011 is sealed at
-  `phase-mc-complete`; migrations 012-014 are sealed at the
-  Phase 10 Wave 1B / Wave 2 / Wave 4 tags-or-equivalents — see
-  STATUS.md "Sealed" table for the live list. Migration 015 is the
-  one Wave 5 was authorized to ship and is NOT in scope here.)
+- (d) Have migrations 001-014 stayed **byte-identical (no
+  modifications)** since `stable-alpha-v0.1`? (Migrations 012-014
+  are *additions* during Phase 10 — they show up in the diff as
+  new files; the `--diff-filter=M` flag below scopes the check to
+  modifications only. Migration 015 is Wave 5's authorized
+  addition and is NOT in scope here.)
 
 **Rationale:** This is the structural analog of Phase MC's
 `mc-dictation-untouched` judge. Phase 10 took the unusual step of
@@ -68,10 +76,10 @@ the structural reference if any criterion below is ambiguous.
 
 **Pass criteria — ALL of:**
 
-1. **No Dictation public-API drift since `phase-mc-complete`:**
+1. **No Dictation public-API drift since `stable-alpha-v0.1`:**
 
    ```powershell
-   git diff phase-mc-complete..HEAD -- `
+   git diff stable-alpha-v0.1..HEAD -- `
      src-tauri\src\dictation\ `
      src-tauri\src\injection\ `
      src-tauri\src\cleanup\provider.rs `
@@ -92,17 +100,16 @@ the structural reference if any criterion below is ambiguous.
      hunk + the unauthorized function name.
 
    Bonus (eyeball): no new module added to `src-tauri/src/dictation/`
-   that didn't exist at `phase-mc-complete`. Listing addition is
-   only OK for `dictation/paste_payload.rs` (sealed in `stable-alpha-v0.1`,
-   pre-dates Phase 10) — verify by checking `git log
-   src-tauri/src/dictation/paste_payload.rs | tail -1` shows a
-   commit BEFORE `phase-mc-complete`.
+   that didn't exist at `stable-alpha-v0.1`. (Because the base ref
+   is `stable-alpha-v0.1` — which post-dates the `paste_payload.rs`
+   addition — there should be ZERO new dictation modules in this
+   diff.)
 
 2. **No Meeting Capture pipeline-shape drift since
-   `phase-mc-complete`:**
+   `stable-alpha-v0.1`:**
 
    ```powershell
-   git diff phase-mc-complete..HEAD -- `
+   git diff stable-alpha-v0.1..HEAD -- `
      src-tauri\src\meetings\capture.rs `
      src-tauri\src\meetings\long_form_stt.rs `
      src-tauri\src\meetings\formatter.rs `
@@ -136,7 +143,7 @@ the structural reference if any criterion below is ambiguous.
    never mutated):**
 
    ```powershell
-   git diff phase-mc-complete..HEAD -- src-tauri\src\ |
+   git diff stable-alpha-v0.1..HEAD -- src-tauri\src\ |
      Select-String -Pattern 'UPDATE transcripts|UPDATE .* stage'
    ```
 
@@ -148,10 +155,12 @@ the structural reference if any criterion below is ambiguous.
    `block-mutate-raw-transcripts` hook should have caught it at
    write time; this judge is belt-and-suspenders.
 
-4. **Sealed migrations untouched since their respective seal tags:**
+4. **Sealed migrations 001-014 are MODIFICATION-free since
+   `stable-alpha-v0.1` (additions of 012/013/014 are allowed and
+   filtered out by `--diff-filter=M`):**
 
    ```powershell
-   git diff phase-mc-complete..HEAD -- `
+   git diff --diff-filter=M --name-only stable-alpha-v0.1..HEAD -- `
      src-tauri\src\db\migrations\001_*.sql `
      src-tauri\src\db\migrations\002_*.sql `
      src-tauri\src\db\migrations\003_*.sql `
@@ -172,9 +181,12 @@ the structural reference if any criterion below is ambiguous.
    `phase-4-complete`, 011 sealed at `phase-mc-complete`, 012-014
    sealed at their Wave-level commits (`7333a98` / `9155f40` /
    `e3f90db`). Migration 015 is Wave 5's authorized addition and is
-   NOT in this list. If any 001-014 file shows in the diff, FAIL —
-   and the `block-sealed-migration-edits` hook should also have
-   caught it.
+   NOT in this list. `--diff-filter=M` excludes the *additions* of
+   012/013/014 during Phase 10 (which are legitimate); it only
+   surfaces *modifications* of already-sealed files, which is the
+   actual seal violation. If any 001-014 file shows in the diff,
+   FAIL — and the `block-sealed-migration-edits` hook should also
+   have caught it.
 
 5. **Dictation + Meeting Capture test suites still link clean:**
 

@@ -345,4 +345,136 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&base);
     }
+
+    // ----------------------------------------------------------
+    // Phase 10 Wave 6.B — crash-recovery-idempotent judge fixtures.
+    // ADR 0036 §Decision item 9 (boot recovery).
+    // ----------------------------------------------------------
+
+    #[test]
+    fn recover_all_is_idempotent() {
+        let db = fresh_db();
+        let sid = seed_in_progress(&db.conn, 1_000_000);
+
+        let base = std::env::temp_dir().join(format!(
+            "mb_test_recovery_idemp_{}",
+            now_ms().wrapping_add(std::process::id() as i64)
+        ));
+        std::fs::create_dir_all(base.join(&sid)).unwrap(); // known
+        std::fs::create_dir_all(base.join("orphan-id")).unwrap(); // orphan
+
+        // First pass — promotes the in-progress row + deletes the
+        // orphan dir.
+        let r1 = recover_all(&db.conn, &base);
+        assert_eq!(r1.sessions_recovered, 1);
+        assert_eq!(r1.orphan_dirs_deleted, 1);
+        assert_eq!(r1.orphan_dirs_kept, 1);
+
+        let (status_1, ended_1): (String, Option<i64>) = db
+            .conn
+            .query_row(
+                "SELECT status, ended_at FROM activity_sessions WHERE id = ?1",
+                params![&sid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status_1, SessionStatus::CrashedRecovered.as_db_str());
+
+        // Second pass — must be a no-op: nothing to promote, nothing
+        // to delete (orphan is already gone, known dir stays).
+        let r2 = recover_all(&db.conn, &base);
+        assert_eq!(r2.sessions_recovered, 0);
+        assert_eq!(r2.orphan_dirs_deleted, 0);
+        assert_eq!(r2.orphan_dirs_kept, 1);
+
+        let (status_2, ended_2): (String, Option<i64>) = db
+            .conn
+            .query_row(
+                "SELECT status, ended_at FROM activity_sessions WHERE id = ?1",
+                params![&sid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            status_2,
+            SessionStatus::CrashedRecovered.as_db_str(),
+            "second pass must not re-promote the row"
+        );
+        assert_eq!(ended_2, ended_1, "ended_at must not drift across re-runs");
+
+        let total_recovered: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM activity_sessions WHERE status = 'crashed_recovered'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(total_recovered, 1, "exactly one crashed_recovered row");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn recover_all_handles_concurrent_calls() {
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+
+        let db = fresh_db();
+        let sid = seed_in_progress(&db.conn, 1_000_000);
+
+        let base = std::env::temp_dir().join(format!(
+            "mb_test_recovery_concur_{}",
+            now_ms().wrapping_add(std::process::id() as i64)
+        ));
+        std::fs::create_dir_all(base.join(&sid)).unwrap();
+        std::fs::create_dir_all(base.join("orphan-id")).unwrap();
+
+        let conn = Arc::new(Mutex::new(db.conn));
+        let base_arc = Arc::new(base.clone());
+
+        let conn_a = conn.clone();
+        let base_a = base_arc.clone();
+        let h_a = thread::spawn(move || {
+            let c = conn_a.lock().unwrap();
+            recover_all(&c, &base_a)
+        });
+        let conn_b = conn.clone();
+        let base_b = base_arc.clone();
+        let h_b = thread::spawn(move || {
+            let c = conn_b.lock().unwrap();
+            recover_all(&c, &base_b)
+        });
+
+        let r_a = h_a.join().unwrap();
+        let r_b = h_b.join().unwrap();
+
+        // Across the union of the two reports: exactly one promotion,
+        // exactly one orphan deletion. (Mutex<Connection> serializes
+        // them; the test pins the serialization invariant in code so
+        // a future fearless-refactor of the lock model is caught here.)
+        assert_eq!(
+            r_a.sessions_recovered + r_b.sessions_recovered,
+            1,
+            "union of two concurrent recover_all calls must promote exactly once"
+        );
+        assert_eq!(
+            r_a.orphan_dirs_deleted + r_b.orphan_dirs_deleted,
+            1,
+            "union must delete the orphan exactly once"
+        );
+
+        let c = conn.lock().unwrap();
+        let total_recovered: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM activity_sessions WHERE status = 'crashed_recovered'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(total_recovered, 1, "DB invariant after concurrent recovery");
+        drop(c);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }

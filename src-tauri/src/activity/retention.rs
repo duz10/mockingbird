@@ -328,4 +328,117 @@ mod tests {
         };
         assert!(p.any_ttl_set());
     }
+
+    // ----------------------------------------------------------
+    // Phase 10 Wave 6.B — retention-preserves-abstracts judge fixture.
+    // ADR 0042 (cascade-option-(a)).
+    // ----------------------------------------------------------
+
+    #[test]
+    fn sweep_marks_blocks_and_deletes_events() {
+        use crate::activity::blocks_persist::insert_block;
+        use crate::activity::persist::{insert_event, insert_session};
+        use crate::db::Database;
+
+        let mut db = Database::open_in_memory().expect("open in-memory db");
+        let now: i64 = 10 * MS_PER_DAY; // pick a clean "now".
+        let day = MS_PER_DAY;
+
+        // Seed session + 3 events (5d, 3d, 0d old) + 1 block referencing all 3.
+        let sid = insert_session(&db.conn, now - 6 * day).unwrap();
+        let e5 = insert_event(
+            &db.conn,
+            &sid,
+            now - 5 * day,
+            "app_switch",
+            Some("a.exe"),
+            Some("t"),
+            None,
+        )
+        .unwrap();
+        let e3 = insert_event(
+            &db.conn,
+            &sid,
+            now - 3 * day,
+            "app_switch",
+            Some("a.exe"),
+            Some("t"),
+            None,
+        )
+        .unwrap();
+        let _e0 = insert_event(
+            &db.conn,
+            &sid,
+            now,
+            "app_switch",
+            Some("a.exe"),
+            Some("t"),
+            None,
+        )
+        .unwrap();
+
+        let src_json = serde_json::to_string(&vec![e5.clone(), e3.clone()]).unwrap();
+        let bid = insert_block(
+            &db.conn,
+            &sid,
+            now - 5 * day,
+            now - 3 * day,
+            "a.exe",
+            "t",
+            Some("wrote the Wave 6.A judge slate"),
+            &src_json,
+            "abstract_v1-deadbeef",
+            now - 5 * day,
+        )
+        .unwrap();
+
+        // Set events_days = 1 — anything older than 1 day must die.
+        save_user_policy(&db.conn, 1, 0, 0).unwrap();
+
+        let result = sweep_once(&mut db.conn, now).expect("sweep_once");
+        assert_eq!(
+            result.events_deleted, 2,
+            "events older than now-1d should be deleted"
+        );
+        assert_eq!(
+            result.blocks_marked_purged, 1,
+            "block whose events got deleted should be marked purged"
+        );
+        assert_eq!(
+            result.blocks_deleted, 0,
+            "blocks_days=0 — no block deletions"
+        );
+
+        // Block survives + its abstract is byte-for-byte intact.
+        let (abs_text, purged_at): (Option<String>, Option<i64>) = db
+            .conn
+            .query_row(
+                "SELECT generated_abstract, raw_events_purged_at \
+                 FROM activity_blocks WHERE id = ?1",
+                params![&bid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            abs_text.as_deref(),
+            Some("wrote the Wave 6.A judge slate"),
+            "abstract text must survive the sweep byte-for-byte"
+        );
+        assert_eq!(
+            purged_at,
+            Some(now),
+            "raw_events_purged_at must equal the sweep timestamp"
+        );
+
+        // Exactly one event survived — the now-0d one.
+        let n: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM activity_events WHERE session_id = ?1",
+                params![&sid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1, "only the now-0d event should survive");
+    }
 }

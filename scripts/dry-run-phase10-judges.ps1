@@ -40,13 +40,24 @@ H2 'C4: reload_exclusion_rules_no_leak_across_window test'
 if (HasMatch $rt 'reload_exclusion_rules_no_leak_across_window') { OK 'test exists' } else { BAD 'MISSING (cat c: fixture mismatch, 6.B work)' }
 
 H2 'C5: matcher is consulted BEFORE INSERT (structural eyeball)'
+# 6.B fix: scope the ordering check to the `fn record_event` body so
+# unrelated `insert_event(` calls in `run_emit_control_event` /
+# `emit_layer_error` (which appear earlier in the file) don't shadow
+# the real call site we care about.
 $rtTxt = Get-Content $rt -Raw
-$idxExc1 = $rtTxt.IndexOf('check_excluded(')
-$idxIns1 = $rtTxt.IndexOf('insert_event(')
-if ($idxExc1 -gt 0 -and $idxIns1 -gt 0 -and $idxExc1 -lt $idxIns1) {
-    OK "check_excluded() at offset $idxExc1 precedes insert_event() at offset $idxIns1 in record_event"
+$recStart = $rtTxt.IndexOf('pub fn record_event(')
+$recEnd   = if ($recStart -gt 0) { $rtTxt.IndexOf("`n}", $recStart) } else { -1 }
+if ($recStart -gt 0 -and $recEnd -gt $recStart) {
+    $recBody = $rtTxt.Substring($recStart, $recEnd - $recStart)
+    $idxExc1 = $recBody.IndexOf('check_excluded(')
+    $idxIns1 = $recBody.IndexOf('insert_event(')
+    if ($idxExc1 -ge 0 -and $idxIns1 -gt 0 -and $idxExc1 -lt $idxIns1) {
+        OK "check_excluded() (body offset $idxExc1) precedes insert_event() (body offset $idxIns1) within fn record_event"
+    } else {
+        BAD "structural ordering violation inside fn record_event (exc=$idxExc1, ins=$idxIns1)"
+    }
 } else {
-    BAD "structural ordering violation (exc=$idxExc1, ins=$idxIns1)"
+    BAD "could not locate `fn record_event` body in runtime.rs (start=$recStart, end=$recEnd)"
 }
 
 H2 'Built-in rules count in migration 015'
@@ -151,18 +162,22 @@ if (HasMatch $pdf 'PdfMode::parse|fn parse') { OK 'PdfMode parser present' } els
 # ============================================================
 H1 'Judge 5: sealed-phases-untouched (mechanical diff portion only)'
 # ============================================================
-H2 'C1: Dictation public-API surface diff vs phase-mc-complete'
-$d1 = git diff --name-only phase-mc-complete..HEAD -- `
+# Wave 6.B: range narrowed to stable-alpha-v0.1..HEAD per Dustin's
+# decision — mechanically excludes the dictation-polish lateral epic
+# (commit dda676a) that landed between phase-mc-complete and the
+# Phase 10 first commit. Same range used by the LLM grader.
+H2 'C1: Dictation public-API surface diff vs stable-alpha-v0.1'
+$d1 = git diff --name-only stable-alpha-v0.1..HEAD -- `
     src-tauri/src/dictation/ `
     src-tauri/src/injection/ `
     src-tauri/src/cleanup/provider.rs `
     src-tauri/src/cleanup/llm_cleaner.rs `
     src-tauri/src/cleanup/ollama.rs 2>$null
-if ($null -eq $d1 -or $d1.Count -eq 0) { OK 'empty diff vs phase-mc-complete (mechanical layer: clean)' }
-else { INFO "files in diff (LLM grader needed in 6.B to classify as authorized/unauthorized):"; $d1 | ForEach-Object { Write-Host "    $_" } }
+if ($null -eq $d1 -or $d1.Count -eq 0) { OK 'empty diff vs stable-alpha-v0.1 (mechanical layer: clean)' }
+else { INFO "files in diff (LLM grader classifies as authorized/unauthorized):"; $d1 | ForEach-Object { Write-Host "    $_" } }
 
-H2 'C2: Meeting Capture pipeline shape diff'
-$d2 = git diff --name-only phase-mc-complete..HEAD -- `
+H2 'C2: Meeting Capture pipeline shape diff vs stable-alpha-v0.1'
+$d2 = git diff --name-only stable-alpha-v0.1..HEAD -- `
     src-tauri/src/meetings/capture.rs `
     src-tauri/src/meetings/long_form_stt.rs `
     src-tauri/src/meetings/formatter.rs `
@@ -171,15 +186,20 @@ $d2 = git diff --name-only phase-mc-complete..HEAD -- `
     src-tauri/src/meetings/filler_words.rs `
     src-tauri/src/audio/capture.rs 2>$null
 if ($null -eq $d2 -or $d2.Count -eq 0) { OK 'empty diff (mechanical layer: clean)' }
-else { INFO 'files in diff (needs LLM classification in 6.B):'; $d2 | ForEach-Object { Write-Host "    $_" } }
+else { INFO 'files in diff (LLM grader classifies as authorized/unauthorized):'; $d2 | ForEach-Object { Write-Host "    $_" } }
 
-H2 'C3: stage=raw UPDATE introductions'
-$rawHits = git diff phase-mc-complete..HEAD -- 'src-tauri/src/' 2>$null | Select-String -Pattern 'UPDATE transcripts|UPDATE .* stage'
+H2 'C3: stage=raw UPDATE introductions vs stable-alpha-v0.1'
+$rawHits = git diff stable-alpha-v0.1..HEAD -- 'src-tauri/src/' 2>$null | Select-String -Pattern 'UPDATE transcripts|UPDATE .* stage'
 if ($null -eq $rawHits) { OK 'no UPDATE transcripts / UPDATE...stage patterns in diff' }
 else { BAD (("$($rawHits.Count) matches - eyeball needed (could be comment / cleaned-stage)")); $rawHits | Select-Object -First 10 | ForEach-Object { Write-Host "    $_" } }
 
-H2 'C4: migrations 001-014 untouched since phase-mc-complete'
-$migDiff = git diff --name-only phase-mc-complete..HEAD -- `
+H2 'C4: migrations 001-014 untouched (modifications only) since stable-alpha-v0.1'
+# 6.B fix: --diff-filter=M excludes additions (012/013/014 are *added*
+# during Phase 10; the seal check only cares about MODIFICATIONS of
+# already-sealed files). Range narrowed to stable-alpha-v0.1..HEAD per
+# Dustin's Wave 6.B decision — mechanically excludes the dictation-polish
+# lateral epic that landed between phase-mc-complete and phase-10 start.
+$migDiff = git diff --diff-filter=M --name-only stable-alpha-v0.1..HEAD -- `
     'src-tauri/src/db/migrations/001_*.sql' `
     'src-tauri/src/db/migrations/002_*.sql' `
     'src-tauri/src/db/migrations/003_*.sql' `
@@ -194,7 +214,7 @@ $migDiff = git diff --name-only phase-mc-complete..HEAD -- `
     'src-tauri/src/db/migrations/012_*.sql' `
     'src-tauri/src/db/migrations/013_*.sql' `
     'src-tauri/src/db/migrations/014_*.sql' 2>$null
-if ($null -eq $migDiff -or $migDiff.Count -eq 0) { OK 'all sealed migrations 001-014 untouched' }
+if ($null -eq $migDiff -or $migDiff.Count -eq 0) { OK 'all sealed migrations 001-014 untouched (no modifications)' }
 else { BAD 'sealed migrations modified:'; $migDiff | ForEach-Object { Write-Host "    $_" } }
 
 H2 'C5: link-clean test --release --no-run (run separately above)'

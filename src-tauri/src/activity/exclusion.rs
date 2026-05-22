@@ -591,4 +591,33 @@ mod tests {
         }
         assert_eq!(RuleKind::from_db_str("garbage"), None);
     }
+
+    // ----------------------------------------------------------
+    // Phase 10 Wave 6.B — exclusion-is-total judge fixture (C2).
+    // ADR 0043 (built-in rules seeded by migration 015).
+    // ----------------------------------------------------------
+
+    #[test]
+    fn builtin_rules_load_via_load() {
+        use crate::db::Database;
+        let db = Database::open_in_memory().expect("open in-memory db");
+        let m = ExclusionMatcher::load(&db.conn).expect("load matcher");
+        // Migration 015 seeds exactly 8 built-in rules — all enabled
+        // by default — so the matcher's len() equals the seed count.
+        assert_eq!(
+            m.len(),
+            8,
+            "built-in exclusion rules from migration 015 should load via ExclusionMatcher::load"
+        );
+        // Spot-check: 1Password app_glob should fire against a synthetic
+        // event, proving the rules made it into the hot path.
+        assert!(m
+            .matches(Some("1Password 7"), Some("Vault"), false)
+            .is_some());
+        // And the password-field-active system rule should fire
+        // regardless of app + title.
+        assert!(m
+            .matches(Some("Notepad.exe"), Some("Untitled"), true)
+            .is_some());
+    }
 }

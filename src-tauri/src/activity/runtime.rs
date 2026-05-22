@@ -943,4 +943,195 @@ mod tests {
             .unwrap();
         assert_eq!(n, 2);
     }
+
+    // ----------------------------------------------------------
+    // Phase 10 Wave 6.B — exclusion-is-total judge fixtures (C3, C4).
+    // ADR 0043 (capture-time enforcement + hot reload).
+    // ----------------------------------------------------------
+
+    /// Replace whatever exclusion rules `apply_all` seeded with the
+    /// caller-supplied list. Returns after the runtime's matcher has
+    /// been reloaded from the new state.
+    fn replace_exclusion_rules(
+        rt: &ActivityCaptureRuntime,
+        conn: &Arc<Mutex<Connection>>,
+        rules: &[(&str, &str, &str)], // (id, kind, pattern)
+    ) {
+        {
+            let c = conn.lock().unwrap();
+            c.execute("DELETE FROM activity_exclusion_rules", [])
+                .unwrap();
+            for (id, kind, pattern) in rules {
+                c.execute(
+                    "INSERT INTO activity_exclusion_rules \
+                     (id, kind, pattern, enabled, is_builtin, note, created_at, updated_at) \
+                     VALUES (?1, ?2, ?3, 1, 0, NULL, 0, 0)",
+                    rusqlite::params![id, kind, pattern],
+                )
+                .unwrap();
+            }
+        }
+        rt.reload_exclusion_rules().unwrap();
+    }
+
+    #[test]
+    fn record_event_drops_matched_rows() {
+        let (rt, conn) = fresh_runtime();
+        // The runtime construction already loaded the migration-015
+        // built-ins (8 rules, all enabled). That's the realistic
+        // posture for this judge.
+        rt.start().unwrap();
+        let sid = rt.current_session_id().unwrap();
+
+        // (a) Plain app event — nothing about it matches a built-in.
+        rt.record_event(SamplerEvent::AppSwitch {
+            app: "Notepad.exe".into(),
+            title: "x".into(),
+            ts_ms: 1_000,
+        })
+        .unwrap();
+        // (b) 1Password — must be dropped by `builtin-1password`.
+        rt.record_event(SamplerEvent::AppSwitch {
+            app: "1Password 7".into(),
+            title: "Vault".into(),
+            ts_ms: 1_100,
+        })
+        .unwrap();
+        // (c) Password-field-active snapshot — must be dropped by
+        //     `builtin-secure-input` regardless of app/title.
+        let snapshot_json =
+            r#"{"schema":"v2","app":"chrome.exe","title":"ok","passwordFieldActive":true}"#;
+        rt.record_event(SamplerEvent::ContextSnapshot {
+            app: "chrome.exe".into(),
+            title: "ok".into(),
+            ts_ms: 1_200,
+            snapshot_json: snapshot_json.to_string(),
+        })
+        .unwrap();
+
+        let c = conn.lock().unwrap();
+        // 1Password / consent.exe / LogonUI.exe rows: must be zero.
+        let pwd_apps: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM activity_events \
+                 WHERE app_name LIKE '1Password%' \
+                    OR app_name = 'consent.exe' \
+                    OR app_name = 'LogonUI.exe'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            pwd_apps, 0,
+            "password-manager / UAC events must be excluded"
+        );
+
+        // Password-field-active snapshots: must be zero.
+        let pwd_field: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM activity_events \
+                 WHERE snapshot_json LIKE '%\"passwordFieldActive\":true%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            pwd_field, 0,
+            "password-field-active snapshots must be excluded"
+        );
+
+        // Positive control — the matcher is not a sledgehammer.
+        let kept: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM activity_events \
+                 WHERE session_id = ?1 AND app_name = 'Notepad.exe'",
+                rusqlite::params![&sid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(kept, 1, "Notepad event should have been persisted");
+    }
+
+    #[test]
+    fn reload_exclusion_rules_no_leak_across_window() {
+        let (rt, conn) = fresh_runtime();
+
+        // Window 1: ONLY "Foo*" enabled — wipe migration seed + insert.
+        replace_exclusion_rules(&rt, &conn, &[("r-foo", "app_glob", "Foo*")]);
+
+        rt.start().unwrap();
+        let sid = rt.current_session_id().unwrap();
+
+        // "Bar" persists (no Bar* rule yet).
+        rt.record_event(SamplerEvent::AppSwitch {
+            app: "Bar".into(),
+            title: "t".into(),
+            ts_ms: 1_000,
+        })
+        .unwrap();
+        // "Foo 1" dropped.
+        rt.record_event(SamplerEvent::AppSwitch {
+            app: "Foo 1".into(),
+            title: "t".into(),
+            ts_ms: 1_100,
+        })
+        .unwrap();
+
+        // Window 2: add Bar* rule + reload. "Bar" should now drop.
+        {
+            let c = conn.lock().unwrap();
+            c.execute(
+                "INSERT INTO activity_exclusion_rules \
+                 (id, kind, pattern, enabled, is_builtin, note, created_at, updated_at) \
+                 VALUES ('r-bar', 'app_glob', 'Bar*', 1, 0, NULL, 1, 1)",
+                [],
+            )
+            .unwrap();
+        }
+        rt.reload_exclusion_rules().unwrap();
+        rt.record_event(SamplerEvent::AppSwitch {
+            app: "Bar".into(),
+            title: "t".into(),
+            ts_ms: 1_200,
+        })
+        .unwrap();
+
+        // Window 3: disable Bar* + reload. "Bar" should persist again.
+        {
+            let c = conn.lock().unwrap();
+            c.execute(
+                "UPDATE activity_exclusion_rules SET enabled = 0 WHERE id = 'r-bar'",
+                [],
+            )
+            .unwrap();
+        }
+        rt.reload_exclusion_rules().unwrap();
+        rt.record_event(SamplerEvent::AppSwitch {
+            app: "Bar".into(),
+            title: "t".into(),
+            ts_ms: 1_300,
+        })
+        .unwrap();
+
+        // Tally: exactly TWO "Bar" rows (windows 1 + 3), zero "Foo" rows ever.
+        let c = conn.lock().unwrap();
+        let bar: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM activity_events \
+                 WHERE session_id = ?1 AND app_name = 'Bar'",
+                rusqlite::params![&sid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let foo: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM activity_events \
+                 WHERE session_id = ?1 AND app_name LIKE 'Foo%'",
+                rusqlite::params![&sid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(bar, 2, "Bar rows from windows 1+3 should survive");
+        assert_eq!(foo, 0, "Foo* events should never persist");
+    }
 }

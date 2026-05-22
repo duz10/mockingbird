@@ -489,4 +489,129 @@ mod tests {
         assert_eq!(PdfMode::parse("work_report").unwrap(), PdfMode::WorkReport);
         assert!(PdfMode::parse("nonsense").is_err());
     }
+
+    // ----------------------------------------------------------
+    // Phase 10 Wave 6.B — pdf-renders-correct-block-count judge fixtures.
+    // ADR 0044 (printpdf v1 layout; two modes).
+    // ----------------------------------------------------------
+
+    /// Build a fixture session with three labelled blocks (distinct
+    /// labels + abstracts, ordered by `started_at`). Returns the
+    /// session id + the label strings in render order.
+    fn seed_three_block_session(
+        db: &mut crate::db::Database,
+    ) -> (String, [&'static str; 3], [&'static str; 3]) {
+        use crate::activity::blocks_persist::{insert_block, rename_block};
+        use crate::activity::persist::insert_session;
+
+        let sid = insert_session(&db.conn, 1_000).unwrap();
+        // End the session so the duration header doesn't read 0ms.
+        db.conn
+            .execute(
+                "UPDATE activity_sessions SET ended_at = ?1, status = 'completed' WHERE id = ?2",
+                rusqlite::params![10_000i64, &sid],
+            )
+            .unwrap();
+
+        let labels = ["Wave6JudgesAuthoring", "CargoGateDryRun", "StatusUpdate"];
+        let abstracts = [
+            "Wrote the six invariant judges and the dry-run rig.",
+            "Ran cargo clippy plus fmt plus the no-run gate to prove the link surface.",
+            "Pushed STATUS plus closed the Wave six beads in beads database.",
+        ];
+        for i in 0..3 {
+            let started = 1_000 + (i as i64) * 1_000;
+            let bid = insert_block(
+                &db.conn,
+                &sid,
+                started,
+                started + 500,
+                "a.exe",
+                "t",
+                Some(abstracts[i]),
+                "[]",
+                "abstract_v1-deadbeef",
+                started,
+            )
+            .unwrap();
+            rename_block(&db.conn, &bid, Some(labels[i]), started).unwrap();
+        }
+        (sid, labels, abstracts)
+    }
+
+    #[test]
+    fn full_mode_renders_three_block_labels() {
+        use crate::db::Database;
+        let mut db = Database::open_in_memory().expect("open in-memory db");
+        let (sid, labels, abstracts) = seed_three_block_session(&mut db);
+
+        let bytes = render_session_pdf(&mut db.conn, &sid, PdfMode::Full)
+            .expect("render_session_pdf Full mode");
+        assert!(!bytes.is_empty(), "PDF bytes should not be empty");
+
+        let text = pdf_extract::extract_text_from_mem(&bytes)
+            .expect("pdf_extract should round-trip our PDF");
+
+        // All three labels appear, in started_at order (idx 0 < 1 < 2).
+        let positions: Vec<usize> = labels
+            .iter()
+            .map(|l| {
+                text.find(l)
+                    .unwrap_or_else(|| panic!("label {l:?} missing from PDF text:\n{text}"))
+            })
+            .collect();
+        assert!(
+            positions[0] < positions[1] && positions[1] < positions[2],
+            "labels must appear in started_at order, got positions {positions:?}"
+        );
+
+        // All three abstract strings appear too.
+        for a in abstracts {
+            assert!(
+                text.contains(a),
+                "abstract {a:?} missing from PDF text:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn work_report_mode_renders_three_abstracts_no_events() {
+        use crate::activity::persist::insert_event;
+        use crate::db::Database;
+
+        let mut db = Database::open_in_memory().expect("open in-memory db");
+        let (sid, _labels, abstracts) = seed_three_block_session(&mut db);
+
+        // One distinctive event row that work-report mode must NOT render.
+        insert_event(
+            &db.conn,
+            &sid,
+            1_500,
+            "app_switch",
+            Some("do-not-include-in-work-report.exe"),
+            Some("leak-marker"),
+            None,
+        )
+        .unwrap();
+
+        let bytes = render_session_pdf(&mut db.conn, &sid, PdfMode::WorkReport)
+            .expect("render_session_pdf WorkReport mode");
+        let text = pdf_extract::extract_text_from_mem(&bytes)
+            .expect("pdf_extract should round-trip our PDF");
+
+        for a in abstracts {
+            assert!(
+                text.contains(a),
+                "abstract {a:?} missing from work-report PDF text:\n{text}"
+            );
+        }
+        assert!(
+            !text.contains("do-not-include-in-work-report.exe"),
+            "work-report mode leaked raw event app_name into the PDF:\n{text}"
+        );
+        assert!(
+            !text.contains("Raw event list"),
+            "work-report mode rendered a raw-event section header:\n{text}"
+        );
+    }
 }
