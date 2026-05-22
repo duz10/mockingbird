@@ -26,12 +26,13 @@ import { useNavigate, useParams } from "react-router-dom";
 import { EmptyState, PageHeader, Pill, Spinner } from "../components/primitives";
 import { ActivityIcon } from "../design/Icon";
 import { t } from "../i18n";
-import { activityApi } from "../lib/activity";
+import { activityApi, parseSnapshotJson } from "../lib/activity";
 import type {
   ActivityEventRow,
   ActivitySessionDetail,
   ActivitySessionRow,
   ActivitySessionStatus,
+  UiaSnapshotV2,
 } from "../lib/activity";
 import { formatDuration, formatRelative } from "../lib/format";
 
@@ -308,6 +309,13 @@ function ActivityEventRowView({ event, startedAt }: EventRowProps) {
   const kindLabel = eventKindLabel(event.kind);
   const title = event.windowTitle?.trim() || t("activity.event.untitled");
   const app = event.appName;
+  // Wave 2: parse the v2 snapshot payload (if any) and surface it as
+  // an expandable details panel. For non-context_snapshot rows we just
+  // render the flat title-only line.
+  const snapshot =
+    event.kind === "context_snapshot"
+      ? parseSnapshotJson(event.snapshotJson)
+      : null;
   return (
     <li className={styles.event} data-kind={event.kind}>
       <span className={styles.eventTime}>{elapsed}</span>
@@ -316,7 +324,81 @@ function ActivityEventRowView({ event, startedAt }: EventRowProps) {
         {app && <strong className={styles.eventApp}>{app}</strong>}
         {app && <span aria-hidden> · </span>}
         <span className={styles.eventTitle}>{title}</span>
+        {snapshot && <SnapshotDetails snapshot={snapshot} />}
       </span>
     </li>
+  );
+}
+
+/**
+ * Collapsed-by-default expansion for a Wave-2 context_snapshot row.
+ * Renders the monitor + control-summary one-liner, the focused field
+ * (when present), and a few visible-text fragments as a sample. The
+ * raw JSON is hidden behind a nested `<details>` so power-users can
+ * still inspect it without dominating the timeline.
+ */
+function SnapshotDetails({ snapshot }: { snapshot: UiaSnapshotV2 }) {
+  const cs = snapshot.controlSummary;
+  const monitor = snapshot.monitor;
+  const focused = snapshot.focusedField;
+  const fragments = snapshot.visibleTextFragments;
+  const previewFragments = fragments.slice(0, 6);
+  return (
+    <details className={styles.snapshot}>
+      <summary className={styles.snapshotSummary}>
+        {snapshot.passwordFieldActive
+          ? t("activity.snapshot.passwordRedacted")
+          : t("activity.snapshot.expand")}
+      </summary>
+      <div className={styles.snapshotBody}>
+        {snapshot.status.kind === "failed" && (
+          <div className={styles.snapshotFailed}>
+            {t("activity.snapshot.failed")}: {snapshot.status.reason}
+          </div>
+        )}
+        {monitor && (
+          <div className={styles.snapshotMonitor}>
+            <strong>{t("activity.snapshot.monitor")}:</strong> {monitor.name}
+            {monitor.isPrimary && ` (${t("activity.snapshot.primary")})`} ·{" "}
+            {monitor.bounds.right - monitor.bounds.left}×
+            {monitor.bounds.bottom - monitor.bounds.top}
+            {typeof monitor.dpiScale === "number" &&
+              ` · ${monitor.dpiScale.toFixed(2)}x DPI`}
+          </div>
+        )}
+        {focused && (
+          <div className={styles.snapshotFocused}>
+            <strong>{t("activity.snapshot.focused")}:</strong>{" "}
+            <code>{focused.controlType || "?"}</code>{" "}
+            {focused.name && <span>“{focused.name}”</span>}
+            {focused.value && (
+              <span className={styles.snapshotFocusedValue}>
+                {" "}
+                — {focused.value}
+              </span>
+            )}
+          </div>
+        )}
+        <div className={styles.snapshotCounts}>
+          {t("activity.snapshot.elementsVisited")}: {cs.elementsVisited} ·{" "}
+          {t("activity.snapshot.edits")}: {cs.editCount} ·{" "}
+          {t("activity.snapshot.buttons")}: {cs.buttonCount} ·{" "}
+          {t("activity.snapshot.links")}: {cs.linkCount}
+        </div>
+        {previewFragments.length > 0 && (
+          <ul className={styles.snapshotFragments}>
+            {previewFragments.map((frag, idx) => (
+              <li key={idx}>{frag}</li>
+            ))}
+            {fragments.length > previewFragments.length && (
+              <li className={styles.snapshotFragmentsMore}>
+                +{fragments.length - previewFragments.length}{" "}
+                {t("activity.snapshot.moreFragments")}
+              </li>
+            )}
+          </ul>
+        )}
+      </div>
+    </details>
   );
 }

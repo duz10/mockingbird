@@ -45,7 +45,7 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**Phase 10 — Activity Capture (sibling subsystem). Wave 1B — Activity-Log Skeleton (titles-only) in flight (`mb-hnl3` in_progress; `mb-jtbk` closed end-of-1B).**
+**Phase 10 — Activity Capture (sibling subsystem). Wave 2 — UIA Deep Snapshots + Multi-Monitor code-complete (`mb-hr1u` in_progress, awaiting Wave 3 dispatch for buildable-upon confirmation; `mb-hnl3` closed end-of-2 per Bernard's deferral).**
 
 Chartered 2026-05-25 (Bernard, Wave 0). Wave 0.5 — Command Center charter integration. Wave 1A — Command Center code (sealed end-of-1A, commit `33e2cca`). Wave 1B (this iteration) — migration 012, activity/* runtime modules, Activity-page UI, plus Wave 1A deferrals (command_center_chord Settings row + legacy_meeting_chord_enabled toggle). ADR 0036 + ADR 0037 both Accepted 2026-05-24 by Dustin. Numbered PLAN §10 phase mirroring Phase MC's container: numbered + ADR-chartered + per-wave seal tags + final `phase-10-complete` tag. Phase 9 stays reserved for the macOS cross-platform sweep.
 
@@ -61,8 +61,8 @@ Chartered 2026-05-25 (Bernard, Wave 0). Wave 0.5 — Command Center charter inte
 - **Bead epic:** `mb-a2w9` (status `in_progress`).
 - **Wave beads** (each P1, dependency-chained so each subsequent wave depends on its predecessor; the epic depends on all of them):
   - `mb-jtbk` Wave 1A: Unified Recording Command Center ← `closed` (sealed at commit `33e2cca`; integration verified by Wave 1B's Command Center → Activity flow)
-  - `mb-hnl3` **Wave 1B: Activity-Log Skeleton (titles-only)** ← `in_progress` (this iteration: migration 012, activity/* runtime modules, IPC commands, Activity page + Sidebar nav, Wave 1A deferrals)
-  - `mb-hr1u` Wave 2: UIA deep snapshots + multi-monitor
+  - `mb-hnl3` Wave 1B: Activity-Log Skeleton (titles-only) ← `closed` (sealed at commit `7333a98`; integration verified by Wave 2's UIA layer building cleanly on top of the skeleton)
+  - `mb-hr1u` **Wave 2: UIA deep snapshots + multi-monitor** ← `in_progress` (code complete; UIA Probe trait + Windows COM impl + idle tracker + multi-monitor attribution + v2 snapshot_json schema; Wave 2 brief at `docs/phases/phase10-wave2-brief.md`; awaiting Wave 3 dispatch for buildable-upon confirmation)
   - `mb-pwup` Wave 3: Summarization pipeline
   - `mb-g1w2` Wave 4: Audio layer (Layer 2)
   - `mb-a6tz` Wave 5: Hardening and polish (charters ADR 0038, encryption-at-rest)

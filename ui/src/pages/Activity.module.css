@@ -194,3 +194,68 @@
   margin-bottom: 0.75rem;
   font-size: 0.9rem;
 }
+
+/* Wave 2 — context_snapshot expansion panel.
+ * Tokens come from design/tokens.css (no hard-coded colors).
+ * Stays collapsed by default; the only summary line in the row is
+ * the trigger. Expanded content sits under the event row, indented
+ * to align with .eventBody.
+ */
+.snapshot {
+  margin-top: 0.35rem;
+  display: block;
+}
+
+.snapshotSummary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 0.8rem;
+  user-select: none;
+}
+
+.snapshotSummary:hover {
+  color: var(--text-1);
+}
+
+.snapshotBody {
+  margin-top: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 2px solid var(--border-subtle);
+  background: var(--surface-2);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.snapshotFailed {
+  color: var(--status-error);
+}
+
+.snapshotMonitor,
+.snapshotFocused,
+.snapshotCounts {
+  color: var(--text-2);
+}
+
+.snapshotFocusedValue {
+  color: var(--text-1);
+  font-style: italic;
+}
+
+.snapshotFragments {
+  margin: 0.25rem 0 0;
+  padding-left: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  color: var(--text-1);
+}
+
+.snapshotFragmentsMore {
+  color: var(--text-2);
+  font-style: italic;
+  list-style: none;
+  margin-left: -1rem;
+}

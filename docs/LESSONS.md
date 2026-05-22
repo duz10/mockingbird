@@ -157,6 +157,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-25 | `[phase10-wave-2]`               | windows-rs MONITORINFOF_PRIMARY lives under UI/WindowsAndMessaging not Graphics/Gdi; serde camelCase isn't free; throwaway preamble must append not prepend |
 | 2026-05-25 | `[phase10-wave-1b]`              | typed-settings IPC has no UI wrapper; Pill `tone` is a token string not a union; `formatRelative` takes ISO not unix-ms |
 | 2026-05-25 | `[phase10 / meta / dispatch]`    | sub-agent session_id is conversational, NOT serial — PINNED P8           |
 | 2026-05-24 | `[meta / tooling]`               | bd create non-ASCII trap; git status --porcelain=v1 vs --short; findstr regex limits; triage-before-acting pattern |
@@ -199,6 +200,51 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-25 [phase10-wave-2] three small Rust + tooling paper-cuts while wiring UIA deep snapshots
+
+**Context:** Wave 2 (mb-hr1u) — promoted the activity sampler from titles-only
+to full UIA deep snapshots (focused field, visible-text fragments, control
+summary, multi-monitor attribution, password-field redaction) using raw
+`windows`-rs 0.56 with the new `Win32_UI_Accessibility` feature.
+
+**Findings:**
+
+1. **`MONITORINFOF_PRIMARY` lives under `Win32::UI::WindowsAndMessaging`,
+   not `Win32::Graphics::Gdi`** in `windows`-rs 0.56. The Win32 SDK puts
+   it next to `MONITORINFO` (which IS under `Graphics::Gdi`), but the
+   crate exposes the constant via the WindowsAndMessaging re-export tree.
+   Cost: 1 build cycle. Inline doc-comment now flags the surprise location
+   in `windows_com.rs`.
+
+2. **`#[serde(rename_all = "camelCase")]` is not implicit on derive(Serialize).**
+   The activity-capture DTOs (`ProbeResult`, `MonitorInfo`, `FocusedField`,
+   `ControlSummary`, `Rect`) all needed the explicit attribute to match
+   the TypeScript types on the UI side. The first throwaway-test run lost
+   8/19 tests because they were probing `v["visibleTextFragments"]` while
+   serde was producing `visible_text_fragments`. Defense: when adding a
+   serde-derived struct that round-trips through IPC, copy-paste the
+   `#[serde(rename_all = "camelCase")]` from the nearest neighbor
+   (`persist::ActivitySessionRow` is the canonical example) AT THE SAME
+   MOMENT you add the derive macros.
+
+3. **Throwaway-crate preamble must be APPENDED, not prepended.** Generalizing
+   the throwaway-test recipe (LESSONS P2) into a reusable
+   `scripts/throwaway-test.ps1` introduced a footgun: my first version
+   prepended a stub `pub mod error { ... }` so the source file's
+   `use crate::error::*` would resolve. That broke compilation because
+   the source's own inner attributes (`#![allow(missing_docs)]`) and
+   module-level doc comments have to be the FIRST tokens in the file.
+   Fix: append the preamble at the end. `mod error { ... }` is order-
+   independent for path resolution, so it works at either end of the file.
+
+**Action:** Throwaway script now supports `-Preamble` (appended). Idle-tracker
+module has its own wrapper at `scripts/test-activity-level.ps1` that
+supplies the windows-crate dep + stub error module. Future pure-Rust modules
+that reference `crate::error` should drop their own wrapper or thread the
+preamble through directly.
 
 ---
 

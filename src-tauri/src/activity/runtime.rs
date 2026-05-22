@@ -310,12 +310,14 @@ impl ActivityCaptureRuntime {
                     None,
                 )?;
             }
-            SamplerEvent::ContextSnapshot { app, title, ts_ms } => {
-                let payload = format!(
-                    "{{\"app\":{},\"title\":{}}}",
-                    json_escape_string(&app),
-                    json_escape_string(&title)
-                );
+            SamplerEvent::ContextSnapshot {
+                app,
+                title,
+                ts_ms,
+                snapshot_json,
+            } => {
+                // Wave 2: the sampler builds the JSON payload (it owns
+                // the platform-specific UIA probe). We just persist it.
                 insert_event(
                     &conn,
                     &sid,
@@ -323,8 +325,14 @@ impl ActivityCaptureRuntime {
                     "context_snapshot",
                     Some(&app),
                     Some(&title),
-                    Some(&payload),
+                    Some(&snapshot_json),
                 )?;
+            }
+            SamplerEvent::IdleStart { ts_ms } => {
+                insert_event(&conn, &sid, ts_ms, "idle_start", None, None, None)?;
+            }
+            SamplerEvent::IdleEnd { ts_ms } => {
+                insert_event(&conn, &sid, ts_ms, "idle_end", None, None, None)?;
             }
             SamplerEvent::LayerError { message, ts_ms } => {
                 insert_event(
@@ -533,14 +541,19 @@ mod tests {
     }
 
     #[test]
-    fn context_snapshot_emits_json_payload_with_escaping() {
+    fn context_snapshot_persists_sampler_built_payload_verbatim() {
+        // Wave 2: the sampler hands the runtime a pre-built JSON
+        // payload (it owns the platform-specific UIA probe). The
+        // runtime's only job is to write it to the column unchanged.
         let (rt, conn) = fresh_runtime();
         rt.start().unwrap();
         let sid = rt.current_session_id().unwrap();
+        let payload = r#"{"schema":"v2","app":"notepad.exe","title":"T","status":{"kind":"ok"}}"#;
         rt.record_event(SamplerEvent::ContextSnapshot {
             app: "notepad.exe".into(),
-            title: r#"Untitled - "quoted" \ backslash"#.into(),
+            title: "T".into(),
             ts_ms: 100,
+            snapshot_json: payload.to_string(),
         })
         .unwrap();
         let detail = get_session_detail(&conn.lock().unwrap(), &sid)
@@ -551,10 +564,30 @@ mod tests {
             .iter()
             .find(|e| e.kind == "context_snapshot")
             .unwrap();
-        let json = snap.snapshot_json.as_ref().unwrap();
-        // Round-trip via serde_json to assert it's actually valid JSON.
-        let v: serde_json::Value = serde_json::from_str(json).expect("valid JSON");
-        assert_eq!(v["app"], "notepad.exe");
-        assert_eq!(v["title"], r#"Untitled - "quoted" \ backslash"#);
+        assert_eq!(snap.snapshot_json.as_deref(), Some(payload));
+        // Should still be valid JSON for the UI to parse.
+        let v: serde_json::Value =
+            serde_json::from_str(snap.snapshot_json.as_ref().unwrap()).expect("valid JSON");
+        assert_eq!(v["schema"], "v2");
+    }
+
+    #[test]
+    fn record_event_handles_idle_start_and_idle_end() {
+        let (rt, conn) = fresh_runtime();
+        rt.start().unwrap();
+        rt.record_event(SamplerEvent::IdleStart { ts_ms: 500 })
+            .unwrap();
+        rt.record_event(SamplerEvent::IdleEnd { ts_ms: 700 })
+            .unwrap();
+        let n: i64 = conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM activity_events WHERE kind IN ('idle_start','idle_end')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 2);
     }
 }

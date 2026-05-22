@@ -61,13 +61,17 @@
 //!    `LifecycleInput` variant + extending the `apply` match —
 //!    not bolting on a side door in `runtime.rs`.
 
+pub mod activity_level;
 pub mod ids;
 pub mod lifecycle;
 pub mod persist;
 pub mod runtime;
 pub mod sampler;
+pub mod uia;
 
+pub use activity_level::{ActivityLevel, IdleTracker, IdleTransition};
 pub use lifecycle::{LifecycleEffect, LifecycleInput, LifecycleState, Transition};
 pub use persist::{ActivityEventRow, ActivitySessionDetail, ActivitySessionRow, SessionStatus};
 pub use runtime::ActivityCaptureRuntime;
 pub use sampler::{Sampler, SamplerEvent};
+pub use uia::{Probe, ProbeResult, ProbeStatus};

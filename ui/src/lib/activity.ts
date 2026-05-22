@@ -36,9 +36,84 @@ export interface ActivityEventRow {
   appName: string | null;
   windowTitle: string | null;
   /** Free-form JSON string. Wave 1B emits null or
-   *  `{"app":..., "title":...}`; Wave 2 expands. */
+   *  `{"app":..., "title":...}`; Wave 2 emits a v2-schema payload with
+   *  monitor + UIA fields (see {@link UiaSnapshotV2}). */
   snapshotJson: string | null;
   createdAt: number;
+}
+
+/**
+ * Wave 2 `context_snapshot` payload shape (matches
+ * `src-tauri/src/activity/uia/payload.rs::ProbeResult` after
+ * `serde(rename_all = "camelCase")`). The `schema` discriminator
+ * is checked by {@link parseSnapshotJson}; older rows missing the
+ * discriminator return `null` from the parser and the UI falls
+ * back to the flat app/title rendering.
+ */
+export interface UiaSnapshotV2 {
+  schema: "v2";
+  app: string;
+  title: string;
+  monitor: MonitorInfo | null;
+  focusedField: FocusedField | null;
+  visibleTextFragments: string[];
+  controlSummary: ControlSummary;
+  passwordFieldActive: boolean;
+  status: ProbeStatus;
+}
+
+export interface MonitorInfo {
+  name: string;
+  isPrimary: boolean;
+  bounds: { left: number; top: number; right: number; bottom: number };
+  dpiScale: number | null;
+}
+
+export interface FocusedField {
+  name: string;
+  controlType: string;
+  value: string;
+}
+
+export interface ControlSummary {
+  editCount: number;
+  buttonCount: number;
+  documentCount: number;
+  linkCount: number;
+  textCount: number;
+  otherCount: number;
+  elementsVisited: number;
+}
+
+export type ProbeStatus =
+  | { kind: "ok" }
+  | { kind: "no_payload" }
+  | { kind: "failed"; reason: string };
+
+/**
+ * Safe-parse the `snapshot_json` column. Returns the typed v2 payload
+ * when the schema discriminator matches, otherwise null (caller
+ * renders the flat fallback). Never throws.
+ */
+export function parseSnapshotJson(
+  raw: string | null,
+): UiaSnapshotV2 | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as unknown;
+    if (
+      typeof v === "object" &&
+      v !== null &&
+      (v as { schema?: unknown }).schema === "v2"
+    ) {
+      // SAFETY: we have asserted the schema discriminator. Mockingbird
+      // is the only writer; we trust the rest of the shape downstream.
+      return v as UiaSnapshotV2;
+    }
+  } catch {
+    // fall through
+  }
+  return null;
 }
 
 export interface ActivitySessionDetail {
