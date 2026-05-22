@@ -157,6 +157,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-25 | `[phase10-wave-1b]`              | typed-settings IPC has no UI wrapper; Pill `tone` is a token string not a union; `formatRelative` takes ISO not unix-ms |
 | 2026-05-25 | `[phase10 / meta / dispatch]`    | sub-agent session_id is conversational, NOT serial — PINNED P8           |
 | 2026-05-24 | `[meta / tooling]`               | bd create non-ASCII trap; git status --porcelain=v1 vs --short; findstr regex limits; triage-before-acting pattern |
 | 2026-05-24 | `[mc-v1.2 / ADR 0035]`           | MC Stable Alpha seal — capabilities migration is the real mb-z5y root cause; cancel/rename/auto-title; WASAPI loopback fix; stable-alpha-v0.1 tag |
@@ -198,6 +199,73 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-25 [phase10-wave-1b] three small UI-layer paper-cuts while wiring the Activity skeleton
+
+**Context:** Wave 1B (mb-hnl3) iteration — wiring the new Activity page +
+the two Wave 1A deferred Settings rows (`command_center_chord` chord rebind,
+`legacy_meeting_chord_enabled` toggle).
+
+Nothing load-bearing here; just three small irritants that cost time and are
+worth pre-empting next time.
+
+### Finding 1 — Typed-settings IPC was never exposed to the UI.
+
+There are two parallel settings paths on the Rust side:
+
+- `commands::settings::{get_settings, update_setting}` — the flat-bag legacy
+  table (`settings`), TEXT-only, used by Settings.tsx for ui.theme /
+  ui.sound_enabled / etc.
+- `commands::legacy::{get_setting, set_setting}` — the typed registry
+  (`settings_v2` + `SettingKey` enum), JSON values, used by
+  `meeting_settings_get_all` / `meeting_settings_set` curated wrappers, AND
+  by anything that needs to read a `SettingKey` directly (Command Center
+  reading its own chord on boot, etc.).
+
+The UI shim (`ui/src/lib/tauri.ts`) only had wrappers for the legacy flat
+bag. The new chord row + legacy-meeting-chord toggle both live in the
+typed registry, so I had to add `legacy_get_setting` + `legacy_set_setting`
+wrappers to the `api` object + fixture-mode shims for browser preview.
+
+**Takeaway:** when adding a Settings row, check first whether the key is in
+`SettingKey::*` (typed) or just a string in the flat bag. They look
+identical from the React side until you hit the IPC layer and discover the
+wrapper isn't there. There's now no excuse — both wrappers are in
+`tauri.ts`.
+
+### Finding 2 — `Pill` accepts `tone: string`, not a union — but ONLY the existing tokens work.
+
+I initially typed the status-pill tone as `"neutral" | "accent" | "warn"`
+thinking that matched the component API. It doesn't — `Pill`'s `tone` is
+a free-form string that's spliced into a CSS custom property
+(`var(--${tone})`). Only tokens that exist in `design/tokens.css`
+actually render (`status-ok`, `status-error`, `status-info`, `mode-*`).
+Passing `"warn"` silently produces an unstyled pill (no error,
+just no color).
+
+**Takeaway:** treat `Pill` like a token consumer, not a variant component.
+When in doubt, grep `tone="` in `ui/src/pages/` for existing usage and
+match.
+
+### Finding 3 — `formatRelative` takes an ISO string, not a unix-ms number.
+
+The activity persistence layer stores `started_at` / `ended_at` as `i64`
+unix-ms (matches existing migrations). The Rust serializer hands those
+back to the UI as JSON numbers. But `ui/src/lib/format.ts::formatRelative`
+takes `iso: string` and passes it to `new Date(iso)` — passing a number
+in TS strict-mode is a TS2345 error.
+
+**Fix:** `formatRelative(new Date(epochMs).toISOString())` at the call
+site. Considered overloading `formatRelative` to also accept `number`, but
+that hides the conversion at every other call site — better to make the
+conversion explicit.
+
+**Meta-takeaway:** the timestamp boundary between Rust (unix-ms i64) and
+the UI format helpers (ISO string) is a tiny but recurring friction. If
+this surfaces a third time in another page, generalize `formatRelative`
+to accept both with a discriminated union.
 
 ---
 

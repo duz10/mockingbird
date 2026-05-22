@@ -102,6 +102,33 @@ pub enum AppError {
     #[error("formatter error: {0}")]
     Formatter(String),
 
+    /// Activity-capture orchestrator failures.
+    ///
+    /// Sources: orchestrator mutex poisoned, double-start race,
+    /// invariant violations in the lifecycle FSM caller. Phase 10
+    /// Wave 1B +.
+    #[error("activity error: {0}")]
+    Activity(String),
+
+    /// Activity-capture sampler failures.
+    ///
+    /// Sources: failed to spawn the foreground-poll thread, OS-side
+    /// foreground-window queries refusing to return. Distinct from
+    /// `Activity` so the runtime can demote sampler failures to
+    /// "empty timeline" without confusing user-stop / persist errors.
+    /// Phase 10 Wave 1B +.
+    #[error("activity sampler error: {0}")]
+    ActivitySampler(String),
+
+    /// Activity-capture persist failures.
+    ///
+    /// Sources: tried to finalize a session that was never opened
+    /// (or finalized twice), tried to delete a missing session id.
+    /// Distinct from `Sqlite` so the IPC layer can surface a
+    /// human-readable "no such session" toast. Phase 10 Wave 1B +.
+    #[error("activity persist error: {0}")]
+    ActivityPersist(String),
+
     /// Generic catch-all for early Phase 1; replaced by typed variants
     /// as concrete modules surface their errors.
     #[error("{0}")]
@@ -174,5 +201,29 @@ mod tests {
     fn formatter_displays_with_prefix() {
         let err = AppError::Formatter("segment t1 < t0".to_string());
         assert_eq!(err.to_string(), "formatter error: segment t1 < t0");
+    }
+
+    #[test]
+    fn activity_displays_with_prefix() {
+        let err = AppError::Activity("runtime mutex poisoned".to_string());
+        assert_eq!(err.to_string(), "activity error: runtime mutex poisoned");
+    }
+
+    #[test]
+    fn activity_sampler_displays_with_prefix() {
+        let err = AppError::ActivitySampler("sampler thread spawn failed".to_string());
+        assert_eq!(
+            err.to_string(),
+            "activity sampler error: sampler thread spawn failed"
+        );
+    }
+
+    #[test]
+    fn activity_persist_displays_with_prefix() {
+        let err = AppError::ActivityPersist("no such session: abc".to_string());
+        assert_eq!(
+            err.to_string(),
+            "activity persist error: no such session: abc"
+        );
     }
 }

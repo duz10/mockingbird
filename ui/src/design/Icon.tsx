@@ -221,3 +221,16 @@ export function ChevronRightIcon(p: IconProps) {
     </svg>
   );
 }
+
+/** Stacked-windows / timeline glyph — Phase 10 Wave 1B Activity nav.
+ *  Visually distinct from MeetingsIcon (a speech bubble) and
+ *  HistoryIcon (a clock-rewind) so the three time-oriented surfaces
+ *  in the sidebar don't bleed together. */
+export function ActivityIcon(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <rect x="3" y="4" width="14" height="10" rx="1.5" />
+      <rect x="7" y="10" width="14" height="10" rx="1.5" />
+    </svg>
+  );
+}

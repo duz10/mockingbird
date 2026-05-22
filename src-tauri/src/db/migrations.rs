@@ -23,6 +23,10 @@ const MIGRATION_010: &str = include_str!("migrations/010_adr0024_prompt_v2.sql")
 // Phase MC — sibling-subsystem meeting-capture schema (ADR 0026).
 // Purely additive; no prompt-body token substitution needed.
 const MIGRATION_011: &str = include_str!("migrations/011_meeting_capture.sql");
+// Phase 10 Wave 1B — sibling-subsystem activity-capture schema
+// (ADR 0036). Purely additive; no prompt-body substitution. Four new
+// tables, two immutability triggers; FTS5 deferred to Wave 3.
+const MIGRATION_012: &str = include_str!("migrations/012_activity_capture.sql");
 
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
@@ -87,6 +91,17 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         let prepared = substitute_prompt_bodies(MIGRATION_011);
         conn.execute_batch(&prepared)?;
     }
+    if current < 12 {
+        // Phase 10 Wave 1B: activity_sessions + activity_events +
+        // activity_blocks + activity_transcript_segments + two
+        // immutability triggers on activity_events (Principle 1).
+        // No prompt bodies; activity LLM prompts will live as
+        // markdown files under `src-tauri/src/activity/prompts/`
+        // when Wave 3 lands the abstractor. Run through the
+        // substituter for the leftover-token-guard safety net.
+        let prepared = substitute_prompt_bodies(MIGRATION_012);
+        conn.execute_batch(&prepared)?;
+    }
     Ok(())
 }
 
@@ -145,7 +160,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "11");
+        assert_eq!(v, "12");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -164,7 +179,133 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "11");
+        assert_eq!(v, "12");
+    }
+
+    /// Migration 012 ships the activity-capture schema (ADR 0036).
+    /// Verifies tables, immutability triggers, the CASCADE delete
+    /// path, and the no-UPDATE invariant on activity_events
+    /// (Principle 1).
+    #[test]
+    fn migration_012_ships_activity_capture_schema() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+
+        // Tables present.
+        for t in [
+            "activity_sessions",
+            "activity_events",
+            "activity_blocks",
+            "activity_transcript_segments",
+        ] {
+            let n: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master \
+                     WHERE name=?1 AND type='table'",
+                    [t],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(n, 1, "missing activity table: {t}");
+        }
+
+        // Immutability triggers present.
+        for trig in ["activity_events_no_update", "activity_events_no_delete"] {
+            let n: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master \
+                     WHERE type='trigger' AND name=?1",
+                    [trig],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(n, 1, "missing activity immutability trigger: {trig}");
+        }
+
+        // Seed a session + event, then prove the immutability triggers fire.
+        conn.execute(
+            "INSERT INTO activity_sessions (id, started_at, status, \
+             audio_enabled, screenshot_enabled, created_at, updated_at) \
+             VALUES ('sess-01', 1000, 'in_progress', 0, 0, 1000, 1000)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO activity_events (id, session_id, ts, kind, \
+             app_name, window_title, created_at) \
+             VALUES ('evt-01', 'sess-01', 1100, 'app_switch', \
+             'notepad.exe', 'Untitled', 1100)",
+            [],
+        )
+        .unwrap();
+
+        // UPDATE must be rejected (Principle 1).
+        let upd = conn.execute(
+            "UPDATE activity_events SET window_title = 'tampered' WHERE id = 'evt-01'",
+            [],
+        );
+        assert!(upd.is_err(), "UPDATE on activity_events must be rejected");
+        let msg = upd.unwrap_err().to_string();
+        assert!(
+            msg.contains("immutable"),
+            "trigger should mention immutability; got: {msg}"
+        );
+
+        // Direct DELETE on an in_progress session's event IS allowed
+        // (the WHEN-clause guards only completed/crashed sessions);
+        // bump the session to 'completed' first, then verify the
+        // trigger fires.
+        conn.execute(
+            "UPDATE activity_sessions SET status = 'completed', ended_at = 2000, \
+             updated_at = 2000 WHERE id = 'sess-01'",
+            [],
+        )
+        .unwrap();
+        let del = conn.execute("DELETE FROM activity_events WHERE id = 'evt-01'", []);
+        assert!(
+            del.is_err(),
+            "direct DELETE on a completed session's event must be rejected"
+        );
+
+        // CASCADE via session-row delete IS the sanctioned path.
+        conn.execute("DELETE FROM activity_sessions WHERE id = 'sess-01'", [])
+            .unwrap();
+        let remaining: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM activity_events WHERE session_id = 'sess-01'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            remaining, 0,
+            "CASCADE delete should clear events when the session row goes"
+        );
+    }
+
+    /// Migration 012 must not touch dictation or meeting tables.
+    /// Static side of the sibling-subsystem boundary (ADR 0036 §1-2).
+    #[test]
+    fn migration_012_does_not_touch_dictation_or_meeting_tables() {
+        let sql = MIGRATION_012.to_lowercase();
+        for forbidden in [
+            "alter table sessions",
+            "alter table transcripts",
+            "alter table modes",
+            "alter table meeting_sessions",
+            "alter table meeting_transcripts",
+            "drop table sessions",
+            "drop table transcripts",
+            "drop table meeting_sessions",
+            "drop table meeting_transcripts",
+            "insert into modes",
+        ] {
+            assert!(
+                !sql.contains(forbidden),
+                "migration 012 must stay in its sibling-subsystem lane: forbidden snippet found: {forbidden}"
+            );
+        }
     }
 
     /// Migration 011 ships the meeting-capture schema (ADR 0026).

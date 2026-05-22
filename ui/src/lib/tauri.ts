@@ -130,6 +130,18 @@ export const api = {
   update_setting: (key: string, value: string) =>
     invoke<void>("update_setting", { key, value }),
 
+  /**
+   * Phase 10 Wave 1A/1B — read/write the typed `SettingKey` registry
+   * (`settings/model.rs`). Distinct from the legacy `update_setting`
+   * flat bag above. The chord-rebind row reads `command_center_chord`
+   * via this path; the legacy-meeting-chord toggle writes
+   * `legacy_meeting_chord_enabled` here.
+   */
+  legacy_get_setting: (key: string) =>
+    invoke<unknown>("get_setting", { key }),
+  legacy_set_setting: (key: string, value: unknown) =>
+    invoke<void>("set_setting", { key, value }),
+
   // Phase MC Wave 5 — typed meeting-settings IPC.
   meeting_settings_get_all: () =>
     invoke<MeetingSettingsSnapshot>("meeting_settings_get_all"),
@@ -220,6 +232,78 @@ function fixtureFor<T>(command: string, args?: object): T {
           "**Summary** — this is a fixture LLM-pass output for the Dictations tab. Browser-preview only.",
         latencyMs: 1240,
       }) as T;
+    // Phase 10 Wave 1B — Activity capture fixtures.
+    case "activity_list_sessions":
+      return fixture(command, [
+        {
+          id: "fixture-activity-session-1",
+          startedAt: Date.now() - 45 * 60_000,
+          endedAt: Date.now() - 15 * 60_000,
+          status: "completed",
+          audioEnabled: false,
+          screenshotEnabled: false,
+          label: null,
+          createdAt: Date.now() - 45 * 60_000,
+          updatedAt: Date.now() - 15 * 60_000,
+        },
+      ]) as T;
+    case "activity_get_session_detail": {
+      const sid =
+        (args as { sessionId?: string } | undefined)?.sessionId ??
+        "fixture-activity-session-1";
+      return fixture(command, {
+        session: {
+          id: sid,
+          startedAt: Date.now() - 45 * 60_000,
+          endedAt: Date.now() - 15 * 60_000,
+          status: "completed",
+          audioEnabled: false,
+          screenshotEnabled: false,
+          label: null,
+          createdAt: Date.now() - 45 * 60_000,
+          updatedAt: Date.now() - 15 * 60_000,
+        },
+        events: [
+          {
+            id: "fixture-evt-1",
+            sessionId: sid,
+            ts: Date.now() - 44 * 60_000,
+            kind: "app_switch",
+            appName: "Code.exe",
+            windowTitle: "activity.rs — mockingbird",
+            snapshotJson: null,
+            createdAt: Date.now() - 44 * 60_000,
+          },
+          {
+            id: "fixture-evt-2",
+            sessionId: sid,
+            ts: Date.now() - 30 * 60_000,
+            kind: "app_switch",
+            appName: "chrome.exe",
+            windowTitle: "Activity Capture Plan — Notion",
+            snapshotJson: null,
+            createdAt: Date.now() - 30 * 60_000,
+          },
+        ],
+      }) as T;
+    }
+    case "activity_runtime_snapshot":
+      return fixture(command, {
+        lifecycle: "idle",
+        currentSessionId: null,
+      }) as T;
+    case "activity_start":
+      return fixture(command, null as unknown as T);
+    case "get_setting": {
+      // Typed-settings read. Browser-preview only — the real values
+      // come from the typed-registry IPC inside the Tauri shell.
+      const key = (args as { key?: string } | undefined)?.key;
+      if (key === "command_center_chord") return fixture(command, "RightCtrl+Space" as unknown as T);
+      if (key === "legacy_meeting_chord_enabled") return fixture(command, false as unknown as T);
+      return fixture(command, null as unknown as T);
+    }
+    case "set_setting":
+      return fixture(command, undefined as unknown as T);
     // Write commands — no-op in fixture mode.
     case "delete_session":
     case "mark_session_as_example":
@@ -232,6 +316,10 @@ function fixtureFor<T>(command: string, args?: object): T {
     case "report_correction":
     case "trigger_learning_run":
     case "open_path":
+    case "activity_pause":
+    case "activity_resume":
+    case "activity_stop":
+    case "activity_delete_session":
       return fixture(command, undefined as unknown as T);
     default:
       throw new Error(`fixtureFor: no fixture for command "${command}"`);

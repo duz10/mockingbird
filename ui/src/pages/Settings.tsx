@@ -27,6 +27,7 @@ import { api } from "../lib/tauri";
 import type { LearningRun, SettingsSnapshot, ThemeChoice } from "../lib/types";
 import { formatRelative } from "../lib/format";
 
+import { CommandCenterChordRow } from "./SettingsCommandCenterRow";
 import { SettingsMeetingTab } from "./SettingsMeetingTab";
 import styles from "./Settings.module.css";
 
@@ -255,6 +256,12 @@ function GeneralPanel({
           />
         }
       />
+      {/* Phase 10 Wave 1A deferral landed in 1B: surface the
+          `command_center_chord` setting so users can rebind. Stored
+          as a free-form string (e.g. "RightCtrl+Space") parsed by
+          `command_center::parse_chord` on the Rust side. A bad chord
+          falls back to the default without breaking the app. */}
+      <CommandCenterChordRow />
       </Card>
       <BackgroundCard />
     </>

@@ -72,11 +72,13 @@ fn all_expected_tables_exist() {
 }
 
 #[test]
-fn trigger_count_is_16() {
+fn trigger_count_is_18() {
     // 2 dictation FTS5 triggers (transcripts_fts_insert/delete; mig 001)
     // + 4 tables * 3 audit triggers = 12 (mig 002)
     // + 2 meeting FTS5 triggers (meeting_transcripts_fts_insert/delete; mig 011)
-    // = 16 total.
+    // + 2 activity-events immutability triggers
+    //   (activity_events_no_update / activity_events_no_delete; mig 012)
+    // = 18 total.
     //
     // Bump this count whenever a migration adds or removes a trigger.
     // The plus side of asserting an exact number: it catches an
@@ -91,7 +93,7 @@ fn trigger_count_is_16() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(n, 16);
+    assert_eq!(n, 18);
 }
 
 #[test]

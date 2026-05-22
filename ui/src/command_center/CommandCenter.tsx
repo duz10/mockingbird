@@ -34,9 +34,9 @@ import type {
 import styles from "./CommandCenter.module.css";
 
 /**
- * The three modes the user can pick. Activity is gated until Wave 1B
- * lands its runtime; we show the tile so users discover it, but it's
- * non-interactive.
+ * The three modes the user can pick. As of Wave 1B (ADR 0036) all
+ * three are wired to real runtimes; Activity launches the titles-
+ * only sampler (richer UIA capture lands in Wave 2).
  */
 const MODES: ReadonlyArray<{
   kind: RecordingKind;
@@ -57,8 +57,7 @@ const MODES: ReadonlyArray<{
   {
     kind: "activity",
     title: "Activity",
-    hint: "coming soon",
-    disabled: true,
+    hint: "log what you worked on",
   },
 ];
 

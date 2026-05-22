@@ -16,6 +16,7 @@
 //! at the boundary so the JS side gets a friendly message.
 
 pub mod active_mode;
+pub mod activity;
 pub mod dictionary;
 pub mod insights;
 pub mod learning;
@@ -124,6 +125,15 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         crate::command_center::ipc::cc_stop_active_session,
         crate::command_center::ipc::cc_update_session,
         crate::command_center::ipc::cc_get_state,
+        // Phase 10 Wave 1B — Activity capture IPC (ADR 0036).
+        activity::activity_start,
+        activity::activity_pause,
+        activity::activity_resume,
+        activity::activity_stop,
+        activity::activity_runtime_snapshot,
+        activity::activity_list_sessions,
+        activity::activity_get_session_detail,
+        activity::activity_delete_session,
     ])
 }
 

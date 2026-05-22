@@ -6,6 +6,11 @@
 
 #![warn(missing_docs)]
 
+// Phase 10 Wave 1B — sibling subsystem to dictation + meeting capture
+// (ADR 0036). Activity-log skeleton: titles-only foreground sampler,
+// sessions/events tables (migration 012), Command-Center-invoked
+// lifecycle. Layers 2+/abstractor/encryption land in later waves.
+pub mod activity;
 pub mod audio;
 pub mod cleanup;
 // `commands` module is a thin shim over typed DTOs that mirror the
@@ -40,6 +45,7 @@ use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
 
+use activity::ActivityCaptureRuntime;
 use commands::AppState;
 use dictation::runtime::{default_normal_config, DictationRuntime};
 #[cfg(target_os = "windows")]
@@ -219,6 +225,17 @@ pub fn run() {
                     }
                 }
             }
+
+            // Phase 10 Wave 1B — activity-capture runtime. Sibling
+            // subsystem (ADR 0036). Always spawns (no chord, no hook
+            // install) — the worst case is an empty timeline if the
+            // platform sampler can't poll, which is the right UX
+            // (Activity sessions exist; the user can stop them via
+            // the CC). Registered BEFORE the Command Center so the
+            // CC can dispatch into it via managed state immediately.
+            let activity_runtime = ActivityCaptureRuntime::spawn(shared_conn.clone());
+            app.manage(activity_runtime);
+            tracing::info!("📊 activity-capture runtime registered");
 
             // Phase 10 Wave 1A — spin up the Command Center after the
             // dictation + meeting runtimes are registered, so the

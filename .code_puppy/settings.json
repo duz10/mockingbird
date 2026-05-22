@@ -24,8 +24,8 @@
         },
         {
           "type": "command",
-          "name": "block-cross-module-coupling-meeting-dictation",
-          "command": "python scripts/hooks/block-cross-module-coupling-meeting-dictation.py",
+          "name": "block-cross-module-coupling",
+          "command": "python scripts/hooks/block-cross-module-coupling.py",
           "timeout": 5000
         }
       ]

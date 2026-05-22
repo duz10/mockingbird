@@ -403,16 +403,7 @@ impl CommandCenter {
                 self.drive(CcInput::Dismiss);
             }
             RecordingKind::Meeting => self.dispatch_meeting_start(),
-            RecordingKind::Activity => {
-                // Wave 1B (mb-hnl3) lands the runtime; until then,
-                // log and treat as a failed start so the user returns
-                // to the picker rather than getting stuck Launching.
-                tracing::info!(
-                    target: "command_center",
-                    "pick_mode(activity) — runtime not yet wired (Wave 1B)"
-                );
-                self.drive(CcInput::RuntimeReplied { success: false });
-            }
+            RecordingKind::Activity => self.dispatch_activity_start(),
         }
     }
 
@@ -492,12 +483,7 @@ impl CommandCenter {
                 }
             }
             RecordingKind::Meeting => self.dispatch_meeting_stop(),
-            RecordingKind::Activity => {
-                tracing::info!(
-                    target: "command_center",
-                    "stop(activity) — runtime not yet wired (Wave 1B)"
-                );
-            }
+            RecordingKind::Activity => self.dispatch_activity_stop(),
         }
     }
 
@@ -542,6 +528,61 @@ impl CommandCenter {
 
     #[cfg(not(target_os = "windows"))]
     fn dispatch_meeting_stop(&self) {}
+
+    /// Phase 10 Wave 1B — dispatch Activity tile pick. The runtime
+    /// is registered as managed state at boot (lib.rs::run). We hit
+    /// `start()`, then drive the FSM forward with the result.
+    fn dispatch_activity_start(&self) {
+        let Some(rt) = self
+            .inner
+            .app
+            .try_state::<crate::activity::ActivityCaptureRuntime>()
+            .map(|s| s.inner().clone())
+        else {
+            tracing::warn!(
+                target: "command_center",
+                "no activity runtime registered; cannot start activity from CC"
+            );
+            self.drive(CcInput::RuntimeReplied { success: false });
+            return;
+        };
+        match rt.start() {
+            Ok(()) => {
+                let sid = rt.current_session_id();
+                tracing::info!(
+                    target: "command_center",
+                    session_id = ?sid,
+                    "activity start dispatched from CC"
+                );
+                self.set_current_session(Some(RecordingKind::Activity));
+                self.drive(CcInput::RuntimeReplied { success: true });
+            }
+            Err(e) => {
+                tracing::warn!(
+                    target: "command_center",
+                    error = %e,
+                    "activity start failed from CC"
+                );
+                self.drive(CcInput::RuntimeReplied { success: false });
+            }
+        }
+    }
+
+    fn dispatch_activity_stop(&self) {
+        let Some(rt) = self
+            .inner
+            .app
+            .try_state::<crate::activity::ActivityCaptureRuntime>()
+            .map(|s| s.inner().clone())
+        else {
+            tracing::warn!(target: "command_center", "no activity runtime to stop");
+            return;
+        };
+        if let Err(e) = rt.stop() {
+            tracing::warn!(target: "command_center", error = %e, "activity stop failed");
+        }
+        self.set_current_session(None);
+    }
 
     fn emit_state(&self, state: CcState, first_run: bool) {
         let (label, kind) = match state {

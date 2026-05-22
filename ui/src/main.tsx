@@ -11,6 +11,7 @@ import { App } from "./App";
 import { InsightsPage } from "./pages/Insights";
 import { DictationsPage } from "./pages/Dictations";
 import { MeetingsPage } from "./pages/Meetings";
+import { ActivityPage } from "./pages/Activity";
 import { DictionaryPage } from "./pages/Dictionary";
 import { ModesPage } from "./pages/Modes";
 import { SettingsPage } from "./pages/Settings";
@@ -37,6 +38,8 @@ createRoot(container).render(
           <Route path="/history/:id" element={<DictationsPage />} />
           <Route path="/meetings" element={<MeetingsPage />} />
           <Route path="/meetings/:uuid" element={<MeetingsPage />} />
+          <Route path="/activity" element={<ActivityPage />} />
+          <Route path="/activity/:id" element={<ActivityPage />} />
           <Route path="/dictionary" element={<DictionaryPage />} />
           <Route path="/modes" element={<ModesPage />} />
           <Route path="/settings" element={<SettingsPage />} />

@@ -247,6 +247,33 @@ Additional smoke items (not in the grid but required at seal):
 
 **Seal tag:** `phase-10-wave-1b-complete`.
 
+**Wave 1B — as-shipped (this iteration):**
+
+Code complete; **NOT** sealed yet (live smoke matrix needs Dustin sign-off on real Win11).
+
+- Migration 012 in tree (`activity_sessions`, `activity_events` + immutability + no-stray-delete triggers, `activity_blocks`, `activity_transcript_segments`, indexes, `project_id`/`project_label` future-proofing columns; FTS5 deferred to 013 per Wave 3 plan).
+- `src-tauri/src/activity/{mod,ids,lifecycle,persist,runtime,sampler}.rs` — six modules; runtime owns the FSM + sampler thread + chronological insert path; lifecycle is pure-Rust + unit-testable.
+- `src-tauri/src/commands/activity.rs` — 8 Tauri IPC handlers wired in `lib.rs`: `activity_start`, `activity_pause`, `activity_resume`, `activity_stop`, `activity_runtime_snapshot`, `activity_list_sessions`, `activity_get_session_detail`, `activity_delete_session`.
+- `src-tauri/src/command_center/mod.rs` — Activity tile branch now calls `ActivityCaptureRuntime::start()` (Wave 1A's Activity stub replaced).
+- `src-tauri/src/db/migrations.rs` — registers 012; trigger count updated in `tests/db_migrations.rs`.
+- `src-tauri/src/error.rs` — three new `AppError` variants.
+- `scripts/hooks/block-cross-module-coupling.py` — generalized from the meeting-dictation guard; now covers dictation ↔ meetings ↔ activity in all six directions.
+- **UI side:** `ui/src/lib/activity.ts` (typed IPC), `ui/src/pages/Activity.tsx` + `Activity.module.css` (single two-pane page covering list + detail per the Meetings precedent — DRY beats two routed pages), `Sidebar.tsx` nav entry, `main.tsx` routes for `/activity` + `/activity/:id`, `i18n/en.json` strings, `ActivityIcon` glyph, CommandCenter Activity tile no longer `disabled`.
+- **Wave 1A deferrals absorbed:**
+  - `ui/src/pages/SettingsCommandCenterRow.tsx` — new file (kept Settings.tsx near its 600-line cap by extracting). Surfaces `command_center_chord` via the typed-settings IPC (`get_setting` / `set_setting`).
+  - `SettingsMeetingTab.tsx` — added a row + button for `legacy_meeting_chord_enabled` (default OFF; button one-clicks it ON).
+  - `tauri.ts` — `legacy_get_setting` / `legacy_set_setting` wrappers (typed-settings IPC); fixture-mode shims for `get_setting` + `set_setting` + the activity commands.
+- **Wave 1A deferral punted to Wave 2:** the dictation-runtime direct signal path (Bernard's optional polish — replace the `cc_update_session` UI event with a direct constructor arg to `dictation::start()`). The current UI-mediated path works; deferring keeps the wave's blast radius bounded.
+- **Gates** (this iteration, pre-smoke-matrix):
+  - `fmt --check`: clean.
+  - `clippy --release -- -D warnings`: clean (default targets per AGENTS.md).
+  - `test --release --no-run`: ⏳ in progress at commit time (long first-build; rerun + log link goes into the commit body once it lands).
+  - `npx tsc --noEmit`: clean.
+  - `npm test`: 63/63 pass (6 files).
+  - `npm run build`: clean (5 entry points; main bundle 175 KB / 50 KB gzip).
+
+Bead state: `mb-jtbk` closed (Wave 1A integration verified by Activity tile path); `mb-hnl3` left `in_progress` per Bernard's preference (closes after Wave 2 dispatch confirms the skeleton is buildable upon).
+
 ---
 
 ### Wave 2 — UIA deep snapshots + multi-monitor

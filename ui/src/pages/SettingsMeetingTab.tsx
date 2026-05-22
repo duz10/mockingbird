@@ -77,18 +77,45 @@ const PARAGRAPH_GAP_STEP = 100;
 // the export markdown header. 30 chars matches the master-plan call.
 const SPEAKER_LABEL_MAX_LENGTH = 30;
 
+const LEGACY_CHORD_SETTING = "legacy_meeting_chord_enabled";
+
 export function SettingsMeetingTab() {
   const [snap, setSnap] = useState<MeetingSettingsSnapshot | null>(null);
   const [savingError, setSavingError] = useState<string | null>(null);
+  // Phase 10 Wave 1A deferral landed in Wave 1B: the typed-settings
+  // toggle that flips the meeting chord between the legacy
+  // direct-start behavior and the new Command-Center-mediated path.
+  // Default is `false` (CC-mediated) per ADR 0037.
+  const [legacyChord, setLegacyChord] = useState<boolean>(false);
 
   useEffect(() => {
     let cancelled = false;
     void api.meeting_settings_get_all().then((s) => {
       if (!cancelled) setSnap(s);
     });
+    void api
+      .legacy_get_setting(LEGACY_CHORD_SETTING)
+      .then((v) => {
+        if (!cancelled) setLegacyChord(Boolean(v));
+      })
+      .catch(() => {
+        /* first-launch — stay on default */
+      });
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  const setLegacyChordPersisted = useCallback(async (next: boolean) => {
+    setLegacyChord(next);
+    try {
+      await api.legacy_set_setting(LEGACY_CHORD_SETTING, next);
+      setSavingError(null);
+    } catch (err) {
+      setSavingError(String(err));
+      // Roll back the optimistic flip.
+      setLegacyChord(!next);
+    }
   }, []);
 
   // Patch one setting. Optimistic local update + persist; on persist
@@ -198,6 +225,34 @@ export function SettingsMeetingTab() {
                 : t("settings.meeting.hotkeyPaused.off")}
             </span>
           </label>
+        </Row>
+        <Row label={t("settings.meeting.legacyChord")}>
+          {/* Phase 10 Wave 1A deferral landed in Wave 1B: surface the
+              `legacy_meeting_chord_enabled` typed setting + a one-click
+              "restore old behavior" button. When enabled, the meeting
+              chord skips the Command Center and starts a meeting
+              directly (the pre-ADR-0037 behavior). */}
+          <div className={styles.sliderRow}>
+            <label className={styles.toggle}>
+              <input
+                type="checkbox"
+                checked={legacyChord}
+                onChange={(e) =>
+                  void setLegacyChordPersisted(e.target.checked)
+                }
+              />
+              <span>{t("settings.meeting.legacyChord.help")}</span>
+            </label>
+            <button
+              type="button"
+              className={styles.input}
+              style={{ cursor: "pointer" }}
+              onClick={() => void setLegacyChordPersisted(true)}
+              disabled={legacyChord}
+            >
+              {t("settings.meeting.legacyChord.restore")}
+            </button>
+          </div>
         </Row>
       </Card>
 

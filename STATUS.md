@@ -45,9 +45,9 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**Phase 10 — Activity Capture (sibling subsystem). Wave 1A — Unified Recording Command Center in flight (`mb-jtbk` in_progress).**
+**Phase 10 — Activity Capture (sibling subsystem). Wave 1B — Activity-Log Skeleton (titles-only) in flight (`mb-hnl3` in_progress; `mb-jtbk` closed end-of-1B).**
 
-Chartered 2026-05-25 (Bernard, Wave 0). Wave 0.5 — Command Center charter integration. Wave 1A (this iteration) — code implementation per ADR 0037 §Boundary. ADR 0036 + ADR 0037 both flipped Proposed → Accepted on 2026-05-24 by Dustin. Numbered PLAN §10 phase mirroring Phase MC's container: numbered + ADR-chartered + per-wave seal tags + final `phase-10-complete` tag. Phase 9 stays reserved for the macOS cross-platform sweep.
+Chartered 2026-05-25 (Bernard, Wave 0). Wave 0.5 — Command Center charter integration. Wave 1A — Command Center code (sealed end-of-1A, commit `33e2cca`). Wave 1B (this iteration) — migration 012, activity/* runtime modules, Activity-page UI, plus Wave 1A deferrals (command_center_chord Settings row + legacy_meeting_chord_enabled toggle). ADR 0036 + ADR 0037 both Accepted 2026-05-24 by Dustin. Numbered PLAN §10 phase mirroring Phase MC's container: numbered + ADR-chartered + per-wave seal tags + final `phase-10-complete` tag. Phase 9 stays reserved for the macOS cross-platform sweep.
 
 **Decision matrix (Wave 0.5):** Chord = `Right Ctrl + Space` (user-configurable, ADR 0019 probe); mutual-exclusion-while-recording = open Command Center showing SessionCard + Stop button, returns to mode picker after Stop; tray entry = yes ("Open Command Center"); legacy `Right Ctrl + .` meeting chord = user setting `legacy_meeting_chord_enabled` (default OFF; one-shot migration sets ON for existing users with the prior chord configured, mirrors ADR 0033); first-run = auto-open with Welcome header band, tracked via `command_center_seen_v1`.
 
@@ -60,8 +60,8 @@ Chartered 2026-05-25 (Bernard, Wave 0). Wave 0.5 — Command Center charter inte
 - **Sub-ADRs deferred:** ADR 0038 (encryption-at-rest — Wave 5; SQLCipher / DPAPI-per-row / app-layer AES-GCM candidates pre-named; renumbered from 0037 after the Command Center charter took 0037). ADR 0039 (optional, post-seal — Layer 3 screenshot + OCR; renumbered from 0038 for the same reason).
 - **Bead epic:** `mb-a2w9` (status `in_progress`).
 - **Wave beads** (each P1, dependency-chained so each subsequent wave depends on its predecessor; the epic depends on all of them):
-  - `mb-jtbk` **Wave 1A: Unified Recording Command Center** ← `in_progress` (Wave 1A code iteration; ADR 0037 Accepted)
-  - `mb-hnl3` Wave 1B: Activity-Log Skeleton (titles-only) ← blocked-by `mb-jtbk`
+  - `mb-jtbk` Wave 1A: Unified Recording Command Center ← `closed` (sealed at commit `33e2cca`; integration verified by Wave 1B's Command Center → Activity flow)
+  - `mb-hnl3` **Wave 1B: Activity-Log Skeleton (titles-only)** ← `in_progress` (this iteration: migration 012, activity/* runtime modules, IPC commands, Activity page + Sidebar nav, Wave 1A deferrals)
   - `mb-hr1u` Wave 2: UIA deep snapshots + multi-monitor
   - `mb-pwup` Wave 3: Summarization pipeline
   - `mb-g1w2` Wave 4: Audio layer (Layer 2)
