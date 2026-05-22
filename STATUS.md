@@ -43,22 +43,27 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**Phase 10 — Activity Capture (sibling subsystem). Wave 0 complete; awaiting Dustin review of ADR 0036 before Wave 1 code.**
+**Phase 10 — Activity Capture (sibling subsystem). Wave 0.5 — Command Center charter integration shipped; awaiting Dustin review of ADR 0036 + ADR 0037 before Wave 1A code.**
 
-Chartered 2026-05-25 (Bernard, Wave 0 iteration). Numbered PLAN §10 phase mirroring Phase MC's container: numbered + ADR-chartered + per-wave seal tags + final `phase-10-complete` tag. Phase 9 stays reserved for the macOS cross-platform sweep.
+Chartered 2026-05-25 (Bernard, Wave 0). Wave 0.5 (this iteration) — Command Center charter integration — adds ADR 0037 + Wave 1A in response to the three-overlay UX flag Bernard raised in the Wave 0 summary; ADR 0037 is the explicit authorization for the surgical edits Wave 1A will make to sealed Dictation + Meeting Capture surfaces. Numbered PLAN §10 phase mirroring Phase MC's container: numbered + ADR-chartered + per-wave seal tags + final `phase-10-complete` tag. Phase 9 stays reserved for the macOS cross-platform sweep.
 
-- **Charter ADR:** [ADR 0036](docs/adr/0036-activity-capture-sibling-subsystem.md) — **Status: Proposed** (Dustin flips to Accepted after charter review; Wave 1 cannot start until then).
-- **Phase doc:** [`docs/phases/phase10.md`](docs/phases/phase10.md) — six-wave brief (1 skeleton → 2 UIA depth → 3 summarization → 4 audio → 5 hardening → 6 judges + seal). Wave 7 (Layer 3 screenshot + OCR) is OPTIONAL post-seal via successor ADR.
-- **Source plan:** [`mockingbird-activity-capture-plan.md`](mockingbird-activity-capture-plan.md) — vision doc; the implementation charter against it lives in ADR 0036.
-- **PLAN §10 amendment:** Phase 10 entry landed in `PLAN-mockingbird-v2.md` mirroring Phase MC's depth.
-- **Sub-ADRs deferred:** ADR 0037 (encryption-at-rest — Wave 5; SQLCipher / DPAPI-per-row / app-layer AES-GCM candidates pre-named). ADR 0038 (optional, post-seal — Layer 3 screenshot + OCR).
+**Decision matrix (Wave 0.5):** Chord = `Right Ctrl + Space` (user-configurable, ADR 0019 probe); mutual-exclusion-while-recording = open Command Center showing SessionCard + Stop button, returns to mode picker after Stop; tray entry = yes ("Open Command Center"); legacy `Right Ctrl + .` meeting chord = user setting `legacy_meeting_chord_enabled` (default OFF; one-shot migration sets ON for existing users with the prior chord configured, mirrors ADR 0033); first-run = auto-open with Welcome header band, tracked via `command_center_seen_v1`.
+
+- **Charter ADRs:**
+  - [ADR 0036](docs/adr/0036-activity-capture-sibling-subsystem.md) — Activity Capture sibling-subsystem. **Status: Proposed** (Dustin flips to Accepted before Wave 1A code).
+  - [ADR 0037](docs/adr/0037-unified-recording-command-center.md) — Unified Recording Command Center (Wave 1A charter + explicit boundary authorization for surgical edits to sealed Dictation + Meeting Capture surfaces). **Status: Proposed** (Dustin flips to Accepted before Wave 1A code).
+- **Phase doc:** [`docs/phases/phase10.md`](docs/phases/phase10.md) — seven-wave brief (1A Command Center → 1B skeleton → 2 UIA depth → 3 summarization → 4 audio → 5 hardening → 6 judges + seal). Wave 7 (Layer 3 screenshot + OCR) is OPTIONAL post-seal via successor ADR 0039.
+- **Source plan:** [`mockingbird-activity-capture-plan.md`](mockingbird-activity-capture-plan.md) — vision doc; the implementation charter against it lives in ADRs 0036 + 0037.
+- **PLAN §10 amendment:** Phase 10 entry in `PLAN-mockingbird-v2.md` updated to include Wave 1A as the first wave, with Wave 1 re-lettered to 1B.
+- **Sub-ADRs deferred:** ADR 0038 (encryption-at-rest — Wave 5; SQLCipher / DPAPI-per-row / app-layer AES-GCM candidates pre-named; renumbered from 0037 after the Command Center charter took 0037). ADR 0039 (optional, post-seal — Layer 3 screenshot + OCR; renumbered from 0038 for the same reason).
 - **Bead epic:** `mb-a2w9` (status `in_progress`).
-- **Wave beads** (each P1, linked so Wave N+1 depends on Wave N; the epic depends on all six):
-  - `mb-hnl3` Wave 1: Activity-log skeleton (Layer 1 titles-only)  ← unblocked, awaits ADR 0036 Acceptance
+- **Wave beads** (each P1, dependency-chained so each subsequent wave depends on its predecessor; the epic depends on all of them):
+  - `mb-jtbk` **Wave 1A: Unified Recording Command Center** ← unblocked, awaits ADR 0037 Acceptance (Wave 0.5 iteration)
+  - `mb-hnl3` Wave 1B: Activity-Log Skeleton (titles-only) ← blocked-by `mb-jtbk`
   - `mb-hr1u` Wave 2: UIA deep snapshots + multi-monitor
   - `mb-pwup` Wave 3: Summarization pipeline
   - `mb-g1w2` Wave 4: Audio layer (Layer 2)
-  - `mb-a6tz` Wave 5: Hardening and polish (charters ADR 0037)
+  - `mb-a6tz` Wave 5: Hardening and polish (charters ADR 0038, encryption-at-rest)
   - `mb-8r5p` Wave 6: Invariant judges + final seal
 - **Parallel investigation bead (INDEPENDENT — not blocking Phase 10):** `mb-0n8c` (P2 chore) — root-cause `cargo test --release` `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)` on this box. Open since 2026-05-17 (LESSONS PINNED P2). 1-session timebox; falls back to wontfix-with-workaround if unresolved. Resolution would let every future phase run live test exec.
 

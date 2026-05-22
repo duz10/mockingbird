@@ -52,9 +52,9 @@ These are inputs to the charter, not open questions, and they map 1:1 to the kic
 | # | Decision |
 |---|---|
 | Q1 | **Charter as Phase 10** — numbered PLAN §10 phase, mirrors Phase MC's container (numbered + ADR-chartered + per-wave seal tags + final `phase-10-complete` tag). NOT a lateral epic; this is a top-level subsystem and deserves the heavier vehicle. Phase 9 stays reserved for the macOS cross-platform sweep (PLAN §2.1). |
-| Q2 | **Wave order:** Wave 1 skeleton → Wave 2 UIA depth → Wave 3 summarization pipeline → Wave 4 audio (Layer 2) → Wave 5 hardening & polish → Wave 6 invariant judges + final seal. **Wave 7 (Layer 3 screenshot + local OCR) is OPTIONAL and explicitly POST-`phase-10-complete`** — sealed via a successor ADR (likely 0038) if/when shipped. |
+| Q2 | **Wave order:** Wave 1A Command Center → Wave 1B skeleton → Wave 2 UIA depth → Wave 3 summarization pipeline → Wave 4 audio (Layer 2) → Wave 5 hardening & polish → Wave 6 invariant judges + final seal. **Wave 7 (Layer 3 screenshot + local OCR) is OPTIONAL and explicitly POST-`phase-10-complete`** — sealed via a successor ADR (likely 0039) if/when shipped. (Wave 1A inserted after this ADR's first draft via ADR 0037; the sequencing here is updated to match.) |
 | Q3 | **UIA depth:** Wave 1 ships titles-only (foreground app, window title, app-switch + idle events) as the structural skeleton. Wave 2 deepens to **full UIA snapshots**: focused-field text, visible text fragments, control structure, multi-monitor enumeration. |
-| Q4 | **Encryption-at-rest decision deferred to a Wave-5 sub-ADR (ADR 0037).** Three candidates pre-named, weighed in 0037: (a) SQLCipher (encrypt whole DB; one decision, one perf bill, simplest UX), (b) DPAPI-per-row on the `activity_events` JSON payload (Windows-native, no new crate, but per-row CryptProtectData call cost), (c) app-layer AES-GCM with key sealed via DPAPI master (most flexible, most code). 0037 picks one; this ADR refuses to pre-litigate it. |
+| Q4 | **Encryption-at-rest decision deferred to a Wave-5 sub-ADR (ADR 0038).** Three candidates pre-named, weighed in 0038: (a) SQLCipher (encrypt whole DB; one decision, one perf bill, simplest UX), (b) DPAPI-per-row on the `activity_events` JSON payload (Windows-native, no new crate, but per-row CryptProtectData call cost), (c) app-layer AES-GCM with key sealed via DPAPI master (most flexible, most code). 0038 picks one; this ADR refuses to pre-litigate it. (Originally reserved as 0037; renumbered after ADR 0037 was taken by the Unified Recording Command Center charter in Wave 0.5.) |
 | Q5 | **Default exclusion list (capture-time, NOT display-time):** 1Password, Bitwarden, KeePass, browser windows whose `WindowTitle` matches `(?i)\b(bank|login|password|signin)\b`, the lock screen, and UAC dialogs. **Additionally**: the UIA sampler MUST check `UIA_IsPasswordPropertyId` on the currently focused control on every sample — if true, the entire snapshot for that tick is dropped at capture time (not redacted at display time). This is strictly stronger than Dictation's `SecureInputGuard` (ADR 0017) because UIA's password-property bit works across every Win32/UWP/WinUI/Electron app that exposes accessibility, not just classic Edit controls. Folded into Wave 5. |
 | Q6 | **Multi-project tagging deferred to v2 for the surfaced UI**, but migration 012 includes nullable `project_id TEXT` + `project_label TEXT` columns on `activity_sessions` from day 1. Schema-future-proofing only — no IPC, no UI, no settings keys for project tagging in v1. |
 | Q7 | **User edits on Blocks are purely cosmetic in v1.** Renaming, merging, splitting, deleting, rewriting a Block updates `activity_blocks` and that's it. NO feedback signal into a learning loop, NO automatic prompt-iteration, NO correction-rate tracking. The learning loop (Phase 8) is dictation-scoped and stays that way. |
@@ -105,7 +105,7 @@ Concretely:
 
 - **The third subsystem validates the sibling pattern.** ADR 0026 established sibling-by-default with one second consumer (MC). ADR 0036 makes it three. The pattern is now load-bearing: any future top-level subsystem (e.g. a hypothetical clipboard-history feature, a hypothetical agent-runner feature) inherits the boundary discipline mechanically.
 
-- **Per-row encryption-at-rest decision is properly scoped.** Deferring to ADR 0037 in Wave 5 means the choice is made after Wave 1's schema is on disk and Wave 2's snapshot-payload sizes are empirically known — the SQLCipher-vs-DPAPI-vs-AES-GCM tradeoff depends on payload size and write frequency, neither of which is precisely known today.
+- **Per-row encryption-at-rest decision is properly scoped.** Deferring to ADR 0038 in Wave 5 means the choice is made after Wave 1B's schema is on disk and Wave 2's snapshot-payload sizes are empirically known — the SQLCipher-vs-DPAPI-vs-AES-GCM tradeoff depends on payload size and write frequency, neither of which is precisely known today.
 
 ### Negative
 
@@ -125,12 +125,13 @@ Concretely:
 
 - **Cross-platform stubs from day one** are required (Principle 5). `activity/uia.rs` is `#[cfg(target_os = "windows")]`; `activity/uia_macos.rs` and `activity/uia_linux.rs` ship as `todo!()` stubs in Wave 2. Cost: ~five empty files. Benefit: Phase 9's macOS sweep doesn't have to refactor the abstraction.
 
-- **Documentation density grows.** This ADR + ADR 0037 + (optional) ADR 0038 + `docs/phases/phase10.md` + (probable) per-wave briefs in `docs/phases/phase10-wave{N}-brief.md` for the deeper waves (W2 UIA, W3 summarization pipeline, W4 audio, W5 hardening) follow the Phase MC documentation precedent. This is intentional — Phase MC's per-wave briefs were load-bearing during execution and remain useful as historical reference.
+- **Documentation density grows.** This ADR + ADR 0037 (Command Center, Wave 1A charter) + ADR 0038 (encryption-at-rest, Wave 5) + (optional) ADR 0039 (Wave 7 screenshot/OCR) + `docs/phases/phase10.md` + (probable) per-wave briefs in `docs/phases/phase10-wave{N}-brief.md` for the deeper waves (W1A Command Center, W2 UIA, W3 summarization pipeline, W4 audio, W5 hardening) follow the Phase MC documentation precedent. This is intentional — Phase MC's per-wave briefs were load-bearing during execution and remain useful as historical reference.
 
 ## Sub-ADRs deferred to subsequent waves
 
-- **ADR 0037 — Activity Capture encryption-at-rest strategy.** Authored in Wave 5. Decides between SQLCipher, DPAPI-per-row, or app-layer AES-GCM. References Q4 above. Status: Proposed when Wave 5 starts.
-- **ADR 0038 (optional, post-seal) — Layer 3 screenshot fallback + local OCR.** Authored only if Wave 7 is ever scheduled. References Q2 above. NOT part of `phase-10-complete`.
+- **ADR 0037 — Unified Recording Command Center.** Authored 2026-05-25 in Wave 0.5; charters Wave 1A. Inserted after this ADR's first draft to address the three-overlay UX problem; ADR 0037's §Boundary list is the explicit authorization for the surgical edits Wave 1A makes to sealed Dictation + Meeting Capture surfaces.
+- **ADR 0038 — Activity Capture encryption-at-rest strategy.** Authored in Wave 5. Decides between SQLCipher, DPAPI-per-row, or app-layer AES-GCM. References Q4 above. Status: Proposed when Wave 5 starts. (Originally reserved as 0037; renumbered after 0037 was taken by the Command Center charter.)
+- **ADR 0039 (optional, post-seal) — Layer 3 screenshot fallback + local OCR.** Authored only if Wave 7 is ever scheduled. References Q2 above. NOT part of `phase-10-complete`. (Originally reserved as 0038; renumbered for the same reason.)
 
 Additional sub-ADRs may be needed mid-execution (e.g. a UIA dependency-choice ADR in Wave 2 if the `uiautomation` crate is chosen, a chord-conflict-fallback ADR if `Right Ctrl + ,` collides with a user-configured shortcut). Author them as discovered; this ADR does not enumerate them upfront.
 
@@ -155,7 +156,7 @@ Explicit, binding. Future asks against these items require a successor ADR, not 
 
 - **Make audio (Layer 2) a Wave 1 deliverable.** Rejected (and the kickoff Q2 confirms). The source plan calls Layer 1 alone "a usable feature" and Layer 2 a strict enhancement. Shipping Wave 1 as a UIA-skeleton-only release gives Dustin a working raw-timeline UX in one wave, and the Wave 4 audio integration is then cheaper because the persistence layer + lifecycle FSM already exist and only need a new table + a new toggle.
 
-- **Skip ADR 0037; pick encryption-at-rest now.** Rejected (Q4). The three candidates have materially different perf profiles and the actual `activity_events` payload size is unknown until Wave 2 lands. Premature decision is more expensive than the cost of one ADR.
+- **Skip ADR 0038; pick encryption-at-rest now.** Rejected (Q4). The three candidates have materially different perf profiles and the actual `activity_events` payload size is unknown until Wave 2 lands. Premature decision is more expensive than the cost of one ADR.
 
 - **Add this work as a lateral ADR-chartered epic (no `phase-10-complete` tag, just ADR 0036 Accepted + STATUS update).** Rejected (Q1). Activity Capture is multi-wave, multi-session, ≥10 files, ≥1 week of work, introduces four new tables, two new threads, and a brand-new top-level user-visible page. The work-sizing matrix in AGENTS.md is explicit that this is a PLAN §10 phase, not a lateral epic. The `phase-10-complete` tag is reserved for exactly this case.
 
@@ -167,8 +168,9 @@ Explicit, binding. Future asks against these items require a successor ADR, not 
 - **Phase doc:** `docs/phases/phase10.md` (chartered in this iteration; wave-by-wave brief).
 - **PLAN spine:** `PLAN-mockingbird-v2.md` § 10 — adds Phase 10 entry mirroring Phase MC's depth.
 - **Companion / future ADRs:**
-  - ADR 0037 — Activity Capture encryption-at-rest strategy (deferred to Wave 5).
-  - ADR 0038 (optional, post-seal) — Layer 3 screenshot fallback + local OCR.
+  - ADR 0037 — Unified Recording Command Center (Wave 1A charter; authored 2026-05-25).
+  - ADR 0038 — Activity Capture encryption-at-rest strategy (deferred to Wave 5).
+  - ADR 0039 (optional, post-seal) — Layer 3 screenshot fallback + local OCR.
 - **Sibling-subsystem precedent:** ADR 0026 (Meeting Capture sibling-subsystem charter). This ADR mirrors 0026's structure deliberately.
 - **Sealed primitives reused:**
   - `audio::AudioCapture` (Wave 4 only) — ADR 0013 (cpal ringbuf design).

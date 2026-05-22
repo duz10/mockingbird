@@ -1,7 +1,7 @@
 # Phase 10 — Activity Capture (numbered PLAN §10 phase)
 
 **Phase entry tag:** `stable-alpha-v0.1` (post-MC + post-dictation-polish reference checkpoint, 2026-05-24).
-**Phase exit tag:** `phase-10-complete` (target — adds `Activity` AppError variants, migration 012 (`activity_sessions`, `activity_events`, `activity_blocks`, `activity_transcript_segments`), new `src-tauri/src/activity/` module tree, new chord listener + UIA sampler threads, new `recording_indicator` Tauri overlay window, new `Activity.tsx` + `ActivityDetail.tsx` UI pages, five Wave-6 invariant judges. **Does NOT touch** dictation, meeting-capture-except-`long_form_stt`-as-a-library, the `modes` table, the `cleanup_provider` trait, migrations 001–011, or any sealed file enumerated in ADR 0036 §Decision items 1 & 2).
+**Phase exit tag:** `phase-10-complete` (target — adds `Activity` AppError variants, migration 012 (`activity_sessions`, `activity_events`, `activity_blocks`, `activity_transcript_segments`), new `src-tauri/src/activity/` module tree, new UIA sampler thread, new `src-tauri/src/command_center/` module + new `command_center` Tauri window (Wave 1A — see ADR 0037; replaces the originally-planned per-subsystem `recording_indicator` overlay), new shared `src-tauri/src/overlay_conventions.rs` helper, new `Activity.tsx` + `ActivityDetail.tsx` UI pages, five Wave-6 invariant judges. **Does NOT touch** dictation, meeting-capture-except-`long_form_stt`-as-a-library, the `modes` table, the `cleanup_provider` trait, migrations 001–011, or any sealed file enumerated in ADR 0036 §Decision items 1 & 2 — **except** the surgical edits explicitly authorized by ADR 0037 §Boundary, which are scoped to Wave 1A).
 **Charter ADR:** [ADR 0036](../adr/0036-activity-capture-sibling-subsystem.md) — Proposed; Dustin flips to Accepted after charter review (this Wave 0).
 **Source plan:** `mockingbird-activity-capture-plan.md` (repo root, untracked).
 **Planner:** Bernard / code-puppy (Wave 0). **Implementor:** code-puppy unless a project JSON agent (e.g. `migration-author` for Wave 1's migration 012) takes a narrow wave.
@@ -46,7 +46,7 @@ assemble session summary (pure Rust: chronological list of Blocks, optional tota
 
 **No injection.** Output lives in a new `Activity.tsx` page (list of sessions) + `ActivityDetail.tsx` (one session: timeline + Block CRUD + drill-down to raw events + export).
 
-**Activation:** chord `Right Ctrl + ,` (proposed — sits next to MC's `Right Ctrl + .` for muscle-memory). Conflict probe at startup per ADR 0019 ladder. Wave 1 wires it.
+**Activation:** via the Unified Recording Command Center authored in Wave 1A (chord `Right Ctrl + Space` proposed — see ADR 0037 Q1; conflict probe at startup per ADR 0019 ladder; user-configurable via `command_center_chord` setting). Activity Capture has no chord of its own — the user opens the Command Center and picks the Activity tile. Wave 1A wires the Command Center; Wave 1B wires activity capture into it.
 
 **Persistence (migration 012, Wave 1):**
 
@@ -127,9 +127,82 @@ CREATE INDEX activity_segments_session_started ON activity_transcript_segments(s
 
 ## Wave structure
 
-### Wave 1 — Activity-log skeleton (Layer 1 titles-only)
+### Wave 1A — Unified Recording Command Center
 
-**Goal:** A user can press `Right Ctrl + ,`, see a recording indicator, switch between a few apps, press `Right Ctrl + ,` again to stop, and see a chronological raw-events timeline in a new `Activity.tsx` page. No AI. No audio. No snapshots. Title-level signal only — proves the structural skeleton end-to-end.
+**Goal:** A single bottom-center overlay opened by a chord (`Right Ctrl + Space` proposed) or tray menu item, surfacing a mode picker for Dictation / Meeting / Activity. When ANY mode is currently recording, the picker is replaced by a SessionCard with the active session's kind, elapsed time, and a Stop button. First-run auto-opens with a Welcome header band above the tiles. The Right Alt push-to-talk dictation fast path is unchanged. Replaces the three-separate-overlays design from Wave 0 and resolves ADR 0026's `WindowConventions` YAGNI debt.
+
+**Charter ADR:** [ADR 0037](../adr/0037-unified-recording-command-center.md) — Proposed; Dustin flips to Accepted before Wave 1A code starts. ADR 0037 is also the **explicit authorization** for the surgical edits to sealed Dictation + Meeting Capture surfaces enumerated below; outside that boundary, the seal still holds.
+
+**Deliverables (files to create / touch):**
+
+New code (greenfield):
+- `src-tauri/src/command_center/mod.rs` — orchestrator + public API (`open_via_chord`, `open_via_tray`, `open_via_first_run`, `pick_mode`, `stop_active_session`, `dismiss`). No recording logic — purely a dispatcher to the existing Dictation / Meeting / (Wave 1B) Activity runtimes.
+- `src-tauri/src/command_center/state.rs` — pure-Rust state machine (Closed → Opening → ShowingModePicker → ShowingSessionCard{kind} → Launching{kind} → Closed). ≥30 unit tests via throwaway-crate covering every (current-session, user-action) pair plus the first-run-welcome variant.
+- `src-tauri/src/command_center/hotkey.rs` — fourth `WH_KEYBOARD_LL` install in the app, on its own message-pump thread. Always-CallNextHookEx per ADR 0027. Observes ONLY the configured `command_center_chord` VK pair; suppresses Windows key-repeat until main-keyup.
+- `src-tauri/src/overlay_conventions.rs` — **NEW shared helper.** Closes ADR 0026's YAGNI debt (this is window #3). Owns: bottom-center monitor-pick math, `WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TOPMOST` fixup, taskbar-aware bottom-center math. Neutral ground — does NOT live under `meetings/` or `dictation/` or `command_center/`. Dictation pip + meeting overlay + command center all import from here. Pure math helpers throwaway-crate testable; the Win32 fixup is wired.
+- `ui/src/command_center.tsx` — new Tauri window entry, mirrors `recording.tsx` / `meeting_overlay.tsx` shape.
+- `ui/src/command_center/CommandCenter.tsx` — component: mode picker (default) | SessionCard (when a session is live) | Welcome variant (first-run, same component with a header band).
+- `ui/src/command_center/CommandCenter.module.css` — bottom-center positioning, transparent backdrop.
+- `ui/src/lib/command_center.ts` — typed IPC client.
+- `ui/src/lib/i18n/keys/command_center.json` — copy strings.
+- `src-tauri/tauri.conf.json` — register `command_center` webview window (frameless, transparent, alwaysOnTop, focus:false, skipTaskbar:true, resizable:false).
+
+Surgical touches to sealed code (authorized by ADR 0037 §Boundary; outside this list the seal holds):
+- `src-tauri/src/recording_window.rs` — relocate dictation pip default to bottom-center (via `overlay_conventions.rs`); add `suppressed_for_command_center: bool` flag honored when Command Center window is up.
+- `src-tauri/src/meetings/hotkey_installer.rs` — wrap legacy-chord install in `if settings.legacy_meeting_chord_enabled { install() }`.
+- `src-tauri/src/meetings/overlay.rs` — add public invocation entry callable from `command_center::pick_mode(Meeting)`; visual contract unchanged.
+- `src-tauri/src/meetings/runtime.rs` — one-shot legacy-chord migration (pattern verbatim from ADR 0033). INFO-log prior + new values.
+- `src-tauri/src/dictation.rs` / `src-tauri/src/dictation/runtime.rs` — accept "started-from-command-center" signal on the public start entry point; default arg preserves existing call-site behavior.
+- `src-tauri/src/settings/model.rs` + `src-tauri/src/commands/settings.rs` — add `CommandCenterChord`, `CommandCenterSeenV1`, `LegacyMeetingChordEnabled` setting keys (additive only).
+- `ui/src/pages/Settings.tsx` + `ui/src/pages/SettingsMeetingTab.tsx` — two new UI rows: General → "Command Center chord" (string picker); Meetings → "Enable direct chord shortcut" (toggle, with the existing chord-picker visible-but-disabled when toggle is OFF). Plus a "Restore legacy chord behavior" button under the toggle (one-click recovery from a migration misfire).
+- `ui/src/lib/i18n/keys/en.json` (or equivalent) — three new copy strings.
+- `src-tauri/src/tray.rs` — one new menu item: "Open Command Center" near the top.
+
+**Test plan:**
+
+- **Pure-Rust modules** (`state.rs`, `overlay_conventions.rs` pure math helpers, the migration logic extracted into a testable function) → throwaway-crate recipe (LESSONS P2).
+- **Wired modules** (`mod.rs`, `hotkey.rs`, every sealed-surface touch) → cargo check + clippy `--release -- -D warnings` + `fmt --check` + `test --release --no-run`.
+- **UI side** → `npx tsc --noEmit` + `npm test` (vitest) + `npm run build`.
+- **Existing-subsystem regression gate:** the 383 dictation tests + the 5 Phase MC judges (`mc-dictation-untouched`, `mc-formatter-deterministic`, `mc-long-form-stitched-losslessly`, `mc-no-llm-in-critical-path`, `mc-two-channel-merged`) must all stay green at Wave 1A seal.
+- **Live OS smoke matrix:** see the dedicated subsection below.
+
+**Wave 1A — live smoke matrix**
+
+The per-LESSONS-P7 gate. Three invocation paths × four current-session states. Twelve cells; each must show the documented behavior on a real Win11 box before Wave 1A can seal.
+
+| Invocation \ Current session | (a) No session | (b) Mid-dictation (Right Alt held) | (c) Mid-meeting | (d) Mid-activity (Wave 1B onward — N/A for 1A) |
+|---|---|---|---|---|
+| **1. Chord (`Right Ctrl + Space`)** | Window opens at bottom-center; mode picker visible; Esc dismisses. | SessionCard with `kind=dictation`, elapsed timer ticking, Stop button drives `dictation::stop()`. Stop returns to mode picker. | SessionCard with `kind=meeting`, Stop button drives `meetings::stop()` (mirrors ADR 0035 cancel path). | (Wave 1B+) SessionCard with `kind=activity`, Stop drives `activity::stop()`. |
+| **2. Tray ("Open Command Center" menu item)** | Same as 1(a). | Same as 1(b). | Same as 1(c). | (Wave 1B+) Same as 1(d). |
+| **3. First-run auto-open** | Welcome variant: header band "Welcome to Mockingbird" above the three tiles; first dismiss flips `command_center_seen_v1 = true`. Reopen any path: Welcome band gone. | N/A (no recording can be live on first run). | N/A (no recording can be live on first run). | N/A. |
+
+Additional smoke items (not in the grid but required at seal):
+
+- Hold Right Alt during dictation: pip suppressed because Command Center is up (or vice versa — visual mutual exclusion holds via bottom-center geometry).
+- Esc on SessionCard: dismisses the Command Center WITHOUT stopping the recording. Recording continues.
+- "Wait — return to picker" affordance on SessionCard: leaves the recording alone, returns to picker.
+- One-shot legacy-chord migration: boot a fresh profile (no settings); confirm `legacy_meeting_chord_enabled = false`. Boot a profile with a prior non-default `meeting_hotkey_chord`; confirm `legacy_meeting_chord_enabled = true`, INFO log captured both values. Click "Restore legacy chord behavior" → bool flips to true regardless of prior state.
+- Conflict probe: temporarily configure `command_center_chord = "RightCtrl+M"` (collides with Phase MC's old default per ADR 0033); confirm WARN log + setting reverts or refuses.
+- Re-run the 5 Phase MC judges live: `mc-dictation-untouched` MUST stay green (the dictation pip change is bottom-center-only, no state-machine touch).
+
+**Seal criteria:**
+- All deliverables in tree.
+- ADR 0037 Accepted.
+- Cargo gate passes (check + clippy + fmt + `--no-run`).
+- UI gate passes (tsc + vitest + build).
+- 383 dictation tests + 5 Phase MC judges all green.
+- Smoke matrix all-green (Dustin signs off).
+- bd Wave 1A bead closed; STATUS.md + this phase doc reflect Wave 1A sealed.
+
+**Seal tag:** `phase-10-wave-1a-complete`.
+
+---
+
+### Wave 1B — Activity-log skeleton (Layer 1 titles-only)
+
+**Blocked-by:** Wave 1A (`phase-10-wave-1a-complete` tag must exist + Command Center wired). Activity Capture's invocation flows through the Command Center's mode picker — there is no standalone activity overlay.
+
+**Goal:** A user opens the Command Center (chord or tray), picks the **Activity** tile, the Command Center dismisses, an activity session starts, the user switches between a few apps, opens the Command Center again, sees the SessionCard with `kind=activity` + Stop button, presses Stop, and sees a chronological raw-events timeline in a new `Activity.tsx` page. No AI. No audio. No snapshots. Title-level signal only — proves the structural skeleton end-to-end behind the Command Center surface.
 
 **Deliverables (files to create / touch):**
 
@@ -142,31 +215,27 @@ CREATE INDEX activity_segments_session_started ON activity_transcript_segments(s
 - `src-tauri/src/commands/activity.rs` — Tauri IPC: `activity_start`, `activity_pause`, `activity_resume`, `activity_stop`, `activity_list_sessions`, `activity_get_session_detail` (events only — no Blocks yet).
 - `src-tauri/src/db/migrations/012_activity_capture.sql` — full schema above (DDL + immutability trigger + indexes; FTS5 deferred to Wave 3).
 - `src-tauri/src/error.rs` — add three new `AppError` variants (`Activity(String)`, `ActivitySampler(String)`, `ActivityPersist(String)`).
-- `src-tauri/tauri.conf.json` — register `recording_indicator` webview window (frameless, no-decorations, alwaysOnTop, focus:false; small pip ~280×60 top-right by default).
-- `ui/src/recording_indicator.tsx` — new entry point (mirrors `meeting_overlay.tsx` shape).
-- `ui/src/recording_indicator/RecordingIndicator.tsx` — "Recording activity • <duration> • [Pause] [Stop]" pip.
-- `ui/src/recording_indicator/styles.module.css`.
 - `ui/src/pages/Activity.tsx` — list-of-sessions page (date, duration, app-switch count, raw-only badge until Wave 3).
 - `ui/src/pages/ActivityDetail.tsx` — chronological raw-events list (timestamp · app · title), grouped by 5-minute buckets visually.
 - `ui/src/lib/activity.ts` — typed IPC client.
 - `ui/src/lib/i18n/keys/activity.json` — copy strings.
 - Sidebar nav entry + route.
-- Hotkey wiring: `activity/chord.rs` — second installer of `WH_KEYBOARD_LL` per ADR 0027's precedent (this is now the THIRD hook thread; document the chain order in the wave brief).
-- Pre-commit hook update: generalize `block-cross-module-coupling-meeting-dictation` → `block-cross-module-coupling` covering all three subsystems (dictation/meetings/activity). Live in `.code_puppy/settings.json` or its referenced script.
+- **Activity invocation wiring:** activity capture wires into the Command Center mode picker authored in Wave 1A. **No standalone activity overlay window.** The Command Center's SessionCard renders the "you're recording activity" surface when `kind=activity`. No new `recording_indicator.tsx` / `RecordingIndicator.tsx` / `recording_indicator/styles.module.css` — those files from the original Wave 1 plan are deleted from the deliverables list. The `activity/chord.rs` listener also goes away — invocation is via `command_center::pick_mode(Activity)`, which calls `activity::start()` directly; there's no third chord to register (Command Center is the chord owner now).
+- Pre-commit hook update: generalize `block-cross-module-coupling-meeting-dictation` → `block-cross-module-coupling` covering all three subsystems (dictation/meetings/activity). Live in `.code_puppy/settings.json` or its referenced script. (NOTE: Wave 1A may have already done this; if so, Wave 1B verifies + extends.)
 
 **Test plan:**
 
 - **Pure-Rust modules** (`lifecycle.rs`, `exclusion.rs` stub) → throwaway-crate recipe (LESSONS P2).
-- **Wired modules** (`sampler.rs`, `chord.rs`, `persist.rs`, `commands/activity.rs`) → cargo check + clippy --release -- -D warnings + fmt --check + test --release --no-run.
+- **Wired modules** (`sampler.rs`, `persist.rs`, `commands/activity.rs`) → cargo check + clippy --release -- -D warnings + fmt --check + test --release --no-run.
 - **UI side** → `npx tsc --noEmit` + `npm test` (vitest) + `npm run build`.
 - **Live smoke matrix (≥5 min):**
-  1. Launch app; verify chord conflict probe runs at startup (no panic; logs say "activity chord = RCtrl+,").
-  2. Press chord → recording_indicator window appears top-right; `activity_sessions` row with status='in_progress' inserted.
-  3. Alt-tab through Notepad → Chrome → VS Code → terminal; each transition writes an `app_switch` event row.
-  4. Press chord again → indicator window hides; row.status = 'completed'; ended_at populated.
+  1. Open Command Center (chord or tray). Mode picker visible. Pick **Activity** tile → Command Center dismisses; `activity_sessions` row with status='in_progress' inserted.
+  2. Alt-tab through Notepad → Chrome → VS Code → terminal; each transition writes an `app_switch` event row.
+  3. Open Command Center again → SessionCard with `kind=activity`, elapsed time ticking, Stop button visible.
+  4. Press Stop → row.status = 'completed'; ended_at populated; state machine returns to mode picker (per ADR 0037 Q2).
   5. Navigate to Activity page; the new session is in the list. Drill in; raw events render in order.
   6. Restart app mid-session: verify `crashed_recovered` status promotion on next boot.
-  7. Press dictation hotkey during an activity session → dictation still works, no cross-talk.
+  7. Press dictation hotkey (Right Alt) during an activity session → dictation still works, no cross-talk. Open Command Center mid-dictation: SessionCard shows `kind=dictation` (the most-recently-started session). (Mutual-exclusion-display semantics confirmed in the Wave 1A smoke matrix; Wave 1B verifies activity inherits the same behavior.)
 
 **Seal criteria:**
 - All deliverables in tree.
@@ -174,9 +243,9 @@ CREATE INDEX activity_segments_session_started ON activity_transcript_segments(s
 - UI gate passes (tsc + vitest + build).
 - Smoke matrix all-green (Dustin signs off).
 - `block-cross-module-coupling` hook rejects a deliberate test-commit that imports `dictation::*` from `activity::*` (and vice versa with `meetings::*`).
-- bd-wave-1 closed; STATUS.md updated.
+- bd Wave 1B bead (`mb-hnl3`) closed; STATUS.md updated.
 
-**Seal tag:** `phase-10-wave-1-complete`.
+**Seal tag:** `phase-10-wave-1b-complete`.
 
 ---
 
@@ -287,7 +356,7 @@ CREATE INDEX activity_segments_session_started ON activity_transcript_segments(s
 
 **Deliverables:**
 
-- **`docs/adr/0037-activity-capture-encryption-at-rest.md`** — weigh SQLCipher / DPAPI-per-row / app-layer AES-GCM (Q4); Status: Proposed → Accepted by Dustin in this wave. Implement the chosen path. Migration 014 if a schema-altering route is picked (e.g. AES-GCM blob column on `activity_events.snapshot_json`).
+- **`docs/adr/0038-activity-capture-encryption-at-rest.md`** — weigh SQLCipher / DPAPI-per-row / app-layer AES-GCM (Q4); Status: Proposed → Accepted by Dustin in this wave. Implement the chosen path. Migration 014 if a schema-altering route is picked (e.g. AES-GCM blob column on `activity_events.snapshot_json`). (Originally reserved as ADR 0037; renumbered after 0037 was taken by the Command Center charter in Wave 0.5.)
 - `src-tauri/src/activity/exclusion.rs` — full implementation. Capture-time enforcement (events for excluded windows are dropped before the INSERT). Defaults: 1Password, Bitwarden, KeePass, browser windows with `(?i)\b(bank|login|password|signin)\b` in the title, the Win lock screen, UAC dialogs. **Plus**: UIA `UIA_IsPasswordPropertyId` check on every snapshot — if true, the whole snapshot tick is dropped (Q5; stronger than `SecureInputGuard` because it works on any focused edit across any UIA-exposing app).
 - `src-tauri/src/activity/retention.rs` — configurable auto-delete (default: keep forever; opt-in N-day TTL). Wired into a Tauri scheduled task or a startup-sweep helper.
 - `src-tauri/src/activity/crash_recovery.rs` — at app boot, detect `activity_sessions` rows with status='in_progress' and no `ended_at` → promote to `crashed_recovered`, run Wave 3 summarization on what survives. Cover the case in a unit test.
@@ -299,11 +368,11 @@ CREATE INDEX activity_segments_session_started ON activity_transcript_segments(s
 **Test plan:**
 - Pure: `retention.rs` math, `crash_recovery.rs` state-promotion, `exclusion.rs` title-regex + UIA-password-bit handling → throwaway-crate.
 - Wired: cargo check + clippy + fmt + `--no-run`.
-- Smoke (≥20 min): record a session that focuses 1Password mid-flow → verify event for that window is NOT in `activity_events`; focus a sign-in form's password field → verify the snapshot for that tick is dropped (or has empty payload + `password_field_active=true`); set retention TTL to 1 day and verify a fixture session older than that gets purged on next sweep; kill the app mid-session and reboot → verify `crashed_recovered` promotion + Wave-3 summary runs on the partial; export a session as PDF in both regular and work-report modes; flip encryption-at-rest setting and verify ADR 0037's chosen approach is honored on disk (binary-inspect the DB file).
+- Smoke (≥20 min): record a session that focuses 1Password mid-flow → verify event for that window is NOT in `activity_events`; focus a sign-in form's password field → verify the snapshot for that tick is dropped (or has empty payload + `password_field_active=true`); set retention TTL to 1 day and verify a fixture session older than that gets purged on next sweep; kill the app mid-session and reboot → verify `crashed_recovered` promotion + Wave-3 summary runs on the partial; export a session as PDF in both regular and work-report modes; flip encryption-at-rest setting and verify ADR 0038's chosen approach is honored on disk (binary-inspect the DB file).
 
 **Seal criteria:**
 - All deliverables in tree.
-- ADR 0037 Accepted.
+- ADR 0038 Accepted.
 - Cargo + UI gates pass.
 - Smoke matrix all-green; exclusion-list verified empirically (NOT just unit-tested).
 - bd-wave-5 closed; STATUS updated.
@@ -349,10 +418,10 @@ CREATE INDEX activity_segments_session_started ON activity_transcript_segments(s
 
 ### Wave 7 (OPTIONAL, post-`phase-10-complete`)
 
-Layer 3 screenshot fallback + local OCR. Chartered via successor ADR (likely 0038). NOT part of `phase-10-complete`. NOT planned in this phase doc.
+Layer 3 screenshot fallback + local OCR. Chartered via successor ADR (likely 0039). NOT part of `phase-10-complete`. NOT planned in this phase doc.
 
 If/when scheduled:
-- Author ADR 0038 (Status: Proposed → Accepted).
+- Author ADR 0039 (Status: Proposed → Accepted).
 - Add `activity/screenshot.rs` + `activity/ocr.rs`.
 - Add new bead `Phase 10 Wave 7 (post-seal): Layer 3 screenshot + OCR`.
 - Seal via STATUS update + ADR Accepted, NOT a new `phase-10-w7-complete` tag (lateral-epic shape per AGENTS.md, not numbered-phase shape — Wave 7 lives outside the numbered phase).
