@@ -268,6 +268,67 @@ progress, **STOP** and escalate via STATUS.md "Blocked / human input needed"
 and a beads issue tagged `escalation`. Do not push to 10. The judge prompt
 or the deliverable is likely misspecified.
 
+## Work sizing & workflow selection
+
+Pick the **smallest container** that fits the work. Don't reach for phase
+machinery when a P3 bead is enough; don't paper over a real lateral epic
+with a single bead.
+
+### Work containers (smallest → largest)
+
+| Container | When to use | Tracking | Seal |
+|---|---|---|---|
+| **Bead-only task** | Tiny work: single bug fix, single-file refactor, UI polish, copy change. <~200 LoC, single session. | `bd create … -t {bug,task,chore}` with optional dependency links. | `bd close <id>` + commit message references `mb-<id>`. No ADR, no tag. |
+| **ADR-chartered lateral epic** | Coherent multi-piece work that doesn't fit a sealed phase but isn't a new numbered phase either. ~1-3 sessions, 3-15 files. Examples: MC v1.1 (ADR 0032), MC v1.2 (ADR 0035), three-mode cleanup (ADR 0022). | Charter ADR (Proposed → Accepted). Beads per piece, each referencing the ADR in its description. | ADR Accepted + STATUS.md updated. **NOT** a new `phase-*-complete` tag — those are reserved for PLAN §10 phases. |
+| **PLAN §10 phase** | New top-level subsystem from the PLAN. Multi-session, multi-wave, ≥10 files, ≥1 week. | Phase doc at `docs/phases/phase{N}.md`. Wave briefs as you go. Beads per wave's tasks. Judges authored in the final wave. | `git tag phase-{N}-complete`. STATUS.md "Sealed" table updated. |
+| **Standing P1/P2** | Long-running quality loop. Never "complete" — picks up whenever there's fixture input. Examples: `mb-ez9` empirical prompt tuning, `mb-xwi` Phase 5/6/7 remaining scope. | One persistent `in_progress` bead with periodic update comments. | Doesn't seal as a unit. Re-anchored when the underlying ADR / phase doc changes. |
+
+### Default rule: bead-first
+
+If you start work on anything that isn't already a bead, `bd create` it
+**before the first code edit**. Single-line title is fine — the bead is
+the tracking unit, not the spec. Mid-session discoveries that are
+out-of-scope for the current bead: `bd create` them immediately, don't
+carry them in conversation memory. Memory clears between iterations; the
+bd DB doesn't.
+
+### Workflow modes (orthogonal to container)
+
+| Mode | When | Cost | Risk |
+|---|---|---|---|
+| **Ad-hoc / driver-and-passenger** | Human at the keyboard. Small-to-medium work. Live screenshots, questions, and judgment calls in real time. | Cheapest. No `/goal` overhead. | Easy to skip beads / LESSONS / commits in flow. Mitigated by the "bead-first" default above + end-of-iteration checklist. |
+| **`/goal` autonomous** | Human is stepping away. Work is well-scoped (clear deliverable + chartered ADR or wave brief). | Auto-clears context between iterations. Resumable across sessions. | Stale-prompt risk (LESSONS PINNED P4). Up to 10 iterations of LLM cost. |
+| **`/goal` + judges (Ralph Wiggum loop)** | High-stakes invariants with explicit pass/fail. Phase MC's 5 judges are the canonical reference (deterministic formatter, lossless stitching, two-channel merge, no-LLM-in-critical-path, dictation-untouched). | Highest — judges author + run cost. | Lowest — invariants mechanically enforced every loop until green. |
+
+### Judges — when (regardless of container)
+
+Any work touching the eight binding principles (Principles section above)
+benefits from a judge if no existing judge already covers it. A judge is
+just a small LLM-grading prompt returning pass/fail + reasoning.
+Wave-6-style five-invariant bundles are the canonical pattern; a
+**single one-off judge for a single bead is fine** when the invariant is
+narrow. Don't reach for a 5-judge bundle when a 1-judge spot-check fits.
+
+### Bug-fix subpattern (the common case)
+
+Most bug fixes are this — no ADR, no judges, no tag:
+
+1. `bd create "subsystem: short symptom" -t bug -p {1=user-blocking, 2=annoying, 3=papercut}`
+2. *(optional)* `bd update <id> --status in_progress`
+3. Reproduce → fix → test → commit (commit message references `mb-<id>`).
+4. `bd close <id> -r "Fixed in <commit>. Root cause: ..."`
+5. If the bug surfaced a non-obvious finding, append a body entry to
+   `docs/LESSONS.md`.
+
+### Discovery → bead pattern (mid-session)
+
+When you discover work outside the current bead's scope (refactor
+opportunity, related bug, missing test, doc gap), the default is
+`bd create` immediately, with a one-line title and a sensible priority
+(P3 if you're unsure — promote later). Holding it in conversation memory
+is the failure mode — discoveries get lost when context clears between
+iterations.
+
 ## Never do
 
 - Modify a file in `models/` (gitignored downloads)
@@ -354,22 +415,53 @@ See LESSONS PINNED entry **P4**.
 
 ## Issue Tracking
 
-This project uses **bd (beads)** for issue tracking alongside `STATUS.md`.
+**`bd` (beads) is the DEFAULT work-tracking mechanism for Mockingbird.**
+Every non-trivial unit of work — features, bugs, refactors, docs,
+mid-session discoveries — should have a bead. `STATUS.md` is the
+human-readable snapshot at iteration boundaries; `bd` is the live queue
+you actually work from.
 
-- **`bd`** is the live task queue: dependency graph, ready-work view, priorities.
-- **`STATUS.md`** is the human-readable phase snapshot the PLAN, judges, and
-  hooks expect at iteration boundaries.
+See "Work sizing & workflow selection" above for *when* to use just-a-bead
+vs. ADR-chartered epic vs. PLAN phase. This section covers *how* to use
+`bd`.
 
-Treat them as complementary — keep both in sync at end-of-iteration.
-Run `bd prime` for workflow context, or install hooks (`bd hooks install`)
-for auto-injection at session start.
+### Default flow
 
-**Quick reference:**
-- `bd ready` — find unblocked work
-- `bd create "Title" --type task --priority 2` — create issue
-- `bd update <id> --status in_progress` — mark started
-- `bd close <id>` — complete work
-- `bd link <a> <b>` — b blocks a (a depends on b)
+1. **Start:** `bd ready` (or `bd ready -t bug`, etc.) to pick work. If your
+   task isn't already in the queue, `bd create` it **before** the first
+   edit. A one-line title is enough.
+2. **During:** `bd update <id> --status in_progress` if it'll take more than
+   a few minutes. `bd link <a> <b>` if discovery surfaces a dependency.
+   `bd create` any out-of-scope discoveries immediately — don't carry them
+   in working memory.
+3. **End:** `bd close <id> -r "..."` with a resolution message that mentions
+   the commit hash and (if applicable) the LESSONS or ADR reference.
+
+### Quick reference
+
+- `bd ready` — find unblocked work (filter with `-t bug`, `-p 1`, etc.)
+- `bd create "Title" -t {bug|feature|task|chore} -p {1|2|3}` — create issue
+- `bd update <id> --status {open|in_progress|blocked|closed}` — change state
+- `bd close <id> -r "resolution note"` — close with reason
+- `bd link <a> <b>` — `b` blocks `a` (i.e. `a` depends on `b`)
 - `bd show <id>` — full issue detail
+- `bd prime` — full workflow context dump (read once per fresh setup)
 
-Issue prefix is `mb-` (set at `bd init`). For full workflow details: `bd prime`.
+Issue prefix is `mb-` (set at `bd init`). Reference IDs in commit messages
+so `git log <hash> -1 --format=%B` and `bd show <id>` cross-walk cleanly.
+
+### Gotchas (learned the hard way)
+
+- **Avoid non-ASCII in `bd create` titles/descriptions.** Em-dashes, smart
+  quotes, and some other unicode characters cause `bd create --description "..."`
+  to fail with a non-zero exit code **after** creating the issue (so retrying
+  produces a duplicate). Workaround: keep create-time strings ASCII-only and
+  use `bd update <id>` to add rich descriptions post-create if needed.
+  Lesson logged 2026-05-24 (4 duplicate beads created + closed in one
+  iteration before noticing).
+- **`git status --short` eats the leading-status character when piped into
+  `findstr`.** Use `git status --porcelain=v1` instead — the two-character
+  `XY` index/worktree status survives the pipe. Lesson logged 2026-05-24.
+- **`findstr /R` regex is anemic** (no `\b`, no `+`, no lookahead). For
+  anything beyond "contains a literal substring", pipe to PowerShell
+  `Select-String` or `Select-Object` instead. Lesson logged 2026-05-24.

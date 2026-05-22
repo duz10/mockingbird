@@ -129,6 +129,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-24 | `[meta / tooling]`               | bd create non-ASCII trap; git status --porcelain=v1 vs --short; findstr regex limits; triage-before-acting pattern |
 | 2026-05-24 | `[mc-v1.2 / ADR 0035]`           | MC Stable Alpha seal — capabilities migration is the real mb-z5y root cause; cancel/rename/auto-title; WASAPI loopback fix; stable-alpha-v0.1 tag |
 | 2026-05-24 | `[dictation-polish]`             | paste-trailing-space, History→Dictations, on-demand LLM pass, Insights 2-tab redesign |
 | 2026-05-23 | `[mc-hotfix / mb-z5y / ADR 0034]`| overlay stuck in CHOOSE — show-before-emit + emit_to + defensive clear   |
@@ -168,6 +169,77 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-24 [meta / tooling] four tooling gotchas + a process pattern that paid off
+
+- **Context:** End-of-iteration meta-review with Dustin. Codifying gotchas
+  discovered the hard way this session so future-Bernard doesn't burn
+  iterations on them. Three are shell/tooling traps; one is a positive
+  process pattern worth re-using.
+
+- **Finding 1 (`bd create` + non-ASCII = silent duplicate trap):**
+  Running `bd create "Title" -t feature -p 2 --description "... text with — em-dash ..."`
+  causes `bd` to exit with a non-zero status code **after** writing the
+  issue to disk. The error stream shows nothing useful. If you retry on
+  the assumption that the create failed, you get a duplicate issue. This
+  bit me twice in one iteration tonight (8 issues created when only 4
+  were intended; I noticed when `bd ready` showed near-identical pairs
+  of titles with different `mb-*` ids). **Action / workaround:** keep
+  bd create-time titles and descriptions ASCII-only. If you need rich
+  text (em-dashes, smart quotes, code blocks), use `bd update <id>` on
+  the freshly-created issue. Encoded into AGENTS.md § "Issue Tracking →
+  Gotchas".
+
+- **Finding 2 (`git status --short` + `findstr` eats the leading status
+  character):** Porcelain v1 output format is `XY filename` where `X` is
+  the index status and `Y` is the worktree status. When the index status
+  is a space (file modified in worktree only) the leading space gets
+  consumed by some Windows piping paths, making it look like `M filename`
+  (which would mean "staged-modified"). Confused me twice tonight into
+  thinking `git add` had silently failed when it actually worked.
+  **Action:** prefer `git status --porcelain=v1` for scripts and grep —
+  the two-char `XY` prefix survives the pipe intact. Reserve
+  `git status --short` for direct human reading. Encoded into AGENTS.md.
+
+- **Finding 3 (`findstr /R` regex is anemic):** Windows `findstr /R` is
+  POSIX-BRE *minus* features. No `\b` word boundary, no `+` quantifier
+  (use `*` after a duplicated atom), no lookahead, no character classes
+  beyond ASCII ranges, no alternation outside `/C:` literal mode.
+  Symptoms I hit tonight: `findstr /R "^.Created\|mb-"` returned empty
+  on output that obviously contained both patterns. **Action:** for
+  anything beyond a literal substring search, pipe to PowerShell's
+  `Select-String` (real regex) or `Select-Object` (line-range pagination)
+  via `powershell -Command "$input | Select-String 'pattern'"`. Encoded
+  into AGENTS.md. The cargo/git output examples already use this pattern
+  in commit `dda676a` and onward.
+
+- **Finding 4 (triage-before-acting is cheap insurance):** Tonight the
+  working tree arrived with 13 modified + 7 untracked files from a prior
+  unfinished session. The temptation was to `cargo fmt` the whole crate
+  (would have touched files outside my scope) and `git commit -a` (would
+  have bundled my work with Dustin's in-flight epic). Instead I burned
+  3 minutes auditing — `git diff --stat HEAD -- <suspect-files>`,
+  `cat` the new untracked files, surface ownership ambiguity in the
+  response BEFORE staging anything. Result: Dustin could greenlight the
+  surgical commit (my files only) cleanly, then we sealed his in-flight
+  epic (MC v1.2 / ADR 0035) deliberately in a separate commit with him
+  driving the calls. **Generalizable rule:** when the tree is dirty
+  and you didn't make it dirty, the right first move is `git diff
+  --stat HEAD` against suspect files + a short audit summary in your
+  next message. The 3 minutes of triage trades cleanly against the 10
+  minutes of "oh no, I committed someone else's half-baked changes."
+  Promoted into AGENTS.md § "Work sizing & workflow selection" implicitly
+  via the "bead-first" + "discovery → bead" patterns; explicit prose
+  reference lives here.
+
+- **Why these are body-only, not PINNED:** PINNED is reserved for
+  load-bearing every-session traps (cargo wrapper, test-binary launch
+  bug, stale-prompt session-start ritual). The four findings above are
+  each "burn 5-15 minutes" not "burn an hour rediscovering the same
+  trap." Body entries are the right tier; the TOC row makes them
+  greppable for future sessions.
 
 ---
 
