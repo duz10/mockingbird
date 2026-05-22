@@ -11,7 +11,8 @@ use rusqlite::Connection;
 use tauri::State;
 
 use crate::commands::types::{
-    InsightsSnapshot, InsightsToday, LatencyBreakdown, LearningSummary, ModeMixEntry, TopAppEntry,
+    CorrectionEntry, DictTermEntry, HeatmapDay, InsightsSnapshot, InsightsToday, LatencyBreakdown,
+    LearningSummary, LifetimeTotals, ModeMixEntry, TopAppEntry, WpmStats,
 };
 use crate::commands::{into_err, lock_db, AppStateHandle};
 
@@ -31,6 +32,13 @@ pub fn insights_snapshot(db: State<'_, AppStateHandle>) -> Result<InsightsSnapsh
     let top_apps = top_apps_7d(&conn).map_err(into_err)?;
     let latency = avg_latency_7d(&conn).map_err(into_err)?;
     let learning = learning_summary(&conn).map_err(into_err)?;
+    let lifetime = lifetime_totals(&conn).map_err(into_err)?;
+    let longest_streak_days = longest_streak(&conn).map_err(into_err)?;
+    let heatmap365d = heatmap_365d(&conn).map_err(into_err)?;
+    let peak_hours = peak_hours_90d(&conn).map_err(into_err)?;
+    let top_dict_terms = top_dict_terms(&conn).map_err(into_err)?;
+    let top_corrections = top_corrections(&conn).map_err(into_err)?;
+    let wpm = wpm_stats_30d(&conn).map_err(into_err)?;
 
     Ok(InsightsSnapshot {
         today,
@@ -40,6 +48,13 @@ pub fn insights_snapshot(db: State<'_, AppStateHandle>) -> Result<InsightsSnapsh
         top_apps,
         latency,
         learning,
+        lifetime,
+        longest_streak_days,
+        heatmap365d,
+        peak_hours,
+        top_dict_terms,
+        top_corrections,
+        wpm,
     })
 }
 
@@ -244,6 +259,262 @@ fn learning_summary(conn: &Connection) -> rusqlite::Result<LearningSummary> {
         last_rolled_back: last_rolled_back != 0,
         recent_terms,
     })
+}
+
+/* ------------------------------------------------------------------ */
+/* Lifetime totals — dictation + meetings, all time                    */
+/* ------------------------------------------------------------------ */
+
+fn lifetime_totals(conn: &Connection) -> rusqlite::Result<LifetimeTotals> {
+    let (sessions, recording_ms): (i64, i64) = conn.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(audio_duration_ms), 0) FROM sessions",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    // Sum of word counts across every `final` transcript (fall back
+    // to `cleaned` then `raw` per-session). The picked-stage subquery
+    // mirrors `today_block` to keep numbers comparable.
+    let words: i64 = conn
+        .prepare(
+            "SELECT COALESCE(SUM( \
+                LENGTH(t.text) - LENGTH(REPLACE(t.text, ' ', '')) + 1 \
+             ), 0) \
+             FROM transcripts t \
+             WHERE t.stage = ( \
+                SELECT stage FROM transcripts \
+                WHERE session_id = t.session_id \
+                ORDER BY CASE stage \
+                  WHEN 'final' THEN 0 WHEN 'cleaned' THEN 1 ELSE 2 \
+                END LIMIT 1 \
+             )",
+        )?
+        .query_row([], |r| r.get(0))?;
+    // Meetings are stored in `meeting_sessions`; only count
+    // status='complete' so a crash mid-recording doesn't pad totals.
+    // `total_duration_ms` is authoritative duration on that row.
+    let (m_count, m_ms): (i64, i64) = conn
+        .query_row(
+            "SELECT COUNT(*), COALESCE(SUM(total_duration_ms), 0) \
+             FROM meeting_sessions WHERE status = 'complete'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        // Schema before migration 011 has no meeting_sessions table —
+        // tolerate that so the upstream insights snapshot doesn't 500
+        // on an old DB clone. Treat "table missing" as zeroes.
+        .unwrap_or((0, 0));
+    Ok(LifetimeTotals {
+        dictation_words: words,
+        dictation_sessions: sessions,
+        dictation_recording_ms: recording_ms,
+        meetings_count: m_count,
+        meetings_total_ms: m_ms,
+    })
+}
+
+/* ------------------------------------------------------------------ */
+/* Longest streak — capped at 365                                      */
+/* ------------------------------------------------------------------ */
+
+fn longest_streak(conn: &Connection) -> rusqlite::Result<i64> {
+    // One pass through the distinct session-day list, ordered by
+    // date. Each iteration compares to the prior day's date string
+    // via SQLite's date math; gaps reset the running count.
+    let mut stmt =
+        conn.prepare("SELECT DISTINCT date(started_at) FROM sessions ORDER BY date(started_at)")?;
+    let mut rows = stmt.query([])?;
+    let mut longest = 0_i64;
+    let mut current = 0_i64;
+    let mut prev: Option<String> = None;
+    while let Some(row) = rows.next()? {
+        let day: String = row.get(0)?;
+        let is_consecutive = match &prev {
+            None => false,
+            Some(p) => {
+                // SQLite date('YYYY-MM-DD', '+1 day') gives the next
+                // calendar day. Compare as strings (ISO sorts right).
+                let next: String =
+                    conn.query_row("SELECT date(?1, '+1 day')", [p], |r| r.get(0))?;
+                next == day
+            }
+        };
+        current = if is_consecutive { current + 1 } else { 1 };
+        if current > longest {
+            longest = current;
+        }
+        prev = Some(day);
+    }
+    Ok(longest.min(365))
+}
+
+/* ------------------------------------------------------------------ */
+/* 365-day heatmap — one row per day, oldest first                     */
+/* ------------------------------------------------------------------ */
+
+fn heatmap_365d(conn: &Connection) -> rusqlite::Result<Vec<HeatmapDay>> {
+    // SQLite computes per-day session + word totals; we then
+    // backfill missing days as zero-cells in Rust. Backfilling in
+    // SQL would require a recursive CTE which is fine but adds
+    // complexity vs. a 365-iteration Rust loop. Keep it simple.
+    let mut stmt = conn.prepare(
+        "SELECT date(s.started_at) AS d, \
+                COUNT(s.id), \
+                COALESCE(SUM( \
+                    (LENGTH(t.text) - LENGTH(REPLACE(t.text, ' ', '')) + 1) \
+                ), 0) \
+         FROM sessions s \
+         LEFT JOIN transcripts t \
+            ON t.session_id = s.id AND t.stage = 'final' \
+         WHERE s.started_at >= datetime('now', '-365 days') \
+         GROUP BY d",
+    )?;
+    use std::collections::HashMap;
+    let mut by_date: HashMap<String, (i64, i64)> = HashMap::new();
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
+    })?;
+    for r in rows {
+        let (d, sessions, words) = r?;
+        by_date.insert(d, (sessions, words));
+    }
+    // Walk the last 365 days in ISO date order, filling zeroes for
+    // gaps. Today is index 364; 364 days ago is index 0.
+    let mut out = Vec::with_capacity(365);
+    for days_ago in (0..365).rev() {
+        let d: String = conn.query_row(
+            "SELECT date('now', ?1)",
+            [format!("-{days_ago} days")],
+            |r| r.get(0),
+        )?;
+        let (sessions, words) = by_date.get(&d).copied().unwrap_or((0, 0));
+        out.push(HeatmapDay {
+            date: d,
+            sessions,
+            words,
+        });
+    }
+    Ok(out)
+}
+
+/* ------------------------------------------------------------------ */
+/* Peak hours — last 90 days, sessions per hour-of-day bucket         */
+/* ------------------------------------------------------------------ */
+
+fn peak_hours_90d(conn: &Connection) -> rusqlite::Result<Vec<i64>> {
+    // SQLite's strftime('%H', ...) returns '00'..'23' as text.
+    // CAST to integer once in SQL, then build a 24-slot vector in
+    // Rust so the response shape is always length-24 even on a
+    // brand-new DB.
+    let mut stmt = conn.prepare(
+        "SELECT CAST(strftime('%H', started_at) AS INTEGER), COUNT(*) \
+         FROM sessions \
+         WHERE started_at >= datetime('now', '-90 days') \
+         GROUP BY 1",
+    )?;
+    let mut buckets = vec![0_i64; 24];
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?;
+    for r in rows {
+        let (hour, n) = r?;
+        if (0..24).contains(&hour) {
+            buckets[hour as usize] = n;
+        }
+    }
+    Ok(buckets)
+}
+
+/* ------------------------------------------------------------------ */
+/* Top dictionary terms — by use_count                                 */
+/* ------------------------------------------------------------------ */
+
+fn top_dict_terms(conn: &Connection) -> rusqlite::Result<Vec<DictTermEntry>> {
+    let mut stmt = conn.prepare(
+        "SELECT term, use_count FROM dictionary \
+         WHERE use_count > 0 \
+         ORDER BY use_count DESC, last_used_at DESC \
+         LIMIT 8",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(DictTermEntry {
+            term: r.get(0)?,
+            use_count: r.get(1)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+/* ------------------------------------------------------------------ */
+/* Top corrections — most-corrected raw tokens, last 90d              */
+/* ------------------------------------------------------------------ */
+
+fn top_corrections(conn: &Connection) -> rusqlite::Result<Vec<CorrectionEntry>> {
+    // Group by `before_text` (the wrong word) so a recurring
+    // mis-transcription bubbles to the top regardless of how the
+    // user fixed it.
+    let mut stmt = conn.prepare(
+        "SELECT before_text, COUNT(*) FROM corrections \
+         WHERE created_at >= datetime('now', '-90 days') \
+         GROUP BY before_text \
+         ORDER BY COUNT(*) DESC, before_text \
+         LIMIT 8",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(CorrectionEntry {
+            before: r.get(0)?,
+            count: r.get(1)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+/* ------------------------------------------------------------------ */
+/* WPM — words / minute over last 30 days                              */
+/* ------------------------------------------------------------------ */
+
+fn wpm_stats_30d(conn: &Connection) -> rusqlite::Result<WpmStats> {
+    // Per-session WPM = words / (audio_duration_ms / 60_000). Only
+    // count sessions ≥ 5 seconds so 1-word "yes" misfires don't
+    // skew the average; cap individual WPM at 300 so a near-zero
+    // duration outlier doesn't explode the mean. We average the
+    // per-session WPM (not total-words / total-time) so a single
+    // long session can't dominate.
+    let mut stmt = conn.prepare(
+        "SELECT \
+             ( (LENGTH(t.text) - LENGTH(REPLACE(t.text, ' ', '')) + 1) * 1.0 ) \
+             / (s.audio_duration_ms / 60000.0) AS wpm \
+         FROM sessions s \
+         JOIN transcripts t ON t.session_id = s.id AND t.stage = 'final' \
+         WHERE s.started_at >= datetime('now', '-30 days') \
+           AND s.audio_duration_ms >= 5000 \
+           AND LENGTH(t.text) > 0",
+    )?;
+    let rows = stmt.query_map([], |r| r.get::<_, f64>(0))?;
+    let mut total = 0_f64;
+    let mut samples = 0_i64;
+    for r in rows {
+        let wpm = r?;
+        if wpm.is_finite() && wpm > 0.0 && wpm <= 300.0 {
+            total += wpm;
+            samples += 1;
+        }
+    }
+    let avg_wpm = if samples > 0 {
+        Some(total / samples as f64)
+    } else {
+        None
+    };
+    Ok(WpmStats { avg_wpm, samples })
 }
 
 #[cfg(test)]

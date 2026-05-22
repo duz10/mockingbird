@@ -1,10 +1,43 @@
-/* Insights — dashboard grid. Three rows:
- *   1. Today's "big numbers" + streak badge.
- *   2. Sparkline + mode mix side-by-side.
- *   3. Top apps + latency + learning loop, three across on wide screens,
- *      stacked under 920px. */
+/* Insights — two-tab dashboard.
+ *
+ *   Tab 1 "Your usage": lifetime tiles, 365-day heatmap, 7-day spark,
+ *                       mode mix, top apps, today snapshot.
+ *   Tab 2 "Your voice": WPM big-number, peak-hours bar chart,
+ *                       top dictionary terms, top corrections,
+ *                       latency, learning loop.
+ *
+ * Layout is gap-driven flex columns so cards reflow gracefully on
+ * narrow windows. The two-column rows collapse under 920px.
+ */
 
 .shell { display: flex; flex-direction: column; gap: var(--s-5); }
+
+/* --- tabs --------------------------------------------------------- */
+.tabs {
+  display: flex;
+  gap: var(--s-2);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--s-4);
+}
+.tab {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: var(--s-2) var(--s-3);
+  font: var(--type-md);
+  color: var(--on-surf-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color var(--dur-1) var(--ease-out),
+              border-color var(--dur-1) var(--ease-out);
+}
+.tab:hover { color: var(--on-surf); }
+.tab[aria-selected="true"] {
+  color: var(--on-surf);
+  border-bottom-color: var(--mode-normal);
+  font-weight: 600;
+}
 
 /* Row 1 — 4 metric tiles + streak badge. */
 .tiles {
@@ -47,6 +80,152 @@
 /* Streak tile uses the same shell but flagged with a gold accent. */
 .tileStreak { border-color: oklch(from var(--status-processing) l c h / 0.6); }
 .tileStreak .tileValue { color: var(--status-processing); }
+
+/* --- Today mini-stats (inside a Card on the Usage tab) ------------ */
+.todayGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: var(--s-3);
+}
+.miniStat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.miniStatValue {
+  font: var(--type-lg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--on-surf);
+}
+
+/* --- 365-day heatmap --------------------------------------------- */
+.heatmap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  overflow-x: auto;
+}
+.heatmapMonths {
+  display: grid;
+  grid-template-columns: 24px repeat(53, 1fr);
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  min-width: 720px;
+  /* Month labels are sparse — only show above the first column of
+   * each new month, so we position them via inline gridColumn. */
+  align-items: end;
+  height: 14px;
+}
+.heatmapBody {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  gap: var(--s-2);
+  min-width: 720px;
+}
+.heatmapDows {
+  display: grid;
+  /* Three labels spread across 7 rows: Mon (row 2), Wed (row 4),
+   * Fri (row 6). Empty rows are spacers. */
+  grid-template-rows: repeat(7, 1fr);
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  height: 100%;
+}
+.heatmapDows span:nth-child(1) { grid-row: 2; }
+.heatmapDows span:nth-child(2) { grid-row: 4; }
+.heatmapDows span:nth-child(3) { grid-row: 6; }
+.heatmapGrid {
+  display: grid;
+  gap: 3px;
+}
+.heatmapCol {
+  display: grid;
+  grid-template-rows: repeat(7, 1fr);
+  gap: 3px;
+}
+.heatmapCell {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 2px;
+  display: inline-block;
+  min-width: 8px;
+  min-height: 8px;
+}
+.heatmapPad { visibility: hidden; aspect-ratio: 1/1; }
+/* Five intensity levels — empty + four filled steps. Use the same
+ * accent family as mode-normal so theme swaps inherit. */
+.hm0 { background: var(--surf-3); }
+.hm1 { background: oklch(from var(--mode-normal) l c h / 0.28); }
+.hm2 { background: oklch(from var(--mode-normal) l c h / 0.50); }
+.hm3 { background: oklch(from var(--mode-normal) l c h / 0.72); }
+.hm4 { background: var(--mode-normal); }
+.heatmapLegend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  justify-content: flex-end;
+}
+.heatmapLegend .heatmapCell {
+  width: 11px;
+  height: 11px;
+  min-width: 11px;
+  min-height: 11px;
+  aspect-ratio: auto;
+}
+
+/* --- WPM big number ---------------------------------------------- */
+.wpmBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-1);
+}
+.wpmValue {
+  font: var(--type-3xl, var(--type-2xl));
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--on-surf);
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.wpmUnit {
+  font: var(--type-sm);
+  color: var(--on-surf-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: -4px;
+}
+
+/* --- Peak-hours bar chart ---------------------------------------- */
+.peakBars {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  gap: 3px;
+  align-items: end;
+  height: 96px;
+  padding: var(--s-2) 0;
+}
+.peakBar {
+  width: 100%;
+  background: var(--mode-normal);
+  border-radius: 2px;
+  min-height: 2px;
+  transition: filter var(--dur-1) var(--ease-out);
+}
+.peakBar:hover { filter: brightness(1.2); }
+.peakScale {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  font: var(--type-xs);
+  color: var(--on-surf-faint);
+  margin-top: -2px;
+}
+.peakScale span:nth-child(1) { text-align: left; }
+.peakScale span:nth-child(4) { text-align: right; }
+.peakScale span:nth-child(2), .peakScale span:nth-child(3) { text-align: center; }
 
 /* Row 2 + 3 — two-column then three-column. */
 .row2 {

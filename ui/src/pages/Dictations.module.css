@@ -205,6 +205,102 @@
   z-index: 100;
 }
 
+/* ---- LLM-pass card ---------------------------------------------
+ *
+ * Lives below the transcript stages in the detail view. Local to
+ * this page (vs the meeting LLM-pass which has its own panel) so
+ * the styles can stay scoped instead of being lifted to design
+ * tokens — both surfaces are still tweaking their visual identity.
+ */
+.llmControls {
+  display: flex;
+  gap: var(--s-3);
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: var(--s-2);
+}
+.llmPromptLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font: var(--type-sm);
+  color: var(--on-surf-muted);
+}
+.llmPromptSelect {
+  background: var(--surf-2);
+  color: var(--on-surf);
+  border: 1px solid var(--on-surf-faint);
+  border-radius: var(--radius-sm);
+  padding: var(--s-1) var(--s-2);
+  font: var(--type-sm);
+  cursor: pointer;
+}
+.llmPromptSelect:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.llmHelp {
+  font: var(--type-sm);
+  color: var(--on-surf-muted);
+  margin: var(--s-2) 0 0 0;
+  line-height: 1.45;
+}
+.llmError {
+  background: oklch(from var(--status-error) l c h / 0.12);
+  border: 1px solid oklch(from var(--status-error) l c h / 0.3);
+  color: var(--on-surf);
+  border-radius: var(--radius-sm);
+  padding: var(--s-2) var(--s-3);
+  font: var(--type-sm);
+  margin-top: var(--s-2);
+}
+.llmResult {
+  margin-top: var(--s-2);
+}
+.llmResultMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  margin-bottom: var(--s-1);
+}
+.llmResultMd {
+  font: var(--type-sm);
+  color: var(--on-surf);
+  background: var(--surf-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--s-3) var(--s-4);
+  line-height: 1.55;
+  max-height: 420px;
+  overflow: auto;
+}
+.llmResultMd > :first-child {
+  margin-top: 0;
+}
+.llmResultMd > :last-child {
+  margin-bottom: 0;
+}
+.llmResultPara {
+  margin: var(--s-2) 0;
+  white-space: pre-wrap;
+}
+.llmResultList {
+  margin: var(--s-2) 0;
+  padding-left: var(--s-5);
+  list-style: disc;
+}
+.llmResultList li {
+  margin: var(--s-1) 0;
+}
+.llmResultList li::marker {
+  /* Subtler than the default — the markers are decoration, the
+   * action text is the signal. */
+  color: var(--on-surf-faint);
+}
+
 /* ════════════════════════════════════════════════════════════════
  * Photo-background mode: the left pane is a bare flex container
  * with no material at rest (the .list inside has --surf-2). Against

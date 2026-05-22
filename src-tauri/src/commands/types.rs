@@ -20,6 +20,66 @@ pub struct InsightsSnapshot {
     pub top_apps: Vec<TopAppEntry>,
     pub latency: LatencyBreakdown,
     pub learning: LearningSummary,
+    /// All-time totals across dictation + meetings.
+    pub lifetime: LifetimeTotals,
+    /// Longest consecutive-day streak ever recorded (≥ current).
+    pub longest_streak_days: i64,
+    /// Daily activity for the last 365 days, oldest first. Used by
+    /// the GitHub-style contribution heatmap on the Usage tab.
+    pub heatmap365d: Vec<HeatmapDay>,
+    /// Session-start counts per hour-of-day (0..=23), last 90 days.
+    /// Index 0 = midnight–1am, index 23 = 11pm–midnight.
+    pub peak_hours: Vec<i64>,
+    /// Most-used dictionary terms by `use_count`. Top 8.
+    pub top_dict_terms: Vec<DictTermEntry>,
+    /// Most-corrected raw tokens (from the corrections table). Top 8.
+    pub top_corrections: Vec<CorrectionEntry>,
+    /// Words-per-minute stats over the last 30 days.
+    pub wpm: WpmStats,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LifetimeTotals {
+    pub dictation_words: i64,
+    pub dictation_sessions: i64,
+    pub dictation_recording_ms: i64,
+    pub meetings_count: i64,
+    pub meetings_total_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeatmapDay {
+    /// `YYYY-MM-DD` (local date).
+    pub date: String,
+    pub sessions: i64,
+    pub words: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DictTermEntry {
+    pub term: String,
+    pub use_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CorrectionEntry {
+    pub before: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WpmStats {
+    /// Average WPM over sessions in the last 30 days. `None` if
+    /// there's no qualifying sample.
+    pub avg_wpm: Option<f64>,
+    /// Number of sessions that contributed to the average. Helps the
+    /// UI render "based on N sessions" honestly.
+    pub samples: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -28,7 +28,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: "/insights",   label: t("nav.insights"),   Icon: SparklesIcon },
-  { to: "/history",    label: t("nav.history"),    Icon: HistoryIcon },
+  { to: "/dictations", label: t("nav.dictations"), Icon: HistoryIcon },
   { to: "/meetings",   label: t("nav.meetings"),   Icon: MeetingsIcon },
   { to: "/dictionary", label: t("nav.dictionary"), Icon: BookIcon },
   { to: "/modes",      label: t("nav.modes"),      Icon: SlidersIcon },

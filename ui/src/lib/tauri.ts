@@ -18,6 +18,8 @@ import type {
   DictionaryEntry,
   InsightsSnapshot,
   LearningRun,
+  LlmPassPromptArg,
+  LlmPassResult,
   MeetingSettingsSnapshot,
   ModeRow,
   SessionDetail,
@@ -88,6 +90,20 @@ export const api = {
     invoke<void>("mark_session_as_example", { id }),
   report_correction: (sessionId: number, before: string, after: string) =>
     invoke<number>("report_correction", { sessionId, before, after }),
+  /** Run the optional dictation LLM-pass over a session's transcript.
+   *  Returns the text directly; nothing is cached server-side (see
+   *  `dictation_run_llm_pass` in commands/sessions.rs for the
+   *  rationale — no export pipeline = no need for a cache id). */
+  dictation_run_llm_pass: (
+    sessionId: number,
+    promptId: LlmPassPromptArg,
+    modelId?: string,
+  ) =>
+    invoke<LlmPassResult>("dictation_run_llm_pass", {
+      sessionId,
+      promptId,
+      modelId,
+    }),
 
   // Dictionary
   list_dictionary: () => invoke<DictionaryEntry[]>("list_dictionary"),
@@ -197,6 +213,13 @@ function fixtureFor<T>(command: string, args?: object): T {
         "qwen2.5:3b-instruct-q4_K_M",
         "gemma2:2b-instruct-q4_K_M",
       ]) as T;
+    case "dictation_run_llm_pass":
+      return fixture(command, {
+        id: "fixture-dictation-llm-pass-id",
+        text:
+          "**Summary** — this is a fixture LLM-pass output for the Dictations tab. Browser-preview only.",
+        latencyMs: 1240,
+      }) as T;
     // Write commands — no-op in fixture mode.
     case "delete_session":
     case "mark_session_as_example":
@@ -260,6 +283,53 @@ export const FIXTURES: {
       lastRolledBack: false,
       recentTerms: ["kubectl", "Mockingbird", "Tauri", "OKLCH", "WisprFlow"],
     },
+    lifetime: {
+      dictationWords: 24_066,
+      dictationSessions: 412,
+      dictationRecordingMs: 6 * 3_600_000 + 17 * 60_000,
+      meetingsCount: 18,
+      meetingsTotalMs: 12 * 3_600_000 + 42 * 60_000,
+    },
+    longestStreakDays: 27,
+    // Generate a plausibly-irregular 365-day heatmap: some weeks busy,
+    // some sparse, weekend dips. Deterministic so fixture screenshots
+    // are stable across reruns.
+    heatmap365d: Array.from({ length: 365 }, (_, i) => {
+      const daysAgo = 364 - i;
+      const date = new Date(Date.now() - daysAgo * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+      // Pseudo-random but deterministic: hash the index into a small
+      // count. Weekends get reduced activity.
+      const day = new Date(date).getDay();
+      const isWeekend = day === 0 || day === 6;
+      const seed = ((i * 1103515245 + 12345) >>> 0) % 11;
+      const sessions = isWeekend ? Math.max(0, seed - 7) : seed;
+      return { date, sessions, words: sessions * 78 };
+    }),
+    peakHours: [
+      0, 0, 0, 0, 0, 0, 1, 4, 12, 28, 41, 33,
+      22, 31, 38, 29, 24, 15, 9, 5, 3, 2, 1, 0,
+    ],
+    topDictTerms: [
+      { term: "kubectl", useCount: 47 },
+      { term: "Mockingbird", useCount: 36 },
+      { term: "Tauri", useCount: 28 },
+      { term: "OKLCH", useCount: 19 },
+      { term: "qwen2.5", useCount: 14 },
+      { term: "rusqlite", useCount: 11 },
+      { term: "Ollama", useCount: 9 },
+      { term: "WisprFlow", useCount: 6 },
+    ],
+    topCorrections: [
+      { before: "missy", count: 8 },
+      { before: "dustin", count: 6 },
+      { before: "react", count: 5 },
+      { before: "k8s", count: 4 },
+      { before: "github", count: 3 },
+      { before: "oh-em-gee", count: 2 },
+    ],
+    wpm: { avgWpm: 142.7, samples: 184 },
   },
   sessions: Array.from({ length: 40 }, (_, i) => ({
     id: 100 + i,

@@ -1,4 +1,14 @@
-// History page — list + detail in a two-pane layout.
+// Dictations page — list + detail in a two-pane layout. Shows the
+// history of past dictation sessions (Right-Alt push-to-talk).
+// Sibling to the Meetings page; *not* the same thing as meeting
+// recordings.
+//
+// **Renamed from "History" 2026-05-21.** Internal Rust event names
+// (`history:session-saved`) are left alone — sealed Phase 4 code,
+// and the wire-name has no user impact. The i18n keys, route, and
+// component names all moved to `dictations.*` / `/dictations` /
+// `DictationsPage` so the new naming is consistent from the source
+// down.
 //
 // Why no virtual scrolling: the session list is bounded (we'll add a
 // "Load more" affordance when the user hits the bottom). Real users
@@ -27,6 +37,7 @@ import {
   HistoryIcon,
   PlusIcon,
   SearchIcon,
+  SparklesIcon,
   TrashIcon,
 } from "../design/Icon";
 import { t } from "../i18n";
@@ -41,12 +52,12 @@ import { useAppStore } from "../lib/store";
 import { api, isTauri } from "../lib/tauri";
 import type { SessionDetail, SessionSummary, TranscriptSearchHit } from "../lib/types";
 
-import styles from "./History.module.css";
+import styles from "./Dictations.module.css";
 
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 200;
 
-export function HistoryPage() {
+export function DictationsPage() {
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [searchHits, setSearchHits] = useState<TranscriptSearchHit[] | null>(null);
   const [query, setQuery] = useState("");
@@ -148,7 +159,7 @@ export function HistoryPage() {
   // session list after destructive ops so the UI stays consistent.
   const handleDelete = useCallback(async () => {
     if (!detail) return;
-    if (!window.confirm(t("history.action.delete") + "?")) return;
+    if (!window.confirm(t("dictations.action.delete") + "?")) return;
     await api.delete_session(detail.session.id);
     const list = await api.list_sessions(PAGE_SIZE, 0);
     setSessions(list);
@@ -165,7 +176,7 @@ export function HistoryPage() {
   const handleCopy = useCallback(async () => {
     if (!detail) return;
     await navigator.clipboard.writeText(detail.final || detail.cleaned || detail.raw);
-    showToast(t("history.copied"));
+    showToast(t("dictations.copied"));
   }, [detail, showToast]);
 
   // Decide what to render in the list pane.
@@ -175,8 +186,8 @@ export function HistoryPage() {
       return (
         <EmptyState
           icon={<HistoryIcon size={28} />}
-          title={t("history.empty.title")}
-          subtitle={t("history.empty.subtitle")}
+          title={t("dictations.empty.title")}
+          subtitle={t("dictations.empty.subtitle")}
         />
       );
     }
@@ -200,7 +211,7 @@ export function HistoryPage() {
 
   return (
     <>
-      <PageHeader title={t("history.title")} />
+      <PageHeader title={t("dictations.title")} />
 
       <div className={styles.shell}>
         <div className={styles.leftPane}>
@@ -247,9 +258,9 @@ function SearchInput({
         type="search"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={t("history.search.placeholder")}
+        placeholder={t("dictations.search.placeholder")}
         className={styles.searchInput}
-        aria-label={t("history.search.placeholder")}
+        aria-label={t("dictations.search.placeholder")}
       />
     </label>
   );
@@ -340,7 +351,7 @@ function SearchHitsList({
     return (
       <EmptyState
         icon={<SearchIcon size={28} />}
-        title={t("history.search.noResults")}
+        title={t("dictations.search.noResults")}
       />
     );
   }
@@ -433,45 +444,45 @@ function DetailView({
           </span>
         </div>
         <div className={styles.detailActions}>
-          <Button onClick={fireCopy} ariaLabel={t("history.action.copyFinal")}>
+          <Button onClick={fireCopy} ariaLabel={t("dictations.action.copyFinal")}>
             {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
-            {copied ? "Copied" : t("history.action.copyFinal")}
+            {copied ? "Copied" : t("dictations.action.copyFinal")}
           </Button>
           <Button onClick={onMarkExample}>
             <PlusIcon size={14} />
-            {t("history.action.markExample")}
+            {t("dictations.action.markExample")}
           </Button>
           <Button variant="danger" onClick={onDelete}>
             <TrashIcon size={14} />
-            {t("history.action.delete")}
+            {t("dictations.action.delete")}
           </Button>
         </div>
       </div>
 
-      <Card title={t("history.detail.metadata")}>
+      <Card title={t("dictations.detail.metadata")}>
         <div className={styles.metaGrid}>
-          <span className={styles.metaKey}>{t("history.detail.mode")}</span>
+          <span className={styles.metaKey}>{t("dictations.detail.mode")}</span>
           <span className={styles.metaVal}>
             <Pill tone={`mode-${s.modeSlug}`}>{s.modeSlug}</Pill>
           </span>
-          <span className={styles.metaKey}>{t("history.detail.model")}</span>
+          <span className={styles.metaKey}>{t("dictations.detail.model")}</span>
           <span className={styles.metaVal}>{detail.modelUsed ?? "—"}</span>
           <span className={styles.metaKey}>
-            {t("history.detail.promptVersion")}
+            {t("dictations.detail.promptVersion")}
           </span>
           <span className={styles.metaVal}>{detail.promptVersion ?? "—"}</span>
           <span className={styles.metaKey}>
-            {t("history.detail.dictVersion")}
+            {t("dictations.detail.dictVersion")}
           </span>
           <span className={styles.metaVal}>
             {detail.dictionaryVersion ?? "—"}
           </span>
-          <span className={styles.metaKey}>{t("history.detail.app")}</span>
+          <span className={styles.metaKey}>{t("dictations.detail.app")}</span>
           <span className={styles.metaVal}>
             {prettyAppName(s.foregroundApp)} —{" "}
             {s.foregroundWindowTitle ?? "—"}
           </span>
-          <span className={styles.metaKey}>{t("history.detail.latency")}</span>
+          <span className={styles.metaKey}>{t("dictations.detail.latency")}</span>
           <span className={styles.metaVal}>
             STT {Math.round(detail.latency.sttMs ?? 0)} ms · Clean{" "}
             {Math.round(detail.latency.cleanupMs ?? 0)} ms · Inject{" "}
@@ -482,19 +493,200 @@ function DetailView({
       </Card>
 
       <Card>
-        <Stage label={t("history.detail.raw")} text={detail.raw} variant="raw" />
+        <Stage label={t("dictations.detail.raw")} text={detail.raw} variant="raw" />
         <Stage
-          label={t("history.detail.cleaned")}
+          label={t("dictations.detail.cleaned")}
           text={detail.cleaned}
           variant="cleaned"
         />
         <Stage
-          label={t("history.detail.final")}
+          label={t("dictations.detail.final")}
           text={detail.final}
           variant="final"
         />
       </Card>
+
+      <LlmPassCard sessionId={detail.session.id} />
     </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* LLM-pass card                                                       */
+/*                                                                    */
+/* Optional, off the critical path. Calls the dictation LLM-pass IPC  */
+/* with a built-in prompt and renders the result. Nothing is          */
+/* persisted — same invariant as the meeting LLM pass.                */
+/* ------------------------------------------------------------------ */
+
+type DictLlmPrompt = "summary" | "action_items" | "cleaner_punctuation";
+
+const LLM_PROMPT_OPTIONS: Array<{ id: DictLlmPrompt; labelKey: string }> = [
+  { id: "summary", labelKey: "meetings.llm.prompt.summary" },
+  { id: "action_items", labelKey: "meetings.llm.prompt.action_items" },
+  {
+    id: "cleaner_punctuation",
+    labelKey: "meetings.llm.prompt.cleaner_punctuation",
+  },
+];
+
+/* ------------------------------------------------------------------ */
+/* Minimal LLM-output renderer.                                       */
+/*                                                                    */
+/* Our action_items / summary / cleaner_punctuation prompts emit at   */
+/* most: paragraphs and `- ` bullet lists. We render exactly those    */
+/* two shapes — no react-markdown dep, no nested-list support, no     */
+/* inline emphasis parsing. YAGNI: if a future prompt ever needs      */
+/* tables or headings, swap in a real markdown lib then. Until then   */
+/* this stays a ~40-line pure transform.                              */
+/*                                                                    */
+/* The Copy button copies `result.text` (the source markdown), so     */
+/* paste-into-other-apps still gets dash bullets, not stripped text.  */
+/* ------------------------------------------------------------------ */
+
+function LlmMarkdownView({ text }: { text: string }) {
+  // Split the input into "blocks" separated by one-or-more blank
+  // lines. Each block is either a bullet list (every line starts
+  // with `- ` or `* `) or a paragraph.
+  const blocks = text
+    .split(/\n\s*\n/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+
+  return (
+    <div className={styles.llmResultMd}>
+      {blocks.map((block, i) => {
+        const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
+        const isBulletList =
+          lines.length > 0 &&
+          lines.every((l) => l.startsWith("- ") || l.startsWith("* "));
+        if (isBulletList) {
+          return (
+            <ul key={i} className={styles.llmResultList}>
+              {lines.map((l, j) => (
+                // Strip the leading `- ` / `* ` marker — the <li>
+                // bullet supplies the visual marker. Keep it simple:
+                // no inline-formatting parsing.
+                <li key={j}>{l.slice(2)}</li>
+              ))}
+            </ul>
+          );
+        }
+        return (
+          <p key={i} className={styles.llmResultPara}>
+            {block}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function LlmPassCard({ sessionId }: { sessionId: number }) {
+  const [prompt, setPrompt] = useState<DictLlmPrompt>("summary");
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<{ text: string; latencyMs: number } | null>(
+    null,
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<number | null>(null);
+
+  // Clear local state when the user navigates to a different
+  // session. The LLM pass is per-session; carrying over a previous
+  // result into a new session would be misleading.
+  useEffect(() => {
+    setResult(null);
+    setError(null);
+    setRunning(false);
+    setCopied(false);
+  }, [sessionId]);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimer.current) window.clearTimeout(copyTimer.current);
+    };
+  }, []);
+
+  async function runPass() {
+    setRunning(true);
+    setError(null);
+    try {
+      const r = await api.dictation_run_llm_pass(sessionId, prompt);
+      setResult({ text: r.text, latencyMs: r.latencyMs });
+    } catch (e) {
+      // Surface the backend error message verbatim — it's already a
+      // human-readable string from `commands::into_err`.
+      setError(String(e));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  async function copyOutput() {
+    if (!result) return;
+    try {
+      await navigator.clipboard.writeText(result.text);
+    } catch {
+      // Fall back silently — the user can still select + copy by
+      // hand. Not worth a toast for a 1-in-1000 permission edge.
+      return;
+    }
+    setCopied(true);
+    if (copyTimer.current) window.clearTimeout(copyTimer.current);
+    copyTimer.current = window.setTimeout(() => setCopied(false), 1200);
+  }
+
+  return (
+    <Card title={t("dictations.llm.title")}>
+      <div className={styles.llmControls}>
+        <label className={styles.llmPromptLabel}>
+          {t("dictations.llm.prompt.label")}
+          <select
+            className={styles.llmPromptSelect}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value as DictLlmPrompt)}
+            disabled={running}
+          >
+            {LLM_PROMPT_OPTIONS.map((opt) => (
+              <option key={opt.id} value={opt.id}>
+                {t(opt.labelKey)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Button onClick={runPass} disabled={running}>
+          <SparklesIcon size={14} />
+          {running ? t("dictations.llm.running") : t("dictations.llm.run")}
+        </Button>
+      </div>
+
+      {error ? (
+        <div className={styles.llmError} role="alert">
+          {t("dictations.llm.error").replace("{message}", error)}
+        </div>
+      ) : null}
+
+      {result ? (
+        <div className={styles.llmResult}>
+          <div className={styles.llmResultMeta}>
+            <span>
+              {t("dictations.llm.latency").replace(
+                "{ms}",
+                String(result.latencyMs),
+              )}
+            </span>
+            <Button onClick={copyOutput} ariaLabel={t("dictations.llm.copy")}>
+              {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
+              {copied ? t("dictations.llm.copied") : t("dictations.llm.copy")}
+            </Button>
+          </div>
+          <LlmMarkdownView text={result.text} />
+        </div>
+      ) : !running && !error ? (
+        <p className={styles.llmHelp}>{t("dictations.llm.notRun")}</p>
+      ) : null}
+    </Card>
   );
 }
 

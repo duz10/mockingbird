@@ -32,6 +32,26 @@ export interface InsightsSnapshot {
     lastRolledBack: boolean;
     recentTerms: string[];
   };
+  /** All-time totals across dictation + meetings. */
+  lifetime: {
+    dictationWords: number;
+    dictationSessions: number;
+    dictationRecordingMs: number;
+    meetingsCount: number;
+    meetingsTotalMs: number;
+  };
+  /** Longest consecutive-day dictation streak ever. */
+  longestStreakDays: number;
+  /** Daily activity for the last 365 days, oldest first. */
+  heatmap365d: { date: string; sessions: number; words: number }[];
+  /** Session-start counts per hour-of-day (0..=23), last 90 days. */
+  peakHours: number[];
+  /** Top 8 dictionary terms by use_count. */
+  topDictTerms: { term: string; useCount: number }[];
+  /** Top 8 most-corrected raw tokens, last 90 days. */
+  topCorrections: { before: string; count: number }[];
+  /** Average WPM over the last 30 days. `null` when no qualifying samples. */
+  wpm: { avgWpm: number | null; samples: number };
 }
 
 export interface SessionSummary {

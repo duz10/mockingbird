@@ -9,7 +9,7 @@ import "./design/global.css";
 
 import { App } from "./App";
 import { InsightsPage } from "./pages/Insights";
-import { HistoryPage } from "./pages/History";
+import { DictationsPage } from "./pages/Dictations";
 import { MeetingsPage } from "./pages/Meetings";
 import { DictionaryPage } from "./pages/Dictionary";
 import { ModesPage } from "./pages/Modes";
@@ -26,8 +26,15 @@ createRoot(container).render(
         <Routes>
           <Route path="/" element={<Navigate to="/insights" replace />} />
           <Route path="/insights" element={<InsightsPage />} />
-          <Route path="/history" element={<HistoryPage />} />
-          <Route path="/history/:id" element={<HistoryPage />} />
+          {/* Legacy /history routes preserved for any deep links
+              that may have escaped into shortcuts / notifications
+              before the 2026-05-21 rename. New canonical path is
+              /dictations. Drop these in a future cleanup once the
+              tag has aged. */}
+          <Route path="/dictations" element={<DictationsPage />} />
+          <Route path="/dictations/:id" element={<DictationsPage />} />
+          <Route path="/history" element={<Navigate to="/dictations" replace />} />
+          <Route path="/history/:id" element={<DictationsPage />} />
           <Route path="/meetings" element={<MeetingsPage />} />
           <Route path="/meetings/:uuid" element={<MeetingsPage />} />
           <Route path="/dictionary" element={<DictionaryPage />} />

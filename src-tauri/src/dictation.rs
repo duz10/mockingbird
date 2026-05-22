@@ -50,6 +50,8 @@
 //! - [`runtime`]: Wave 4.5 spawn glue that wires the orchestrator
 //!   into `lib.rs::run()` with the platform-default traits.
 
+pub mod llm_prompts;
+pub mod paste_payload;
 pub mod runtime;
 
 use std::collections::HashMap;
@@ -562,7 +564,13 @@ impl DictationOrchestrator {
         } else {
             match decision {
                 pipeline::Decision::Proceed(strategy) => {
-                    match self.injector.inject(&cleaned_text, strategy) {
+                    // Append a single trailing space to the *paste*
+                    // payload (NOT the persisted text) so the user's
+                    // next dictation flows naturally without
+                    // needing a leading space. See
+                    // dictation::paste_payload for the policy + tests.
+                    let to_paste = paste_payload::paste_payload(&cleaned_text);
+                    match self.injector.inject(&to_paste, strategy) {
                         Ok(o) => o,
                         Err(e) => {
                             tracing::warn!(error = ?e, "injector returned error");

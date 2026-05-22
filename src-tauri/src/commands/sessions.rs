@@ -5,11 +5,14 @@
 use rusqlite::{params, Connection};
 use tauri::State;
 
+use crate::commands::meetings::{LlmPassPromptArg, LlmPassResultDto};
 use crate::commands::types::{
     LatencyBreakdown, SessionDetail, SessionSummary, TranscriptSearchHit,
 };
 use crate::commands::{into_err, lock_db, AppStateHandle};
 use crate::db::{search, sessions, transcripts};
+use crate::dictation::llm_prompts::{resolve_dictation_prompt, strip_markdown_code_fence};
+use crate::meetings::llm_pass::{run_llm_pass, LlmPassPrompt, LlmPassRequest};
 
 /// Single-line text for the summary row. Falls back across stages:
 /// `final` → `cleaned` → `raw` so we always show something.
@@ -265,4 +268,83 @@ pub fn report_correction(
         },
     )
     .map_err(into_err)
+}
+
+// --------------------------------------------------------------------
+// Dictation LLM-pass
+// --------------------------------------------------------------------
+
+/// Run an optional LLM-pass over a dictation session's final text.
+///
+/// Mirrors `meeting_run_llm_pass` but for the Dictations tab. Reuses
+/// the meeting LLM-pass engine (prompts + OllamaProvider plumbing in
+/// `meetings::llm_pass`) instead of duplicating it — the engine is
+/// already prompt-agnostic and the per-pass system header is generic
+/// enough to work on short dictation paragraphs.
+///
+/// **NOT persisted.** Unlike the meeting variant, dictation LLM-pass
+/// output isn't even cached server-side: the UI just renders the
+/// returned text in a panel and offers a Copy button. There's no
+/// export pipeline to hand a cache id to, so the simplest contract
+/// (`run → text → done`) is correct here. If we add an export later,
+/// promote to a cached variant then.
+///
+/// Falls back across transcript stages so a session that injected
+/// nothing (e.g. focus drift) can still be summarized from its
+/// `cleaned` or `raw` stage. The user explicitly asked for the
+/// "injected output" but the fallback keeps the feature useful on
+/// edge-case sessions.
+#[tauri::command]
+pub fn dictation_run_llm_pass(
+    db: State<'_, AppStateHandle>,
+    session_id: i64,
+    prompt_id: LlmPassPromptArg,
+    model_id: Option<String>,
+) -> Result<LlmPassResultDto, String> {
+    let transcript_text = {
+        let conn = lock_db(&db)?;
+        // Confirm the session exists, then load the best-available
+        // transcript stage.
+        let _ = sessions::get_by_id(&conn, session_id)
+            .map_err(into_err)?
+            .ok_or_else(|| format!("session {session_id} not found"))?;
+        pick_summary_text(&conn, session_id)
+            .ok_or_else(|| format!("session {session_id} has no transcript text to summarize"))?
+    };
+    if transcript_text.trim().is_empty() {
+        return Err("transcript text is empty".into());
+    }
+    // Resolve built-in prompt names against the DICTATION prompt set
+    // (`dictation/prompts/*.md`) — these are tuned for first-person
+    // voice memos, where the meeting prompts' demand for explicit
+    // owners + deadlines produces "No action items" on perfectly
+    // actionable notes.
+    //
+    // We wrap the resolved body in `LlmPassPrompt::Custom(body)` so
+    // the existing meeting LLM-pass engine drives Ollama unchanged.
+    // Custom bodies the user passes through stay verbatim.
+    let dict_prompt = match prompt_id {
+        LlmPassPromptArg::BuiltIn(name) => {
+            let body = resolve_dictation_prompt(&name).map_err(into_err)?;
+            LlmPassPrompt::Custom(body.to_string())
+        }
+        LlmPassPromptArg::Custom { custom } => LlmPassPrompt::Custom(custom),
+    };
+    let req = LlmPassRequest {
+        // The engine treats `meeting_uuid` as an opaque ID string; we
+        // pass the session id as a string label so log lines still
+        // correlate to the session row.
+        meeting_uuid: format!("dictation:{session_id}"),
+        prompt: dict_prompt,
+        model_id,
+    };
+    let result = run_llm_pass(&req, &transcript_text).map_err(into_err)?;
+    // Defensive postprocess: small models tend to wrap output in an
+    // outer ```markdown ... ``` fence regardless of the prompt's
+    // instructions. Strip it so the UI renders the content directly.
+    Ok(LlmPassResultDto {
+        id: result.id,
+        text: strip_markdown_code_fence(&result.text),
+        latency_ms: result.latency_ms,
+    })
 }
