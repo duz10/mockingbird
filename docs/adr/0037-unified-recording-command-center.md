@@ -1,7 +1,7 @@
 # ADR-0037: Unified Recording Command Center
 
-- **Status:** Proposed
-- **Date:** 2026-05-25
+- **Status:** Accepted
+- **Date:** 2026-05-25 (Proposed) → 2026-05-24 (Accepted, by Dustin via Bernard planning round)
 - **Deciders:** Dustin (project lead), Bernard / code-puppy (chartering)
 - **Charter for:** Phase 10 Wave 1A — Unified Recording Command Center (inserted before Wave 1B Activity-Log Skeleton; numbered phase's first wave seals at `phase-10-wave-1a-complete`).
 - **Sibling ADR:** [ADR 0036](0036-activity-capture-sibling-subsystem.md) — Activity Capture sibling-subsystem charter. 0037 is the explicit authorization to make surgical edits to sealed Dictation + Meeting Capture surfaces that 0036's "sealed modules stay sealed" rule would otherwise forbid; this authorization is scoped to the boundary listed below.
@@ -112,6 +112,7 @@ The state machine (in `state.rs`) is the only file that decides what those calls
   - Esc dismisses; click outside the window also dismisses; mode pick dispatches via `command_center::pick_mode(kind)` and immediately hides the window.
 
 - **SessionCard (state when ANY recording is already live):** one card.
+  - **Concurrent-session tie-breaker.** If multiple recording sessions are concurrently active when the user opens the Command Center (e.g. dictation pressed during a meeting), the SessionCard shows the **most-recently-started** session. Tie-breaker implementation: `runtimes.iter().filter(active).max_by_key(started_at)`. Esc returns to the mode picker; only one card is shown at a time. If the user wants to inspect the older session, they can dismiss and re-open after the newest one ends. This is a deliberate simplification: a stack-of-cards UI is over-engineering for a state expected to be rare and brief.
   - Header: "Currently recording: Dictation / Meeting / Activity" (with mode icon).
   - Subtitle: elapsed time, live-updating at 1 Hz.
   - Big red "Stop Recording" button. Esc still works (dismisses the card, NOT the recording).

@@ -37,28 +37,30 @@
 - ADR 0033 — MC chord-collision hotfix (VK_M → VK_OEM_PERIOD + settings actually-read-at-boot + overlay UI wires)
 - ADR 0034 — MC overlay event-delivery hotfix (show-before-emit + `emit_to` re-broadcast + defensive latch clear + emit-state observability; fixes mb-z5y)
 - ADR 0035 — MC v1.2 Stable Alpha (Tauri `capabilities/default.json` migration — the *real* root cause of mb-z5y class bugs; `meeting_cancel`; `meeting_rename`; `meeting_overlay_hide`; auto-derived meeting title; WASAPI loopback `build_stream` config-discovery fix; forensic JS-listener-ping beacon scheduled for removal in v1.3 — see `mb-xnn7`)
+- ADR 0036 — Activity Capture sibling-subsystem charter (Phase 10 numbered phase; Accepted 2026-05-24)
+- ADR 0037 — Unified Recording Command Center (Wave 1A charter + explicit boundary authorization for surgical edits to sealed Dictation + Meeting Capture surfaces; Accepted 2026-05-24)
 
 If a kickoff prompt asks you to re-execute any of the above, **STOP** and surface
 the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently sealed".
 
 ## 🟢 Currently active
 
-**Phase 10 — Activity Capture (sibling subsystem). Wave 0.5 — Command Center charter integration shipped; awaiting Dustin review of ADR 0036 + ADR 0037 before Wave 1A code.**
+**Phase 10 — Activity Capture (sibling subsystem). Wave 1A — Unified Recording Command Center in flight (`mb-jtbk` in_progress).**
 
-Chartered 2026-05-25 (Bernard, Wave 0). Wave 0.5 (this iteration) — Command Center charter integration — adds ADR 0037 + Wave 1A in response to the three-overlay UX flag Bernard raised in the Wave 0 summary; ADR 0037 is the explicit authorization for the surgical edits Wave 1A will make to sealed Dictation + Meeting Capture surfaces. Numbered PLAN §10 phase mirroring Phase MC's container: numbered + ADR-chartered + per-wave seal tags + final `phase-10-complete` tag. Phase 9 stays reserved for the macOS cross-platform sweep.
+Chartered 2026-05-25 (Bernard, Wave 0). Wave 0.5 — Command Center charter integration. Wave 1A (this iteration) — code implementation per ADR 0037 §Boundary. ADR 0036 + ADR 0037 both flipped Proposed → Accepted on 2026-05-24 by Dustin. Numbered PLAN §10 phase mirroring Phase MC's container: numbered + ADR-chartered + per-wave seal tags + final `phase-10-complete` tag. Phase 9 stays reserved for the macOS cross-platform sweep.
 
 **Decision matrix (Wave 0.5):** Chord = `Right Ctrl + Space` (user-configurable, ADR 0019 probe); mutual-exclusion-while-recording = open Command Center showing SessionCard + Stop button, returns to mode picker after Stop; tray entry = yes ("Open Command Center"); legacy `Right Ctrl + .` meeting chord = user setting `legacy_meeting_chord_enabled` (default OFF; one-shot migration sets ON for existing users with the prior chord configured, mirrors ADR 0033); first-run = auto-open with Welcome header band, tracked via `command_center_seen_v1`.
 
 - **Charter ADRs:**
-  - [ADR 0036](docs/adr/0036-activity-capture-sibling-subsystem.md) — Activity Capture sibling-subsystem. **Status: Proposed** (Dustin flips to Accepted before Wave 1A code).
-  - [ADR 0037](docs/adr/0037-unified-recording-command-center.md) — Unified Recording Command Center (Wave 1A charter + explicit boundary authorization for surgical edits to sealed Dictation + Meeting Capture surfaces). **Status: Proposed** (Dustin flips to Accepted before Wave 1A code).
+  - [ADR 0036](docs/adr/0036-activity-capture-sibling-subsystem.md) — Activity Capture sibling-subsystem. **Status: Accepted (2026-05-24).**
+  - [ADR 0037](docs/adr/0037-unified-recording-command-center.md) — Unified Recording Command Center (Wave 1A charter + explicit boundary authorization for surgical edits to sealed Dictation + Meeting Capture surfaces). **Status: Accepted (2026-05-24).** Tie-breaker amendment: SessionCard shows most-recently-started concurrent session.
 - **Phase doc:** [`docs/phases/phase10.md`](docs/phases/phase10.md) — seven-wave brief (1A Command Center → 1B skeleton → 2 UIA depth → 3 summarization → 4 audio → 5 hardening → 6 judges + seal). Wave 7 (Layer 3 screenshot + OCR) is OPTIONAL post-seal via successor ADR 0039.
 - **Source plan:** [`mockingbird-activity-capture-plan.md`](mockingbird-activity-capture-plan.md) — vision doc; the implementation charter against it lives in ADRs 0036 + 0037.
 - **PLAN §10 amendment:** Phase 10 entry in `PLAN-mockingbird-v2.md` updated to include Wave 1A as the first wave, with Wave 1 re-lettered to 1B.
 - **Sub-ADRs deferred:** ADR 0038 (encryption-at-rest — Wave 5; SQLCipher / DPAPI-per-row / app-layer AES-GCM candidates pre-named; renumbered from 0037 after the Command Center charter took 0037). ADR 0039 (optional, post-seal — Layer 3 screenshot + OCR; renumbered from 0038 for the same reason).
 - **Bead epic:** `mb-a2w9` (status `in_progress`).
 - **Wave beads** (each P1, dependency-chained so each subsequent wave depends on its predecessor; the epic depends on all of them):
-  - `mb-jtbk` **Wave 1A: Unified Recording Command Center** ← unblocked, awaits ADR 0037 Acceptance (Wave 0.5 iteration)
+  - `mb-jtbk` **Wave 1A: Unified Recording Command Center** ← `in_progress` (Wave 1A code iteration; ADR 0037 Accepted)
   - `mb-hnl3` Wave 1B: Activity-Log Skeleton (titles-only) ← blocked-by `mb-jtbk`
   - `mb-hr1u` Wave 2: UIA deep snapshots + multi-monitor
   - `mb-pwup` Wave 3: Summarization pipeline

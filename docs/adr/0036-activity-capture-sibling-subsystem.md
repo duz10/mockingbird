@@ -1,7 +1,7 @@
 # ADR-0036: Activity Capture is a sibling subsystem; chartered as Phase 10
 
-- **Status:** Proposed
-- **Date:** 2026-05-25
+- **Status:** Accepted
+- **Date:** 2026-05-25 (Proposed) → 2026-05-24 (Accepted, by Dustin via Bernard planning round)
 - **Deciders:** Dustin (project lead), Bernard / code-puppy (chartering)
 - **Charter for:** Phase 10 — Activity Capture (numbered PLAN §10 phase, six waves; mirrors Phase MC's container shape: numbered + ADR-chartered + per-wave seal tags + final `phase-10-complete` tag)
 - **Source plan:** `mockingbird-activity-capture-plan.md` at repo root (untracked feature plan; this ADR is the implementation charter against it)
