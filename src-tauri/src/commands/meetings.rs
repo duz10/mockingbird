@@ -47,7 +47,8 @@ use crate::meetings::export::render_markdown;
 use crate::meetings::llm_pass::{run_llm_pass, LlmPassPrompt, LlmPassRequest};
 use crate::meetings::repo::{
     delete_meeting as repo_delete_meeting, list_meetings as repo_list_meetings,
-    load_meeting_detail, search_meetings, MeetingDetail, MeetingMatch, MeetingSummary,
+    load_meeting_detail, rename_meeting as repo_rename_meeting, search_meetings, MeetingDetail,
+    MeetingMatch, MeetingSummary,
 };
 use crate::meetings::runtime::{MeetingCaptureRuntime, MeetingRuntimeShared};
 
@@ -211,12 +212,20 @@ pub fn meeting_start(
             "uuid": &uuid,
             "source": src.as_db_str(),
         });
-        if let Err(e) = rt.app_handle.emit_to(
+        match rt.app_handle.emit_to(
             crate::meetings::overlay::MEETING_OVERLAY_LABEL,
             "meeting:state",
             payload,
         ) {
-            tracing::warn!(error = ?e, "meeting:state emit_to overlay failed");
+            Ok(()) => tracing::info!(
+                target: "mb_listener_ping",
+                uuid = %uuid,
+                "emit_to(meeting_overlay, meeting:state=started) OK"
+            ),
+            Err(e) => tracing::warn!(
+                error = ?e,
+                "meeting:state emit_to overlay failed"
+            ),
         }
     }
 
@@ -234,6 +243,55 @@ pub fn meeting_start(
 #[tauri::command]
 pub fn meeting_stop(rt: State<'_, MeetingRuntimeShared>, uuid: String) -> Result<(), String> {
     rt.stop_meeting(&uuid).map_err(into_err)
+}
+
+/// User-initiated cancel — stops the in-flight meeting and discards
+/// the recording entirely (no DB row, no chunk files left on disk).
+/// Distinct from `meeting_stop` (clean save) and from the drop-time
+/// `Interrupted` finalizer (forensic save on crash). Emits
+/// `meeting:state=cancelled`.
+#[tauri::command]
+pub fn meeting_cancel(rt: State<'_, MeetingRuntimeShared>, uuid: String) -> Result<(), String> {
+    rt.cancel_meeting(&uuid).map_err(into_err)
+}
+
+/// Hide the meeting overlay window. Delegates to the existing
+/// `meetings::overlay::hide_overlay` helper.
+///
+/// Why this IPC exists when the JS side has
+/// `getCurrentWindow().hide()`: live-fire showed that on Win32,
+/// calling `window.hide()` synchronously from a button onClick
+/// handler silently no-ops (the click finishes but the hide call
+/// doesn't take). Routing through Rust uses the AppHandle's window
+/// registry directly and works reliably from any context. Same
+/// belt-and-suspenders pattern as the post-`done` Rust fallback
+/// hide. See LESSONS 2026-05-23.
+#[tauri::command]
+pub fn meeting_overlay_hide<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    crate::meetings::overlay::hide_overlay(&app);
+    Ok(())
+}
+
+/// **mb-z5y wave-2 forensic ping** — listener-fired beacon.
+///
+/// Both React listeners (`Meetings.tsx` and `MeetingOverlay.tsx`)
+/// call this from inside their `meeting:state` listener callbacks.
+/// On the Rust side it does nothing except log, giving us hard
+/// evidence in `mockingbird.log` of whether the listener actually
+/// fires (vs. our prior inference from observable UI symptoms which
+/// could be confused by optimistic state updates).
+///
+/// Delete this command + its TS callers once the cross-window
+/// event-delivery issue is rooted out and judged-against.
+#[tauri::command]
+pub fn meeting_debug_listener_ping(window: String, event: String, payload_state: String) {
+    tracing::info!(
+        target: "mb_listener_ping",
+        window = %window,
+        event = %event,
+        state = %payload_state,
+        "JS LISTENER FIRED"
+    );
 }
 
 /// Pause or unpause the meeting hotkey. Persisted to settings so the
@@ -298,6 +356,25 @@ pub fn delete_meeting(db: State<'_, AppStateHandle>, uuid: String) -> Result<(),
     let _existed = repo_delete_meeting(&conn, &uuid).map_err(into_err)?;
     // Idempotent per repo contract — a stale "Delete" click on a row
     // that already vanished is not an error.
+    Ok(())
+}
+
+/// Rename a meeting (or clear back to None to use the auto-derived
+/// default at render time). Pass `title: Some("…")` to set, or
+/// `title: None` to clear. Empty / whitespace-only titles coerce to
+/// None per `repo::rename_meeting`.
+///
+/// Idempotent like `delete_meeting`: a uuid that no longer exists is
+/// not an error (the user's last click on a row that just vanished
+/// shouldn't toast a scary message).
+#[tauri::command]
+pub fn meeting_rename(
+    db: State<'_, AppStateHandle>,
+    uuid: String,
+    title: Option<String>,
+) -> Result<(), String> {
+    let conn = lock_db(&db)?;
+    let _updated = repo_rename_meeting(&conn, &uuid, title.as_deref()).map_err(into_err)?;
     Ok(())
 }
 

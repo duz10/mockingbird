@@ -10,7 +10,7 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-05-24 (checkpoint after dictation-polish session — paste fix, History→Dictations rename, on-demand LLM pass, Insights 2-tab redesign; commit `dda676a`).
+**Last consolidated:** 2026-05-24 (MC v1.2 Stable Alpha seal — ADR 0035 + git tag `stable-alpha-v0.1`).
 
 ## ✅ Sealed (do not re-execute)
 
@@ -25,6 +25,7 @@
 | `phase-8-complete`       | UI sprint — all six pages + recording overlay (App/Insights/History/Dictionary/Modes/Settings + recording window). |
 | `phase-mc-start` (anchor)| Stable diff reference for `mc-dictation-untouched` judge. |
 | `phase-mc-complete`      | Meeting Capture subsystem: chord activation, twin-stream capture, long-form chunked Whisper, deterministic formatter, two-channel merge, ephemeral LLM pass, overlay UI, Meetings/MeetingDetail pages, 5 invariant judges. |
+| `stable-alpha-v0.1`      | First user-visible stable build. MC subsystem at UX parity with PLAN (start/pause/stop/cancel/rename/auto-title/search/delete/export). Insights two-tab redesign. On-demand LLM pass on dictations. Reference checkpoint for distinguishing pre-/post-enhancement work in future sessions. |
 
 **Lateral epics accepted via ADR** (no new phase tag — see `docs/adr/`):
 
@@ -35,11 +36,31 @@
 - ADR 0032 — MC v1.1 polish (VU meters, LLM-ephemeral notice, MaxDuration UI)
 - ADR 0033 — MC chord-collision hotfix (VK_M → VK_OEM_PERIOD + settings actually-read-at-boot + overlay UI wires)
 - ADR 0034 — MC overlay event-delivery hotfix (show-before-emit + `emit_to` re-broadcast + defensive latch clear + emit-state observability; fixes mb-z5y)
+- ADR 0035 — MC v1.2 Stable Alpha (Tauri `capabilities/default.json` migration — the *real* root cause of mb-z5y class bugs; `meeting_cancel`; `meeting_rename`; `meeting_overlay_hide`; auto-derived meeting title; WASAPI loopback `build_stream` config-discovery fix; forensic JS-listener-ping beacon scheduled for removal in v1.3 — see `mb-xnn7`)
 
 If a kickoff prompt asks you to re-execute any of the above, **STOP** and surface
 the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently sealed".
 
 ## 🟢 Currently active
+
+**No in-flight epic.** Stable-alpha checkpoint reached 2026-05-24.
+
+**Standing P3 follow-up:** `mb-xnn7` — remove the `meeting_debug_listener_ping`
+IPC + its TS callers in `Meetings.tsx` / `MeetingOverlay.tsx` before the next
+MC enhancement epic ships. The beacon was added in v1.2 as forensic evidence
+for JS-listener firing during the mb-z5y class of bug; it's not load-bearing
+and the noise should not survive the next iteration.
+
+**Future epic candidate (NOT chartered yet):**
+`mockingbird-activity-capture-plan.md` (untracked at repo root) — vision-stage
+plan for an Activity Capture & Session Summary feature (foreground-context
+sampling via accessibility tree + mic + optional screenshots → chronological
+work-day summary). Sibling-subsystem candidate. Read the plan first before
+chartering.
+
+---
+
+### Previous in-flight summary (now sealed)
 
 **Dictation polish — shipped 2026-05-24** (commit `dda676a`). Four-in-one
 lateral cleanup session:

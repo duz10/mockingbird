@@ -19,7 +19,7 @@
 //! the only state they need is the `AppHandle` (already on
 //! [`super::runtime::MeetingRuntimeShared`]).
 
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 /// Label of the meeting overlay webview, matches the declaration in
 /// `tauri.conf.json`. Kept as a `pub const` so callers in tests +
@@ -36,7 +36,7 @@ pub const MEETING_OVERLAY_LABEL: &str = "meeting_overlay";
 /// Returns `true` when the overlay window was found + show() was
 /// dispatched; `false` when the window is missing (callers can fall
 /// back to direct start if they like).
-pub fn show_overlay(app: &AppHandle) -> bool {
+pub fn show_overlay<R: Runtime>(app: &AppHandle<R>) -> bool {
     let Some(window) = app.get_webview_window(MEETING_OVERLAY_LABEL) else {
         tracing::warn!(
             label = MEETING_OVERLAY_LABEL,
@@ -71,7 +71,7 @@ pub fn show_overlay(app: &AppHandle) -> bool {
 ///
 /// Returns `true` when the overlay window was found + show() was
 /// dispatched; `false` when the window is missing.
-pub fn force_show_for_recording(app: &AppHandle) -> bool {
+pub fn force_show_for_recording<R: Runtime>(app: &AppHandle<R>) -> bool {
     let Some(window) = app.get_webview_window(MEETING_OVERLAY_LABEL) else {
         tracing::warn!(
             label = MEETING_OVERLAY_LABEL,
@@ -88,7 +88,7 @@ pub fn force_show_for_recording(app: &AppHandle) -> bool {
 
 /// Hide the overlay window (no event — the React side self-clears
 /// state on `meeting:state == "done"`).
-pub fn hide_overlay(app: &AppHandle) {
+pub fn hide_overlay<R: Runtime>(app: &AppHandle<R>) {
     let Some(window) = app.get_webview_window(MEETING_OVERLAY_LABEL) else {
         return;
     };

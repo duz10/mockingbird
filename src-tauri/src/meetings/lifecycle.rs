@@ -148,6 +148,74 @@ impl MeetingRuntimeShared {
         Ok(())
     }
 
+    /// User-initiated cancel. Stops capture, joins the long-form
+    /// thread (discards its output), and **deletes the on-disk chunk
+    /// directory**. Does NOT persist anything to the meetings DB —
+    /// the user explicitly told us to throw this away.
+    ///
+    /// Mirrors the early teardown steps of [`Self::finalize_meeting`]
+    /// (stop tick emitter → stop capture → join long-form) but skips
+    /// the format/merge/persist tail. Emits `meeting:state=cancelled`.
+    ///
+    /// Raw-data immutability rule (PLAN principle #1) is not
+    /// violated: nothing in `transcripts(stage='raw')` has been
+    /// written yet at the point this runs. We're cleaning up the
+    /// pre-DB scratch space (chunk WAVs) that the user discarded.
+    pub fn cancel_meeting(&self, uuid: &str) -> AppResult<()> {
+        let in_flight = self.take_in_flight_or_error(uuid)?;
+        let InFlightMeeting {
+            uuid: ifl_uuid,
+            source,
+            mut capture,
+            long_form_thread,
+            chunk_dir,
+            tick_running,
+            mut tick_thread,
+            ..
+        } = in_flight;
+
+        // 0. Stop tick emitter first (matches finalize_meeting order).
+        tick_running.store(false, Ordering::Relaxed);
+        if let Some(h) = tick_thread.take() {
+            if let Err(e) = h.join() {
+                tracing::warn!(target: "meetings", error = ?e, "cancel: tick thread join failed");
+            }
+        }
+
+        // 1. Stop capture — closes WAV file handles in the chunker.
+        if let Err(e) = capture.stop() {
+            tracing::warn!(target: "meetings", error = %e, "cancel: capture.stop() reported errors");
+        }
+
+        // 2. Join the long-form worker. Output is discarded.
+        match long_form_thread.join() {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => {
+                tracing::warn!(target: "meetings", error = %e, "cancel: long-form thread errored")
+            }
+            Err(e) => {
+                tracing::warn!(target: "meetings", error = ?e, "cancel: long-form thread panicked")
+            }
+        }
+
+        // 3. Best-effort remove of chunk_dir. Failure here is OK —
+        //    the directory will be GC'd by app startup eventually,
+        //    or the user can delete manually. Logging only.
+        if let Err(e) = std::fs::remove_dir_all(&chunk_dir) {
+            tracing::warn!(
+                target: "meetings",
+                error = ?e,
+                path = %chunk_dir.display(),
+                "cancel: chunk_dir cleanup failed"
+            );
+        }
+
+        // 4. Emit the cancelled state. React side flips to a
+        //    "cancelled, not saved" mode for ~3s, then back to choose.
+        self.emit_state("cancelled", Some(&ifl_uuid), Some(source));
+        Ok(())
+    }
+
     /// Drop-time best-effort finalizer. Persists any still-in-flight
     /// meeting as `MeetingStatus::Interrupted`.
     pub(crate) fn finalize_in_flight_as_interrupted(&self) -> AppResult<()> {
@@ -222,9 +290,22 @@ impl MeetingRuntimeShared {
             }
         }
 
-        if let Err(e) = capture.stop() {
-            tracing::warn!(target: "meetings", error = %e, "capture.stop() reported errors");
-        }
+        // mb-z5y wave-5: track capture-stop errors so we can flag
+        // meetings that never produced audio. Previously errors here
+        // were swallowed as warnings and the meeting persisted as
+        // Complete with an empty transcript — confusing for users
+        // ("why is my system-audio recording blank?").
+        let capture_stop_error: Option<String> = match capture.stop() {
+            Ok(_) => None,
+            Err(e) => {
+                tracing::warn!(
+                    target: "meetings",
+                    error = %e,
+                    "capture.stop() reported errors"
+                );
+                Some(e.to_string())
+            }
+        };
 
         // 2. Join the long-form worker.
         let output = long_form_thread
@@ -238,6 +319,34 @@ impl MeetingRuntimeShared {
                 );
                 LongFormOutput::default()
             });
+
+        // mb-z5y wave-5: detect silent capture failure. If the user
+        // asked for a channel that produced ZERO segments AND we hit
+        // a capture error, the recording is effectively a no-op.
+        // Downgrade status + attach a user-facing error message so
+        // the persisted row reflects reality and the UI can surface
+        // a meaningful failure. (Real silence with a working stream
+        // is fine — only flagged when stop also errored.)
+        let (status, error_message) = {
+            let mic_dead = source.needs_mic() && output.mic_segments.is_empty();
+            let sys_dead = source.needs_system() && output.sys_segments.is_empty();
+            let all_required_dead = match source {
+                MeetingSource::Mic => mic_dead,
+                MeetingSource::System => sys_dead,
+                MeetingSource::Both => mic_dead && sys_dead,
+            };
+            if all_required_dead && capture_stop_error.is_some() {
+                let msg = format!(
+                    "capture produced no audio for source '{}': {}",
+                    source.as_db_str(),
+                    capture_stop_error.as_deref().unwrap_or("(no detail)")
+                );
+                tracing::error!(target: "meetings", error = %msg, "meeting failed: silent capture");
+                (MeetingStatus::Failed, Some(msg))
+            } else {
+                (status, error_message)
+            }
+        };
 
         // 3. Format + merge.
         let opts = FormatOpts::default();
@@ -305,6 +414,31 @@ impl MeetingRuntimeShared {
             MeetingStatus::Failed => "failed",
         };
         self.emit_state(state_label, Some(&uuid), Some(source));
+
+        // mb-z5y wave-3 belt-and-suspenders: on a clean stop the React
+        // side shows the "Saved to history" confirmation for 5s then
+        // calls `getCurrentWindow().hide()`. In wave-2 we confirmed JS
+        // listeners fire (capabilities fix landed), but Dustin still
+        // saw the pill stuck visible after stop in one live-fire run.
+        // Schedule a Rust-side fallback hide 5.5s after `done` — by
+        // then the React side has either succeeded (no-op, window
+        // already hidden) or failed (we rescue the UX).
+        //
+        // Only fires for the clean `done` path. error/interrupted/
+        // failed deliberately leave the overlay visible so the user
+        // sees what went wrong.
+        if matches!(status, MeetingStatus::Complete) {
+            let app = self.app_handle.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(5_500));
+                crate::meetings::overlay::hide_overlay(&app);
+                tracing::info!(
+                    target: "mb_listener_ping",
+                    "rust fallback hide_overlay() called 5.5s post-done"
+                );
+            });
+        }
+
         Ok(session_rowid)
     }
 
@@ -325,9 +459,19 @@ impl MeetingRuntimeShared {
             formatted_sys,
             formatted_merged,
         } = args;
+        // Auto-derive a short title from the formatted transcripts.
+        // Pure heuristic — see `meetings::title`. Returns None when
+        // every channel is silent; UI then falls back to the
+        // localized "Untitled meeting" string. Users can rename via
+        // the `meeting_rename` command.
+        let title = crate::meetings::title::derive_meeting_title(
+            formatted_merged.as_deref(),
+            formatted_mic.as_deref(),
+            formatted_sys.as_deref(),
+        );
         MeetingPersistRequest {
             uuid: uuid.to_string(),
-            title: None,
+            title,
             started_at: started_at_iso.to_string(),
             ended_at: now_iso(),
             status,

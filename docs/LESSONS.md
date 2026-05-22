@@ -129,6 +129,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-24 | `[mc-v1.2 / ADR 0035]`           | MC Stable Alpha seal — capabilities migration is the real mb-z5y root cause; cancel/rename/auto-title; WASAPI loopback fix; stable-alpha-v0.1 tag |
 | 2026-05-24 | `[dictation-polish]`             | paste-trailing-space, History→Dictations, on-demand LLM pass, Insights 2-tab redesign |
 | 2026-05-23 | `[mc-hotfix / mb-z5y / ADR 0034]`| overlay stuck in CHOOSE — show-before-emit + emit_to + defensive clear   |
 | 2026-05-23 | `[meta / session-start]`         | detected stale Phase MC kickoff but then over-corrected — added (a/b/c) triage |
@@ -167,6 +168,123 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-24 [mc-v1.2 / ADR 0035] MC Stable Alpha seal: Tauri capabilities config was the real root cause of the mb-z5y bug class, not just an event-ordering race
+
+- **Context:** Triaging the pre-existing dirty tree before sealing,
+  found a coherent in-flight epic spanning 14 files
+  (`capabilities/default.json` new, `audio/capture.rs`,
+  `meetings/{lifecycle,repo,title,mod,runtime,overlay}.rs`,
+  `commands/meetings.rs`, plus React side: `MeetingDetail.tsx`,
+  `Meetings.tsx`, `MeetingOverlay.tsx`, `meetings.ts`, `Icon.tsx`).
+  The work was ~80% done; what remained was the ADR charter, fmt
+  pass on the drifted files, bead tracking, STATUS/LESSONS, and the
+  commit + tag. Live-fire verification was on Dustin's side
+  (he confirmed "things are good" before greenlighting the seal).
+
+- **Finding 1 (the real mb-z5y root cause):** ADR 0034 hot-fixed the
+  symptom (overlay event delivery race) with four belt-and-suspenders
+  layers. They worked. But the *real* root cause was hiding in plain
+  sight: there was no `src-tauri/capabilities/default.json`. Without
+  that file, Tauri 2.x's permission system is empty by default for
+  secondary windows, and `listen()`, `emit_to()`, and
+  `window.hide()` silently no-op on non-main webviews. `invoke()` of
+  `#[tauri::command]` handlers uses a different permission path and
+  still works — which is *exactly* why the bug looked like an
+  event-delivery race instead of a missing-permission problem.
+  **Action (v1.2):** added the capabilities file granting
+  `core:default` to `main`, `recording`, and `meeting_overlay`. The
+  ADR 0034 belt-and-suspenders fixes stay in place (cheap, idempotent
+  defense in depth) but the capabilities file is the deeper fix.
+  **Lesson:** when a hotfix works but you don't fully understand *why*
+  it works, treat that ignorance as a follow-up debt, not a closed
+  chapter. ADR 0034 was Accepted on 2026-05-23 with the surface
+  understanding; one day later we found the deeper cause. Worth
+  re-reading the Tauri capabilities docs end-to-end the next time a
+  permission-shaped bug appears.
+
+- **Finding 2 (`build_stream` diverged from `probe_sources`):**
+  Two-channel meetings worked in development but sometimes failed on
+  real hardware. The reason: `probe_sources()` (used for the device
+  picker availability check) correctly branched on
+  `DeviceSource::{Input, Loopback}` and called
+  `default_output_config()` for loopback per ADR 0031.
+  `CpalCapture::build_stream` (used to actually start the stream)
+  did NOT — it called `default_input_config()` unconditionally,
+  which fails on render devices with "requested stream type is not
+  supported." In some lucky cases cpal accepted the wrong config
+  and produced silent/garbled audio that survived to the
+  "transcript is empty" branch, hiding the bug. **Lesson:** when
+  two functions need to make the same OS-call-shape decision
+  (probe vs. actual use), extract the decision into a single
+  helper or at minimum cross-reference them in code comments.
+  A divergence like this is exactly the kind of thing the
+  600-line file-cap rule catches by forcing function extraction
+  earlier.
+
+- **Finding 3 (auto-title pure module = easy to test exhaustively):**
+  `meetings/title.rs` is ~310 lines and has ~25 unit tests. It's a
+  pure function — no I/O, no DB, no clock — so the test surface is
+  exactly the input-output mapping. Tests cover: happy-path 5-word
+  truncation, speaker-label stripping (`**You:**` / `**Other(s):**`),
+  paragraph-skipping for filler-only paragraphs, channel fallback
+  (merged > mic > sys), unicode capitalization (`café` → `Café`),
+  apostrophe/hyphen preservation, quote stripping, char-cap at 60
+  without splitting tokens, pathological single-huge-token,
+  realistic two-speaker merged-formatter output. **Lesson:** when a
+  module's whole purpose is a pure transformation, the test density
+  target is much higher than the AGENTS.md baseline (10 tests per
+  500 LoC). A pure module deserves 25-30 tests if there's any
+  branching at all, because the marginal cost of each test is
+  trivial and the marginal value (catching a regression in a
+  re-tuning) is high. This was already PLAN guidance for MC waves;
+  it's worth re-stating for non-MC pure modules too.
+
+- **Finding 4 (the forensic ping pattern):**
+  `meeting_debug_listener_ping` is an explicitly-temporary IPC that
+  React listeners call from inside their `meeting:state` callback,
+  with the Rust side doing nothing but logging. This gives hard
+  evidence of JS listener firing — distinguishing "emit landed but
+  listener didn't fire" from "listener fired but state update
+  raced" the next time this bug class shows up. Code comment
+  + ADR 0035 + bead `mb-xnn7` all explicitly mark it for
+  removal. **Lesson:** forensic instrumentation that *would* have
+  caught the previous bug is worth shipping even after the bug is
+  fixed — but only if you track the deletion as a real follow-up
+  task. Otherwise you accumulate forever-temporary instrumentation
+  that future-Bernard reads and treats as load-bearing.
+
+- **Finding 5 (`getCurrentWindow().hide()` Win32 silent no-op):**
+  Calling `getCurrentWindow().hide()` synchronously from a button
+  onClick handler silently fails on Win32 — the click finishes,
+  the JS executes, but the hide doesn't take. The Rust path
+  (`AppHandle::get_webview_window(label).hide()`) uses Tauri's
+  internal window registry and works reliably from any context.
+  Same shape as the `emit_to` lesson from ADR 0034 / capabilities
+  finding above: when the JS-side primitive is unreliable on a
+  specific platform, route through Rust. `meeting_overlay_hide` is
+  now the canonical hide path.
+
+- **Finding 6 (process — sealing an in-flight epic you didn't
+  write):** When you walk into a session and find a coherent
+  ~80%-done epic in the dirty tree, the right move is *not* to
+  finish writing it inline (you don't have the live-fire context).
+  The right move is to: (a) audit and triage publicly so the user
+  can decide whether to seal-as-is or fix-then-seal; (b) treat their
+  "things are good" as the live-fire acceptance gate; (c) do the
+  paper-work seal (ADR + STATUS + LESSONS + beads + tag) without
+  changing the runtime behavior. This kept the iteration cheap and
+  preserved Dustin's authorship of the runtime work.
+
+- **Gate evidence:** `cargo fmt --check` clean across the whole
+  crate; `clippy --release -D warnings` clean; `check --release
+  --tests` clean; `tsc --noEmit` clean; vitest 55/55 (note: includes
+  the `SettingsMeetingTab.test.ts` 11-test suite that was always
+  there — earlier grep just truncated). Stable alpha tag
+  `stable-alpha-v0.1` lands on the seal commit. `mb-xnn7` stays
+  open as the v1.3-prep follow-up.
 
 ---
 

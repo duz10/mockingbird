@@ -179,10 +179,32 @@ impl CpalCapture {
     /// converts on the fly via [`super::resampler::AudioPipeline`].
     /// The downstream consumer always sees `TARGET_SAMPLE_RATE` mono
     /// `i16`, regardless of what the device exposed.
-    fn build_stream(device: &Device, producer: SampleProducer) -> AppResult<Stream> {
-        let supported = device
-            .default_input_config()
-            .map_err(|e| AppError::Audio(format!("default_input_config: {e}")))?;
+    ///
+    /// **mb-z5y wave-5 fix**: branches on `source` to pick the right
+    /// cpal config-discovery call. `default_input_config()` works for
+    /// real input devices (mic) but FAILS on render devices with
+    /// "requested stream type is not supported" because cpal sees
+    /// them as output-only. For WASAPI loopback we must use
+    /// `default_output_config()` — the render device's native output
+    /// format IS the format the loopback stream will deliver. cpal's
+    /// WASAPI backend transparently flips on `AUDCLNT_STREAMFLAGS_-
+    /// LOOPBACK` when `build_input_stream` is called on a render
+    /// device (ADR 0031). See `probe_sources()` in `meetings/capture`
+    /// — it uses the correct call for availability detection; this
+    /// function previously diverged.
+    fn build_stream(
+        device: &Device,
+        source: DeviceSource,
+        producer: SampleProducer,
+    ) -> AppResult<Stream> {
+        let supported = match source {
+            DeviceSource::Input => device
+                .default_input_config()
+                .map_err(|e| AppError::Audio(format!("default_input_config: {e}")))?,
+            DeviceSource::Loopback => device
+                .default_output_config()
+                .map_err(|e| AppError::Audio(format!("default_output_config: {e}")))?,
+        };
 
         let sample_format = supported.sample_format();
         let config = StreamConfig {
@@ -313,7 +335,7 @@ impl super::AudioCapture for CpalCapture {
         let (producer, consumer) = rb.split();
         self.consumer = consumer;
 
-        let stream = Self::build_stream(&device, producer)?;
+        let stream = Self::build_stream(&device, self.source, producer)?;
         stream
             .play()
             .map_err(|e| AppError::Audio(format!("stream play: {e}")))?;

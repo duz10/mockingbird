@@ -483,6 +483,10 @@ impl MeetingCaptureRuntime {
         self.shared.stop_meeting(uuid)
     }
 
+    pub fn cancel_meeting(&self, uuid: &str) -> AppResult<()> {
+        self.shared.cancel_meeting(uuid)
+    }
+
     pub fn llm_pass_cache(&self) -> Arc<Mutex<HashMap<String, String>>> {
         self.shared.llm_pass_cache.clone()
     }

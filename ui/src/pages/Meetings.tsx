@@ -52,7 +52,7 @@ import type {
 import {
   FRESH_LLM,
   MeetingDetailView,
-  sourceTone,
+  SourcePills,
   statusLabel,
   type LlmPassUiState,
 } from "./MeetingDetail";
@@ -152,6 +152,20 @@ export function MeetingsPage() {
       unlisteners.push(
         await listen<MeetingStateEvent>("meeting:state", (e) => {
           if (cancelled) return;
+          // mb-z5y wave-2 forensic ping — fire-and-forget IPC so
+          // the Rust log has hard evidence the listener ran.
+          void (async () => {
+            try {
+              const { invoke } = await import("@tauri-apps/api/core");
+              await invoke("meeting_debug_listener_ping", {
+                window: "main",
+                event: "meeting:state",
+                payloadState: e.payload.state,
+              });
+            } catch {
+              /* swallow — diagnostic only */
+            }
+          })();
           setRecordingPhase(e.payload.state);
           if (e.payload.state === "started" && e.payload.uuid) {
             setRecordingUuid(e.payload.uuid);
@@ -172,7 +186,8 @@ export function MeetingsPage() {
           } else if (
             e.payload.state === "done" ||
             e.payload.state === "error" ||
-            e.payload.state === "interrupted"
+            e.payload.state === "interrupted" ||
+            e.payload.state === "cancelled"
           ) {
             setRecordingUuid(null);
             recordStartTimeRef.current = null;
@@ -355,6 +370,31 @@ export function MeetingsPage() {
     showToast(t("meetings.copied"));
   }, [detail, llmByUuid, showToast]);
 
+  const handleRename = useCallback(
+    async (next: string | null) => {
+      if (!detail) return;
+      const uuid = detail.uuid;
+      try {
+        await meetings.rename(uuid, next);
+        // Refresh BOTH the detail (header title) and the list (left-
+        // pane row title) so the UI immediately reflects the rename
+        // without a manual reload. Run in parallel.
+        const [fresh, list] = await Promise.all([
+          meetings.detail(uuid),
+          meetings.list(PAGE_SIZE, 0),
+        ]);
+        setDetail(fresh);
+        setSummaries(list);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("meeting_rename failed", err);
+        setToast(String(err));
+        window.setTimeout(() => setToast(null), 3000);
+      }
+    },
+    [detail],
+  );
+
   const handleExport = useCallback(async () => {
     if (!detail) return;
     const llm = llmByUuid[detail.uuid];
@@ -478,6 +518,7 @@ export function MeetingsPage() {
               onCopy={handleCopy}
               onExport={handleExport}
               onDelete={handleDelete}
+              onRename={handleRename}
             />
           ) : summaries && summaries.length === 0 ? null : selectedUuid ===
             null ? (
@@ -580,7 +621,7 @@ function MeetingRow({
         </span>
       </div>
       <div className={styles.rowMeta}>
-        <Pill tone={`mode-${sourceTone(summary.source)}`}>{summary.source}</Pill>
+        <SourcePills source={summary.source} />
         <span>{formatDuration(summary.totalDurationMs)}</span>
         {summary.status !== "complete" ? (
           <Pill tone="status-error">{statusLabel(summary.status)}</Pill>

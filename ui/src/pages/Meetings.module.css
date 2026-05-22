@@ -261,6 +261,63 @@
   margin: 0;
 }
 
+/* mb-z5y: rename affordance. The title becomes a hover-revealed
+   button so it doesn't add visual noise to the static header. */
+.detailTitleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.titleEditBtn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--on-surf-muted);
+  padding: var(--s-1);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.detailTitleRow:hover .titleEditBtn,
+.titleEditBtn:focus-visible {
+  opacity: 1;
+}
+.titleEditBtn:hover,
+.titleEditBtn:focus-visible {
+  color: var(--on-surf);
+  border-color: var(--on-surf-faint);
+  outline: none;
+}
+.titleEditForm {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.titleEditInput {
+  font: var(--type-xl);
+  font-weight: 600;
+  color: var(--on-surf);
+  background: var(--surf-2);
+  border: 1px solid var(--on-surf-faint);
+  border-radius: var(--radius-sm);
+  padding: var(--s-1) var(--s-2);
+  flex: 1 1 auto;
+  min-width: 0;
+  outline: none;
+}
+.titleEditInput:focus {
+  border-color: var(--on-surf-muted);
+}
+.titleEditHint {
+  font: var(--type-xs);
+  color: var(--on-surf-faint);
+  margin-left: var(--s-2);
+}
+
 .detailActions {
   display: flex;
   gap: var(--s-2);

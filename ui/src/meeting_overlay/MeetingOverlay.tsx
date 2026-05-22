@@ -24,7 +24,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { MicIcon, XIcon } from "../design/Icon";
+import { CheckIcon, MicIcon, XIcon } from "../design/Icon";
 import { t } from "../i18n";
 import { meetings } from "../lib/meetings";
 import { isTauri } from "../lib/tauri";
@@ -56,7 +56,25 @@ export function dbfsToFill(db: number): number {
 
 import styles from "./MeetingOverlay.module.css";
 
-type OverlayMode = "choose" | "recording";
+type OverlayMode =
+  | "choose"
+  | "recording"
+  | "confirm-cancel"
+  | "saved"
+  | "cancelled";
+
+/** How long the "Saved to history" confirmation stays visible
+ *  after a successful stop before the overlay auto-hides.
+ *  Belt-and-suspenders: Rust also schedules a hide ~500ms later. */
+const SAVED_VISIBLE_MS = 5000;
+
+/** How long the "Recording cancelled, not saved" notice stays
+ *  visible after the user hits ✕ during recording. Shorter than
+ *  SAVED_VISIBLE_MS because cancel is the not-happy path — get the
+ *  overlay back to its default state quickly so the user can
+ *  re-record. After this elapses the overlay flips back to CHOOSE
+ *  mode (NOT hidden — they likely want to record again). */
+const CANCELLED_VISIBLE_MS = 3000;
 
 export function MeetingOverlay() {
   const [mode, setMode] = useState<OverlayMode>("choose");
@@ -124,23 +142,63 @@ export function MeetingOverlay() {
         await listen<MeetingStateEvent>("meeting:state", (e) => {
           if (cancelled) return;
           const s = e.payload.state;
+          // mb-z5y wave-2 forensic ping — fire-and-forget IPC so
+          // the Rust log has hard evidence the listener ran.
+          void (async () => {
+            try {
+              const { invoke } = await import("@tauri-apps/api/core");
+              await invoke("meeting_debug_listener_ping", {
+                window: "meeting_overlay",
+                event: "meeting:state",
+                payloadState: s,
+              });
+            } catch {
+              /* swallow — diagnostic only */
+            }
+          })();
           if (s === "started" && e.payload.uuid) {
             setRecordingUuid(e.payload.uuid);
             setMode("recording");
             setBusy(null);
             recordStartRef.current = Date.now();
-          } else if (s === "done" || s === "error" || s === "interrupted") {
+          } else if (s === "done") {
+            // mb-z5y: flip into SAVED confirmation mode (✓ + "Saved
+            // to history") for SAVED_VISIBLE_MS ms, then hide.
+            // Rust also schedules a fallback hide ~500ms later in
+            // case JS window.hide() silently fails.
+            recordStartRef.current = null;
+            setElapsedSec(0);
+            setBusy(null);
+            setMode("saved");
+            window.setTimeout(() => {
+              if (cancelled) return;
+              setRecordingUuid(null);
+              setMode("choose"); // reset for next chord-summon
+              void hideOverlay();
+            }, SAVED_VISIBLE_MS);
+          } else if (s === "cancelled") {
+            // User hit ✕ during recording. Flip to a brief
+            // "Cancelled, not saved" notice, then return to CHOOSE
+            // mode so they can immediately start a fresh recording.
+            // Stays visible (NOT hidden) — chord/main-app can
+            // still re-summon to a known-good state.
+            recordStartRef.current = null;
+            setElapsedSec(0);
+            setBusy(null);
+            setRecordingUuid(null);
+            setMode("cancelled");
+            window.setTimeout(() => {
+              if (cancelled) return;
+              setMode("choose");
+            }, CANCELLED_VISIBLE_MS);
+          } else if (s === "error" || s === "interrupted") {
             setRecordingUuid(null);
             setBusy(null);
             recordStartRef.current = null;
             setElapsedSec(0);
-            // Auto-hide after a successful finish; on error we stay
-            // visible so the user can see the failure message.
-            if (s === "done") {
-              void hideOverlay();
-            } else {
-              setErrorMsg(`Recording ${s}`);
-            }
+            // On error/interrupted we stay visible so the user can
+            // see the failure message — they can ✕-dismiss it.
+            setErrorMsg(`Recording ${s}`);
           }
         }),
       );
@@ -207,10 +265,19 @@ export function MeetingOverlay() {
       const { uuid } = await meetings.start(source);
       // The `meeting:state=started` event will normally fire and
       // flip us into RECORDING mode; do a defensive optimistic
-      // update too in case the event misses.
+      // update too in case the event misses (mb-z5y wave-2:
+      // confirmed in live-fire that the meeting:state listener
+      // in this webview does NOT fire reliably for the
+      // started event — see ADR 0034 + LESSONS 2026-05-23-pm).
       setRecordingUuid(uuid);
       recordStartRef.current = Date.now();
       setMode("recording");
+      // CRITICAL: clear the busy latch on success. Without this
+      // the Stop button stays disabled forever because its
+      // disabled condition is `!recordingUuid || busy`. The
+      // listener path also clears this, so both paths are
+      // idempotent — but only one of them currently runs.
+      setBusy(null);
     } catch (err) {
       setErrorMsg(String(err));
       setBusy(null);
@@ -229,11 +296,86 @@ export function MeetingOverlay() {
     }
   }, [recordingUuid, busy]);
 
-  const handleCancel = useCallback(() => {
+  /** ✕ in CHOOSE mode — just hide the overlay. Chord re-summons.
+   *
+   *  Routes through the Rust IPC because Win32 + Tauri 2 silently
+   *  no-ops `window.hide()` when called synchronously from an
+   *  onClick handler. The Rust path uses the AppHandle's window
+   *  registry directly and works from any context. */
+  const handleDismiss = useCallback(() => {
     void hideOverlay();
   }, []);
 
+  /** ✕ in RECORDING mode — flip to a confirmation step. We do NOT
+   *  stop the underlying capture yet; audio keeps streaming so the
+   *  user can hit "Keep recording" with no lost time. */
+  const handleRequestCancel = useCallback(() => {
+    if (!recordingUuid || busy) return;
+    setMode("confirm-cancel");
+  }, [recordingUuid, busy]);
+
+  /** "Discard" button in the confirm-cancel step — actually fires
+   *  the cancel IPC. Rust emits `meeting:state=cancelled`, the
+   *  listener above flips us to the "Cancelled, not saved" notice
+   *  for 3s, then back to CHOOSE mode. */
+  const handleConfirmCancel = useCallback(async () => {
+    if (!recordingUuid || busy) return;
+    setBusy("stopping"); // disabled-while-in-flight state
+    try {
+      await meetings.cancel(recordingUuid);
+    } catch (err) {
+      setErrorMsg(String(err));
+      setBusy(null);
+      // Bounce back to recording so the user can try again — the
+      // capture is still alive (cancel IPC failed before tearing it
+      // down) so they haven't lost the recording.
+      setMode("recording");
+    }
+  }, [recordingUuid, busy]);
+
+  /** "Keep recording" button in the confirm-cancel step — just
+   *  flips the pill back to RECORDING mode. Capture has been
+   *  running uninterrupted, so the elapsed timer + audio pipeline
+   *  pick up exactly where they were. */
+  const handleResumeRecording = useCallback(() => {
+    setMode("recording");
+  }, []);
+
   /* -------- render ------------------------------------------------ */
+
+  if (mode === "saved") {
+    return (
+      <div className={styles.shell}>
+        <div
+          className={styles.pill}
+          role="status"
+          aria-live="polite"
+          data-tauri-drag-region
+        >
+          <CheckIcon size={18} />
+          <span className={styles.label}>{t("meetingOverlay.saved")}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === "cancelled") {
+    return (
+      <div className={styles.shell}>
+        <div
+          className={styles.pill}
+          role="status"
+          aria-live="polite"
+          data-tauri-drag-region
+        >
+          <XIcon size={18} />
+          <span className={styles.label}>
+            {t("meetingOverlay.cancelledNotice")}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   if (mode === "recording") {
     return (
@@ -255,19 +397,56 @@ export function MeetingOverlay() {
           >
             {busy === "stopping" ? "…" : t("meetingOverlay.stop")}
           </button>
-          {/* mb-fc1 hotfix: dismiss the pill WITHOUT stopping the
-              recording. The chord re-summons it, the Meetings page
-              also shows it via the started-event listener. Distinct
-              icon (× sized 14px) so the user can't confuse it with
-              the Stop button (red, labelled). */}
+          {/* mb-z5y wave-4: ✕ in RECORDING mode requests a confirm
+              step (capture keeps running). The Discard button in
+              that step calls the actual cancel IPC. Replaces the
+              mb-fc1 "hide without stopping" behavior. */}
           <button
             type="button"
             className={styles.btnCancel}
-            onClick={handleCancel}
-            aria-label={t("meetingOverlay.dismiss")}
-            title={t("meetingOverlay.dismiss")}
+            onClick={handleRequestCancel}
+            disabled={busy !== null}
+            aria-label={t("meetingOverlay.cancelRecording")}
+            title={t("meetingOverlay.cancelRecording")}
           >
             <XIcon size={14} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === "confirm-cancel") {
+    // Capture is still running underneath this UI — "Keep recording"
+    // snaps right back to the live elapsed timer with no lost audio.
+    return (
+      <div className={styles.shell}>
+        <div
+          className={styles.pill}
+          role="alertdialog"
+          aria-label={t("meetingOverlay.confirmCancelTitle")}
+          data-tauri-drag-region
+        >
+          <span className={styles.label}>
+            {t("meetingOverlay.confirmCancelTitle")}
+          </span>
+          <button
+            type="button"
+            className={`${styles.btn} ${styles.btnStop}`}
+            onClick={handleConfirmCancel}
+            disabled={busy !== null}
+            aria-label={t("meetingOverlay.discard")}
+          >
+            {busy === "stopping" ? "…" : t("meetingOverlay.discard")}
+          </button>
+          <button
+            type="button"
+            className={`${styles.btn} ${styles.btnStart}`}
+            onClick={handleResumeRecording}
+            disabled={busy !== null}
+            aria-label={t("meetingOverlay.keepRecording")}
+          >
+            {t("meetingOverlay.keepRecording")}
           </button>
         </div>
       </div>
@@ -319,7 +498,7 @@ export function MeetingOverlay() {
         <button
           type="button"
           className={styles.btnCancel}
-          onClick={handleCancel}
+          onClick={handleDismiss}
           aria-label={t("meetingOverlay.cancel")}
         >
           <XIcon size={14} />
@@ -341,12 +520,38 @@ export function MeetingOverlay() {
 
 async function hideOverlay(): Promise<void> {
   if (!isTauri()) return;
+  // mb-z5y wave-4: route through Rust. Previously called
+  // `getCurrentWindow().hide()` directly but live-fire showed Win32
+  // silently dropping the call when invoked synchronously from a
+  // button onClick (the saved-mode setTimeout path worked fine —
+  // unclear why; suspect focus-during-click weirdness). The Rust
+  // path is reliable from every context we've tested.
+  let outcome = "ok";
   try {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().hide();
+    await meetings.overlayHide();
   } catch (err) {
+    outcome = `err:${String(err)}`;
     // eslint-disable-next-line no-console
-    console.warn("[meeting-overlay] hide failed", err);
+    console.warn("[meeting-overlay] hide via Rust failed", err);
+    // Fall back to JS hide as a last-ditch attempt.
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().hide();
+      outcome = `fallback-js-ok (rust-err: ${String(err)})`;
+    } catch (err2) {
+      outcome = `${outcome} ; fallback-js-err:${String(err2)}`;
+    }
+  }
+  // Forensic ping so we can see in Rust logs which path won.
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("meeting_debug_listener_ping", {
+      window: "meeting_overlay",
+      event: "hideOverlay",
+      payloadState: outcome,
+    });
+  } catch {
+    /* swallow — diagnostic only */
   }
 }
 

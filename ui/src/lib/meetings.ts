@@ -80,6 +80,18 @@ export const meetings = {
    *  + `meetings:session-saved` on success. */
   stop: (uuid: string) => invoke<void>("meeting_stop", { uuid }),
 
+  /** Cancel the in-flight meeting — discards audio + chunks, does
+   *  NOT persist to the DB. Emits `meeting:state=cancelled`. Used by
+   *  the overlay's ✕ button while recording. */
+  cancel: (uuid: string) => invoke<void>("meeting_cancel", { uuid }),
+
+  /** Hide the meeting overlay window via the Rust path. The JS
+   *  `getCurrentWindow().hide()` silently no-ops on Win32 when
+   *  called synchronously from a button onClick handler — routing
+   *  through Rust uses the AppHandle's window registry and works
+   *  from any context. See LESSONS 2026-05-23. */
+  overlayHide: () => invoke<void>("meeting_overlay_hide"),
+
   /* History (read) */
 
   list: (limit = 200, offset = 0) =>
@@ -88,6 +100,12 @@ export const meetings = {
   detail: (uuid: string) => invoke<MeetingDetail>("get_meeting_detail", { uuid }),
 
   delete: (uuid: string) => invoke<void>("delete_meeting", { uuid }),
+
+  /** Rename a meeting (or clear back to the auto-derived default by
+   *  passing `null`). Empty/whitespace-only strings are coerced to a
+   *  clear by the backend. Idempotent on missing uuids. */
+  rename: (uuid: string, title: string | null) =>
+    invoke<void>("meeting_rename", { uuid, title }),
 
   search: (query: string) =>
     invoke<MeetingMatch[]>("search_meeting_transcripts", { query }),
@@ -188,7 +206,10 @@ function fixtureFor<T>(command: string, args?: object): T {
       }) as T;
     // Void commands — no fixture payload.
     case "meeting_stop":
+    case "meeting_cancel":
+    case "meeting_overlay_hide":
     case "delete_meeting":
+    case "meeting_rename":
     case "meeting_copy_to_clipboard":
       return fixture(command, undefined as unknown as T);
     default:

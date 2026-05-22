@@ -284,6 +284,41 @@ pub fn delete_meeting(conn: &Connection, uuid: &str) -> AppResult<bool> {
     Ok(rows_affected > 0)
 }
 
+/// Maximum allowed title length (in chars). Anything longer is
+/// truncated by the command layer before this function is called;
+/// we still cap defensively here to keep the column predictable.
+pub const MAX_TITLE_CHARS: usize = 200;
+
+/// Rename a meeting. Pass `Some("new title")` to set, or `None` to
+/// clear the title back to the localized "Untitled" fallback.
+///
+/// - Empty / whitespace-only titles are coerced to `None` (clear).
+/// - Titles longer than [`MAX_TITLE_CHARS`] chars are truncated.
+/// - Returns `Ok(true)` if a row was updated, `Ok(false)` if the
+///   uuid didn't match any meeting. Idempotent: not finding the row
+///   is not an error (mirrors `delete_meeting`'s contract).
+///
+/// Updating `meeting_sessions.title` is allowed — the row is NOT a
+/// `raw`-stage transcript so the immutability invariant (PLAN
+/// Principle 1) does not apply.
+pub fn rename_meeting(conn: &Connection, uuid: &str, title: Option<&str>) -> AppResult<bool> {
+    let normalized: Option<String> = title.and_then(|s| {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.chars().take(MAX_TITLE_CHARS).collect())
+        }
+    });
+    let rows_affected = conn
+        .execute(
+            "UPDATE meeting_sessions SET title = ?1 WHERE uuid = ?2",
+            params![normalized, uuid],
+        )
+        .map_err(|e| AppError::MeetingCapture(format!("rename_meeting: {e}")))?;
+    Ok(rows_affected > 0)
+}
+
 /// FTS5 search over formatted meeting transcripts. Returns one row
 /// per matching transcript row (so a meeting whose mic AND merged
 /// channels both match the query appears twice with channel-tagged
@@ -516,6 +551,87 @@ mod tests {
     fn delete_meeting_returns_false_for_unknown_uuid() {
         let conn = fresh_db();
         assert!(!delete_meeting(&conn, "missing").unwrap());
+    }
+
+    // ---- rename_meeting --------------------------------------------
+
+    #[test]
+    fn rename_meeting_updates_existing_title() {
+        let conn = fresh_db();
+        persist_meeting(&conn, &fixture_request("u-rename", MeetingSource::Mic)).unwrap();
+        let updated = rename_meeting(&conn, "u-rename", Some("My fancy meeting")).unwrap();
+        assert!(updated, "row should have been updated");
+        let detail = load_meeting_detail(&conn, "u-rename").unwrap().unwrap();
+        assert_eq!(detail.title.as_deref(), Some("My fancy meeting"));
+    }
+
+    #[test]
+    fn rename_meeting_clears_title_with_none() {
+        let conn = fresh_db();
+        persist_meeting(&conn, &fixture_request("u-clear", MeetingSource::Mic)).unwrap();
+        rename_meeting(&conn, "u-clear", None).unwrap();
+        let detail = load_meeting_detail(&conn, "u-clear").unwrap().unwrap();
+        assert_eq!(detail.title, None, "None should clear the title column");
+    }
+
+    #[test]
+    fn rename_meeting_treats_whitespace_as_clear() {
+        let conn = fresh_db();
+        persist_meeting(&conn, &fixture_request("u-ws", MeetingSource::Mic)).unwrap();
+        rename_meeting(&conn, "u-ws", Some("   \t\n  ")).unwrap();
+        let detail = load_meeting_detail(&conn, "u-ws").unwrap().unwrap();
+        assert_eq!(
+            detail.title, None,
+            "whitespace-only must coerce to None to avoid a useless empty title"
+        );
+    }
+
+    #[test]
+    fn rename_meeting_trims_outer_whitespace() {
+        let conn = fresh_db();
+        persist_meeting(&conn, &fixture_request("u-trim", MeetingSource::Mic)).unwrap();
+        rename_meeting(&conn, "u-trim", Some("   Padded title   ")).unwrap();
+        let detail = load_meeting_detail(&conn, "u-trim").unwrap().unwrap();
+        assert_eq!(detail.title.as_deref(), Some("Padded title"));
+    }
+
+    #[test]
+    fn rename_meeting_truncates_overlong_titles() {
+        let conn = fresh_db();
+        persist_meeting(&conn, &fixture_request("u-long", MeetingSource::Mic)).unwrap();
+        // 500-char input → truncate to MAX_TITLE_CHARS.
+        let long = "a".repeat(500);
+        rename_meeting(&conn, "u-long", Some(&long)).unwrap();
+        let detail = load_meeting_detail(&conn, "u-long").unwrap().unwrap();
+        let stored = detail.title.expect("title set");
+        assert_eq!(
+            stored.chars().count(),
+            MAX_TITLE_CHARS,
+            "title should be truncated to MAX_TITLE_CHARS chars"
+        );
+    }
+
+    #[test]
+    fn rename_meeting_returns_false_for_unknown_uuid() {
+        let conn = fresh_db();
+        // No row inserted — nothing to update.
+        let updated = rename_meeting(&conn, "never-existed", Some("Whatever")).unwrap();
+        assert!(
+            !updated,
+            "renaming a missing row must report false, not error"
+        );
+    }
+
+    #[test]
+    fn rename_meeting_does_not_touch_other_rows() {
+        let conn = fresh_db();
+        persist_meeting(&conn, &fixture_request("u-a", MeetingSource::Mic)).unwrap();
+        persist_meeting(&conn, &fixture_request("u-b", MeetingSource::Mic)).unwrap();
+        rename_meeting(&conn, "u-a", Some("Renamed A")).unwrap();
+        let a = load_meeting_detail(&conn, "u-a").unwrap().unwrap();
+        let b = load_meeting_detail(&conn, "u-b").unwrap().unwrap();
+        assert_eq!(a.title.as_deref(), Some("Renamed A"));
+        assert_eq!(b.title.as_deref(), Some("Meeting u-b"), "sibling untouched");
     }
 
     #[test]

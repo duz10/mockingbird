@@ -143,6 +143,17 @@ export function XIcon(p: IconProps) {
   );
 }
 
+export function PencilIcon(p: IconProps) {
+  // Feather-style edit-2 pencil. Used for the meeting rename
+  // affordance. Kept as plain strokes to inherit `currentColor`
+  // like the rest of the icon set.
+  return (
+    <svg {...base(p)}>
+      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+    </svg>
+  );
+}
+
 export function AlertIcon(p: IconProps) {
   return (
     <svg {...base(p)}>

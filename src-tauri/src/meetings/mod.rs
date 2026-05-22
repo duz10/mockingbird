@@ -73,6 +73,7 @@ pub mod overlay;
 pub mod persist;
 pub mod repo;
 pub mod runtime;
+pub mod title;
 pub mod vk_names;
 
 #[cfg(target_os = "windows")]
