@@ -43,20 +43,30 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**No in-flight epic.** Stable-alpha checkpoint reached 2026-05-24.
+**Phase 10 — Activity Capture (sibling subsystem). Wave 0 complete; awaiting Dustin review of ADR 0036 before Wave 1 code.**
+
+Chartered 2026-05-25 (Bernard, Wave 0 iteration). Numbered PLAN §10 phase mirroring Phase MC's container: numbered + ADR-chartered + per-wave seal tags + final `phase-10-complete` tag. Phase 9 stays reserved for the macOS cross-platform sweep.
+
+- **Charter ADR:** [ADR 0036](docs/adr/0036-activity-capture-sibling-subsystem.md) — **Status: Proposed** (Dustin flips to Accepted after charter review; Wave 1 cannot start until then).
+- **Phase doc:** [`docs/phases/phase10.md`](docs/phases/phase10.md) — six-wave brief (1 skeleton → 2 UIA depth → 3 summarization → 4 audio → 5 hardening → 6 judges + seal). Wave 7 (Layer 3 screenshot + OCR) is OPTIONAL post-seal via successor ADR.
+- **Source plan:** [`mockingbird-activity-capture-plan.md`](mockingbird-activity-capture-plan.md) — vision doc; the implementation charter against it lives in ADR 0036.
+- **PLAN §10 amendment:** Phase 10 entry landed in `PLAN-mockingbird-v2.md` mirroring Phase MC's depth.
+- **Sub-ADRs deferred:** ADR 0037 (encryption-at-rest — Wave 5; SQLCipher / DPAPI-per-row / app-layer AES-GCM candidates pre-named). ADR 0038 (optional, post-seal — Layer 3 screenshot + OCR).
+- **Bead epic:** `mb-a2w9` (status `in_progress`).
+- **Wave beads** (each P1, linked so Wave N+1 depends on Wave N; the epic depends on all six):
+  - `mb-hnl3` Wave 1: Activity-log skeleton (Layer 1 titles-only)  ← unblocked, awaits ADR 0036 Acceptance
+  - `mb-hr1u` Wave 2: UIA deep snapshots + multi-monitor
+  - `mb-pwup` Wave 3: Summarization pipeline
+  - `mb-g1w2` Wave 4: Audio layer (Layer 2)
+  - `mb-a6tz` Wave 5: Hardening and polish (charters ADR 0037)
+  - `mb-8r5p` Wave 6: Invariant judges + final seal
+- **Parallel investigation bead (INDEPENDENT — not blocking Phase 10):** `mb-0n8c` (P2 chore) — root-cause `cargo test --release` `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)` on this box. Open since 2026-05-17 (LESSONS PINNED P2). 1-session timebox; falls back to wontfix-with-workaround if unresolved. Resolution would let every future phase run live test exec.
 
 **Standing P3 follow-up:** `mb-xnn7` — remove the `meeting_debug_listener_ping`
 IPC + its TS callers in `Meetings.tsx` / `MeetingOverlay.tsx` before the next
 MC enhancement epic ships. The beacon was added in v1.2 as forensic evidence
 for JS-listener firing during the mb-z5y class of bug; it's not load-bearing
 and the noise should not survive the next iteration.
-
-**Future epic candidate (NOT chartered yet):**
-`mockingbird-activity-capture-plan.md` (untracked at repo root) — vision-stage
-plan for an Activity Capture & Session Summary feature (foreground-context
-sampling via accessibility tree + mic + optional screenshots → chronological
-work-day summary). Sibling-subsystem candidate. Read the plan first before
-chartering.
 
 ---
 
