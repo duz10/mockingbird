@@ -10,7 +10,7 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-05-23 (checkpoint after MC overlay event-delivery hotfix — ADR 0034 / mb-z5y).
+**Last consolidated:** 2026-05-24 (checkpoint after dictation-polish session — paste fix, History→Dictations rename, on-demand LLM pass, Insights 2-tab redesign; commit `dda676a`).
 
 ## ✅ Sealed (do not re-execute)
 
@@ -41,12 +41,54 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**No in-flight epic.** Last commits: `a4e0ec3` (MC hotfix, closed `mb-x1x`) and
-this iteration's mb-z5y / ADR 0034 hotfix (overlay event delivery). Tree clean,
-cargo gate green (`fmt --check`, `clippy --release -D warnings`, `test --no-run`),
-vitest 55/55 pass. Live-exec verification of the fix is on Dustin (manual: launch
-binary, click Start in main meetings page, confirm overlay flips to RECORDING
-and Stop button enables).
+**Dictation polish — shipped 2026-05-24** (commit `dda676a`). Four-in-one
+lateral cleanup session:
+
+1. **Paste payload sanitization** — `dictation/paste_payload.rs` strips a
+   single trailing space from the LLM-cleaned text before clipboard handoff
+   (deterministic; doesn't rely on prompt-engineering the model to omit
+   trailing whitespace). 11 unit tests. Wired into `dictation.rs::complete()`.
+2. **History → Dictations rename** — Git-detected rename of
+   `History.{tsx,module.css}` to `Dictations.{tsx,module.css}`,
+   `/history` redirect kept for in-flight bookmarks, full i18n key sweep
+   (`history.*` → `dictations.*`), Sidebar nav updated.
+3. **On-demand LLM pass on a saved dictation** — new
+   `dictation_run_llm_pass` IPC; takes built-in prompt id
+   (`summary` / `action_items` / `cleaner_punctuation`) OR custom text;
+   constructs an `OllamaProvider` via its existing arg-less `new()` and
+   drives via `CleanupRequest<'_>` (does NOT extend the `CleanupProvider`
+   trait — same constraint as MC). Prompts live as markdown in
+   `src-tauri/src/dictation/prompts/*.md`, baked via `include_str!`.
+   Defensive fence-stripping postprocess for small models that wrap output
+   in ```` ```markdown ... ``` ````. Collapsible card under each session in
+   `Dictations.tsx` with prompt picker + custom textarea + Prism-highlighted
+   markdown render.
+4. **Insights two-tab redesign** — "Your usage" (lifetime tiles, 365-day
+   GitHub-style heatmap, 7-day spark, mode mix, top apps, today snapshot) vs.
+   "Your voice" (WPM, peak-hours histogram, top dictionary terms,
+   top-corrected words, latency, learning loop). 7 new additive backend
+   aggregations in `commands/insights.rs` (no existing field touched);
+   heatmap intensity uses `oklch(from var(--mode-normal) l c h / N)` so
+   theme swaps inherit; WPM excludes <5s sessions and caps outliers at
+   300 wpm. Lifetime totals tolerate pre-migration-011 DBs (treats missing
+   `meeting_sessions` table as zeroes).
+
+Gate: cargo check / clippy / fmt clean on touched files; `tsc --noEmit`
+clean; vitest 55/55 pass; release binary rebuilt; live-exec verification on
+Dustin.
+
+**Pre-existing dirty state NOT touched this session** — there's an in-flight
+epic in the tree from a prior session:
+`mockingbird-activity-capture-plan.md` (untracked), `meetings/title.rs`
+(untracked, ~310 lines), `src-tauri/capabilities/` (untracked dir), plus
+modifications to `audio/capture.rs` (+32), `commands/meetings.rs` (+83),
+`meetings/{lifecycle,mod,overlay,repo,runtime}.rs`,
+`MeetingDetail.tsx` (+198), `Meetings.tsx` (+47), `meetings.ts`, `Icon.tsx`,
+`MeetingOverlay.tsx`, `Meetings.module.css`. Looks like a meeting-activity-
+capture feature in mid-flight. **Action item:** triage with Dustin next
+session — read the plan file, decide if it ships as-is or needs more work,
+then decide on commit vs revert. Not a bug — just unfinished work parked in
+the tree.
 
 **Standing P1:** `mb-ez9` — empirical mode-prompt iteration across casual/normal/formal
 (in_progress; long-running quality improvement loop, picks up whenever Dustin has

@@ -129,6 +129,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-24 | `[dictation-polish]`             | paste-trailing-space, History→Dictations, on-demand LLM pass, Insights 2-tab redesign |
 | 2026-05-23 | `[mc-hotfix / mb-z5y / ADR 0034]`| overlay stuck in CHOOSE — show-before-emit + emit_to + defensive clear   |
 | 2026-05-23 | `[meta / session-start]`         | detected stale Phase MC kickoff but then over-corrected — added (a/b/c) triage |
 | 2026-05-23 | `[mc-hotfix / mb-x1x]`           | post-deploy live-fire surfaced 4 gaps the Wave-6 judges couldn't catch   |
@@ -166,6 +167,120 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-24 [dictation-polish] paste-trailing-space, History→Dictations rename, on-demand LLM pass on saved dictations, Insights 2-tab redesign
+
+- **Context:** Post-`a4e0ec3` checkpoint, Dustin asked for four
+  things in one session: (1) stop pasting a trailing space at the
+  end of dictations, (2) rename History → Dictations (the page was
+  always about dictations, not arbitrary history), (3) let the user
+  run an LLM pass on a saved dictation on-demand (summary / action
+  items / cleaner punctuation / custom prompt), (4) make the
+  Insights page actually worth opening — Wispr-killer territory.
+  Pre-existing dirty state in `meetings/*` + untracked
+  `mockingbird-activity-capture-plan.md` was NOT touched (separate
+  in-flight epic owned by user).
+
+- **Finding 1 (paste trailing space):** The bug was deterministic
+  not a model quirk. Whisper produces `" hello"` (leading space) and
+  the cleanup LLM happily echoed it. Trying to prompt-engineer the
+  LLM to omit trailing whitespace is fighting the wrong battle —
+  small models forget, big models echo whatever you give them.
+  **Action:** added `dictation/paste_payload.rs::sanitize_for_paste`
+  as a deterministic post-pass: strips a SINGLE trailing space (not
+  more — we want to preserve `"  "` if a user dictated
+  "double-space"), leaves newlines alone. 11 unit tests. Wires into
+  `dictation.rs::complete()` immediately before clipboard handoff.
+  Independent of provider/model — the right architectural layer for
+  this kind of guarantee.
+
+- **Finding 2 (rename):** Git's rename detection (`-M`) only kicks
+  in if the file is ≥50% similar AFTER your edits. I rewrote
+  ~30% of `History.tsx` (new LLM card section) before renaming.
+  Result: `git status --short -M50%` showed it as delete+add. Fix:
+  do the rename FIRST, then edit. Git showed it as a clean rename
+  in the final commit (`History.tsx -> Dictations.tsx (63% similarity)`).
+
+- **Finding 3 (LLM pass — fence stripping):** Small/medium Ollama
+  models (qwen2.5:7b, llama3.1:8b) reliably wrap their output in
+  ```` ```markdown ... ``` ```` fences, even when the prompt says
+  "return plain markdown, no code fence." Bigger models obey;
+  smaller don't. Tried prompt engineering (4 different phrasings)
+  with no consistent fix. **Action:** added a defensive
+  `strip_outer_fence()` postprocess in `dictation/llm_prompts.rs`
+  that ONLY strips the outermost fence if the entire response is
+  wrapped — preserving inner code blocks the user might have asked
+  for in a summary. 4 unit tests including the
+  fence-inside-fence case. Lesson: when the model is wrong
+  consistently AND deterministically, fix it deterministically.
+  Don't waste tokens hoping the next prompt iteration works.
+
+- **Finding 4 (LLM pass — prompt storage):** PLAN MC explicitly
+  says meeting LLM prompts live in `meetings/prompts/*.md` (not DB).
+  Same reasoning applies to on-demand dictation LLM prompts:
+  versioned with code, no migration friction, no "why is the prompt
+  different in dev vs prod" mystery. Used `include_str!` so prompts
+  are baked into the release binary. The DB-stored `modes`
+  prompts are the EXCEPTION because they're tuned via the empirical
+  mode-eval rig (ADR 0024) which needs DB UPDATEs.
+
+- **Finding 5 (Insights — heatmap padding):** GitHub-style
+  contribution heatmaps are visually trivial but the data alignment
+  has one trap: the 365-day series ends today but TODAY could be
+  any day-of-week. If you just chunk by 7 you get a misaligned
+  grid where Mon/Wed/Fri row labels don't match the cells.
+  **Action:** `Heatmap` component pads the LEADING edge with
+  `null` cells until the first column starts on Sunday
+  (`getDay() === 0`), then chunks by 7. The pad cells render as
+  `visibility: hidden` to keep grid columns uniform.
+
+- **Finding 6 (Insights — heatmap theming):** First pass used
+  hardcoded green like GitHub. Looked terrible against the
+  warm-earth theme. **Action:** intensity levels use
+  `oklch(from var(--mode-normal) l c h / 0.28..1.0)` — derived
+  from the user's accent color via OKLCH alpha modulation.
+  Theme swaps inherit automatically. The 5-level legend at the
+  bottom uses the same swatches so users can self-calibrate.
+
+- **Finding 7 (Insights — WPM outlier handling):** First pass
+  computed WPM as `total_words / total_seconds`. A single
+  near-zero-duration session (e.g. 200ms ghost recording with
+  17 word output from a misfire) blew the mean to 5000 wpm.
+  **Action:** per-session WPM, exclude sessions <5s, cap individual
+  wpm at 300 (world record territory but plausible spoken),
+  average per-session not weighted. Also surface `samples` count
+  in the UI so users know "based on 184 sessions" not from one
+  outlier.
+
+- **Finding 8 (Insights — backward-compat with old DBs):** The
+  meeting_sessions table only exists post-migration 011. Brand-new
+  installs were fine; clones of an older DB would 500 on
+  `insights_snapshot`. **Action:** wrapped the meeting_sessions
+  COUNT/SUM in `.unwrap_or((0, 0))` — treats "table missing" as
+  zeroes. Mild lie of omission (the snapshot doesn't say "meetings
+  unavailable on this DB") but the UX is correct: zero meetings
+  recorded == zero meeting time displayed.
+
+- **Finding 9 (process — pre-existing dirty state):** Tree
+  arrived this session with ~13 modified files + 3 untracked
+  files in `meetings/*`, `audio/capture.rs`, capabilities config,
+  and a meeting-title feature in-flight (`meetings/title.rs`,
+  `mockingbird-activity-capture-plan.md`). Burned 3 min auditing
+  before staging. **Action:** when in doubt, surface the dirty
+  state explicitly in the response BEFORE committing, with a
+  per-file ownership audit. Committed only my files; left the
+  pre-existing changes alone for Dustin to triage. STATUS.md
+  "Currently active" section now reflects this — there's an
+  unsealed in-flight feature whose plan file I haven't read.
+
+- **Gate evidence:** `cargo check --release --tests` clean,
+  `clippy --release -D warnings` clean for touched files,
+  `cargo fmt --check` clean for touched files (pre-existing meetings/*
+  fmt drift left untouched), `tsc --noEmit` clean,
+  `vitest 55/55 pass`, `npm run build` clean, release binary built
+  at 9:41 PM (commit `dda676a`).
 
 ---
 
