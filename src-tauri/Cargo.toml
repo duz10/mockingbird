@@ -64,6 +64,11 @@ proptest  = { workspace = true }
 mockall   = { workspace = true }
 criterion = { workspace = true }
 
+# Phase 10 Wave 6 — PDF round-trip verification for the
+# `pdf-renders-correct-block-count` judge (ADR 0044). Test-only;
+# the runtime binary has no business parsing PDFs.
+pdf-extract = "0.7"
+
 [[bench]]
 name    = "whisper_latency"
 harness = false
