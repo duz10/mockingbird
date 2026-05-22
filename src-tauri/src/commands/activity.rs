@@ -18,11 +18,17 @@ use tauri::State;
 
 use crate::activity::{
     blocks_persist::{delete_block, list_blocks, rename_block, rewrite_abstract, ActivityBlockRow},
+    exclusion::{
+        self as exclusion_repo, list_all as list_exclusion_rules, set_enabled, upsert_user_rule,
+        validate, ExclusionRule, RuleKind,
+    },
     export::{copy_to_clipboard, export_to_file, regenerate_summary, render_work_report},
+    pdf_export::{render_session_pdf, PdfMode},
     persist::{
         delete_session, get_session_detail, list_sessions, ActivitySessionDetail,
         ActivitySessionRow,
     },
+    retention::{self, RetentionPolicy, SweepResult},
     runtime::ActivityCaptureRuntime,
     segments_persist::{list_segments, ActivityTranscriptSegmentRow},
 };
@@ -302,4 +308,141 @@ pub fn activity_list_transcript_segments(
 ) -> Result<Vec<ActivityTranscriptSegmentRow>, String> {
     let conn = lock_db(&state)?;
     list_segments(&conn, &session_id).map_err(into_err)
+}
+
+// ===========================================================================
+// Phase 10 Wave 5 — Hardening IPC (ADR 0042 + 0043 + 0044).
+// ===========================================================================
+
+/// List ALL exclusion rules (built-ins + user-created, enabled or
+/// not). The Settings UI renders the full set with toggles + delete
+/// affordances per ADR 0043 §UI surface.
+#[tauri::command]
+pub fn activity_exclusion_list(
+    state: State<'_, AppStateHandle>,
+) -> Result<Vec<ExclusionRule>, String> {
+    let conn = lock_db(&state)?;
+    list_exclusion_rules(&conn).map_err(into_err)
+}
+
+/// Validate a `(kind, pattern)` pair without persisting. Used by the
+/// Settings UI to pre-flight a save (catches invalid regex before
+/// the round-trip).
+#[tauri::command]
+pub fn activity_exclusion_validate(kind: String, pattern: String) -> Result<(), String> {
+    let kind = RuleKind::from_db_str(&kind)
+        .ok_or_else(|| format!("unknown exclusion rule kind: {kind:?}"))?;
+    validate(kind, &pattern).map_err(into_err)
+}
+
+/// Upsert a user-created rule. Pass `id = None` to INSERT; pass an
+/// existing user-rule id to UPDATE. Built-in rules cannot be modified
+/// via this surface — use [`activity_exclusion_set_enabled`].
+#[tauri::command]
+pub fn activity_exclusion_upsert(
+    state: State<'_, AppStateHandle>,
+    runtime: State<'_, ActivityCaptureRuntime>,
+    id: Option<String>,
+    kind: String,
+    pattern: String,
+    enabled: bool,
+    note: Option<String>,
+) -> Result<String, String> {
+    let kind = RuleKind::from_db_str(&kind)
+        .ok_or_else(|| format!("unknown exclusion rule kind: {kind:?}"))?;
+    validate(kind, &pattern).map_err(into_err)?;
+    let new_id = {
+        let conn = lock_db(&state)?;
+        upsert_user_rule(
+            &conn,
+            id.as_deref(),
+            kind,
+            &pattern,
+            enabled,
+            note.as_deref(),
+        )
+        .map_err(into_err)?
+    };
+    runtime.reload_exclusion_rules().map_err(into_err)?;
+    Ok(new_id)
+}
+
+/// Flip the `enabled` flag on any rule (built-in or user). The only
+/// surface that can act on built-ins.
+#[tauri::command]
+pub fn activity_exclusion_set_enabled(
+    state: State<'_, AppStateHandle>,
+    runtime: State<'_, ActivityCaptureRuntime>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    {
+        let conn = lock_db(&state)?;
+        set_enabled(&conn, &id, enabled).map_err(into_err)?;
+    }
+    runtime.reload_exclusion_rules().map_err(into_err)?;
+    Ok(())
+}
+
+/// Delete a user-created rule. Built-ins return an error.
+#[tauri::command]
+pub fn activity_exclusion_delete(
+    state: State<'_, AppStateHandle>,
+    runtime: State<'_, ActivityCaptureRuntime>,
+    id: String,
+) -> Result<(), String> {
+    {
+        let conn = lock_db(&state)?;
+        exclusion_repo::delete_user_rule(&conn, &id).map_err(into_err)?;
+    }
+    runtime.reload_exclusion_rules().map_err(into_err)?;
+    Ok(())
+}
+
+/// Read the current retention policy (TTLs in days + last sweep ts).
+#[tauri::command]
+pub fn activity_retention_get(state: State<'_, AppStateHandle>) -> Result<RetentionPolicy, String> {
+    let conn = lock_db(&state)?;
+    retention::load(&conn).map_err(into_err)
+}
+
+/// Persist the user-tunable TTL fields. Does NOT sweep — call
+/// [`activity_retention_sweep_now`] to trigger an immediate sweep.
+#[tauri::command]
+pub fn activity_retention_set(
+    state: State<'_, AppStateHandle>,
+    events_days: i64,
+    segments_days: i64,
+    blocks_days: i64,
+) -> Result<(), String> {
+    let conn = lock_db(&state)?;
+    retention::save_user_policy(&conn, events_days, segments_days, blocks_days).map_err(into_err)
+}
+
+/// Run the retention sweep once on demand. Returns row-count summary.
+#[tauri::command]
+pub fn activity_retention_sweep_now(
+    state: State<'_, AppStateHandle>,
+) -> Result<SweepResult, String> {
+    let mut conn = lock_db(&state)?;
+    retention::sweep_once(&mut conn, now_ms()).map_err(into_err)
+}
+
+/// Render the per-session PDF and write to `dest_path`.
+/// `mode` is `"full"` or `"work_report"`.
+#[tauri::command]
+pub fn activity_export_pdf(
+    state: State<'_, AppStateHandle>,
+    session_id: String,
+    dest_path: String,
+    mode: String,
+) -> Result<(), String> {
+    let mode = PdfMode::parse(&mode).map_err(into_err)?;
+    let bytes = {
+        let mut conn = lock_db(&state)?;
+        render_session_pdf(&mut conn, &session_id, mode).map_err(into_err)?
+    };
+    std::fs::write(PathBuf::from(&dest_path), &bytes)
+        .map_err(|e| format!("write pdf to {dest_path}: {e}"))?;
+    Ok(())
 }

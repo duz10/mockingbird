@@ -32,7 +32,7 @@
 //! changing the design.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use rusqlite::Connection;
 
@@ -40,6 +40,7 @@ use crate::error::{AppError, AppResult};
 
 use super::audio::{self, AudioPipeline};
 use super::block_audio_stitcher::TranscriptChannel;
+use super::exclusion::ExclusionMatcher;
 use super::lifecycle::{
     apply as lifecycle_apply, LifecycleEffect, LifecycleInput, LifecycleState, Transition,
 };
@@ -73,6 +74,11 @@ struct Inner {
     /// Factory closure that builds an audio pipeline per session.
     /// Production wires [`audio::start_default`]; tests override.
     audio_factory: AudioFactory,
+    /// Phase 10 Wave 5 — exclusion matcher (ADR 0043). Consulted by
+    /// [`record_event`] before INSERTing the row, so excluded events
+    /// never touch disk. Reloadable via [`reload_exclusion_rules`]
+    /// when the IPC layer edits a rule.
+    exclusion_matcher: RwLock<ExclusionMatcher>,
 }
 
 /// All of the mutable orchestrator state that needs to move together
@@ -125,6 +131,25 @@ impl ActivityCaptureRuntime {
         audio_chunk_base_dir: PathBuf,
         audio_factory: AudioFactory,
     ) -> Self {
+        // Best-effort initial matcher load. If the DB read fails
+        // (shouldn't, but rusqlite errors are recoverable), we start
+        // with an empty matcher and let the IPC layer trigger a
+        // reload via `reload_exclusion_rules`. Privacy-by-default
+        // posture would be "refuse to capture" but that's worse UX
+        // for the more likely "first-launch, table just got seeded"
+        // path — and the built-in rules are pre-seeded by migration
+        // 015 so the empty case is genuinely rare.
+        let initial_matcher = match conn.lock() {
+            Ok(c) => ExclusionMatcher::load(&c).unwrap_or_else(|e| {
+                tracing::warn!(
+                    target: "activity::exclusion",
+                    error = %e,
+                    "failed to load exclusion matcher at spawn; starting empty"
+                );
+                ExclusionMatcher::empty()
+            }),
+            Err(_) => ExclusionMatcher::empty(),
+        };
         Self {
             inner: Arc::new(Inner {
                 state: Mutex::new(RuntimeState {
@@ -137,8 +162,27 @@ impl ActivityCaptureRuntime {
                 sampler: Mutex::new(sampler),
                 audio_chunk_base_dir,
                 audio_factory,
+                exclusion_matcher: RwLock::new(initial_matcher),
             }),
         }
+    }
+
+    /// Reload the exclusion matcher from the DB. The IPC layer calls
+    /// this after editing a rule (create/update/delete/toggle).
+    pub fn reload_exclusion_rules(&self) -> AppResult<()> {
+        let conn = self.inner.conn.lock().map_err(|_| {
+            AppError::Activity("db mutex poisoned during exclusion reload".to_string())
+        })?;
+        let new_matcher = ExclusionMatcher::load(&conn)?;
+        if let Ok(mut g) = self.inner.exclusion_matcher.write() {
+            tracing::debug!(
+                target: "activity::exclusion",
+                count = new_matcher.len(),
+                "exclusion matcher reloaded"
+            );
+            *g = new_matcher;
+        }
+        Ok(())
     }
 
     /// User clicked "Activity" in the Command Center. Audio is OFF
@@ -543,6 +587,17 @@ impl ActivityCaptureRuntime {
             })?;
         match ev {
             SamplerEvent::AppSwitch { app, title, ts_ms } => {
+                // ADR 0043 — exclusion check BEFORE insert. AppSwitch
+                // has no snapshot_json so password_field_active = false.
+                if let Some(hit) = self.check_excluded(Some(&app), Some(&title), false) {
+                    tracing::debug!(
+                        target: "activity::exclusion",
+                        rule_id = hit,
+                        %app, %title,
+                        "app_switch dropped by exclusion rule"
+                    );
+                    return Ok(());
+                }
                 insert_event(
                     &conn,
                     &sid,
@@ -559,6 +614,19 @@ impl ActivityCaptureRuntime {
                 ts_ms,
                 snapshot_json,
             } => {
+                // ADR 0043 — exclusion check BEFORE insert. Parse out
+                // the password_field_active bit from snapshot_json so
+                // the system:password_field_active rule kind works.
+                let pwd_field = extract_password_field_active(&snapshot_json);
+                if let Some(rule_id) = self.check_excluded(Some(&app), Some(&title), pwd_field) {
+                    tracing::debug!(
+                        target: "activity::exclusion",
+                        rule_id = rule_id,
+                        %app, %title, pwd_field,
+                        "context_snapshot dropped by exclusion rule"
+                    );
+                    return Ok(());
+                }
                 // Wave 2: the sampler builds the JSON payload (it owns
                 // the platform-specific UIA probe). We just persist it.
                 insert_event(
@@ -590,6 +658,37 @@ impl ActivityCaptureRuntime {
             }
         }
         Ok(())
+    }
+}
+
+/// Parse `passwordFieldActive` out of a context-snapshot JSON
+/// payload. Used by the exclusion matcher to honor the
+/// `system:password_field_active` rule kind. Returns `false` on any
+/// parse failure (safe default — we don't claim a password field is
+/// active when we can't tell).
+fn extract_password_field_active(snapshot_json: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(snapshot_json)
+        .ok()
+        .and_then(|v| {
+            v.get("passwordFieldActive")
+                .or_else(|| v.get("password_field_active"))
+                .and_then(|b| b.as_bool())
+        })
+        .unwrap_or(false)
+}
+
+impl ActivityCaptureRuntime {
+    /// Helper: consult the matcher under a read lock and return the
+    /// matched rule id (for logging) if any rule fires.
+    fn check_excluded(
+        &self,
+        app: Option<&str>,
+        title: Option<&str>,
+        password_field_active: bool,
+    ) -> Option<String> {
+        let g = self.inner.exclusion_matcher.read().ok()?;
+        g.matches(app, title, password_field_active)
+            .map(|hit| hit.rule_id.to_string())
     }
 }
 

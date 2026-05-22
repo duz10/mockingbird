@@ -15,13 +15,17 @@ fn fresh_db() -> Database {
 }
 
 #[test]
-fn schema_version_is_11_after_apply() {
+fn schema_version_is_15_after_apply() {
     // Bump history: 3 → 4 (migration 004 injection_status; Phase 3
     // Wave 4) → 5 (AI command modes) → 6/7/8 (prompt iterations) → 9
     // (max_tokens bump) → 10 (ADR 0024 Wave C prompt v2) → 11 (Phase MC
     // meeting_sessions + meeting_transcripts + FTS; ADR 0026 + 0027 +
-    // 0028 + 0029 + 0030). Bump this assert when the next migration
-    // lands.
+    // 0028 + 0029 + 0030) → 12 (Phase 10 Wave 1B activity-capture
+    // schema) → 13 (Phase 10 Wave 3 activity_blocks FTS5 + label) → 14
+    // (Phase 10 Wave 4 activity_sessions audio-pipeline provenance) →
+    // 15 (Phase 10 Wave 5 hardening — exclusion-rules table +
+    // activity_blocks.raw_events_purged_at; ADR 0042 + 0043). Bump
+    // this assert when the next migration lands.
     let db = fresh_db();
     let v: String = db
         .conn
@@ -31,7 +35,7 @@ fn schema_version_is_11_after_apply() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(v, "11");
+    assert_eq!(v, "15");
 }
 
 #[test]
@@ -57,6 +61,13 @@ fn all_expected_tables_exist() {
         // Phase MC — sibling-subsystem tables (migration 011).
         "meeting_sessions",
         "meeting_transcripts",
+        // Phase 10 Wave 1B — activity-capture sibling-subsystem (migration 012).
+        "activity_sessions",
+        "activity_events",
+        "activity_blocks",
+        "activity_transcript_segments",
+        // Phase 10 Wave 5 — hardening (migration 015).
+        "activity_exclusion_rules",
     ];
     for t in expected {
         let n: i64 = db
@@ -72,13 +83,15 @@ fn all_expected_tables_exist() {
 }
 
 #[test]
-fn trigger_count_is_18() {
+fn trigger_count_is_21() {
     // 2 dictation FTS5 triggers (transcripts_fts_insert/delete; mig 001)
     // + 4 tables * 3 audit triggers = 12 (mig 002)
     // + 2 meeting FTS5 triggers (meeting_transcripts_fts_insert/delete; mig 011)
     // + 2 activity-events immutability triggers
     //   (activity_events_no_update / activity_events_no_delete; mig 012)
-    // = 18 total.
+    // + 3 activity_blocks FTS5 triggers
+    //   (activity_blocks_ai / activity_blocks_au / activity_blocks_ad; mig 013)
+    // = 21 total. Migration 015 (Phase 10 Wave 5) adds 0 triggers.
     //
     // Bump this count whenever a migration adds or removes a trigger.
     // The plus side of asserting an exact number: it catches an
@@ -93,7 +106,7 @@ fn trigger_count_is_18() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(n, 18);
+    assert_eq!(n, 21);
 }
 
 #[test]

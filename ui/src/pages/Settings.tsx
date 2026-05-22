@@ -29,6 +29,7 @@ import { formatRelative } from "../lib/format";
 
 import { CommandCenterChordRow } from "./SettingsCommandCenterRow";
 import { SettingsActivityAudioRow } from "./SettingsActivityAudioRow";
+import { SettingsActivityHardeningRow } from "./SettingsActivityHardeningRow";
 import { SettingsMeetingTab } from "./SettingsMeetingTab";
 import styles from "./Settings.module.css";
 
@@ -268,6 +269,10 @@ function GeneralPanel({
           this at session-start time; the IPC `activity_start` defaults
           to it when no explicit `withAudio` is passed. */}
       <SettingsActivityAudioRow />
+      {/* Phase 10 Wave 5 — Hardening (ADR 0042 retention + ADR 0043
+          exclusion rules). PDF export lives on the per-session view,
+          not here. */}
+      <SettingsActivityHardeningRow />
       </Card>
       <BackgroundCard />
     </>

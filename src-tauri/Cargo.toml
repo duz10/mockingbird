@@ -54,6 +54,9 @@ ureq    = { workspace = true }
 # Phase MC — CRC32 for meeting chunk-WAV integrity (ADR 0029).
 crc32fast = { workspace = true }
 
+# Phase 10 Wave 5 — PDF export for Activity sessions (ADR 0044).
+printpdf  = { workspace = true }
+
 [dev-dependencies]
 tempfile  = { workspace = true }
 rstest    = { workspace = true }

@@ -221,4 +221,105 @@ export const activityApi = {
     split: (blockId: string, splitAtMs: number): Promise<string> =>
       invoke<string>("activity_block_split", { blockId, splitAtMs }),
   },
+
+  // -----------------------------------------------------------------
+  // Wave 5 — Hardening (ADR 0042 retention, 0043 exclusion, 0044 PDF).
+  // -----------------------------------------------------------------
+
+  exclusion: {
+    /** List ALL rules (built-ins + user-created, enabled or not). */
+    list: (): Promise<ExclusionRule[]> =>
+      invoke<ExclusionRule[]>("activity_exclusion_list"),
+    /** Validate a `(kind, pattern)` without persisting. Returns void on
+     *  success; rejects with a string error on invalid input. */
+    validate: (kind: ExclusionRuleKind, pattern: string): Promise<void> =>
+      invoke("activity_exclusion_validate", { kind, pattern }),
+    /** Upsert a user-created rule. `id = null` → INSERT. Built-in rule
+     *  shapes are immutable; use {@link setEnabled} for built-ins. */
+    upsert: (
+      id: string | null,
+      kind: ExclusionRuleKind,
+      pattern: string,
+      enabled: boolean,
+      note: string | null,
+    ): Promise<string> =>
+      invoke<string>("activity_exclusion_upsert", {
+        id,
+        kind,
+        pattern,
+        enabled,
+        note,
+      }),
+    /** Toggle the `enabled` flag on any rule (built-in or user). */
+    setEnabled: (id: string, enabled: boolean): Promise<void> =>
+      invoke("activity_exclusion_set_enabled", { id, enabled }),
+    /** Delete a user-created rule. Built-ins reject with an error. */
+    delete: (id: string): Promise<void> =>
+      invoke("activity_exclusion_delete", { id }),
+  },
+
+  retention: {
+    /** Read current TTLs + last-sweep timestamp. */
+    get: (): Promise<RetentionPolicy> =>
+      invoke<RetentionPolicy>("activity_retention_get"),
+    /** Persist the three TTL knobs. `0` = forever. */
+    set: (
+      eventsDays: number,
+      segmentsDays: number,
+      blocksDays: number,
+    ): Promise<void> =>
+      invoke("activity_retention_set", {
+        eventsDays,
+        segmentsDays,
+        blocksDays,
+      }),
+    /** Trigger the sweep immediately and return row-count summary. */
+    sweepNow: (): Promise<RetentionSweepResult> =>
+      invoke<RetentionSweepResult>("activity_retention_sweep_now"),
+  },
+
+  /** Render the per-session PDF to `destPath`. `mode` selects layout. */
+  exportPdf: (
+    sessionId: string,
+    destPath: string,
+    mode: ActivityPdfMode,
+  ): Promise<void> =>
+    invoke("activity_export_pdf", { sessionId, destPath, mode }),
 };
+
+// -------------------------------------------------------------------
+// Wave 5 — Hardening DTOs.
+// -------------------------------------------------------------------
+
+/** Exclusion-rule kinds (ADR 0043 §Rule kinds). */
+export type ExclusionRuleKind = "app_glob" | "title_regex" | "system";
+
+export interface ExclusionRule {
+  id: string;
+  kind: ExclusionRuleKind;
+  pattern: string;
+  enabled: boolean;
+  isBuiltin: boolean;
+  note: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Retention policy (ADR 0042). All `*Days` fields: `0` = forever. */
+export interface RetentionPolicy {
+  eventsDays: number;
+  segmentsDays: number;
+  blocksDays: number;
+  /** Unix epoch ms of the last successful sweep. `0` = never. */
+  lastSweepMs: number;
+}
+
+export interface RetentionSweepResult {
+  eventsDeleted: number;
+  segmentsDeleted: number;
+  blocksDeleted: number;
+  blocksMarkedPurged: number;
+  ranAtMs: number;
+}
+
+export type ActivityPdfMode = "full" | "work_report";

@@ -246,10 +246,37 @@ pub fn run() {
                     "failed to create activity audio chunk dir; audio will fail if enabled"
                 );
             }
+            // Phase 10 Wave 5 — Crash recovery sweep BEFORE the
+            // activity runtime spawns. Promotes orphan `in_progress`
+            // sessions to `crashed_recovered` and deletes orphan
+            // chunk_dir subdirs (audio for sessions that no longer
+            // exist). Best-effort; logs + swallows individual
+            // errors so a failed recovery can't block boot.
+            {
+                let conn_guard = shared_conn.lock();
+                if let Ok(conn) = conn_guard {
+                    let report =
+                        crate::activity::crash_recovery::recover_all(&conn, &activity_audio_dir);
+                    tracing::info!(
+                        target: "activity::crash_recovery",
+                        sessions_recovered = report.sessions_recovered,
+                        orphan_dirs_deleted = report.orphan_dirs_deleted,
+                        orphan_dirs_kept = report.orphan_dirs_kept,
+                        "\u{1f527} activity crash-recovery pass complete"
+                    );
+                }
+            }
+
             let activity_runtime =
                 ActivityCaptureRuntime::spawn(shared_conn.clone(), activity_audio_dir);
             app.manage(activity_runtime);
             tracing::info!("\u{1f4ca} activity-capture runtime registered");
+
+            // Phase 10 Wave 5 — Retention sweep daemon. Throttled
+            // boot sweep + daily cadence. Fire-and-forget thread.
+            // No-op while all TTLs are `0 = forever` (the default).
+            crate::activity::retention::spawn_daemon(shared_conn.clone());
+            tracing::info!("\u{1f9f9} activity retention daemon started");
 
             // Phase 10 Wave 1A — spin up the Command Center after the
             // dictation + meeting runtimes are registered, so the

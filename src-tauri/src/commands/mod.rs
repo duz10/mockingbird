@@ -147,6 +147,16 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         activity::activity_render_work_report,
         // Phase 10 Wave 4 — Activity audio (ADR 0041).
         activity::activity_list_transcript_segments,
+        // Phase 10 Wave 5 — Hardening (ADR 0042 + 0043 + 0044).
+        activity::activity_exclusion_list,
+        activity::activity_exclusion_validate,
+        activity::activity_exclusion_upsert,
+        activity::activity_exclusion_set_enabled,
+        activity::activity_exclusion_delete,
+        activity::activity_retention_get,
+        activity::activity_retention_set,
+        activity::activity_retention_sweep_now,
+        activity::activity_export_pdf,
     ])
 }
 

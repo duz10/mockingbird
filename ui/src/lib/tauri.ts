@@ -338,6 +338,47 @@ function fixtureFor<T>(command: string, args?: object): T {
       );
     case "activity_block_split":
       return fixture(command, "fixture-blk-new" as unknown as T);
+    // Phase 10 Wave 5 — Hardening fixtures (ADR 0042/0043/0044).
+    case "activity_exclusion_list":
+      return fixture(command, [
+        {
+          id: "builtin-1password",
+          kind: "app_glob",
+          pattern: "1Password*",
+          enabled: true,
+          isBuiltin: true,
+          note: "1Password credentials manager",
+          createdAt: Date.now() - 86_400_000,
+          updatedAt: Date.now() - 86_400_000,
+        },
+        {
+          id: "builtin-secure-input",
+          kind: "system",
+          pattern: "password_field_active",
+          enabled: true,
+          isBuiltin: true,
+          note: "Drop snapshot when UIA reports an active password field",
+          createdAt: Date.now() - 86_400_000,
+          updatedAt: Date.now() - 86_400_000,
+        },
+      ]) as T;
+    case "activity_exclusion_upsert":
+      return fixture(command, "fixture-rule-new" as unknown as T);
+    case "activity_retention_get":
+      return fixture(command, {
+        eventsDays: 0,
+        segmentsDays: 0,
+        blocksDays: 0,
+        lastSweepMs: 0,
+      }) as T;
+    case "activity_retention_sweep_now":
+      return fixture(command, {
+        eventsDeleted: 0,
+        segmentsDeleted: 0,
+        blocksDeleted: 0,
+        blocksMarkedPurged: 0,
+        ranAtMs: Date.now(),
+      }) as T;
     case "get_setting": {
       // Typed-settings read. Browser-preview only — the real values
       // come from the typed-registry IPC inside the Tauri shell.
@@ -370,6 +411,11 @@ function fixtureFor<T>(command: string, args?: object): T {
     case "activity_block_merge":
     case "activity_export_markdown":
     case "activity_copy_to_clipboard":
+    case "activity_exclusion_validate":
+    case "activity_exclusion_set_enabled":
+    case "activity_exclusion_delete":
+    case "activity_retention_set":
+    case "activity_export_pdf":
       return fixture(command, undefined as unknown as T);
     default:
       throw new Error(`fixtureFor: no fixture for command "${command}"`);

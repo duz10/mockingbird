@@ -288,3 +288,17 @@
   font-family: "DM Sans", sans-serif;
   color: var(--md-sys-on-surface-variant);
 }
+
+/* Phase 10 Wave 5 hardening — retention + exclusion list styles. */
+.retentionGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-top: 6px; }
+.retentionLabel { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.retentionLabel input { padding: 4px 6px; }
+.exclusionList { list-style: none; padding: 0; margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
+.exclusionItem { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; padding: 4px 6px; border: 1px solid var(--glass-border); border-radius: var(--shape-sm, 6px); }
+.exclusionToggle { display: flex; align-items: center; }
+.exclusionMeta { display: flex; flex-direction: column; gap: 2px; }
+.exclusionMeta code { font-size: 12px; }
+.exclusionMeta small { color: var(--md-sys-on-surface-variant); font-size: 11px; }
+.exclusionAddForm { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-top: 1px dashed var(--glass-border); margin-top: 6px; }
+.exclusionAddForm label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+

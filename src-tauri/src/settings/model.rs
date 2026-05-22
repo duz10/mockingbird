@@ -121,6 +121,33 @@ pub enum SettingKey {
     /// `activity_transcript_segments` and the audio-aware abstractor
     /// prompt is used at summarization time.
     ActivityAudioEnabled,
+
+    // ----- Phase 10 Wave 5 — Activity retention TTL (ADR 0042). -----
+    //
+    // All defaults are `0 = forever` (privacy-by-default-but-don't-
+    // purge-without-permission — the user must opt in to TTL purges).
+    //
+    /// TTL in days for `activity_events`. `0` = forever. The retention
+    /// sweep (run at boot + periodically) DELETEs events older than
+    /// `now - ttl_days * 86_400_000` ms. Blocks whose events are
+    /// purged get `raw_events_purged_at` stamped (ADR 0042 §Sweep
+    /// order) but survive themselves.
+    ActivityRetentionEventsDays,
+    /// TTL in days for `activity_transcript_segments`. `0` = forever.
+    /// Separate axis from events because some users want long-form
+    /// audio transcripts purged faster than the visual timeline.
+    ActivityRetentionSegmentsDays,
+    /// TTL in days for `activity_blocks` themselves (the derived
+    /// summary layer). `0` = forever. When non-zero, Blocks whose
+    /// `started_at` is older than the cutoff are deleted entirely.
+    /// This is independent of the `raw_events_purged_at` breadcrumb —
+    /// that only fires when raw events under a Block age out while the
+    /// Block is still inside its own retention window.
+    ActivityRetentionBlocksDays,
+    /// Unix epoch ms of the last successful retention sweep. `0` =
+    /// never. Read by the boot sweep to decide whether to run, and by
+    /// the Settings UI to display "last sweep: 2026-05-26 14:02".
+    ActivityRetentionLastSweepMs,
 }
 
 impl SettingKey {
@@ -153,6 +180,11 @@ impl SettingKey {
             Self::LegacyMeetingChordEnabled => "legacy_meeting_chord_enabled",
             // Phase 10 Wave 4.
             Self::ActivityAudioEnabled => "activity_audio_enabled",
+            // Phase 10 Wave 5.
+            Self::ActivityRetentionEventsDays => "activity_retention_events_days",
+            Self::ActivityRetentionSegmentsDays => "activity_retention_segments_days",
+            Self::ActivityRetentionBlocksDays => "activity_retention_blocks_days",
+            Self::ActivityRetentionLastSweepMs => "activity_retention_last_sweep_ms",
         }
     }
 
@@ -185,6 +217,11 @@ impl SettingKey {
             "legacy_meeting_chord_enabled" => Ok(Self::LegacyMeetingChordEnabled),
             // Phase 10 Wave 4.
             "activity_audio_enabled" => Ok(Self::ActivityAudioEnabled),
+            // Phase 10 Wave 5.
+            "activity_retention_events_days" => Ok(Self::ActivityRetentionEventsDays),
+            "activity_retention_segments_days" => Ok(Self::ActivityRetentionSegmentsDays),
+            "activity_retention_blocks_days" => Ok(Self::ActivityRetentionBlocksDays),
+            "activity_retention_last_sweep_ms" => Ok(Self::ActivityRetentionLastSweepMs),
             other => Err(AppError::Other(format!("unknown setting key: {other:?}"))),
         }
     }
@@ -234,6 +271,12 @@ impl SettingKey {
             // The user opts in via Settings; the Command Center reads
             // this value at start time.
             Self::ActivityAudioEnabled => serde_json::json!(false),
+            // Phase 10 Wave 5. All TTLs default to 0 = forever (user
+            // opt-in). LastSweepMs starts at 0 = never.
+            Self::ActivityRetentionEventsDays => serde_json::json!(0),
+            Self::ActivityRetentionSegmentsDays => serde_json::json!(0),
+            Self::ActivityRetentionBlocksDays => serde_json::json!(0),
+            Self::ActivityRetentionLastSweepMs => serde_json::json!(0),
         }
     }
 
@@ -268,6 +311,11 @@ impl SettingKey {
             Self::LegacyMeetingChordEnabled,
             // Phase 10 Wave 4.
             Self::ActivityAudioEnabled,
+            // Phase 10 Wave 5.
+            Self::ActivityRetentionEventsDays,
+            Self::ActivityRetentionSegmentsDays,
+            Self::ActivityRetentionBlocksDays,
+            Self::ActivityRetentionLastSweepMs,
         ]
     }
 }
@@ -369,8 +417,9 @@ mod tests {
     fn all_enumerates_every_variant() {
         // 8 original + 11 Phase MC + 1 Phase MC W5 (MeetingHotkeyPaused)
         //   + 3 Phase 10 W1A (CommandCenter* + LegacyMeetingChordEnabled)
-        //   + 1 Phase 10 W4 (ActivityAudioEnabled) = 24.
-        assert_eq!(SettingKey::all().len(), 24);
+        //   + 1 Phase 10 W4 (ActivityAudioEnabled)
+        //   + 4 Phase 10 W5 (ActivityRetention* x 4) = 28.
+        assert_eq!(SettingKey::all().len(), 28);
     }
 
     /// Phase 10 Wave 1A defaults must match ADR 0037 §Decision items

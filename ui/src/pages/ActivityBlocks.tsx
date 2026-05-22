@@ -12,7 +12,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pill, Spinner } from "../components/primitives";
 import { t } from "../i18n";
 import { activityApi } from "../lib/activity";
-import type { ActivityBlockRow } from "../lib/activity";
+import type { ActivityBlockRow, ActivityPdfMode } from "../lib/activity";
+import { api } from "../lib/tauri";
 import { formatDuration } from "../lib/format";
 
 import styles from "./ActivityBlocks.module.css";
@@ -66,6 +67,26 @@ export function ActivityBlocksPanel({ sessionId, canSummarize }: Props) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, [sessionId]);
+
+  // Phase 10 Wave 5 — PDF export (ADR 0044). No save dialog: we drop
+  // the file under `<appdata>/activity_exports/` with a deterministic
+  // filename and toast the path. The user opens it via Explorer.
+  // Mirrors the meeting export's "default to appdata" path resolution.
+  const onExportPdf = useCallback(
+    async (mode: ActivityPdfMode) => {
+      try {
+        const paths = await api.app_paths();
+        const shortId = sessionId.slice(0, 8);
+        const suffix = mode === "work_report" ? "-work-report" : "";
+        const destPath = `${paths.dataDir}\\activity_exports\\${shortId}${suffix}.pdf`;
+        await activityApi.exportPdf(sessionId, destPath, mode);
+        setToast(`PDF saved: ${destPath}`);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [sessionId],
+  );
 
   const onDeleteBlock = useCallback(
     async (blockId: string) => {
@@ -137,6 +158,24 @@ export function ActivityBlocksPanel({ sessionId, canSummarize }: Props) {
             onClick={onCopy}
           >
             {t("activity.blocks.copy")}
+          </button>
+          <button
+            type="button"
+            className={styles.secondaryBtn}
+            disabled={!hasBlocks}
+            onClick={() => void onExportPdf("full")}
+            title="Export full PDF (header, time-range, primary app, abstract)"
+          >
+            PDF (Full)
+          </button>
+          <button
+            type="button"
+            className={styles.secondaryBtn}
+            disabled={!hasBlocks}
+            onClick={() => void onExportPdf("work_report")}
+            title="Export work-report PDF (time-range + abstract only)"
+          >
+            PDF (Work Report)
           </button>
         </div>
       </header>

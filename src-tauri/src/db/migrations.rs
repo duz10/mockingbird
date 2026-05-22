@@ -35,6 +35,12 @@ const MIGRATION_013: &str = include_str!("migrations/013_activity_blocks_fts.sql
 // activity_sessions (audio_whisper_model + audio_chunk_window_ms).
 // Purely additive ADD COLUMN, NULL-defaulted. ADR 0041.
 const MIGRATION_014: &str = include_str!("migrations/014_activity_audio_provenance.sql");
+// Phase 10 Wave 5 — Hardening. ADRs 0042 (retention cascade) + 0043
+// (exclusion-rule shape). Adds `activity_exclusion_rules` with
+// built-in seed defaults, plus `activity_blocks.raw_events_purged_at`
+// breadcrumb column. Purely additive; no triggers; idempotent run
+// via the schema_version gate.
+const MIGRATION_015: &str = include_str!("migrations/015_activity_wave5_hardening.sql");
 
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
@@ -126,6 +132,14 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         let prepared = substitute_prompt_bodies(MIGRATION_014);
         conn.execute_batch(&prepared)?;
     }
+    if current < 15 {
+        // Phase 10 Wave 5: hardening schema — exclusion rules table
+        // (with built-in seed defaults) + activity_blocks.raw_events_
+        // purged_at column for retention cascade (ADR 0042 + 0043).
+        // Substituter pass for the leftover-token guard.
+        let prepared = substitute_prompt_bodies(MIGRATION_015);
+        conn.execute_batch(&prepared)?;
+    }
     Ok(())
 }
 
@@ -184,7 +198,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "14");
+        assert_eq!(v, "15");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -203,7 +217,42 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "14");
+        assert_eq!(v, "15");
+    }
+
+    /// Migration 015 ships the exclusion-rules table + raw_events_
+    /// purged_at column. ADR 0042 + 0043; Wave 5. Verify both shapes
+    /// land.
+    #[test]
+    fn migration_015_ships_exclusion_rules_and_block_purged_column() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+
+        // Table exists with built-ins seeded.
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM activity_exclusion_rules WHERE is_builtin = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            count >= 8,
+            "expected at least 8 built-in exclusion rules; got {count}"
+        );
+
+        // raw_events_purged_at column exists on activity_blocks.
+        let mut stmt = conn.prepare("PRAGMA table_info(activity_blocks)").unwrap();
+        let cols: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        assert!(
+            cols.iter().any(|c| c == "raw_events_purged_at"),
+            "activity_blocks missing raw_events_purged_at column; got {cols:?}"
+        );
     }
 
     /// Migration 014 ships per-session audio-pipeline provenance
