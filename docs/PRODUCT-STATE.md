@@ -138,7 +138,21 @@ preserved even in Windows-only v1.
   Silero-gates → runs Whisper once on the stopped buffer → runs Cleanup → emits
   `dictation:state` events → injects via clipboard → persists three-stage transcript
   (raw / cleaned / final) per ADR 0010 immutability.
-- **Sealed:** any file under `dictation/` and `dictation.rs` itself.
+- **Headless ingest (ADR 0046 Iter 1, shipped 2026-05-27):**
+  `dictation::ingest::headless_ingest(deps, samples, provenance)` is a pure-Rust
+  entry point that runs VAD + STT + Cleanup on a pre-decoded sample buffer (no
+  mic, no PTT). The `+ Audio file` button on the Dictations page calls the
+  `dictation_import_file` IPC, which decodes via `symphonia` off-thread and
+  queues a `HeadlessIngestRequest` onto a sibling `crossbeam-channel` next to
+  the orchestrator's existing `StateAction` stream (ADR 0046 §3.2). Same
+  VAD/STT/Cleaner instances are reused — no fresh allocations per import.
+  Sessions land with `source='desktop-import'` and `start_mode='in_app'`
+  (migration 018 + ADR 0045 columns). `SessionsEventBus` trait drives UI
+  refetch identically to the PTT path. No progress indicator yet — tracked as
+  `mb-q1xt` for Iter 4 polish.
+- **Sealed:** any file under `dictation/` and `dictation.rs` itself, except for
+  edits explicitly authorized by ADR 0045 (programmatic start/stop) and
+  ADR 0046 §3 / §3.1 / §3.2 (headless ingest).
 
 ### 3.6 `injection/` — Clipboard paste
 - Save-restore the prior clipboard around every paste (Principle 7).
