@@ -1,4 +1,4 @@
-﻿#![allow(missing_docs)] // Enum variants are documented in docs/SETTINGS.md.
+#![allow(missing_docs)] // Enum variants are documented in docs/SETTINGS.md.
 
 //! Typed setting keys — the registry of every known setting in the app.
 //!
@@ -148,6 +148,68 @@ pub enum SettingKey {
     /// never. Read by the boot sweep to decide whether to run, and by
     /// the Settings UI to display "last sweep: 2026-05-26 14:02".
     ActivityRetentionLastSweepMs,
+
+    // ----- ADR 0046 Iter 2 — Mobile Sync via Obsidian vault. -----
+    //
+    // Eight keys total; Iter 2 wires the first four behaviorally, the
+    // remaining four are enum-stubbed so the Iter 4 Mobile tab can
+    // render with the full settings registry already present. No
+    // migration: values land in the existing `settings` table via the
+    // `Settings` facade. Defaults are deliberately OFF / unset --
+    // mobile sync is opt-in, per Principle 4 + ADR §10.
+    //
+    /// Master toggle. When `true` AND `VaultPath` validates, every
+    /// dictation / meeting commit triggers an export reconciliation
+    /// pass and the Iter 3 inbox watcher is armed. Default `false`.
+    /// Flipping ON also fires an initial backfill (every in-scope
+    /// historical record gets projected).
+    MobileSyncEnabled,
+    /// Absolute path to the Obsidian vault root the user wants
+    /// Mockingbird to write into (e.g.
+    /// `C:\Users\dboyd\mockingbird-vault`). Validated by
+    /// `vault::layout::VaultLayout::validate` before being honored.
+    /// `null` until the user picks one. Default `null`.
+    VaultPath,
+    /// Which record types to project. One of `"dictation" |
+    /// "meeting" | "both"`. Default `"both"`. Narrowing this triggers
+    /// the reconciliation engine to ARCHIVE (not delete) any
+    /// currently-projected records that are now out of scope -- ADR
+    /// §5 / §13 "history/_archive/" zone.
+    VaultSyncRecordTypes,
+    /// Retention window in days. Records whose `started_at` is older
+    /// than `now - retention_days * 86_400_000` ms are NOT projected
+    /// (and are archived if they were previously projected). Default
+    /// 30. `0` reserved for "forever" but the Settings UI clamps to
+    /// `[1, 3650]` to discourage unbounded vault growth.
+    VaultRetentionDays,
+
+    // ----- Iter 4 stubs (declared now for enum stability; no
+    // behavior in Iter 2). The Mobile tab in Iter 4 will be the
+    // first reader. -----
+    //
+    /// Which sync backend the user has chosen for the vault. One of
+    /// `"obsidian-sync" | "icloud-drive" | "onedrive" | "google-drive"
+    /// | "dropbox" | "syncthing" | "other"`. Used by the Mobile tab
+    /// in Iter 4 to surface the right help copy + the tier byte cap.
+    /// Default `"obsidian-sync"` (the recommended option).
+    VaultSyncBackend,
+    /// Per-tier byte cap for the chosen backend, in bytes. The
+    /// Mobile tab pre-fills from a built-in table (Obsidian Sync
+    /// Standard = 4 MB, etc.); the user can override. The Iter 3
+    /// audio-blob courier path checks this before queueing.
+    /// `0` = unlimited (mostly for self-hosted Syncthing).
+    /// Default `4_000_000` (Obsidian Sync Standard tier).
+    SyncTierByteCap,
+    /// Debug toggle: when `true`, the inbox watcher leaves successful
+    /// couriers in `<vault>/inbox/_keep/` instead of deleting them.
+    /// Default `false`. Power-user setting; never surfaced in the
+    /// regular Settings UI.
+    VaultDebugKeepCouriers,
+    /// Whether the audio-blob courier (Iter 3+) keeps raw audio files
+    /// in the vault under `<vault>/audio-blobs/`. Off by default
+    /// because audio is large and most sync tiers charge per byte.
+    /// Default `false`.
+    KeepAudioBlobs,
 }
 
 impl SettingKey {
@@ -185,6 +247,15 @@ impl SettingKey {
             Self::ActivityRetentionSegmentsDays => "activity_retention_segments_days",
             Self::ActivityRetentionBlocksDays => "activity_retention_blocks_days",
             Self::ActivityRetentionLastSweepMs => "activity_retention_last_sweep_ms",
+            // ADR 0046 Iter 2.
+            Self::MobileSyncEnabled => "mobile_sync_enabled",
+            Self::VaultPath => "vault_path",
+            Self::VaultSyncRecordTypes => "vault_sync_record_types",
+            Self::VaultRetentionDays => "vault_retention_days",
+            Self::VaultSyncBackend => "vault_sync_backend",
+            Self::SyncTierByteCap => "sync_tier_byte_cap",
+            Self::VaultDebugKeepCouriers => "vault_debug_keep_couriers",
+            Self::KeepAudioBlobs => "keep_audio_blobs",
         }
     }
 
@@ -222,6 +293,15 @@ impl SettingKey {
             "activity_retention_segments_days" => Ok(Self::ActivityRetentionSegmentsDays),
             "activity_retention_blocks_days" => Ok(Self::ActivityRetentionBlocksDays),
             "activity_retention_last_sweep_ms" => Ok(Self::ActivityRetentionLastSweepMs),
+            // ADR 0046 Iter 2.
+            "mobile_sync_enabled" => Ok(Self::MobileSyncEnabled),
+            "vault_path" => Ok(Self::VaultPath),
+            "vault_sync_record_types" => Ok(Self::VaultSyncRecordTypes),
+            "vault_retention_days" => Ok(Self::VaultRetentionDays),
+            "vault_sync_backend" => Ok(Self::VaultSyncBackend),
+            "sync_tier_byte_cap" => Ok(Self::SyncTierByteCap),
+            "vault_debug_keep_couriers" => Ok(Self::VaultDebugKeepCouriers),
+            "keep_audio_blobs" => Ok(Self::KeepAudioBlobs),
             other => Err(AppError::Other(format!("unknown setting key: {other:?}"))),
         }
     }
@@ -277,6 +357,16 @@ impl SettingKey {
             Self::ActivityRetentionSegmentsDays => serde_json::json!(0),
             Self::ActivityRetentionBlocksDays => serde_json::json!(0),
             Self::ActivityRetentionLastSweepMs => serde_json::json!(0),
+            // ADR 0046 Iter 2. All defaults are opt-in / OFF.
+            Self::MobileSyncEnabled => serde_json::json!(false),
+            Self::VaultPath => serde_json::json!(null),
+            Self::VaultSyncRecordTypes => serde_json::json!("both"),
+            Self::VaultRetentionDays => serde_json::json!(30),
+            // Iter 4 stubs.
+            Self::VaultSyncBackend => serde_json::json!("obsidian-sync"),
+            Self::SyncTierByteCap => serde_json::json!(4_000_000),
+            Self::VaultDebugKeepCouriers => serde_json::json!(false),
+            Self::KeepAudioBlobs => serde_json::json!(false),
         }
     }
 
@@ -316,6 +406,15 @@ impl SettingKey {
             Self::ActivityRetentionSegmentsDays,
             Self::ActivityRetentionBlocksDays,
             Self::ActivityRetentionLastSweepMs,
+            // ADR 0046 Iter 2.
+            Self::MobileSyncEnabled,
+            Self::VaultPath,
+            Self::VaultSyncRecordTypes,
+            Self::VaultRetentionDays,
+            Self::VaultSyncBackend,
+            Self::SyncTierByteCap,
+            Self::VaultDebugKeepCouriers,
+            Self::KeepAudioBlobs,
         ]
     }
 }
@@ -418,8 +517,37 @@ mod tests {
         // 8 original + 11 Phase MC + 1 Phase MC W5 (MeetingHotkeyPaused)
         //   + 3 Phase 10 W1A (CommandCenter* + LegacyMeetingChordEnabled)
         //   + 1 Phase 10 W4 (ActivityAudioEnabled)
-        //   + 4 Phase 10 W5 (ActivityRetention* x 4) = 28.
-        assert_eq!(SettingKey::all().len(), 28);
+        //   + 4 Phase 10 W5 (ActivityRetention* x 4)
+        //   + 8 ADR 0046 Iter 2 (MobileSync/Vault* x 8) = 36.
+        assert_eq!(SettingKey::all().len(), 36);
+    }
+
+    /// ADR 0046 Iter 2 defaults must match §10 ("opt-in by default";
+    /// every behavioral key starts OFF or unset so a user who hasn't
+    /// touched the Mobile Sync tab sees zero outbound writes to disk).
+    #[test]
+    fn mobile_sync_defaults_match_adr_0046() {
+        use serde_json::json;
+        assert_eq!(SettingKey::MobileSyncEnabled.default_value(), json!(false));
+        assert!(SettingKey::VaultPath.default_value().is_null());
+        assert_eq!(
+            SettingKey::VaultSyncRecordTypes.default_value(),
+            json!("both")
+        );
+        assert_eq!(SettingKey::VaultRetentionDays.default_value(), json!(30));
+        assert_eq!(
+            SettingKey::VaultSyncBackend.default_value(),
+            json!("obsidian-sync")
+        );
+        assert_eq!(
+            SettingKey::SyncTierByteCap.default_value(),
+            json!(4_000_000)
+        );
+        assert_eq!(
+            SettingKey::VaultDebugKeepCouriers.default_value(),
+            json!(false)
+        );
+        assert_eq!(SettingKey::KeepAudioBlobs.default_value(), json!(false));
     }
 
     /// Phase 10 Wave 1A defaults must match ADR 0037 §Decision items
