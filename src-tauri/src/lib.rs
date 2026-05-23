@@ -124,6 +124,26 @@ pub fn run() {
             // WAL mode (set in Database::open) makes parallel access safe.
             let shared_conn = Arc::new(Mutex::new(database.conn));
             app.manage(AppState::new(shared_conn.clone()));
+
+            // ADR 0046 Iter 2 / mb-lvzw — vault export-job runtime.
+            // Construct BEFORE the dictation + meeting runtimes spawn so
+            // both can grab a clone for their post-commit triggers.
+            // Disabled-by-default per `MobileSyncEnabled` settings
+            // default; `trigger()` short-circuits while disabled.
+            let vault_runtime = match crate::vault::export_job::VaultRuntime::new(&shared_conn) {
+                Ok(v) => Arc::new(v),
+                Err(e) => {
+                    tracing::error!(error = ?e, "vault runtime init failed; mobile sync disabled this session");
+                    // Fall back to a default-config runtime so the
+                    // dictation + meeting wiring still gets a handle
+                    // (trigger() is a no-op when disabled).
+                    Arc::new(
+                        crate::vault::export_job::VaultRuntime::new(&shared_conn)
+                            .unwrap_or_else(|_| panic!("vault runtime fallback also failed")),
+                    )
+                }
+            };
+            app.manage(Arc::clone(&vault_runtime));
             // Tray registration moved BELOW the runtime spawns so the
             // tray menu can read `MeetingCaptureRuntime::
             // is_meeting_hotkey_paused()` when building the initial
@@ -137,6 +157,7 @@ pub fn run() {
                     shared_conn.clone(),
                     orchestrator_config,
                     HashMap::new(),
+                    Arc::clone(&vault_runtime),
                 ) {
                     Ok(runtime) => {
                         // Plug the Tauri AppHandle into the recording
@@ -211,6 +232,7 @@ pub fn run() {
                     shared_conn.clone(),
                     mc_config,
                     app.handle().clone(),
+                    Arc::clone(&vault_runtime),
                 ) {
                     Ok(mc_runtime) => {
                         // Publish the cheaply-clonable shared bag for

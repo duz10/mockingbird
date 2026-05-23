@@ -367,6 +367,13 @@ pub struct MeetingRuntimeShared {
     pub(crate) app_handle: AppHandle,
     pub(crate) in_flight: Arc<Mutex<Option<InFlightMeeting>>>,
     pub(crate) llm_pass_cache: Arc<Mutex<HashMap<String, String>>>,
+    /// ADR 0046 Iter 2 / mb-lvzw — vault export-job handle. The
+    /// lifecycle module fires `vault.trigger(...)` on the
+    /// `MeetingStatus::Complete` branch of `finalize_meeting` after
+    /// the row commit lands. Cancel / interrupt / failed branches
+    /// do not trigger -- the `vault::export_job::query_meetings`
+    /// filter requires `status = 'complete'`.
+    pub(crate) vault: Arc<crate::vault::export_job::VaultRuntime>,
 }
 
 /// One live meeting. Held under `Mutex<Option<…>>` so `start` /
@@ -425,6 +432,7 @@ impl MeetingCaptureRuntime {
         shared_conn: Arc<Mutex<Connection>>,
         config: MeetingRuntimeConfig,
         app_handle: AppHandle,
+        vault: Arc<crate::vault::export_job::VaultRuntime>,
     ) -> AppResult<Self> {
         let shared = MeetingRuntimeShared {
             shared_conn,
@@ -432,6 +440,7 @@ impl MeetingCaptureRuntime {
             app_handle,
             in_flight: Arc::new(Mutex::new(None)),
             llm_pass_cache: Arc::new(Mutex::new(HashMap::new())),
+            vault,
         };
 
         let (act_tx, act_rx) = mpsc::channel::<ActivationEvent>();

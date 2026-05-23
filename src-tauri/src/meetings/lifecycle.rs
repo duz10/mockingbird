@@ -145,6 +145,11 @@ impl MeetingRuntimeShared {
                 "sessionRowid": session_rowid,
             }),
         );
+        // ADR 0046 Iter 2 / mb-lvzw — fire the vault trigger after
+        // the Complete persist + UI event. Same fire-and-forget
+        // pattern dictation uses; export job runs in its own
+        // worker thread.
+        self.vault.trigger(Arc::clone(&self.shared_conn));
         Ok(())
     }
 

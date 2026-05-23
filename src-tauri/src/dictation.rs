@@ -147,6 +147,14 @@ pub struct DictationOrchestrator {
     /// which are exactly the three places `start_mode` matters.
     next_start_is_programmatic: Arc<AtomicBool>,
 
+    /// ADR 0046 Iter 2 / mb-lvzw — vault export-job handle. Every
+    /// `persist_complete` + every successful `handle_headless`
+    /// trigger fires `vault.trigger(self.db.clone())` AFTER the row
+    /// commit. Same additive pattern Iter 1 used for the
+    /// `SessionsEventBus` recording-window field; nothing in the
+    /// existing pipeline behavior changes.
+    vault: Arc<crate::vault::export_job::VaultRuntime>,
+
     // Per-session transient state.
     state: SessionState,
 }
@@ -299,6 +307,7 @@ impl DictationOrchestrator {
         user_overrides: HashMap<String, InjectionStrategy>,
         hotkey_tx: Sender<HotkeyEvent>,
         next_start_is_programmatic: Arc<AtomicBool>,
+        vault: Arc<crate::vault::export_job::VaultRuntime>,
     ) -> Self {
         Self {
             audio,
@@ -314,6 +323,7 @@ impl DictationOrchestrator {
             user_overrides,
             hotkey_tx,
             next_start_is_programmatic,
+            vault,
             state: SessionState::default(),
         }
     }
@@ -441,6 +451,14 @@ impl DictationOrchestrator {
             config: &self.config,
         };
         let result = headless_ingest(deps, samples, provenance);
+
+        // ADR 0046 Iter 2 / mb-lvzw — fire the vault trigger on a
+        // successful headless ingest (file-import path + future
+        // mobile-inbox courier). Failures don't trigger; same
+        // contract as `persist_complete` above.
+        if result.is_ok() {
+            self.vault.trigger(Arc::clone(&self.db));
+        }
 
         if reply_tx.send(result).is_err() {
             tracing::warn!(
@@ -897,6 +915,11 @@ impl DictationOrchestrator {
         // race against our still-held connection.
         drop(conn);
         self.emit_session_saved(id);
+        // ADR 0046 Iter 2 / mb-lvzw — vault export trigger fires
+        // ONLY on the success path. Error-status sessions don't get
+        // projected (the query in `vault::export_job::query_dictations`
+        // filters by `status = 'complete'`).
+        self.vault.trigger(Arc::clone(&self.db));
         Ok(())
     }
 

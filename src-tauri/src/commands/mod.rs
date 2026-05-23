@@ -28,6 +28,7 @@ pub mod sessions;
 pub mod settings;
 pub mod system;
 pub mod types;
+pub mod vault;
 
 use std::sync::{Arc, Mutex};
 
@@ -163,6 +164,10 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         activity::activity_retention_set,
         activity::activity_retention_sweep_now,
         activity::activity_export_pdf,
+        // ADR 0046 Iter 2 / mb-lvzw + mb-vg3p — vault IPC.
+        vault::vault_settings_get,
+        vault::vault_settings_set,
+        vault::vault_export_now,
     ])
 }
 

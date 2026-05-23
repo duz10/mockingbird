@@ -44,7 +44,19 @@ use mockingbird_lib::injection::strategy::InjectionStrategy;
 use mockingbird_lib::injection::{InjectionOutcome, Injector};
 use mockingbird_lib::recording_window::RecordingWindow;
 use mockingbird_lib::stt::{SpeechToText, TranscribeRequest, Transcript};
+use mockingbird_lib::vault::export_job::VaultRuntime;
 use mockingbird_lib::window_context::{ForegroundWindow, WindowContext};
+
+/// Test fixture: a VaultRuntime that always reads disabled config so
+/// `trigger()` is a fast-path no-op (no spawned worker, no I/O).
+fn stub_vault(db: &Arc<Mutex<rusqlite::Connection>>) -> Arc<VaultRuntime> {
+    // Stamp `mobile_sync_enabled = false` if the settings table is
+    // empty/missing rows. VaultConfig::load tolerates missing rows
+    // (defaults to disabled), so for these tests we just construct
+    // a runtime from whatever's in the DB. The vault subsystem will
+    // see `enabled = false` and short-circuit at trigger() entry.
+    Arc::new(VaultRuntime::new(db).expect("VaultRuntime::new on test DB"))
+}
 
 // --------------------------------------------------------------------
 // Stub trait implementations.
@@ -243,6 +255,9 @@ fn build_orchestrator_with_cleaner(
         // IPC. These integration tests exercise the PTT path, so the
         // flag stays false; `start_capture` will pick StartMode::Ptt.
         Arc::new(AtomicBool::new(false)),
+        // ADR 0046 Iter 2 / mb-lvzw — vault runtime, disabled by
+        // default so trigger() short-circuits without touching disk.
+        stub_vault(&db_arc),
     );
 
     (orchestrator, db_arc, injector, hotkey_rx)
@@ -483,6 +498,8 @@ fn llm_cleanup_runs_in_orchestrator_and_injects_cleaned_text() {
         hotkey_tx,
         // PTT path; programmatic-start flag stays false (mb-tfyp).
         Arc::new(AtomicBool::new(false)),
+        // ADR 0046 Iter 2 / mb-lvzw — vault disabled in tests.
+        stub_vault(&db_arc),
     );
     run_one_cycle(orchestrator);
 

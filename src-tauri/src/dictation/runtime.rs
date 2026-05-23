@@ -112,6 +112,7 @@ impl DictationRuntime {
         db: Arc<Mutex<Connection>>,
         config: OrchestratorConfig,
         user_overrides: HashMap<String, InjectionStrategy>,
+        vault: Arc<crate::vault::export_job::VaultRuntime>,
     ) -> AppResult<Self> {
         ensure_ort_dylib_set();
 
@@ -168,6 +169,7 @@ impl DictationRuntime {
                     user_overrides,
                     pipeline_complete_tx,
                     programmatic_clone,
+                    vault,
                 ) {
                     tracing::error!(error = ?e, "dictation thread bailed out");
                 }
@@ -193,6 +195,7 @@ impl DictationRuntime {
         _db: Arc<Mutex<Connection>>,
         _config: OrchestratorConfig,
         _user_overrides: HashMap<String, InjectionStrategy>,
+        _vault: Arc<crate::vault::export_job::VaultRuntime>,
     ) -> AppResult<Self> {
         // The `next_start_is_programmatic` + headless-channel fields
         // are unused on non-Windows (`Self` is never actually
@@ -308,6 +311,7 @@ fn run_dictation_thread(
     user_overrides: HashMap<String, InjectionStrategy>,
     hotkey_tx: std::sync::mpsc::Sender<crate::hotkey::HotkeyEvent>,
     next_start_is_programmatic: Arc<AtomicBool>,
+    vault: Arc<crate::vault::export_job::VaultRuntime>,
 ) -> AppResult<()> {
     // Build !Send deps here on this thread. None cross thread boundaries.
     let audio = crate::audio::make_default_capture()?;
@@ -332,6 +336,7 @@ fn run_dictation_thread(
         user_overrides,
         hotkey_tx,
         next_start_is_programmatic,
+        vault,
     );
 
     // ADR 0046 §3.2 — bridge the std::sync::mpsc StateAction stream
