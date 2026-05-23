@@ -95,22 +95,37 @@
   gap: var(--s-2);
 }
 
-/* Inline pill toggle (re-using the same shape as Modes). */
+/* Inline pill toggle (re-using the same shape as Modes).
+ *
+ * mb-5kyy: changed from `inline-block; width: 40px` to inline-flex so
+ * SettingsMeetingTab's <label.toggle><input><span>text</span></label>
+ * markup (which lacks the canonical .toggleTrack child) can lay text
+ * out NEXT to the pill instead of clipping into the 40x22 box.
+ * Follow-up (post-mb-n455): rewrite SettingsMeetingTab toggles to use
+ * the canonical <Switch> component from design/components. */
 .toggle {
   position: relative;
-  display: inline-block;
-  width: 40px;
-  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
   cursor: pointer;
+  min-height: 22px;
 }
 .toggle input {
+  position: absolute;
   opacity: 0;
-  width: 0;
-  height: 0;
+  width: 40px;
+  height: 22px;
+  left: 0;
+  top: 0;
+  margin: 0;
 }
 .toggleTrack {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  display: block;
+  flex-shrink: 0;
+  width: 40px;
+  height: 22px;
   background: var(--surf-3);
   border-radius: var(--r-pill);
   transition: background var(--dur-1) var(--ease-out);
@@ -289,10 +304,23 @@
   color: var(--md-sys-on-surface-variant);
 }
 
-/* Phase 10 Wave 5 hardening — retention + exclusion list styles. */
+/* Phase 10 Wave 5 hardening ï¿½ï¿½ï¿½ retention + exclusion list styles. */
 .retentionGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-top: 6px; }
 .retentionLabel { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
-.retentionLabel input { padding: 4px 6px; }
+/* mb-4frh: retention day inputs were rendering as browser-default
+ * white-bg + cream text (WCAG fail). Apply the same dark-pill recipe
+ * as .input above. */
+.retentionLabel input {
+  background: var(--surf-1);
+  color: var(--on-surf);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  padding: var(--s-1) var(--s-2);
+  font: var(--type-sm);
+  font-family: inherit;
+  min-width: 0;
+  width: 100%;
+}
 .exclusionList { list-style: none; padding: 0; margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
 .exclusionItem { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; padding: 4px 6px; border: 1px solid var(--glass-border); border-radius: var(--shape-sm, 6px); }
 .exclusionToggle { display: flex; align-items: center; }

@@ -269,8 +269,8 @@
 
 /* Button overrides — map the 3 legacy variants onto v2 equivalents.
  * primary  → filled with --md-sys-primary
- * ghost    → outlined with --md-sys-outline
- * danger   → text on --md-sys-error
+ * ghost    → outlined with --surface-glass-faint default fill (mb-5m53)
+ * danger   → outlined-glass with --md-sys-error text
  * Shape becomes pill-full to match the v2 button family. */
 .btn {
   border-radius: var(--shape-full);
@@ -296,15 +296,20 @@
   background: color-mix(in oklch, var(--md-sys-primary) 88%, white);
 }
 .btn_ghost {
-  background: transparent;
+  /* mb-5m53: glass-faint default fill so the button stays visible on
+   * arbitrary photo backgrounds. The [data-photo-bg] cascade swaps the
+   * underlying primitive to a darker tint for photo-bg legibility. */
+  background: var(--surface-glass-faint);
   color: var(--md-sys-on-surface);
   border-color: var(--md-sys-outline);
 }
 .btn_ghost:hover:not(:disabled) {
-  background: var(--md-sys-surface-container-low);
+  background: var(--surface-glass-soft);
 }
 .btn_danger {
-  background: transparent;
+  /* mb-5m53: same glass-faint default for the danger outline. Hover
+   * tints the error color in as the affordance. */
+  background: var(--surface-glass-faint);
   color: var(--md-sys-error);
   border-color: var(--md-sys-outline-variant);
 }

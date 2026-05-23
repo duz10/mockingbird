@@ -38,7 +38,7 @@ body {
 }
 
 body {
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* Recording overlay body — transparent so the Tauri frameless +
@@ -51,7 +51,7 @@ body.recording-body {
 
 #root,
 #recording-root {
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 button {

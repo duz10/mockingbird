@@ -1,7 +1,7 @@
 /* Meeting overlay — frameless transparent Tauri window.
  *
  * Pattern + lessons mirror `RecordingWindow.module.css`:
- *   - the pill IS the window (fills 100vw × 100vh) to avoid the
+ *   - the pill IS the window (fills 100vw × 100dvh) to avoid the
  *     Windows 11 WebView2 transparency artifact (LESSONS 2026-05-17).
  *   - no box-shadow on the pill itself; the OS DWM shadow from
  *     tauri.conf.json `shadow: true` is the only shadow we want.
@@ -12,7 +12,7 @@
 .shell {
   display: block;
   width: 100vw;
-  height: 100vh;
+  height: 100dvh;
   background: transparent;
   margin: 0;
   padding: 0;

@@ -1,14 +1,30 @@
 .shell {
+  /* mb-x3bj/mb-t4l1: bounded-height shell so .content becomes THE
+   * single page-scroller (was min-height which let content grow
+   * unbounded and forced page-level inner lists to grow their own
+   * nested scrollers). `height` + `min-height: 0` on the grid row
+   * is the canonical "one-scroller" pattern. */
   display: grid;
   grid-template-columns: 220px 1fr;
-  min-height: 100vh;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100dvh;
   background: var(--surf-0);
 }
 
 .content {
+  /* mb-ra2n: scrollbar-gutter stable prevents the ~15px layout shift
+   * when scrollbars appear/disappear across page navigations.
+   * overscroll-behavior contain keeps wheel-momentum inside the app
+   * instead of triggering browser-chrome back-gesture. */
   overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
   padding: var(--s-6);
   background: var(--surf-0);
+  /* App content fills the viewport-height grid cell. min-height: 0
+   * on the grid row lets this overflow contain itself rather than
+   * expand the shell. */
+  min-height: 0;
 }
 
 @media (max-width: 720px) {

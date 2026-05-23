@@ -4,12 +4,16 @@
  */
 
 .panel {
+  /* mb-n455 phase 4: glass-soft for the blocks-panel surface so it
+   * reads as a coherent card-stack on photo background. */
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--glass-border);
   border-radius: 12px;
-  background: var(--surface-1);
+  background: var(--surface-glass-soft);
+  backdrop-filter: blur(var(--glass-blur-cap)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-cap)) saturate(160%);
   padding: 1rem;
   margin-bottom: 1rem;
 }
@@ -37,13 +41,22 @@
 .secondaryBtn,
 .dangerBtn,
 .tinyBtn {
-  border: 1px solid var(--border-subtle);
-  background: var(--surface-2);
-  color: var(--text-1);
+  /* mb-5m53: outline-glass default fill so these stay visible on
+   * photo bg. PrimaryBtn below overrides to filled-accent. */
+  border: 1px solid var(--md-sys-outline);
+  background: var(--surface-glass-faint);
+  color: var(--md-sys-on-surface);
   padding: 0.375rem 0.75rem;
   border-radius: 6px;
   font-size: 0.875rem;
   cursor: pointer;
+  transition: background var(--duration-short-2) var(--motion-standard);
+}
+
+.secondaryBtn:hover:not(:disabled),
+.dangerBtn:hover:not(:disabled),
+.tinyBtn:hover:not(:disabled) {
+  background: var(--surface-glass-soft);
 }
 
 .primaryBtn {
@@ -113,9 +126,12 @@
 }
 
 .card {
-  border: 1px solid var(--border-subtle);
+  /* mb-n455: per-block sub-card. Inside .panel (already glass), we use
+   * a slightly softer fill so the inner cards have visual hierarchy
+   * without doubling the blur. */
+  border: 1px solid var(--glass-border);
   border-radius: 8px;
-  background: var(--surface-2);
+  background: var(--surface-glass-faint);
   padding: 0.75rem;
   display: flex;
   flex-direction: column;

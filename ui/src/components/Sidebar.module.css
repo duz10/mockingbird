@@ -6,7 +6,7 @@
   padding: var(--s-4) var(--s-2);
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: 100dvh;
 }
 
 .brand {

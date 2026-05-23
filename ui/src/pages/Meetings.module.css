@@ -11,29 +11,40 @@
  * 600-line hard cap not even close to being a concern for this file. */
 
 .shell {
+  /* mb-t4l1: no height bound. App `.content` scrolls the page; the
+   * sticky .leftPane keeps the meetings list visible while the right
+   * pane transcript scrolls past it. Same pattern as Dictations. */
   display: grid;
   grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
   gap: var(--s-4);
-  height: calc(100vh - 140px);
+  align-items: start;
   min-height: 480px;
 }
 
 @media (max-width: 980px) {
   .shell {
     grid-template-columns: 1fr;
-    height: auto;
   }
 }
 
-.leftPane,
-.rightPane {
+.leftPane {
+  /* Sticky meetings list — stays visible while transcript scrolls. */
   display: flex;
   flex-direction: column;
   gap: var(--s-3);
   min-height: 0;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: calc(100dvh - 140px);
 }
+
 .rightPane {
-  overflow-y: auto;
+  /* mb-t4l1: no internal overflow — App `.content` scrolls. */
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  min-height: 0;
 }
 
 /* ============================================================ */

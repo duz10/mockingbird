@@ -239,12 +239,14 @@
      live names, and then this bridge block can be deleted.
      ════════════════════════════════════════════════════════════ */
 
-  --surface-1:     var(--surf-1);
-  --surface-2:     var(--surf-2);
-  --surface-3:     var(--surf-3);
-  --text-1:        var(--on-surf);
-  --text-2:        var(--on-surf-muted);
-  --border-subtle: var(--border);
+  --surface-1:        var(--surf-1);
+  --surface-2:        var(--surf-2);
+  --surface-3:        var(--surf-3);
+  --text-1:           var(--on-surf);
+  --text-2:           var(--on-surf-muted);
+  --border-subtle:    var(--border);
+  --accent-1:         var(--md-sys-primary);
+  --accent-1-contrast: var(--md-sys-on-primary);
 
   /* ════════════════════════════════════════════════════════════
      §00.H  LEGACY ALIAS BRIDGE
