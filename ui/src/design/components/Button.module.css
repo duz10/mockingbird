@@ -89,12 +89,17 @@
 }
 
 .btn_outlined {
-  background: transparent;
+  /* Default-state low-opacity glass fill so the button remains
+   * visible against arbitrary photo backgrounds (mb-n455 P1-03).
+   * The [data-photo-bg] cascade in materials-v2.css swaps the
+   * underlying primitive to a darker fill for photo-bg legibility. */
+  background: var(--surface-glass-faint);
   border-color: var(--md-sys-outline);
   color: var(--md-sys-on-surface);
 }
 .btn_outlined:hover:not(:disabled) {
-  background: var(--md-sys-surface-container-low);
+  background: var(--surface-glass-soft);
+  border-color: var(--md-sys-outline);
 }
 
 .btn_text {

@@ -1,0 +1,81 @@
+/* Mockingbird Design System v1 — canonical layout primitives.
+ *
+ * Single source of truth for the sidebar-content shell pattern used
+ * by Dictations / Meetings / Activity / Modes / Settings / Dictionary /
+ * About / Insights. Bound to mb-n455.
+ *
+ * Two binding rules (see docs/design/conventions.md for rationale):
+ *
+ *   1. THE PAGE-LEVEL CONTENT AREA IS THE *ONLY* SCROLLER.
+ *      Sidebar lists do NOT scroll internally. If a sidebar list is
+ *      taller than the viewport, the whole page scrolls — never the
+ *      list within itself. (Anti-pattern: nested scrollbars in one
+ *      viewport. Audit P1-04, P2-02.)
+ *
+ *   2. EVERY VIEWPORT-SIZED CONTAINER USES `var(--viewport-height)`
+ *      (== `100dvh`), NEVER `100vh`. (Audit P2-05.)
+ *
+ * Consume by adding the classes to the outermost JSX nodes that match
+ * the named regions. CSS-modules pages can compose via
+ * `composes: app-shell-sidebar from global;` etc. — or just use the
+ * raw class names directly via `className="app-shell-sidebar"`.
+ */
+
+/* The two-column shell. Sidebar on the left, content on the right,
+ * filling exactly the viewport height. The sidebar does not scroll;
+ * the content area is the single page scroller. */
+.app-shell {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  height: var(--viewport-height);
+  width: 100%;
+  overflow: hidden;
+}
+
+/* Sidebar column — fixed full-viewport, internally `flex column` so
+ * nav items stack and (rare) terminal items like the version footer
+ * settle at the bottom via `margin-top: auto`. */
+.app-shell-sidebar {
+  height: var(--viewport-height);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The single page scroller. `scrollbar-gutter: stable` prevents the
+ * ~15px layout shift when scrollbars appear/disappear across page
+ * navigations; `overscroll-behavior: contain` keeps wheel-momentum
+ * inside the app instead of triggering browser-chrome back-gesture. */
+.app-shell-content {
+  height: var(--viewport-height);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+/* For inner sidebar lists that show a vertical stack of selectable
+ * items (Dictations transcript list, Meetings list, Activity sessions
+ * list, etc.). Explicitly NO `overflow` — the page scroller above is
+ * the single scroll surface. If you find yourself wanting overflow
+ * here, you're about to recreate the nested-scrollers bug — fix the
+ * page layout instead. */
+.app-list-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  /* deliberately no overflow */
+}
+
+/* Decorative motion gate. Wrap decorative `animation:` /
+ * `transition:` rules in `@media (prefers-reduced-motion: no-preference)`
+ * — or set `animation: none` inside the reduced-motion media block.
+ * Token-level `--duration-*` collapses to 0ms under reduced-motion
+ * via tokens-v2.css; this class is for full-on opt-out of decorative
+ * animation (e.g. UnsplashBackground blob drift). */
+@media (prefers-reduced-motion: reduce) {
+  .motion-decorative {
+    animation: none !important;
+    transition: none !important;
+  }
+}

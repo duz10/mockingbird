@@ -177,6 +177,76 @@
                      0 2px 8px rgba(0, 0, 0, 0.25);
 
   /* ════════════════════════════════════════════════════════════
+     §00.G.1  CANONICAL GLASS-TIER SEMANTIC TOKENS  (mb-n455)
+     ════════════════════════════════════════════════════════════
+     Three tiers, three intents. Every glass surface in the app
+     MUST consume one of these — no ad-hoc rgba() bg colours on
+     glass elements. Pairs with `var(--md-sys-on-surface)` for
+     WCAG AA-compliant body text on every tier.
+
+     The tiers ride on top of the existing --glass-tint-* primitives
+     so the [data-photo-bg] cascade in materials-v2.css applies for
+     free (primitives are overridden to darker fills; the semantic
+     aliases inherit the override).
+
+         tier      | dark theme | photo bg | use
+         strong    | 12% cream  | 82% near-black | modals, primary cards, session cards on photo
+         soft      |  8% cream  | 72% near-black | secondary panels, list rows, sub-cards
+         faint     |  6% cream  | 60% near-black | outline-button default, subtle dividers, ambient chips
+     ════════════════════════════════════════════════════════════ */
+
+  --surface-glass-strong: var(--glass-tint-thick);
+  --surface-glass-soft:   var(--glass-tint-regular);
+  --surface-glass-faint:  var(--glass-tint-thin);
+
+  /* Max blur for any glass surface. Heavier than this looks like
+   * mid-2020s frosted-glass kitsch; 12px is the 2026 cap. */
+  --glass-blur-cap: 12px;
+
+  /* ════════════════════════════════════════════════════════════
+     §00.G.2  LAYOUT / SCROLL / FOCUS / MOTION CONVENTIONS  (mb-n455)
+     ════════════════════════════════════════════════════════════ */
+
+  /* Replaces every `100vh` in the codebase — handles browser chrome
+   * and mobile safe-area correctly. (See conventions.md.) */
+  --viewport-height: 100dvh;
+
+  /* For the ONE page-level scroll container. Sidebar lists must
+   * not have internal overflow — they live inside this scroller. */
+  --scrollbar-gutter: stable;
+  --overscroll-behavior: contain;
+
+  /* Canonical focus ring. Consume via `outline + outline-offset`,
+   * paired with `:focus-visible` (never bare `:focus`). */
+  --ring-focus:  2px solid var(--md-sys-primary);
+  --ring-offset: 2px;
+
+  /* ════════════════════════════════════════════════════════════
+     §00.G.3  LEGACY DEAD-TOKEN BRIDGE  (mb-n455)
+     ════════════════════════════════════════════════════════════
+     `Activity.module.css` + `ActivityBlocks.module.css` (Phase 10
+     Wave 1B) were authored against pre-W6 token names
+     (--surface-1/2/3, --text-1/2, --border-subtle) which were
+     renamed in the design-language cutover. CSS treats unknown
+     vars as invalid → background falls through to transparent →
+     cards don't render → the Unsplash photo bleeds straight
+     through. (Smoking gun of the mb-n455 audit; see
+     docs/audits/2026-05-26-design-v1-baseline/REPORT.md P1-01/02/08.)
+
+     These aliases keep the dead names alive against the live M3
+     surfaces so Activity renders correctly *immediately*. The
+     follow-up sweep within mb-n455 converts the call sites to the
+     live names, and then this bridge block can be deleted.
+     ════════════════════════════════════════════════════════════ */
+
+  --surface-1:     var(--surf-1);
+  --surface-2:     var(--surf-2);
+  --surface-3:     var(--surf-3);
+  --text-1:        var(--on-surf);
+  --text-2:        var(--on-surf-muted);
+  --border-subtle: var(--border);
+
+  /* ════════════════════════════════════════════════════════════
      §00.H  LEGACY ALIAS BRIDGE
      ════════════════════════════════════════════════════════════
      The page CSS modules and primitives still reference the legacy

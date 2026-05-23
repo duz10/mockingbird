@@ -16,6 +16,7 @@
 @import "./typography-v2.css";
 @import "./materials-v2.css";
 @import "./icons-v2.css";
+@import "./layout.css";
 
 *,
 *::before,
