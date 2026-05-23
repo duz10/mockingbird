@@ -10,6 +10,10 @@
 
   "activity.title": "Activity",
   "activity.subtitle": "Sessions where Mockingbird logged what you worked on.",
+  "activity.beta.label": "BETA",
+  "activity.beta.heading": "Beta — proven concept, not yet release-grade.",
+  "activity.beta.body": "Mockingbird is capturing activity events and assembling timeline blocks. The remaining gap to call this stable is the granularity of task-level recording — distinguishing meaningful work-units from incidental focus changes well enough to produce a quality summary. Improvements landing iteratively.",
+  "sidebar.betaTag": "BETA",
   "activity.empty.title": "No activity sessions yet",
   "activity.empty.body": "Open the Command Center (Right Ctrl + Space) and pick Activity to start one.",
   "activity.list.startedAt": "Started",

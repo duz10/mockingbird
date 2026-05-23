@@ -199,6 +199,13 @@ export function ActivityPage() {
   return (
     <>
       <PageHeader title={t("activity.title")} subtitle={t("activity.subtitle")} />
+      <aside className={styles.betaCallout} aria-label="Beta status">
+        <span className={styles.betaTag}>{t("activity.beta.label")}</span>
+        <div className={styles.betaText}>
+          <strong>{t("activity.beta.heading")}</strong>
+          <p>{t("activity.beta.body")}</p>
+        </div>
+      </aside>
       {error && <div className={styles.error}>{error}</div>}
       <div className={styles.shell}>
         <aside className={styles.listPane} aria-label="Activity sessions">

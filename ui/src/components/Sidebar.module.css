@@ -87,6 +87,28 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1 1 auto;
+}
+
+/* BETA pill rendered next to nav labels for subsystems whose concept
+ * is shipped but whose quality bar is still iterating (mb-aho4).
+ * Uses the existing warm-gold warning token from Design System v1;
+ * no new color invented. */
+.betaPill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--md-sys-warning);
+  color: var(--md-sys-warning);
+  background: transparent;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex: 0 0 auto;
+  line-height: 1;
 }
 
 .footer {
@@ -143,7 +165,8 @@
   .brandText,
   .linkLabel,
   .version,
-  .activeModeLabel {
+  .activeModeLabel,
+  .betaPill {
     display: none;
   }
   .brand,

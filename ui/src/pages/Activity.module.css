@@ -15,6 +15,63 @@
   min-height: 0;
 }
 
+/* BETA status callout. mb-aho4: surface the maturity gap on the
+ * page itself, not just in a sidebar tag. Glass-soft tier so it
+ * reads as a sibling surface to the session cards below, with the
+ * warm-gold warning accent on the left edge + the inline pill. */
+.betaCallout {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+  padding: 0.875rem 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--glass-border);
+  border-left: 3px solid var(--md-sys-warning);
+  border-radius: 12px;
+  background: var(--surface-glass-soft);
+  backdrop-filter: blur(var(--glass-blur-cap)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-cap)) saturate(160%);
+  color: var(--md-sys-on-surface);
+}
+
+.betaTag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  margin-top: 2px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--md-sys-warning);
+  color: var(--md-sys-warning);
+  background: transparent;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  flex: 0 0 auto;
+  line-height: 1.2;
+}
+
+.betaText {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.betaText strong {
+  font-family: "DM Sans", sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--md-sys-on-surface);
+}
+.betaText p {
+  margin: 0;
+  font-family: "DM Sans", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--md-sys-on-surface-variant);
+}
+
 .listPane {
   /* Glass-soft (8% cream tint, dark-fill under photo-bg). Sticky so the
    * sessions list stays visible while the detail pane scrolls past it;

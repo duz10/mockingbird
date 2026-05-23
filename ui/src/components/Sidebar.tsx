@@ -25,13 +25,17 @@ interface NavItem {
   to: string;
   label: string;
   Icon: ComponentType<{ size?: number }>;
+  /** Renders a small BETA pill next to the label. Used for subsystems
+   * whose concept is proven but whose UX/quality hasn't crossed the
+   * release-grade bar yet (mb-aho4). */
+  beta?: boolean;
 }
 
 const NAV: NavItem[] = [
   { to: "/insights",   label: t("nav.insights"),   Icon: SparklesIcon },
   { to: "/dictations", label: t("nav.dictations"), Icon: HistoryIcon },
   { to: "/meetings",   label: t("nav.meetings"),   Icon: MeetingsIcon },
-  { to: "/activity",   label: t("nav.activity"),   Icon: ActivityIcon },
+  { to: "/activity",   label: t("nav.activity"),   Icon: ActivityIcon, beta: true },
   { to: "/dictionary", label: t("nav.dictionary"), Icon: BookIcon },
   { to: "/modes",      label: t("nav.modes"),      Icon: SlidersIcon },
   { to: "/settings",   label: t("nav.settings"),   Icon: SettingsIcon },
@@ -70,7 +74,7 @@ export function Sidebar() {
         </div>
       ) : null}
       <nav className={styles.nav}>
-        {NAV.map(({ to, label, Icon }) => (
+        {NAV.map(({ to, label, Icon, beta }) => (
           <NavLink
             key={to}
             to={to}
@@ -83,6 +87,11 @@ export function Sidebar() {
           >
             <Icon size={18} />
             <span className={styles.linkLabel}>{label}</span>
+            {beta ? (
+              <span className={styles.betaPill} aria-label="Beta feature">
+                {t("sidebar.betaTag")}
+              </span>
+            ) : null}
           </NavLink>
         ))}
       </nav>
