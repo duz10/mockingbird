@@ -129,6 +129,17 @@ pub enum AppError {
     #[error("activity persist error: {0}")]
     ActivityPersist(String),
 
+    /// Vault projection failures (ADR 0046).
+    ///
+    /// Sources: vault path not configured / not writable, manifest
+    /// JSON parse failure, atomic-rename failure during projection
+    /// write, machine-fingerprint mismatch in single-desktop guard
+    /// (§16). Distinct from `Io` so the IPC layer can surface a
+    /// "check the Mobile Sync tab" toast rather than a raw OS error.
+    /// ADR 0046 Iter 2 +.
+    #[error("vault error: {0}")]
+    Vault(String),
+
     /// Generic catch-all for early Phase 1; replaced by typed variants
     /// as concrete modules surface their errors.
     #[error("{0}")]
@@ -224,6 +235,15 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "activity persist error: no such session: abc"
+        );
+    }
+
+    #[test]
+    fn vault_displays_with_prefix() {
+        let err = AppError::Vault("manifest fingerprint mismatch".to_string());
+        assert_eq!(
+            err.to_string(),
+            "vault error: manifest fingerprint mismatch"
         );
     }
 }

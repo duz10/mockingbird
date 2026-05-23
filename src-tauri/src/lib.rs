@@ -38,6 +38,9 @@ pub mod secrets;
 pub mod settings;
 pub mod stt;
 pub mod tray;
+// ADR 0046 Iter 2 — outbound Obsidian projection. Lives alongside
+// the other top-level subsystems (dictation, meetings, activity).
+pub mod vault;
 pub mod window_context;
 
 use std::collections::HashMap;
