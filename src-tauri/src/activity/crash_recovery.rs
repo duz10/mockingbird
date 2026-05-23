@@ -100,18 +100,47 @@ pub fn recover_all(conn: &Connection, audio_base_dir: &Path) -> RecoveryReport {
 }
 
 /// Promote any `in_progress` session to `crashed_recovered`. The
-/// synthesized `ended_at` is `MAX(updated_at, started_at)`, i.e. the
-/// last timestamp we know was alive — NOT `now_ms`, because the user
-/// may not have launched the app for days, and "session ended at
-/// today" would be misleading.
+/// synthesized `ended_at` is the latest of:
+/// 1. the existing `ended_at` (if a previous recovery already set one),
+/// 2. `updated_at` (last row touch),
+/// 3. `started_at`,
+/// 4. the timestamp of the latest `activity_events` row for the session
+///    — this is the load-bearing one for mb-dxpp: a fresh session that
+///    crashed with 79 events but never had its session row touched has
+///    `updated_at == started_at`, so without the event-ts max the
+///    recovered row reads as `Duration: 0s` despite having a full event
+///    stream. Picking the latest event ts means the UI shows a meaningful
+///    duration (the time of the crash, approximately).
+///
+/// We deliberately do NOT use `now_ms` — the user may not have launched
+/// the app for days, and "session ended at today" would be a lie.
 ///
 /// Returns the number of rows promoted.
 pub fn mark_interrupted_sessions(conn: &Connection, _now_ms: i64) -> AppResult<usize> {
     let n = conn.execute(
         "UPDATE activity_sessions \
          SET status = 'crashed_recovered', \
-             ended_at = COALESCE(ended_at, MAX(updated_at, started_at)), \
-             updated_at = MAX(updated_at, started_at) \
+             ended_at = COALESCE( \
+                 ended_at, \
+                 MAX( \
+                     updated_at, \
+                     started_at, \
+                     COALESCE( \
+                         (SELECT MAX(ts) FROM activity_events \
+                          WHERE activity_events.session_id = activity_sessions.id), \
+                         started_at \
+                     ) \
+                 ) \
+             ), \
+             updated_at = MAX( \
+                 updated_at, \
+                 started_at, \
+                 COALESCE( \
+                     (SELECT MAX(ts) FROM activity_events \
+                      WHERE activity_events.session_id = activity_sessions.id), \
+                     started_at \
+                 ) \
+             ) \
          WHERE status = 'in_progress'",
         [],
     )?;
@@ -218,7 +247,7 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::activity::persist::{insert_session, SessionStatus};
+    use crate::activity::persist::{insert_event, insert_session, SessionStatus};
     use crate::db::Database;
     use rusqlite::params;
 
@@ -256,6 +285,74 @@ mod tests {
         // ended_at should be the last-known-alive timestamp
         // (max(started_at, updated_at)), NOT now_ms.
         assert_eq!(ended_at, Some(1_005_000));
+    }
+
+    /// mb-dxpp regression guard. A session that crashed BEFORE
+    /// `updated_at` was advanced past `started_at` (e.g. a brand-new
+    /// session that captured 79 events but never had its row touched)
+    /// must synthesize `ended_at` from the latest event timestamp,
+    /// not from `started_at` (which would render Duration: 0s in the
+    /// UI even though events exist).
+    #[test]
+    fn mark_interrupted_uses_latest_event_ts_when_updated_at_lagged() {
+        let db = fresh_db();
+        let started_at = 1_000_000_i64;
+        let sid = insert_session(&db.conn, started_at).unwrap();
+        // Deliberately do NOT touch updated_at — simulate a session
+        // that crashed before any persist::set_*/finalize_* path ran.
+        // Insert events at increasing timestamps.
+        for (i, ts_offset) in [100, 5_000, 12_345, 79_000].iter().enumerate() {
+            insert_event(
+                &db.conn,
+                &sid,
+                started_at + ts_offset,
+                "app_switch",
+                Some(&format!("app_{i}.exe")),
+                Some("win"),
+                None,
+            )
+            .unwrap();
+        }
+
+        let n = mark_interrupted_sessions(&db.conn, 999_999_999_999).unwrap();
+        assert_eq!(n, 1);
+
+        let ended_at: Option<i64> = db
+            .conn
+            .query_row(
+                "SELECT ended_at FROM activity_sessions WHERE id = ?1",
+                params![sid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            ended_at,
+            Some(started_at + 79_000),
+            "ended_at must come from the latest event ts, not started_at",
+        );
+    }
+
+    /// Defensive: a session with NO events still recovers cleanly
+    /// (ended_at falls back to started_at; Duration: 0s here is
+    /// honest because there's nothing to base a duration on).
+    #[test]
+    fn mark_interrupted_eventless_session_recovers_at_started_at() {
+        let db = fresh_db();
+        let started_at = 2_000_000_i64;
+        let sid = insert_session(&db.conn, started_at).unwrap();
+        let n = mark_interrupted_sessions(&db.conn, 0).unwrap();
+        assert_eq!(n, 1);
+        let ended_at: Option<i64> = db
+            .conn
+            .query_row(
+                "SELECT ended_at FROM activity_sessions WHERE id = ?1",
+                params![sid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        // No events + updated_at == started_at (insert_session sets
+        // them equal at insert time) → ended_at == started_at.
+        assert_eq!(ended_at, Some(started_at));
     }
 
     #[test]

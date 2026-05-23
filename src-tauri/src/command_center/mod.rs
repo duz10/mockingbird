@@ -34,10 +34,11 @@
 
 #![allow(missing_docs)]
 
+pub mod drive;
 pub mod hotkey;
 pub mod state;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -46,6 +47,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::overlay_conventions;
 use crate::settings::{model::SettingKey, Settings};
 
+pub use drive::{drive_engine, CcEffects, DispatchOutcome};
 pub use hotkey::{CcActivation, CcChordConfig, CommandCenterHotkeyInstaller};
 pub use state::{apply, CcEffect, CcInput, CcState, CurrentSession, RecordingKind, Transition};
 
@@ -295,68 +297,15 @@ impl CommandCenter {
 
     // ---------------- FSM drive + effects ----------------
 
+    /// Drive one FSM step for `input`. Thin adapter that hands the
+    /// pure-Rust orchestrator engine ([`drive::drive_engine`]) a
+    /// Tauri-backed effects implementation. All testable orchestration
+    /// logic lives in `drive.rs`; this method exists so the existing
+    /// `pub fn dismiss / pick_mode / stop_active_session / …` surface
+    /// stays unchanged.
     fn drive(&self, input: CcInput) {
-        let (effect, next, first_run) = {
-            let mut guard = self
-                .inner
-                .state
-                .lock()
-                .expect("cc state mutex must be unpoisoned");
-            let session = self
-                .inner
-                .current_session
-                .lock()
-                .map(|g| *g)
-                .unwrap_or(None);
-            let first_run = self.inner.first_run.load(Ordering::Relaxed);
-            let t = apply(*guard, input, session, first_run);
-            *guard = t.next;
-            (t.effect, t.next, first_run)
-        };
-        tracing::debug!(
-            target: "command_center",
-            ?input,
-            ?next,
-            ?effect,
-            "fsm step"
-        );
-        self.run_effect(effect);
-        // Re-snapshot AFTER run_effect.
-        //
-        // INVARIANT: emit_state must broadcast the ACTUAL current FSM
-        // state, not the cached `next` value from this drive's apply()
-        // call.
-        //
-        // Why: several effects (DispatchStart for Meeting/Activity,
-        // and dispatch_start(Dictation) → Dismiss) call `self.drive(...)`
-        // recursively to feed back the runtime's reply. That inner
-        // drive() has already (a) updated the state mutex and (b)
-        // emitted its own state to the UI. If we then emit our
-        // captured (now-stale) `next`, the UI snaps backwards (e.g.
-        // ShowingSessionCard → Launching), all tiles disable, and
-        // the modal looks frozen.
-        //
-        // This is the mb-23rh / mb-7ju5 hotfix. The 1-line fix is the
-        // load below; the comment is the load-bearing part.
-        let actual = self.snapshot();
-        let actual_first_run = self.inner.first_run.load(Ordering::Relaxed);
-        self.emit_state(actual, actual_first_run);
-        // First dismiss flips the "seen" setting. Cheap to do here
-        // rather than in the FSM (which is pure).
-        if matches!(input, CcInput::Dismiss) && first_run {
-            self.inner.first_run.store(false, Ordering::Relaxed);
-            self.persist_seen_flag();
-        }
-    }
-
-    fn run_effect(&self, effect: CcEffect) {
-        match effect {
-            CcEffect::None => {}
-            CcEffect::ShowWindow { .. } => self.show_window(),
-            CcEffect::HideWindow => self.hide_window(),
-            CcEffect::DispatchStart { kind } => self.dispatch_start(kind),
-            CcEffect::DispatchStop { kind } => self.dispatch_stop(kind),
-        }
+        let effects = TauriEffects { cc: self };
+        drive_engine(&self.inner.state, &self.inner.first_run, &effects, input);
     }
 
     fn show_window(&self) {
@@ -406,27 +355,8 @@ impl CommandCenter {
         }
     }
 
-    fn dispatch_start(&self, kind: RecordingKind) {
-        match kind {
-            RecordingKind::Dictation => {
-                // Push-to-talk has no programmatic start. The tile's
-                // UX per ADR 0037 §4 is the "or just hold Right Alt"
-                // hint; picking it dismisses the CC. We treat this as
-                // immediate success so the FSM returns to picker on
-                // the next interaction.
-                tracing::info!(
-                    target: "command_center",
-                    "pick_mode(dictation) — dismissing; user holds Right Alt to start"
-                );
-                self.drive(CcInput::Dismiss);
-            }
-            RecordingKind::Meeting => self.dispatch_meeting_start(),
-            RecordingKind::Activity => self.dispatch_activity_start(),
-        }
-    }
-
     #[cfg(target_os = "windows")]
-    fn dispatch_meeting_start(&self) {
+    fn dispatch_meeting_start(&self) -> bool {
         // Resolve the most current MeetingRuntimeShared either from
         // our inner cache (preferred — set at spawn time via
         // `attach_meeting_runtime`) or from Tauri managed state as
@@ -445,8 +375,7 @@ impl CommandCenter {
                 target: "command_center",
                 "no meeting runtime registered; cannot start meeting from CC"
             );
-            self.drive(CcInput::RuntimeReplied { success: false });
-            return;
+            return false;
         };
         // Default source from settings; project LastChosenSource onto
         // the capture-side `MeetingSource` (the two enums live in
@@ -468,7 +397,7 @@ impl CommandCenter {
                     "meeting start dispatched from CC"
                 );
                 self.set_current_session(Some(RecordingKind::Meeting));
-                self.drive(CcInput::RuntimeReplied { success: true });
+                true
             }
             Err(e) => {
                 tracing::warn!(
@@ -476,18 +405,18 @@ impl CommandCenter {
                     error = %e,
                     "meeting start failed from CC"
                 );
-                self.drive(CcInput::RuntimeReplied { success: false });
+                false
             }
         }
     }
 
     #[cfg(not(target_os = "windows"))]
-    fn dispatch_meeting_start(&self) {
+    fn dispatch_meeting_start(&self) -> bool {
         tracing::info!(
             target: "command_center",
             "meeting start not available on this platform"
         );
-        self.drive(CcInput::RuntimeReplied { success: false });
+        false
     }
 
     fn dispatch_stop(&self, kind: RecordingKind) {
@@ -552,7 +481,7 @@ impl CommandCenter {
     /// `start_with_audio()` (Phase 10 Wave 4: honors
     /// `ActivityAudioEnabled`), then drive the FSM forward with the
     /// result.
-    fn dispatch_activity_start(&self) {
+    fn dispatch_activity_start(&self) -> bool {
         let Some(rt) = self
             .inner
             .app
@@ -563,8 +492,7 @@ impl CommandCenter {
                 target: "command_center",
                 "no activity runtime registered; cannot start activity from CC"
             );
-            self.drive(CcInput::RuntimeReplied { success: false });
-            return;
+            return false;
         };
         // Wave 4: read the audio setting in its own short critical
         // section so the CC dispatch path doesn't hold the DB lock
@@ -591,7 +519,7 @@ impl CommandCenter {
                     "activity start dispatched from CC"
                 );
                 self.set_current_session(Some(RecordingKind::Activity));
-                self.drive(CcInput::RuntimeReplied { success: true });
+                true
             }
             Err(e) => {
                 tracing::warn!(
@@ -599,7 +527,7 @@ impl CommandCenter {
                     error = %e,
                     "activity start failed from CC"
                 );
-                self.drive(CcInput::RuntimeReplied { success: false });
+                false
             }
         }
     }
@@ -669,6 +597,72 @@ impl CommandCenter {
                 );
             }
         };
+    }
+}
+
+// ---------------- TauriEffects: production CcEffects impl ----------------
+//
+// Wraps `&CommandCenter` so the pure-Rust `drive_engine` can drive
+// against the real Tauri AppHandle + runtime handles. Test code uses
+// `MockEffects` (in `drive.rs::tests`) instead. The trait is the seam
+// that makes the orchestrator unit-testable; this adapter is the
+// minimal glue.
+
+struct TauriEffects<'a> {
+    cc: &'a CommandCenter,
+}
+
+impl<'a> CcEffects for TauriEffects<'a> {
+    fn current_session(&self) -> Option<RecordingKind> {
+        self.cc
+            .inner
+            .current_session
+            .lock()
+            .map(|g| *g)
+            .unwrap_or(None)
+    }
+
+    fn show_window(&self) {
+        self.cc.show_window();
+    }
+
+    fn hide_window(&self) {
+        self.cc.hide_window();
+    }
+
+    fn dispatch_start(&self, kind: RecordingKind) -> DispatchOutcome {
+        match kind {
+            RecordingKind::Dictation => {
+                // Push-to-talk has no programmatic start. Per ADR 0037
+                // §4 the tile's UX is the "or just hold Right Alt"
+                // hint; picking it dismisses the CC. drive_engine
+                // recurses with Dismiss, which is identical to the
+                // pre-refactor `self.drive(CcInput::Dismiss)`.
+                tracing::info!(
+                    target: "command_center",
+                    "pick_mode(dictation) — dismissing; user holds Right Alt to start"
+                );
+                DispatchOutcome::NoProgrammaticStart
+            }
+            RecordingKind::Meeting => DispatchOutcome::Replied {
+                success: self.cc.dispatch_meeting_start(),
+            },
+            RecordingKind::Activity => DispatchOutcome::Replied {
+                success: self.cc.dispatch_activity_start(),
+            },
+        }
+    }
+
+    fn dispatch_stop(&self, kind: RecordingKind) {
+        self.cc.dispatch_stop(kind);
+    }
+
+    fn emit_state(&self, state: CcState, first_run: bool) {
+        self.cc.emit_state(state, first_run);
+    }
+
+    fn persist_seen_flag(&self) {
+        self.cc.persist_seen_flag();
     }
 }
 

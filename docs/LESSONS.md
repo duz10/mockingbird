@@ -206,6 +206,110 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 ---
 
+## 2026-05-26 [phase10-hotfix-of-hotfix / mb-a0f3 / mb-q2if / mb-pxe7 / mb-dxpp] Capabilities-omission strikes for the THIRD time, and why ship-and-pray happened (again)
+
+**Context:** First Phase 10 hotfix (`ebe976b`) fixed the visible
+recursive-emit clobber (mb-23rh / mb-7ju5) and gates were green —
+but Dustin's live smoke test surfaced TWO new P1s on the rebuilt
+binary: the Command Center now rendered as an empty black box on
+chord-press, and Esc / outside-click would not dismiss it (taskkill
+required to recover). Same iteration also surfaced a P3:
+crash-recovered activity sessions showed `Duration: 0s` even when
+79 events were on disk.
+
+**Finding 1 — `capabilities/default.json` is a strict allowlist; new
+Tauri windows MUST be added there or `listen()` silently no-ops.** The
+`command_center` window was added in Phase 10 Wave 1A but never added
+to the `windows` array in `capabilities/default.json`. The file's own
+description literally calls this failure mode out (it was the
+mb-z5y / ADR 0035 root cause): `invoke()` of `#[tauri::command]`
+handlers still works for unlisted windows, but `listen() / window.hide()
+/ emit_to()` silently no-op. Symptoms in this iteration:
+  - **Empty black box (mb-a0f3)**: React mounted, called
+    `getCommandCenterState()` (invoke → worked → returned Closed at
+    mount time), then registered a `listen('command_center:state',
+    ...)` handler. The listen registration was a silent no-op. When
+    Rust later emitted `modePicker`, nothing arrived → React stayed in
+    its initial `Closed` snap → component returned null → empty
+    transparent window appeared (which against the desktop wallpaper /
+    dark windows reads as "black box").
+  - **Won't dismiss (mb-q2if)**: a follow-on of the same bug. With
+    React stuck on `Closed`, `apply(Closed, Dismiss, …)` is a FSM
+    no-op (no `HideWindow` effect). So invoke fired, FSM stepped
+    Closed → Closed, and the orphaned window stayed visible. The user
+    saw "Esc / outside-click do nothing".
+  
+  This is the THIRD time this exact gap has bitten (mb-z5y wave-1,
+  mb-z5y wave-2, now mb-a0f3 / mb-q2if). **Action:** the file's
+  description now spells out the recurrence pattern explicitly and the
+  rule "whenever you add a Tauri-declared window in `tauri.conf.json`,
+  also add it to `capabilities/default.json`". Future thought: hook?
+  schema check that the two `windows` lists are equal? For now, the
+  in-file shouting is the cheapest deterrent.
+
+**Finding 2 — "ship-and-pray" pattern: gates green, live broken, because
+the orchestrator surface had no unit tests at all.** The first hotfix
+was verified by cargo check / clippy / npm gates only — the entire
+`drive()` orchestrator (the function that runs the FSM, dispatches
+effects, and re-emits state) had ZERO unit tests because it was
+inseparable from the Tauri `AppHandle`. The pure FSM in `state.rs`
+had 44 tests (all green) but those test the wrong thing — they verify
+`apply(state, input) → Transition`, not the orchestrator's
+sequence-of-emits behavior that the React UI actually binds to. Both
+the mb-23rh recursive-emit clobber AND the post-hotfix gap (everything
+working except for the missing capability) would have been caught by
+a single "chord-press Open must emit a visible state synchronously"
+test if such a test existed.
+  
+  **Action taken this iteration:** extracted the orchestrator's pure
+  core into `command_center/drive.rs` as a free function over a
+  `CcEffects` trait. Production wires it via a `TauriEffects` adapter
+  in `mod.rs`; tests wire it via a `MockEffects` recorder that captures
+  the full sequence of show / hide / dispatch_start / dispatch_stop /
+  emit_state / persist_seen_flag calls. 16 new unit tests cover all 7
+  user-facing paths from the kickoff acceptance criteria (chord press
+  first-run / subsequent, each tile pick, runtime-refuses, Esc dismiss,
+  Stop button, re-chord while session live, SessionEnded mid-card) plus
+  explicit named regression guards for mb-23rh, mb-a0f3, mb-q2if. The
+  trait is the seam; the pattern transfers to any future
+  AppHandle-coupled orchestrator (the dictation `complete()` chain is
+  the obvious next candidate). Total cost: ~600 lines including the
+  test suite; the engine itself is ~50 LoC of orchestration.
+
+**Finding 3 — `crash_recovery::mark_interrupted_sessions` synthesized
+`ended_at = MAX(updated_at, started_at)` but never looked at the
+`activity_events` table.** A session that crashed mid-stream (events
+written but no `set_session_audio_provenance` / `finalize_session` call
+to bump `updated_at`) recovers with `updated_at == started_at`, so
+`ended_at` lands ON `started_at` and the UI shows `Duration: 0s`
+despite the events being right there in the DB. Fix: nest a
+`(SELECT MAX(ts) FROM activity_events WHERE session_id = …)` into the
+`MAX(...)`. Two tests added: one with events at increasing timestamps
+(asserts ended_at == latest event ts), one eventless (asserts ended_at
+falls back to started_at gracefully).
+
+**Finding 4 — `tracing::debug!` for FSM steps is the wrong level for
+production.** The drive loop logged transitions at `debug!` — invisible
+at the default `info` level the launcher configures. When Dustin's
+binary mis-behaves, there's no FSM trace in `mockingbird.log` to
+cross-reference. Bumped to `info!` (one line per FSM step,
+tiny cost in normal operation, massive diagnostic value when a future
+bug surfaces). General principle: ANY state-machine orchestrator's
+step transitions should be `info!`, not `debug!`. The body of effects
+(window show, runtime starts) can stay `info!` or `debug!` as fits.
+
+**Why this matters for next time:** "green gates, broken live" is not
+rare — it's the default failure mode whenever the gates don't exercise
+the full integration surface. The fix is NOT "run more manual
+smoke-tests"; it's "add a unit-testable seam at the integration
+boundary so the gate can mechanically cover it". For Tauri
+orchestrators specifically: the AppHandle is the wrong testable unit;
+the trait of "what the orchestrator does TO the AppHandle" is the
+right one. Apply the same pattern wherever you see `&AppHandle` in a
+function signature that contains business logic.
+
+---
+
 ## 2026-05-26 [phase10-hotfix / mb-scla / mb-23rh / mb-7ju5 / mb-7knd] Two post-seal Phase 10 papercuts and a load-bearing observation about the test gate
 
 **Context:** Dustin's first live-fire smoke test of `phase-10-complete`
