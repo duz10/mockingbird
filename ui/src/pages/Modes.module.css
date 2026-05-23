@@ -279,8 +279,8 @@
   background: linear-gradient(180deg,
     var(--glass-tint-regular) 0%,
     var(--glass-tint-thin) 100%);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur-cap)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-cap)) saturate(180%);
   border: 1px solid var(--glass-border);
   border-radius: var(--shape-xl);
   box-shadow:

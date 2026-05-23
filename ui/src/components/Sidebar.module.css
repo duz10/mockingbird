@@ -170,8 +170,8 @@
 
 .sidebar {
   background: var(--glass-tint-thin);
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur-cap)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-cap)) saturate(160%);
   border-right: 1px solid var(--glass-border);
 }
 

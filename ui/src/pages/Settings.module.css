@@ -147,15 +147,26 @@
   transform: translateX(18px);
 }
 
+/* mb-bpo8: custom chevron via background-image SVG + appearance: none.
+ * Replaces native browser chevron (which renders in OS chrome and
+ * doesn't match the warm-neutral theme). */
 .select {
-  background: var(--surf-1);
+  background-color: var(--surf-1);
   color: var(--on-surf);
   border: 1px solid var(--border);
   border-radius: var(--r-2);
-  padding: var(--s-1) var(--s-2);
+  padding: var(--s-1) calc(var(--s-2) + 22px) var(--s-1) var(--s-2);
   font: var(--type-sm);
   font-family: inherit;
   min-width: 140px;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none'><path d='M1 1.5l5 5 5-5' stroke='%23B8A89A' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 10px 7px;
+  cursor: pointer;
 }
 
 /* Phase MC Wave 5 — controls used by SettingsMeetingTab. Same
@@ -181,9 +192,45 @@
   align-items: center;
   gap: var(--s-3);
 }
+/* mb-rv78: themed range pill — was native HTML5 default (bright
+ * blue/gray thumb). Cross-browser-styled via -webkit-* + -moz-*
+ * pseudo-elements. */
 .sliderRow input[type="range"] {
   flex: 1 1 auto;
   min-width: 160px;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--surf-3);
+  cursor: pointer;
+  outline: none;
+}
+.sliderRow input[type="range"]:focus-visible {
+  outline: var(--ring-focus);
+  outline-offset: var(--ring-offset);
+}
+.sliderRow input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--md-sys-primary);
+  border: 2px solid var(--surf-1);
+  cursor: pointer;
+  transition: transform var(--duration-short-2) var(--motion-standard);
+}
+.sliderRow input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+}
+.sliderRow input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--md-sys-primary);
+  border: 2px solid var(--surf-1);
+  cursor: pointer;
 }
 .errorBanner {
   background: var(--status-bad-soft, rgba(255, 80, 80, 0.12));
@@ -275,8 +322,8 @@
 
 .tabs {
   background: var(--glass-tint-thin);
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur-cap)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-cap)) saturate(160%);
   border: 1px solid var(--glass-border);
   border-radius: var(--shape-lg);
 }

@@ -68,8 +68,8 @@
 
 .field_search .input {
   background: var(--glass-tint-thin);
-  backdrop-filter: blur(16px) saturate(160%);
-  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur-cap)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-cap)) saturate(160%);
   border-color: var(--glass-border);
   border-radius: var(--shape-full);
   padding-left: 44px;

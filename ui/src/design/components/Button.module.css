@@ -114,8 +114,8 @@
 
 .btn_glass {
   background: var(--glass-tint-regular);
-  backdrop-filter: blur(16px) saturate(160%);
-  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur-cap)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-cap)) saturate(160%);
   border-color: var(--glass-border);
   color: var(--md-sys-on-surface);
   box-shadow: inset 0 1px 0 var(--glass-highlight);

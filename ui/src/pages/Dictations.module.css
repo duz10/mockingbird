@@ -329,8 +329,8 @@
 
 :root[data-photo-bg] .leftPane {
   background: var(--glass-tint-regular);
-  backdrop-filter: blur(16px) saturate(160%);
-  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur-cap)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-cap)) saturate(160%);
   border: 1px solid var(--glass-border);
   border-radius: var(--shape-lg);
   padding: var(--space-4);
