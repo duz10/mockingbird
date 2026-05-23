@@ -275,3 +275,35 @@
   outline: 2px solid var(--md-sys-primary);
   outline-offset: 2px;
 }
+
+/* ADR 0045 + mb-sowc — primary Stop button for in-app sessions.
+ * Mirrors `meeting_overlay`'s `.btnStop` pattern: status-error
+ * filled, white text, full-radius. Disabled while the IPC is in
+ * flight (avoids double-stop spam). PTT sessions never render this
+ * — the TSX gates on `event.startMode === "in_app"`. */
+.stop {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  font-family: "DM Sans", sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 4px 12px;
+  border-radius: var(--shape-full, 999px);
+  background: var(--md-sys-error, var(--status-error, oklch(0.62 0.21 28)));
+  color: var(--md-sys-on-error, #fff);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+.stop:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.stop:focus-visible {
+  outline: 2px solid var(--md-sys-primary);
+  outline-offset: 2px;
+}
+.stop:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}

@@ -570,6 +570,10 @@ export const FIXTURES: {
           ? "Add a `--verbose` flag to the build script so CI can see what step is hanging."
           : `Sample dictation #${i} — the quick brown fox jumps over the lazy dog.`,
     injectionStatus: i % 8 === 7 ? "aborted" : "ok",
+    // ADR 0045 + mb-tfyp — every 5th fixture row simulates an
+    // in-app session so the IN_APP pill renders in Vite preview
+    // / Playwright snapshots.
+    startMode: i % 5 === 4 ? "in_app" : "ptt",
   })),
   sessionDetails: [
     {
@@ -584,6 +588,7 @@ export const FIXTURES: {
         finalText:
           "Hey team, just pushed the Phase 4 LLM cleanup work. Provider abstraction works for both Ollama and Claude; tests are green.",
         injectionStatus: "ok",
+        startMode: "ptt",
       },
       raw: "hey team just pushed the phase four LLM cleanup work provider abstraction works for both olama and claude tests are green",
       cleaned:

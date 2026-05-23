@@ -126,6 +126,8 @@
   "dictations.detail.promptVersion": "Prompt",
   "dictations.detail.dictVersion": "Dictionary",
   "dictations.detail.app": "App",
+  "dictations.detail.startMode.ptt": "Push-to-talk",
+  "dictations.detail.startMode.inApp": "In-app",
   "dictations.action.markExample": "Mark as style example",
   "dictations.action.addTerm": "Add term to dictionary",
   "dictations.action.copyFinal": "Copy injected text",
@@ -301,6 +303,7 @@
   "recording.state.done": "Done",
   "recording.state.aborted": "Aborted",
   "recording.action.cancel": "Cancel dictation",
+  "recording.action.stop": "Stop",
 
   "common.save": "Save",
   "common.cancel": "Cancel",

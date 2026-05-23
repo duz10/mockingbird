@@ -25,6 +25,7 @@
 //! LLM cleaner will plug in.
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
@@ -235,6 +236,11 @@ fn build_orchestrator_with_cleaner(
         config,
         HashMap::new(),
         hotkey_tx,
+        // ADR 0045 + mb-tfyp — orchestrator now consumes a shared
+        // `next_start_is_programmatic` flag set by the in-app start
+        // IPC. These integration tests exercise the PTT path, so the
+        // flag stays false; `start_capture` will pick StartMode::Ptt.
+        Arc::new(AtomicBool::new(false)),
     );
 
     (orchestrator, db_arc, injector, hotkey_rx)
@@ -467,6 +473,8 @@ fn llm_cleanup_runs_in_orchestrator_and_injects_cleaned_text() {
         config,
         HashMap::new(),
         hotkey_tx,
+        // PTT path; programmatic-start flag stays false (mb-tfyp).
+        Arc::new(AtomicBool::new(false)),
     );
     run_one_cycle(orchestrator);
 

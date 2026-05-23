@@ -77,6 +77,13 @@ pub enum InjectionOutcome {
     FailedClipboardLocked,
     /// `SendInput` returned 0 events written (anti-cheat block, etc).
     FailedSendInput,
+    /// ADR 0045 + mb-tfyp — programmatic (in-app Start button)
+    /// dictation. No injection is attempted: Mockingbird is the
+    /// focus the entire time, there is no target app to paste
+    /// into, and the transcript appears in the Dictations list.
+    /// Distinct from the abort variants because nothing went
+    /// wrong — the no-inject is intentional, not defensive.
+    InAppNoInject,
 }
 
 impl InjectionOutcome {
@@ -90,6 +97,7 @@ impl InjectionOutcome {
             Self::AbortedFocusChanged => "aborted_focus_changed",
             Self::FailedClipboardLocked => "failed_clipboard_locked",
             Self::FailedSendInput => "failed_send_input",
+            Self::InAppNoInject => "in_app",
         }
     }
 }
@@ -146,5 +154,6 @@ mod tests {
             InjectionOutcome::FailedClipboardLocked.as_db_str(),
             "failed_clipboard_locked"
         );
+        assert_eq!(InjectionOutcome::InAppNoInject.as_db_str(), "in_app");
     }
 }

@@ -149,7 +149,7 @@ impl EvalProvider for FixedEvalProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::sessions::{self, NewSession, SessionStatus};
+    use crate::db::sessions::{self, NewSession, SessionStatus, StartMode};
     use crate::db::Database;
     use crate::dictation::runtime::bootstrap_provenance_rows;
     use crate::learning::corrections::{insert as insert_correction, NewCorrection};
@@ -190,6 +190,7 @@ mod tests {
                 prompt_id,
                 dictionary_snapshot_id: dict_id,
                 example_set_id: example_id,
+                start_mode: StartMode::Ptt,
             },
         )
         .unwrap();

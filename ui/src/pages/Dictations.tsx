@@ -297,6 +297,42 @@ function SessionList({
   );
 }
 
+/* ADR 0045 + mb-tfyp — list-pill semantics.
+ *
+ * Priority order (highest wins):
+ *   1. `startMode === 'in_app'` → render `IN_APP` (neutral, glass-faint).
+ *      In-app sessions don't have a target app, so the legacy abort
+ *      heuristic doesn't apply and the row should never wear the red
+ *      `ABORTED_FOCUS_CHANGED` pill — even if the underlying
+ *      injection_status string still happens to read "aborted" on
+ *      legacy rows. The semantic is "captured a transcript, no
+ *      injection by design."
+ *   2. `injectionStatus === 'ok'` → no pill (the happy path is silent).
+ *   3. anything else → red error pill with the verbatim status.
+ */
+function renderStatusPill(session: SessionSummary) {
+  if (session.startMode === "in_app") {
+    return (
+      <>
+        <span>·</span>
+        {/* `status-info` matches the rest of the app's "informational,
+            not an error" pill convention (ActivityBlocks "edited",
+            Meetings search channel chips). Critically NOT
+            `status-error` — in-app sessions are by design, not a
+            failure. */}
+        <Pill tone="status-info">IN_APP</Pill>
+      </>
+    );
+  }
+  if (session.injectionStatus === "ok") return null;
+  return (
+    <>
+      <span>·</span>
+      <Pill tone="status-error">{session.injectionStatus}</Pill>
+    </>
+  );
+}
+
 function SessionRow({
   session,
   active,
@@ -331,12 +367,7 @@ function SessionRow({
         <span>{prettyAppName(session.foregroundApp)}</span>
         <span>·</span>
         <span>{formatDuration(session.durationMs)}</span>
-        {session.injectionStatus !== "ok" ? (
-          <>
-            <span>·</span>
-            <Pill tone="status-error">{session.injectionStatus}</Pill>
-          </>
-        ) : null}
+        {renderStatusPill(session)}
       </div>
     </div>
   );
@@ -468,6 +499,14 @@ function DetailView({
           <span className={styles.metaKey}>{t("dictations.detail.mode")}</span>
           <span className={styles.metaVal}>
             <Pill tone={`mode-${s.modeSlug}`}>{s.modeSlug}</Pill>
+            {/* ADR 0045 + mb-tfyp — show start path next to the mode
+                so the metadata is self-explanatory: "casual / In-app"
+                vs "casual / Push-to-talk". */}
+            <span className={styles.metaStartMode}>
+              {s.startMode === "in_app"
+                ? t("dictations.detail.startMode.inApp")
+                : t("dictations.detail.startMode.ptt")}
+            </span>
           </span>
           <span className={styles.metaKey}>{t("dictations.detail.model")}</span>
           <span className={styles.metaVal}>{detail.modelUsed ?? "—"}</span>

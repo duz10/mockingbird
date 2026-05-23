@@ -157,6 +157,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-27 | `[mb-tfyp / mb-sowc / ADR 0045]` | start_mode plumbing: the focus-drift abort heuristic conflates two semantically distinct outcomes (PTT target lost focus vs. in-app session never had a target); the fix is a new column + a new InjectionOutcome variant, NOT a new pill string on the legacy abort path |
 | 2026-05-26 | `[design-v1 / mb-n455]`          | Design System v1 audit + formalization shipped; six modes by which UI drift accumulated between phases; one specific bug class (the dead-token cascade silently rendering surfaces transparent) deserves a permanent guardrail; kitten's `getComputedStyle().backgroundColor` probe is blind to background-image gradients — false-positive trap |
 | 2026-05-26 | `[phase10-hotfix / mb-scla / mb-23rh]` | Two post-seal Phase 10 hotfixes: (1) `activity_blocks.primary_title` schema-vs-code drift slipped past green judges because `cargo test --release` is `--no-run` on this box — judges check contracts, not runtime SQL; (2) Command Center FSM `drive()` emitted the captured pre-effect `next` AFTER a recursive inner drive() had already emitted the post-effect state, clobbering the UI back into `Launching` and locking all tiles |
 | 2026-05-26 | `[phase10-wave-6b / SEAL]`       | Phase 10 sealed at `phase-10-complete`; Wiggum loop went green on iteration 1 of 3; narrowing the `sealed-phases-untouched` base ref from `phase-mc-complete` → `stable-alpha-v0.1` excluded an unrelated lateral epic from grader scope |
@@ -204,6 +205,28 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-27 [mb-tfyp / mb-sowc / ADR 0045 follow-up] In-app dictation showed `ABORTED_FOCUS_CHANGED`; the fix is a new column AND a new InjectionOutcome variant, not a new pill string
+
+**Context:** ADR 0045 (mb-ddfx) shipped programmatic dictation start via the `dictation_start` IPC. Both PTT and in-app modes drive the same FSM via a sentinel VK, so the orchestrator was mode-blind by design. First live-fire reveal: clicking the new in-app Start button → captured a transcript → session row landed with `injection_status = 'aborted_focus_changed'` (red pill in the list). Latency row showed `Inject 0 ms`, consistent with the abort path skipping injection.
+
+**Finding:** The `aborted_focus_changed` outcome conflates two semantically distinct things:
+  1. PTT session lost its target app between key-down and inject (a real-world abort — the user's text would land somewhere wrong, so we skip).
+  2. In-app session — there was no target app to begin with, so the comparison is incoherent.
+Both wound up at the same `InjectionOutcome::AbortedFocusChanged` arm because the focus comparison ran unconditionally and produced "different" (`null` foreground at start ≠ `mockingbird.exe` at end). The temptation was to special-case the pill render: "if the underlying status is aborted_focus_changed AND start_mode is in_app, show IN_APP." That's a leak — the DB row is still wearing a red status, and any future query / analytics / judge looking at `injection_status` gets the wrong story.
+
+**Action:**
+  1. New `sessions.start_mode` column (migration 017, `'ptt' | 'in_app'`, DEFAULT `'ptt'`). Backfills cleanly because all pre-ADR-0045 rows were PTT.
+  2. New `InjectionOutcome::InAppNoInject` variant (db str `"in_app"`). Computed in `complete()` as `if state.start_mode == StartMode::InApp { InAppNoInject } else { existing-focus-drift logic }`. The focus comparison literally doesn't run for in-app — different code path, same observable result (no paste).
+  3. `dictation:state` event payload extended with optional `startMode` field. UI list-pill prefers `startMode === 'in_app'` (neutral `IN_APP` chip via `status-info` tone) over `injectionStatus` for pill rendering. Detail panel shows "Push-to-talk" / "In-app" next to the mode pill.
+  4. Recording-pill overlay conditionally renders a Stop button when `startMode === 'in_app'` (mirrors the meeting overlay's Stop+Cancel pattern). PTT pill is byte-identical to before. Zero regression.
+  5. Plumbing: `DictationRuntime` owns an `Arc<AtomicBool> next_start_is_programmatic` that the `dictation_start` IPC flips; `start_capture` reads-and-clears it into the session state. Single-sourced — no caller of `start_capture` can forget to set it.
+
+**Why this matters for next time:** when a status enum carries semantic baggage ("we aborted because X"), and you ship a new path where X is a category error ("there is no X"), the right fix is a NEW variant, not a pill-render hack. The DB row should encode what actually happened. UI semantics that contradict the DB row are tech debt with compound interest.
+
+**Schema discipline:** migration 017 is the 2nd post-`phase-10-complete` migration (016 was the activity_blocks hotfix). Post-seal migrations remain sanctioned for additive plumbing / defect repair; non-additive changes still need an ADR. Pure ADD COLUMN with DEFAULT — verified via throwaway-crate recipe per LESSONS P2 because `cargo test --release --no-run` is still the gate on this box.
 
 ---
 

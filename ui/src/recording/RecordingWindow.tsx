@@ -13,10 +13,11 @@
 
 import { useEffect, useState } from "react";
 
-import { isTauri } from "../lib/tauri";
+import { api, isTauri } from "../lib/tauri";
 import { XIcon } from "../design/Icon";
 import { MockingbirdMark, type MarkState } from "../design/components/MockingbirdMark";
 import { t } from "../i18n";
+import type { StartMode } from "../lib/types";
 import styles from "./RecordingWindow.module.css";
 
 /** All states the orchestrator can drive the overlay through. */
@@ -33,6 +34,11 @@ interface DictationEvent {
   state: DictationState;
   modeSlug?: string;
   modeLabel?: string;
+  /** ADR 0045 + mb-tfyp — present on every emit while a session
+   *  is in flight. `"in_app"` unlocks the inline Stop button below;
+   *  `"ptt"` keeps the legacy pill behavior (no Stop, the user
+   *  releases Right Alt to finalize). */
+  startMode?: StartMode;
 }
 
 /** Status-label lookup. Centralized so i18n keys stay in one place. */
@@ -96,6 +102,10 @@ export function RecordingWindow() {
     modeSlug: "normal",
     modeLabel: "Normal",
   });
+  /** Debounce flag for the Stop button so a rage-click doesn't fire
+   *  two `dictation_stop` IPCs in <80ms (the FSM no-ops the second,
+   *  but we save the round-trip + log line). */
+  const [stopping, setStopping] = useState(false);
 
   // Subscribe to Tauri events. Dynamically imported so the recording
   // bundle stays import-free outside Tauri.
@@ -206,6 +216,42 @@ export function RecordingWindow() {
           >
             {event.modeLabel}
           </span>
+        )}
+
+        {/* ADR 0045 + mb-sowc — Stop button is only meaningful for
+            in-app sessions. PTT sessions finalize by releasing Right
+            Alt; an inline Stop would either be a no-op (the FSM
+            ignores `dictation_stop` for a PTT-held session because
+            the synthetic KeyUp uses a different VK) or worse,
+            confusing UI. Mirror the meeting overlay's `Stop / Cancel`
+            side-by-side pattern: Stop is primary (danger-tinted),
+            Cancel/X is the secondary discard. */}
+        {event.startMode === "in_app" && (
+          <button
+            type="button"
+            className={styles.stop}
+            aria-label={t("recording.action.stop")}
+            disabled={stopping}
+            onClick={() => {
+              if (stopping) return;
+              setStopping(true);
+              void (async () => {
+                try {
+                  await api.dictation_stop();
+                } catch (err) {
+                  // eslint-disable-next-line no-console
+                  console.warn("[recording] dictation_stop failed", err);
+                } finally {
+                  // Hide-on-done is driven by the orchestrator's
+                  // `idle` emit; this just unlocks the button if
+                  // the user opens another session via PTT later.
+                  window.setTimeout(() => setStopping(false), 200);
+                }
+              })();
+            }}
+          >
+            {stopping ? "…" : t("recording.action.stop")}
+          </button>
         )}
 
         <button

@@ -39,12 +39,13 @@
 //! Tauri-provided on every platform. The `Beep` helper is
 //! Windows-only and no-ops elsewhere.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::db::sessions::StartMode;
 use crate::error::AppResult;
 
 /// Webview label declared in `tauri.conf.json`. Kept here as a const
@@ -115,6 +116,23 @@ struct StateEventPayload<'a> {
     mode_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<&'a str>,
+    /// ADR 0045 + mb-tfyp — `"ptt"` or `"in_app"`. Carried on EVERY
+    /// emit during a session (not just `listening`) so a listener
+    /// that subscribes after the initial `listening` fires (e.g. the
+    /// Dictations page's `<DictationRecordButton>` re-mounting on
+    /// tab switch) still sees the value. Omitted when there is no
+    /// active session (idle / pre-first-show).
+    #[serde(skip_serializing_if = "Option::is_none", rename = "startMode")]
+    start_mode: Option<&'a str>,
+}
+
+/// Internal encoding of the optional `StartMode` for the
+/// `AtomicU8` slot. SeqCst loads return a `u8`; this struct just
+/// names the discriminants in one place.
+mod start_mode_slot {
+    pub const NONE: u8 = 0;
+    pub const PTT: u8 = 1;
+    pub const IN_APP: u8 = 2;
 }
 
 /// Title-case a mode slug ("normal" → "Normal"). Cheap, no allocator
@@ -140,6 +158,14 @@ pub struct RecordingWindow {
     /// `Option` so unit tests can construct a window without spinning
     /// up a full Tauri runtime.
     app: Arc<Mutex<Option<AppHandle>>>,
+    /// ADR 0045 + mb-tfyp — current session's `StartMode`, included
+    /// in every `dictation:state` emit so the React overlay can
+    /// render the pill-overlay Stop button conditionally without
+    /// fetching extra state. AtomicU8 over Mutex<Option<StartMode>>
+    /// to keep `emit()` lock-free (emits happen from multiple
+    /// threads — the cold-start re-emit burst spawns its own).
+    /// `0 = unset`, `1 = ptt`, `2 = in_app`. See `start_mode_slot`.
+    start_mode: Arc<AtomicU8>,
     /// Phase 10 Wave 1A (ADR 0037 §5 — surgical touch authorized).
     /// When the Command Center window is up, the dictation pip and
     /// the CC would collide at bottom-center. The CC sets this flag
@@ -203,6 +229,38 @@ impl RecordingWindow {
     /// suppressed by Command Center".
     pub fn is_suppressed_for_command_center(&self) -> bool {
         self.suppressed_for_command_center.load(Ordering::SeqCst)
+    }
+
+    /// ADR 0045 + mb-tfyp — record the start_mode for the session
+    /// the orchestrator is about to begin. Subsequent `emit()`s
+    /// (listening, transcribing, cleaning, pasting, done) carry
+    /// this value in the payload. Called from
+    /// `DictationOrchestrator::start_capture` BEFORE `show()`.
+    ///
+    /// `hide()` resets to `unset` so an unrelated `error` /
+    /// `aborted` emit between sessions doesn't leak the previous
+    /// session's mode.
+    pub fn set_start_mode(&self, mode: StartMode) {
+        let slot = match mode {
+            StartMode::Ptt => start_mode_slot::PTT,
+            StartMode::InApp => start_mode_slot::IN_APP,
+        };
+        self.start_mode.store(slot, Ordering::SeqCst);
+    }
+
+    /// Reset start_mode to "unset". Internal: called from `hide()`.
+    fn clear_start_mode(&self) {
+        self.start_mode
+            .store(start_mode_slot::NONE, Ordering::SeqCst);
+    }
+
+    /// Snapshot the current start_mode as the wire string, if any.
+    fn current_start_mode_str(&self) -> Option<&'static str> {
+        match self.start_mode.load(Ordering::SeqCst) {
+            start_mode_slot::PTT => Some("ptt"),
+            start_mode_slot::IN_APP => Some("in_app"),
+            _ => None,
+        }
     }
 
     /// Wire up the Tauri app handle. Idempotent — last writer wins.
@@ -279,7 +337,11 @@ impl RecordingWindow {
                 let _ = w.hide();
             });
         }
+        // Emit IDLE WITH the trailing start_mode (so the overlay
+        // sees the session it was tracking end cleanly), then clear
+        // the slot so the next session starts clean.
         self.emit(state::IDLE, None, None);
+        self.clear_start_mode();
         Ok(())
     }
 
@@ -356,6 +418,7 @@ impl RecordingWindow {
             mode_slug,
             mode_label,
             error,
+            start_mode: self.current_start_mode_str(),
         };
         if let Err(e) = app.emit(STATE_EVENT, &payload) {
             tracing::debug!(error = ?e, state, "failed to emit dictation:state");

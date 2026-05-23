@@ -32,6 +32,7 @@
 //! need to live on one thread.
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -72,6 +73,13 @@ pub struct DictationRuntime {
     /// Public so the tray can read it for status display. Cloning
     /// shares the visibility flag.
     pub recording_window: RecordingWindow,
+
+    /// ADR 0045 + mb-tfyp — shared with the orchestrator on the
+    /// dictation thread. `start()` flips it to `true` immediately
+    /// before injecting the synthetic `KeyDown`; the orchestrator
+    /// reads + clears it at `start_capture` time. Stays `false`
+    /// for every PTT session (the real OS hook never touches it).
+    next_start_is_programmatic: Arc<AtomicBool>,
 
     /// Hook handle — Drop posts WM_QUIT to the hotkey thread.
     #[cfg(target_os = "windows")]
@@ -127,6 +135,11 @@ impl DictationRuntime {
         let recording_window = RecordingWindow::new();
         let rw_clone = recording_window.clone();
         let pipeline_complete_tx = pause.sender_clone();
+        // mb-tfyp: programmatic-start flag. Cloned once into the
+        // orchestrator on the dictation thread; the runtime keeps
+        // its own clone so `start()` can flip it.
+        let next_start_is_programmatic = Arc::new(AtomicBool::new(false));
+        let programmatic_clone = next_start_is_programmatic.clone();
         let dictation_join = std::thread::Builder::new()
             .name("mockingbird-dictation".into())
             .spawn(move || {
@@ -137,6 +150,7 @@ impl DictationRuntime {
                     config,
                     user_overrides,
                     pipeline_complete_tx,
+                    programmatic_clone,
                 ) {
                     tracing::error!(error = ?e, "dictation thread bailed out");
                 }
@@ -148,6 +162,7 @@ impl DictationRuntime {
         Ok(Self {
             pause,
             recording_window,
+            next_start_is_programmatic,
             _hook: hook,
             _dictation_join: Some(dictation_join),
         })
@@ -161,6 +176,11 @@ impl DictationRuntime {
         _config: OrchestratorConfig,
         _user_overrides: HashMap<String, InjectionStrategy>,
     ) -> AppResult<Self> {
+        // The `next_start_is_programmatic` field is unused on non-Windows
+        // (`Self` is never actually constructed on those platforms), but
+        // referring to `AtomicBool` here keeps the import live without a
+        // cfg-gated use statement.
+        let _: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
         Err(AppError::Other(
             "dictation runtime is Windows-only (Phase 9 platform parity)".into(),
         ))
@@ -187,6 +207,23 @@ impl DictationRuntime {
     /// `Processing`, both of which §6.1 ignores — so the call is a
     /// no-op, not a corruption.
     pub fn start(&self) -> AppResult<()> {
+        // mb-tfyp: tell the orchestrator this session is
+        // programmatic BEFORE the synthetic KeyDown lands on the
+        // hotkey channel. Otherwise there's a tiny race where the
+        // FSM could process KeyDown + emit StartCapture + the
+        // orchestrator's `start_capture` could read the flag —
+        // all before we'd flipped it. The other direction is
+        // safe: setting the flag, then NOT sending KeyDown (because
+        // the channel closed), leaves a stale `true` that the next
+        // programmatic call would consume — harmless because the
+        // flag is gated on the synthetic KeyDown actually producing
+        // a `StartCapture`, which it won't if the channel is dead.
+        // Worst case: the very next REAL PTT hold gets tagged as
+        // in-app. That requires the hotkey channel to be both
+        // closed AND magically reopen — i.e. the runtime is
+        // being torn down, so the misattribution is moot.
+        self.next_start_is_programmatic
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         self.pause
             .sender_clone()
             .send(HotkeyEvent::KeyDown {
@@ -234,6 +271,7 @@ impl DictationRuntime {
 const PROGRAMMATIC_VK: u32 = 0x07;
 
 #[cfg(target_os = "windows")]
+#[allow(clippy::too_many_arguments)]
 fn run_dictation_thread(
     actions: std::sync::mpsc::Receiver<crate::hotkey::state::StateAction>,
     recording_window: RecordingWindow,
@@ -241,6 +279,7 @@ fn run_dictation_thread(
     config: OrchestratorConfig,
     user_overrides: HashMap<String, InjectionStrategy>,
     hotkey_tx: std::sync::mpsc::Sender<crate::hotkey::HotkeyEvent>,
+    next_start_is_programmatic: Arc<AtomicBool>,
 ) -> AppResult<()> {
     // Build !Send deps here on this thread. None cross thread boundaries.
     let audio = crate::audio::make_default_capture()?;
@@ -264,6 +303,7 @@ fn run_dictation_thread(
         config,
         user_overrides,
         hotkey_tx,
+        next_start_is_programmatic,
     );
 
     orchestrator.run(actions)

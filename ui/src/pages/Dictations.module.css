@@ -248,6 +248,16 @@
 .metaKey { color: var(--on-surf-muted); }
 .metaVal { color: var(--on-surf); font-variant-numeric: tabular-nums; }
 
+/* ADR 0045 + mb-tfyp — start_mode hint next to the mode pill in
+ * the detail metadata grid. Glass-soft tier per the chartering
+ * follow-up: small, muted, lowercase-ish; the mode Pill is the
+ * primary affordance and this is a parenthetical clarifier. */
+.metaStartMode {
+  margin-left: var(--space-2, 8px);
+  color: var(--on-surf-muted);
+  font: var(--type-xs);
+}
+
 .toast {
   position: fixed;
   bottom: var(--s-5);

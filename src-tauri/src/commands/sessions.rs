@@ -79,6 +79,10 @@ fn to_summary(conn: &Connection, s: &sessions::Session) -> SessionSummary {
             .injection_status
             .clone()
             .unwrap_or_else(|| "unknown".into()),
+        // ADR 0045 + mb-tfyp. NOT NULL on disk (migration 017 DEFAULT
+        // 'ptt'); ship the wire string straight from the enum so we
+        // never accidentally diverge from `StartMode::as_db_str`.
+        start_mode: s.start_mode.as_db_str().to_string(),
     }
 }
 

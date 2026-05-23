@@ -6,7 +6,20 @@
 // runtime and the corresponding Playwright spec will fail loudly.
 
 export type ThemeChoice = "system" | "light" | "dark";
-export type InjectionStatus = "ok" | "aborted" | "secure_input" | "focus_changed";
+/** Canonical DB string of an injection outcome.
+ *
+ * Mirrors `InjectionOutcome::as_db_str` on the Rust side. New variants:
+ *   - `"in_app"` (ADR 0045 + mb-tfyp) — programmatic in-app dictation,
+ *     no inject attempted by design (not a failure).
+ *
+ * Kept as a string union (not narrow literals) because legacy rows can
+ * carry pre-Phase-1 values like `"unknown"` and the UI must render
+ * something useful regardless. */
+export type InjectionStatus = string;
+
+/** ADR 0045 + mb-tfyp — which path started a dictation session.
+ *  Persisted as `sessions.start_mode` (migration 017). */
+export type StartMode = "ptt" | "in_app";
 
 export interface InsightsSnapshot {
   today: {
@@ -64,6 +77,12 @@ export interface SessionSummary {
   foregroundWindowTitle: string | null;
   finalText: string;
   injectionStatus: InjectionStatus;
+  /** ADR 0045 + mb-tfyp. Drives the list-pill semantics: in-app
+   *  sessions render `IN_APP` (neutral) instead of leaking the
+   *  ABORTED_FOCUS_CHANGED legacy heuristic which doesn't apply
+   *  when there was no target app. Defaults to `"ptt"` for
+   *  pre-migration-017 rows. */
+  startMode: StartMode;
 }
 
 export interface SessionDetail {

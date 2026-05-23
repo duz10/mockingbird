@@ -49,6 +49,13 @@ const MIGRATION_015: &str = include_str!("migrations/015_activity_wave5_hardenin
 // `test --release --no-run` (LESSONS P2); the link-clean check proves
 // types, not SQL. Purely additive ADD COLUMN; no triggers.
 const MIGRATION_016: &str = include_str!("migrations/016_activity_blocks_primary_title.sql");
+// mb-tfyp / ADR 0045 follow-up — track `start_mode` (ptt | in_app) on
+// dictation sessions. Programmatic-start sessions need a distinct list-pill
+// label because the ABORTED_FOCUS_CHANGED heuristic is semantically wrong
+// for them (Mockingbird is the focus the whole time, there's no target
+// app to lose focus to). Pure ADD COLUMN with DEFAULT 'ptt' backfill;
+// audit triggers don't cover the `sessions` table, no trigger update.
+const MIGRATION_017: &str = include_str!("migrations/017_dictation_start_mode.sql");
 
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
@@ -160,6 +167,16 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         let prepared = substitute_prompt_bodies(MIGRATION_016);
         conn.execute_batch(&prepared)?;
     }
+    if current < 17 {
+        // mb-tfyp / ADR 0045 follow-up: adds `sessions.start_mode` so
+        // the UI can render IN_APP for programmatic-start sessions
+        // instead of the (semantically wrong) ABORTED_FOCUS_CHANGED
+        // that the legacy focus-drift abort path produced. Pure ADD
+        // COLUMN with DEFAULT 'ptt'. Substituter pass for the
+        // leftover-token guard.
+        let prepared = substitute_prompt_bodies(MIGRATION_017);
+        conn.execute_batch(&prepared)?;
+    }
     Ok(())
 }
 
@@ -218,7 +235,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "16");
+        assert_eq!(v, "17");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -237,7 +254,41 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "16");
+        assert_eq!(v, "17");
+    }
+
+    /// Migration 017 (mb-tfyp / ADR 0045 follow-up) adds the
+    /// `sessions.start_mode` column with DEFAULT 'ptt'. Verify the
+    /// column lands and the default backfills legacy rows.
+    #[test]
+    fn migration_017_ships_sessions_start_mode_column() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+
+        // Column exists with the expected type + default.
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(sessions)")
+            .expect("prepare table_info");
+        let found = stmt
+            .query_map([], |row| {
+                let name: String = row.get(1)?;
+                let ty: String = row.get(2)?;
+                let notnull: i64 = row.get(3)?;
+                let dflt: Option<String> = row.get(4)?;
+                Ok((name, ty, notnull, dflt))
+            })
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .find(|(n, _, _, _)| n == "start_mode")
+            .expect("start_mode column should exist after migration 017");
+        assert_eq!(found.1, "TEXT");
+        assert_eq!(found.2, 1, "start_mode should be NOT NULL");
+        assert_eq!(
+            found.3.as_deref(),
+            Some("'ptt'"),
+            "start_mode should default to 'ptt'"
+        );
     }
 
     /// Migration 015 ships the exclusion-rules table + raw_events_

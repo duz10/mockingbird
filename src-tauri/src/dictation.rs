@@ -55,6 +55,7 @@ pub mod paste_payload;
 pub mod runtime;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -64,7 +65,7 @@ use rusqlite::Connection;
 use crate::audio::vad::VoiceActivityDetector;
 use crate::audio::{trim_speech, AudioCapture, TrimConfig};
 use crate::cleanup::Cleaner;
-use crate::db::sessions::{self, NewSession, ProcessingCompletion, SessionStatus};
+use crate::db::sessions::{self, NewSession, ProcessingCompletion, SessionStatus, StartMode};
 use crate::db::transcripts;
 use crate::error::{AppError, AppResult};
 use crate::hotkey::state::StateAction;
@@ -122,6 +123,20 @@ pub struct DictationOrchestrator {
     /// every subsequent KeyDown.
     hotkey_tx: Sender<HotkeyEvent>,
 
+    /// ADR 0045 + mb-tfyp — set by [`DictationRuntime::start`] just
+    /// before it injects the synthetic `KeyDown` for a programmatic
+    /// session. The orchestrator swaps it back to `false` on
+    /// `start_capture` so the flag never leaks past one session.
+    ///
+    /// Why an atomic instead of plumbing the mode through the FSM:
+    /// ADR 0045 explicitly keeps the state machine + `StateAction`
+    /// enum mode-agnostic (the synthetic event is indistinguishable
+    /// from a real key event there). The orchestrator is the first
+    /// place in the pipeline that's allowed to know — it owns the
+    /// session row, the focus-drift check, and the inject decision,
+    /// which are exactly the three places `start_mode` matters.
+    next_start_is_programmatic: Arc<AtomicBool>,
+
     // Per-session transient state.
     state: SessionState,
 }
@@ -171,6 +186,12 @@ struct SessionState {
     /// `None` until `start_capture`; callers fall back to
     /// `self.config` defensively.
     active_mode: Option<ResolvedMode>,
+    /// ADR 0045 + mb-tfyp — snapshotted from
+    /// `next_start_is_programmatic` at `start_capture`. Drives
+    /// (a) the focus-drift skip, (b) the inject skip, (c) the
+    /// `sessions.start_mode` DB column, (d) the `dictation:state`
+    /// event payload's `startMode` field.
+    start_mode: StartMode,
 }
 
 /// The mode identifiers a single dictation session uses end-to-end:
@@ -209,6 +230,7 @@ impl DictationOrchestrator {
         config: OrchestratorConfig,
         user_overrides: HashMap<String, InjectionStrategy>,
         hotkey_tx: Sender<HotkeyEvent>,
+        next_start_is_programmatic: Arc<AtomicBool>,
     ) -> Self {
         Self {
             audio,
@@ -223,6 +245,7 @@ impl DictationOrchestrator {
             config,
             user_overrides,
             hotkey_tx,
+            next_start_is_programmatic,
             state: SessionState::default(),
         }
     }
@@ -294,17 +317,38 @@ impl DictationOrchestrator {
         self.state.fg_keydown = self.window_ctx.foreground().ok();
         self.state.started_at = Some(Instant::now());
         self.state.started_at_iso = Some(now_iso());
+        // ADR 0045 + mb-tfyp. Snapshot + RESET the programmatic flag
+        // atomically. swap() guarantees the next PTT hold can't
+        // accidentally inherit the bit even if this `start_capture`
+        // races with another `DictationRuntime::start` call (which is
+        // a state-machine no-op in `Recording` / `Processing` anyway,
+        // but we want the flag to be honest).
+        let start_mode = if self
+            .next_start_is_programmatic
+            .swap(false, Ordering::SeqCst)
+        {
+            StartMode::InApp
+        } else {
+            StartMode::Ptt
+        };
+        self.state.start_mode = start_mode;
         // Pin the active mode for this whole session BEFORE we open
         // the mic. Single resolution per session: recording-window
         // colour, cleanup prompt, and DB FKs all see the same mode.
         let resolved = self.resolve_active_mode();
         self.audio.start()?;
+        // Tell the recording-window owner about start_mode BEFORE
+        // show() emits the first `listening` event — otherwise the
+        // overlay's first paint won't carry the `startMode` field
+        // and the pill-overlay Stop button would briefly not render.
+        self.recording_window.set_start_mode(start_mode);
         // show() handles both the OS-level window display + emitting
         // the initial `listening` state to the React overlay.
         self.recording_window.show(&resolved.slug)?;
         tracing::info!(
             fg = ?self.state.fg_keydown.as_ref().map(|f| &f.process_name),
             mode = %resolved.slug,
+            start_mode = start_mode.as_db_str(),
             "dictation: start_capture"
         );
         self.state.active_mode = Some(resolved);
@@ -502,7 +546,16 @@ impl DictationOrchestrator {
             "dictation: cleanup end"
         );
 
-        // **Post-cleanup focus-drift check.**
+        // ADR 0045 + mb-tfyp — programmatic sessions bypass the
+        // focus-drift check AND the inject step entirely. There is
+        // no target app for an in-app session (Mockingbird itself is
+        // the focus the whole time), so the heuristic doesn't apply
+        // and pasting would either be a no-op or land in our own UI.
+        // The user clicked Start, dictated, clicked Stop — they get
+        // a transcript in the list. That's the contract.
+        let is_in_app = self.state.start_mode == StartMode::InApp;
+
+        // **Post-cleanup focus-drift check** (PTT path only).
         //
         // ADR 0020 covers focus changes BETWEEN key-down and key-up
         // (permissive: inject into the key-up app). It does NOT
@@ -520,65 +573,83 @@ impl DictationOrchestrator {
         // `AbortedFocusChanged` (raw + cleaned still persist, only
         // the `final` stage is skipped). User can retry; better
         // than pasting into the wrong window.
-        let fg_now = self.window_ctx.foreground().ok();
-        let focus_drifted = match &fg_now {
-            Some(now) => !same_process(now, &fg_keyup),
-            None => true, // null foreground == drifted away from everything
+        let focus_drifted = if is_in_app {
+            false
+        } else {
+            let fg_now = self.window_ctx.foreground().ok();
+            let drifted = match &fg_now {
+                Some(now) => !same_process(now, &fg_keyup),
+                None => true, // null foreground == drifted away from everything
+            };
+            if drifted {
+                tracing::warn!(
+                    fg_keyup = ?fg_keyup.process_name,
+                    fg_now = ?fg_now.as_ref().map(|f| &f.process_name),
+                    cleanup_latency_ms,
+                    "focus drifted between key-up and inject (likely slow cleanup + \
+                     user navigated away); aborting to avoid pasting into wrong window"
+                );
+            }
+            drifted
         };
-        if focus_drifted {
-            tracing::warn!(
-                fg_keyup = ?fg_keyup.process_name,
-                fg_now = ?fg_now.as_ref().map(|f| &f.process_name),
-                cleanup_latency_ms,
-                "focus drifted between key-up and inject (likely slow cleanup + \
-                 user navigated away); aborting to avoid pasting into wrong window"
-            );
-        }
 
-        // Secure-input check + focus-loss + strategy resolution.
-        let is_secure = self.secure_guard.is_secure(&fg_keyup);
-        let inputs = pipeline::Inputs {
-            fg_keydown: self.state.fg_keydown.as_ref(),
-            fg_keyup: &fg_keyup,
-            is_secure,
-            user_overrides: &self.user_overrides,
-        };
-        let decision = pipeline::decide(&inputs);
-
-        // Inject (or skip per decision + focus drift).
+        // Inject (or skip per start_mode / focus drift / decision).
         self.recording_window
             .set_state(crate::recording_window::state::PASTING, Some(&mode_slug));
         let inject_start = Instant::now();
-        tracing::info!(
-            decision = ?decision,
-            text_len = cleaned_text.len(),
-            focus_drifted,
-            "dictation: inject begin"
-        );
-        let outcome = if focus_drifted {
-            // Reuse the existing legacy variant: semantically "focus
-            // changed and we declined to paste". The DB CHECK
-            // constraint already allows `aborted_focus_changed`
-            // (migrations/004) so no schema change needed.
-            InjectionOutcome::AbortedFocusChanged
+        let outcome = if is_in_app {
+            // Programmatic session: nothing to paste into. Distinct
+            // outcome (`in_app`) so the UI can render an `IN_APP`
+            // pill without re-deriving the semantic from
+            // `start_mode` AND `injection_status` in two places.
+            tracing::info!(
+                text_len = cleaned_text.len(),
+                "dictation: inject skipped — programmatic (in-app) session"
+            );
+            InjectionOutcome::InAppNoInject
         } else {
-            match decision {
-                pipeline::Decision::Proceed(strategy) => {
-                    // Append a single trailing space to the *paste*
-                    // payload (NOT the persisted text) so the user's
-                    // next dictation flows naturally without
-                    // needing a leading space. See
-                    // dictation::paste_payload for the policy + tests.
-                    let to_paste = paste_payload::paste_payload(&cleaned_text);
-                    match self.injector.inject(&to_paste, strategy) {
-                        Ok(o) => o,
-                        Err(e) => {
-                            tracing::warn!(error = ?e, "injector returned error");
-                            InjectionOutcome::FailedSendInput
+            // Secure-input check + focus-loss + strategy resolution.
+            // PTT path only — built lazily so the in-app branch
+            // doesn't pay for an unused secure_guard probe.
+            let is_secure = self.secure_guard.is_secure(&fg_keyup);
+            let inputs = pipeline::Inputs {
+                fg_keydown: self.state.fg_keydown.as_ref(),
+                fg_keyup: &fg_keyup,
+                is_secure,
+                user_overrides: &self.user_overrides,
+            };
+            let decision = pipeline::decide(&inputs);
+            tracing::info!(
+                decision = ?decision,
+                text_len = cleaned_text.len(),
+                focus_drifted,
+                "dictation: inject begin"
+            );
+            if focus_drifted {
+                // Reuse the existing legacy variant: semantically "focus
+                // changed and we declined to paste". The DB CHECK
+                // constraint already allows `aborted_focus_changed`
+                // (migrations/004) so no schema change needed.
+                InjectionOutcome::AbortedFocusChanged
+            } else {
+                match decision {
+                    pipeline::Decision::Proceed(strategy) => {
+                        // Append a single trailing space to the *paste*
+                        // payload (NOT the persisted text) so the user's
+                        // next dictation flows naturally without
+                        // needing a leading space. See
+                        // dictation::paste_payload for the policy + tests.
+                        let to_paste = paste_payload::paste_payload(&cleaned_text);
+                        match self.injector.inject(&to_paste, strategy) {
+                            Ok(o) => o,
+                            Err(e) => {
+                                tracing::warn!(error = ?e, "injector returned error");
+                                InjectionOutcome::FailedSendInput
+                            }
                         }
                     }
+                    pipeline::Decision::Abort(o) => o,
                 }
-                pipeline::Decision::Abort(o) => o,
             }
         };
         let injection_latency_ms = inject_start.elapsed().as_millis() as i64;
@@ -753,6 +824,7 @@ impl DictationOrchestrator {
             prompt_id: active.prompt_id,
             dictionary_snapshot_id: self.config.dictionary_snapshot_id,
             example_set_id: self.config.example_set_id,
+            start_mode: self.state.start_mode,
         };
         sessions::insert(conn, &new)
     }
@@ -778,6 +850,7 @@ impl DictationOrchestrator {
             prompt_id: active.prompt_id,
             dictionary_snapshot_id: self.config.dictionary_snapshot_id,
             example_set_id: self.config.example_set_id,
+            start_mode: self.state.start_mode,
         };
         sessions::insert(conn, &new)
     }

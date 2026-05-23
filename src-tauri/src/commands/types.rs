@@ -135,6 +135,11 @@ pub struct SessionSummary {
     pub foreground_window_title: Option<String>,
     pub final_text: String,
     pub injection_status: String,
+    /// ADR 0045 + mb-tfyp — `"ptt"` or `"in_app"`. Distinguishes
+    /// hotkey-triggered sessions from programmatic-start ones so
+    /// the UI list-pill can render IN_APP instead of the
+    /// (semantically wrong) ABORTED_FOCUS_CHANGED for in-app rows.
+    pub start_mode: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

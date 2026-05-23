@@ -30,6 +30,53 @@ pub struct NewSession {
     pub prompt_id: i64,
     pub dictionary_snapshot_id: i64,
     pub example_set_id: i64,
+
+    /// ADR 0045 + mb-tfyp — which start path produced this session.
+    /// `Ptt` for hotkey-triggered, `InApp` for programmatic
+    /// (`dictation_start` IPC) sessions. Persisted as TEXT (migration
+    /// 017).
+    pub start_mode: StartMode,
+}
+
+/// Discriminates the two ADR 0045 dictation start paths.
+///
+/// Persisted to `sessions.start_mode` (migration 017). Drives the
+/// list-pill label in the UI and skips the focus-drift abort path
+/// for `InApp` sessions (Mockingbird is the focus the whole time,
+/// so the heuristic doesn't apply).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StartMode {
+    /// Right Alt PTT or any other future keyboard-hook trigger.
+    /// Default for legacy rows (pre-migration-017) and for the
+    /// happy-path Right-Alt-hold flow.
+    #[default]
+    Ptt,
+    /// Programmatic start via `dictation_start` IPC — e.g. the
+    /// in-app Start Dictation button. There is no "target app";
+    /// injection is intentionally skipped.
+    InApp,
+}
+
+impl StartMode {
+    /// Canonical DB string. Must match the value the UI renders
+    /// against — see `ui/src/lib/types.ts` `StartMode`.
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Ptt => "ptt",
+            Self::InApp => "in_app",
+        }
+    }
+
+    /// Parse a DB string. Unknown values default to `Ptt` (the safe
+    /// fallback — a row that mysteriously says "foobar" is at least
+    /// not falsely promoted to in-app, which would suppress paste).
+    pub fn parse_db(s: &str) -> Self {
+        match s {
+            "in_app" => Self::InApp,
+            _ => Self::Ptt,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -89,6 +136,10 @@ pub struct Session {
     /// Canonical injection outcome string. NULL on legacy rows and
     /// on currently-in-flight sessions. See migration 004.
     pub injection_status: Option<String>,
+    /// ADR 0045 + mb-tfyp. NOT NULL with DEFAULT 'ptt' on disk
+    /// (migration 017) — but kept as the typed enum here so callers
+    /// can match without juggling strings.
+    pub start_mode: StartMode,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -112,9 +163,10 @@ pub fn insert(conn: &Connection, new: &NewSession) -> AppResult<i64> {
         "INSERT INTO sessions ( \
             uuid, mode_id, hotkey_pressed, started_at, recording_ended_at, \
             status, foreground_app, foreground_window_title, audio_duration_ms, \
-            audio_blob_path, prompt_id, dictionary_snapshot_id, example_set_id \
+            audio_blob_path, prompt_id, dictionary_snapshot_id, example_set_id, \
+            start_mode \
          ) VALUES \
-         (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+         (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             new.uuid,
             new.mode_id,
@@ -129,6 +181,7 @@ pub fn insert(conn: &Connection, new: &NewSession) -> AppResult<i64> {
             new.prompt_id,
             new.dictionary_snapshot_id,
             new.example_set_id,
+            new.start_mode.as_db_str(),
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -194,7 +247,7 @@ const SELECT_ALL: &str =
             foreground_window_title, audio_duration_ms, audio_blob_path, \
             prompt_id, dictionary_snapshot_id, example_set_id, \
             stt_latency_ms, cleanup_latency_ms, injection_latency_ms, \
-            injection_status \
+            injection_status, start_mode \
      FROM sessions";
 
 fn fetch_one(
@@ -241,6 +294,13 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
         cleanup_latency_ms: row.get(17)?,
         injection_latency_ms: row.get(18)?,
         injection_status: row.get(19)?,
+        start_mode: {
+            // NOT NULL on disk (migration 017 DEFAULT 'ptt'), but be
+            // defensive against pre-017 rows in case a downgrade ever
+            // re-runs this code against an older schema.
+            let s: Option<String> = row.get(20)?;
+            s.as_deref().map(StartMode::parse_db).unwrap_or_default()
+        },
     })
 }
 
@@ -291,7 +351,64 @@ mod tests {
             prompt_id,
             dictionary_snapshot_id: snapshot_id,
             example_set_id,
+            start_mode: StartMode::Ptt,
         }
+    }
+
+    #[test]
+    fn start_mode_db_strings_are_stable() {
+        // These end up in sessions.start_mode and become part of the
+        // persisted provenance — changing them is a schema break.
+        assert_eq!(StartMode::Ptt.as_db_str(), "ptt");
+        assert_eq!(StartMode::InApp.as_db_str(), "in_app");
+        assert_eq!(StartMode::parse_db("ptt"), StartMode::Ptt);
+        assert_eq!(StartMode::parse_db("in_app"), StartMode::InApp);
+        // Unknown values fall back to the safe default.
+        assert_eq!(StartMode::parse_db("bogus"), StartMode::Ptt);
+    }
+
+    #[test]
+    fn insert_and_read_in_app_start_mode() {
+        let db = Database::open_in_memory().unwrap();
+        let mut new = fresh_new_session(&db.conn);
+        new.start_mode = StartMode::InApp;
+        let id = insert(&db.conn, &new).unwrap();
+        let got = get_by_id(&db.conn, id).unwrap().unwrap();
+        assert_eq!(got.start_mode, StartMode::InApp);
+    }
+
+    #[test]
+    fn start_mode_defaults_to_ptt_on_legacy_rows() {
+        // Simulate pre-migration-017 rows: bypass the NewSession API
+        // and INSERT manually omitting start_mode. Because the
+        // column has DEFAULT 'ptt', the read should still produce Ptt.
+        let db = Database::open_in_memory().unwrap();
+        let new = fresh_new_session(&db.conn);
+        db.conn
+            .execute(
+                "INSERT INTO sessions ( \
+                    uuid, mode_id, hotkey_pressed, started_at, recording_ended_at, \
+                    status, foreground_app, audio_duration_ms, \
+                    prompt_id, dictionary_snapshot_id, example_set_id \
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    "legacy-uuid",
+                    new.mode_id,
+                    new.hotkey_pressed,
+                    new.started_at,
+                    new.recording_ended_at,
+                    new.status.as_str(),
+                    new.foreground_app,
+                    new.audio_duration_ms,
+                    new.prompt_id,
+                    new.dictionary_snapshot_id,
+                    new.example_set_id,
+                ],
+            )
+            .unwrap();
+        let id = db.conn.last_insert_rowid();
+        let got = get_by_id(&db.conn, id).unwrap().unwrap();
+        assert_eq!(got.start_mode, StartMode::Ptt);
     }
 
     #[test]
