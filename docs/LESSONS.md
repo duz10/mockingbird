@@ -3922,3 +3922,24 @@ Whisper) closed via ADR 0029 as its architectural closer.
   The user invokes `meeting_run_llm_pass` explicitly per
   meeting; the canonical transcript is independent.
 
+
+## 2026-05-27 [adr-0046-iter2] Throwaway-crate recipe extends cleanly to submodule layouts
+
+- **Context:** Phase A landed `vault/{layout,manifest}.rs` as a flat throwaway crate (`src/lib.rs` + `src/{layout,manifest}.rs`). Phase B added `vault/project.rs` which imports `crate::vault::manifest::{RecordType, MOCKINGBIRD_EXPORT_VERSION}` — a real-workspace path that doesn't resolve in the flat throwaway layout.
+- **Finding:** The throwaway-crate recipe (LESSONS P2) was originally documented as flat — copy the `.rs` file in, run `cargo test`. When the module under test imports from a sibling sub-module via `crate::vault::*`, the throwaway needs to MIRROR the real workspace's module tree so those paths resolve unchanged. Trying to patch import paths inline is brittle (defeats the byte-identical copy promise); restructuring the throwaway is the clean move: `src/lib.rs` declares `pub mod vault;`, `src/vault/mod.rs` re-exports the sibling files, and the copied `.rs` files import via `crate::vault::*` exactly like in the real workspace. Took 5 minutes the first time; would have been zero if documented.
+- **Action:** When the module under test has intra-subsystem (intra-vault / intra-meeting / intra-activity / etc.) imports, mirror the real path under the throwaway's `src/`:
+
+  ```
+  $env:TEMP\<modname>_throwaway\
+  ├── Cargo.toml          # deps: only what the module(s) under test pull in
+  └── src\
+      ├── lib.rs          # `pub mod error; pub mod <topmod>;` + AppError shim
+      └── <topmod>\
+          ├── mod.rs      # mirrors real workspace's mod.rs (`pub mod foo; pub mod bar;`)
+          ├── foo.rs      # copied verbatim from real workspace
+          └── bar.rs      # copied verbatim from real workspace
+  ```
+
+  The `AppError` shim in `src/lib.rs` provides exactly the variants the modules use (`Vault(String)` for vault modules, etc.) — catch-all `_ => panic!()` arms in tests emit `unreachable_pattern` warnings under the shim, harmless because the catch-all IS reachable against the full `AppError` enum in the real workspace.
+
+  Iter 2 Phase B: 33/33 throwaway-crate tests green after the restructure, including a golden-snapshot byte-pin of `vault::project::project()` output (`vault_phase_a_throwaway` at `$env:TEMP`).
