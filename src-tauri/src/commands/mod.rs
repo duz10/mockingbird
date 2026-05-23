@@ -168,6 +168,7 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         vault::vault_settings_get,
         vault::vault_settings_set,
         vault::vault_export_now,
+        vault::vault_pick_directory,
     ])
 }
 

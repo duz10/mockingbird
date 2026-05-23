@@ -368,3 +368,30 @@ export interface MeetingTickEvent {
   micDb: number;
   sysDb: number;
 }
+
+/** ADR 0046 Iter 2 / mb-vg3p — typed snapshot of the four
+ *  Mobile-Sync settings keys. Read via `api.vault_settings_get()`;
+ *  individual fields written via `api.vault_settings_set(key, value)`
+ *  (key matches the Rust-side `SettingKey::as_str()` value:
+ *  `"mobile_sync_enabled"`, `"vault_path"`, `"vault_sync_record_types"`,
+ *  `"vault_retention_days"`). The set IPC also fires a backfill
+ *  trigger so a freshly-enabled vault populates without an explicit
+ *  Export-now click. */
+export interface VaultSettingsSnapshot {
+  mobileSyncEnabled: boolean;
+  vaultPath: string | null;
+  vaultSyncRecordTypes: "dictation" | "meeting" | "both";
+  vaultRetentionDays: number;
+}
+
+/** Result of a manual `vault_export_now` IPC call. `skipped` is true
+ *  when the runtime short-circuited because sync was disabled or no
+ *  vault path was configured -- the UI renders a different toast in
+ *  that case. Otherwise `changes` / `archived` / `total` count the
+ *  actual reconciliation work. */
+export interface VaultExportSummary {
+  total: number;
+  changes: number;
+  archived: number;
+  skipped: boolean;
+}

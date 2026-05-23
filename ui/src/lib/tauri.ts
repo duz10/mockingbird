@@ -27,6 +27,8 @@ import type {
   SessionSummary,
   SettingsSnapshot,
   TranscriptSearchHit,
+  VaultExportSummary,
+  VaultSettingsSnapshot,
 } from "./types";
 
 /** True when we're running inside an actual Tauri shell. */
@@ -192,6 +194,27 @@ export const api = {
    *  suitable for showing verbatim. */
   dictation_import_file: () =>
     invoke<SessionImportSummary>("dictation_import_file"),
+
+  // ADR 0046 Iter 2 / mb-vg3p — Mobile Sync (Obsidian Vault) preview.
+  /** Read the four mobile-sync settings keys (`mobile_sync_enabled`,
+   *  `vault_path`, `vault_sync_record_types`, `vault_retention_days`). */
+  vault_settings_get: () =>
+    invoke<VaultSettingsSnapshot>("vault_settings_get"),
+  /** Write one of the four mobile-sync settings keys. The IPC also
+   *  refreshes the runtime config + fires a backfill trigger, so
+   *  flipping the toggle on with a valid path immediately populates
+   *  the vault. */
+  vault_settings_set: (key: string, value: unknown) =>
+    invoke<void>("vault_settings_set", { key, value }),
+  /** Manual reconciliation pass. Synchronous (blocks on the worker
+   *  pool); the returned summary feeds the Export-now toast. */
+  vault_export_now: () =>
+    invoke<VaultExportSummary>("vault_export_now"),
+  /** Native directory picker for the vault path. Returns `null` on
+   *  cancel and the absolute path string on confirm. Exposed as a
+   *  Rust IPC so the UI doesn't need `@tauri-apps/plugin-dialog`. */
+  vault_pick_directory: () =>
+    invoke<string | null>("vault_pick_directory"),
 };
 
 /* ------------------------------------------------------------------ */
@@ -220,6 +243,23 @@ function fixtureFor<T>(command: string, args?: object): T {
       return fixture(command, FIXTURES.activeMode) as T;
     case "get_settings":
       return fixture(command, FIXTURES.settings) as T;
+    case "vault_settings_get":
+      return fixture(command, {
+        mobileSyncEnabled: false,
+        vaultPath: null,
+        vaultSyncRecordTypes: "both",
+        vaultRetentionDays: 30,
+      } as VaultSettingsSnapshot) as T;
+    case "vault_export_now":
+      return fixture(command, {
+        total: 4,
+        changes: 2,
+        archived: 0,
+        skipped: false,
+      } as VaultExportSummary) as T;
+    case "vault_pick_directory":
+      // Browser-preview stub: pretend the user picked a path.
+      return fixture(command, "C:\\Users\\you\\mockingbird-vault") as T;
     case "meeting_settings_get_all":
       return fixture(command, {
         hotkeyModifier: "VK_RCONTROL",
@@ -448,6 +488,7 @@ function fixtureFor<T>(command: string, args?: object): T {
     case "set_active_mode":
     case "update_setting":
     case "meeting_settings_set":
+    case "vault_settings_set":
     case "report_correction":
     case "trigger_learning_run":
     case "open_path":

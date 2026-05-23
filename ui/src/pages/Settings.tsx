@@ -31,6 +31,7 @@ import { CommandCenterChordRow } from "./SettingsCommandCenterRow";
 import { SettingsActivityAudioRow } from "./SettingsActivityAudioRow";
 import { SettingsActivityHardeningRow } from "./SettingsActivityHardeningRow";
 import { SettingsMeetingTab } from "./SettingsMeetingTab";
+import { SettingsMobilePreview } from "./SettingsMobilePreview";
 import styles from "./Settings.module.css";
 
 type Tab = "general" | "models" | "history" | "meeting" | "advanced";
@@ -608,6 +609,7 @@ function AdvancedPanel({ settings, patch }: PanelProps) {
 
   return (
     <>
+      <SettingsMobilePreview />
       <Card title={t("settings.advanced.learning")}>
         <p style={{ margin: 0, color: "var(--on-surf-muted)", font: "var(--type-sm)" }}>
           {t("settings.advanced.learning.help")}

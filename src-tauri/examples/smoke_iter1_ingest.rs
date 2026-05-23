@@ -46,6 +46,7 @@ use mockingbird_lib::dictation::ingest::IngestProvenance;
 use mockingbird_lib::dictation::ingest_channel::HeadlessIngestRequest;
 use mockingbird_lib::dictation::runtime::{default_normal_config, DictationRuntime};
 use mockingbird_lib::error::AppResult;
+use mockingbird_lib::vault::export_job::VaultRuntime;
 
 const REPLY_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -87,7 +88,10 @@ fn main() {
     // --- Step 2: spawn DictationRuntime (loads whisper-rs CUDA + Silero VAD + cleaner).
     println!("\n[1/4] Spawning DictationRuntime (whisper-rs CUDA + Silero VAD load) ...");
     let t0 = std::time::Instant::now();
-    let runtime = DictationRuntime::spawn(shared.clone(), config, HashMap::new())
+    // ADR 0046 Iter 2 / mb-lvzw — vault runtime, disabled by default
+    // on a brand-new DB so `trigger()` is a no-op for this smoke.
+    let vault = Arc::new(VaultRuntime::new(&shared).expect("VaultRuntime::new"));
+    let runtime = DictationRuntime::spawn(shared.clone(), config, HashMap::new(), vault)
         .expect("DictationRuntime::spawn");
     println!("      runtime up in {:?}", t0.elapsed());
 

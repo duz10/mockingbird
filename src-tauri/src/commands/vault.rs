@@ -18,10 +18,12 @@
 //! semantics so spamming the button can't pile up worker threads or
 //! corrupt the manifest.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Runtime, State};
+use tauri_plugin_dialog::DialogExt;
 
 use crate::commands::{into_err, lock_db, AppStateHandle};
 use crate::settings::{model::SettingKey, Settings};
@@ -136,6 +138,25 @@ impl From<ReconciliationSummary> for VaultExportSummary {
             skipped: s.skipped,
         }
     }
+}
+
+/// Open a native directory picker so the Settings UI doesn't have
+/// to take a dependency on `@tauri-apps/plugin-dialog`. Returns
+/// `Ok(None)` on cancel and `Ok(Some(path))` on confirm. Uses
+/// `pick_folder` (synchronous blocking variant, same plugin as the
+/// dictation file picker).
+#[tauri::command]
+pub async fn vault_pick_directory<R: Runtime>(app: AppHandle<R>) -> Result<Option<String>, String> {
+    let picked: Option<PathBuf> = tokio::task::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Choose your Obsidian vault folder")
+            .blocking_pick_folder()
+            .and_then(|fp| fp.into_path().ok())
+    })
+    .await
+    .map_err(|e| format!("dialog task panicked: {e}"))?;
+    Ok(picked.map(|p| p.to_string_lossy().into_owned()))
 }
 
 #[tauri::command]
