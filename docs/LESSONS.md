@@ -157,6 +157,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-27 | `[ADR 0046 Iter 1 / mb-evn3 / mb-7vyz]` | The `StateAction` channel topology can't be naively extended for headless ingest — the orchestrator's input channel is fed by exactly one producer (StateDriver), so "add a new variant" requires a new sibling mpsc + run-loop multi-select, which is an ADR-amendment-sized change, not an in-boundary tweak |
 | 2026-05-27 | `[mb-tfyp / mb-sowc / ADR 0045]` | start_mode plumbing: the focus-drift abort heuristic conflates two semantically distinct outcomes (PTT target lost focus vs. in-app session never had a target); the fix is a new column + a new InjectionOutcome variant, NOT a new pill string on the legacy abort path |
 | 2026-05-26 | `[design-v1 / mb-n455]`          | Design System v1 audit + formalization shipped; six modes by which UI drift accumulated between phases; one specific bug class (the dead-token cascade silently rendering surfaces transparent) deserves a permanent guardrail; kitten's `getComputedStyle().backgroundColor` probe is blind to background-image gradients — false-positive trap |
 | 2026-05-26 | `[phase10-hotfix / mb-scla / mb-23rh]` | Two post-seal Phase 10 hotfixes: (1) `activity_blocks.primary_title` schema-vs-code drift slipped past green judges because `cargo test --release` is `--no-run` on this box — judges check contracts, not runtime SQL; (2) Command Center FSM `drive()` emitted the captured pre-effect `next` AFTER a recursive inner drive() had already emitted the post-effect state, clobbering the UI back into `Launching` and locking all tiles |
@@ -205,6 +206,24 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-27 [ADR 0046 Iter 1 / mb-evn3 / mb-7vyz] The `StateAction` channel topology can't be naively extended for headless ingest — it needs an ADR-amendment-sized change, not an in-boundary tweak
+
+**Context:** ADR 0046 Iter 1 Phase D (`mb-7vyz`, "+ Audio file" button) needed the IPC handler to drive the same VAD/STT/Cleaner the orchestrator owns. The dispatch's preferred pattern was "extend `StateAction` with a `HeadlessIngest(IngestRequest)` variant and let the orchestrator process it on its thread."
+
+**Finding:** That pattern doesn't survive contact with the real channel topology.
+
+1. `StateAction` lives in `src-tauri/src/hotkey/state.rs` — a file explicitly outside the ADR §3 boundary. Even adding a single enum variant touches sealed Phase 3 code in a non-trivial way (any `match` on `StateAction` becomes non-exhaustive without an arm). The dispatch's "Stop and ask if" #3 calls this out specifically.
+
+2. Even with the enum variant added: the orchestrator's input is `Receiver<StateAction>`, but the SENDER is `StateDriver`, which only consumes `Receiver<HotkeyEvent>`. There is no path from `DictationRuntime` (where the IPC handler reaches in via Tauri state) into the orchestrator's `StateAction` stream that doesn't go through the keyboard FSM. To support pattern (a) cleanly you'd need a NEW sibling mpsc channel from runtime → dictation thread, plus the run loop would have to multi-select on two channels (which `std::sync::mpsc::Receiver` can't do natively — needs crossbeam-channel `select!` or polling with `try_recv`).
+
+**Why it matters for future epics:** "extend the existing channel enum" is a tempting shorthand for "plumb a new event through the orchestrator," but in this codebase the channel topology asymmetry (one input channel, fed by ONE specific producer) means the real change is bigger than the enum delta suggests. Future ADRs that propose orchestrator-targeted side channels (e.g. a future "start-from-Activity-block-context" feature) should explicitly answer: "who is the new sender, and does the orchestrator's run loop need to multi-select?"
+
+**What we did:** Sealed `mb-evn3` (Phase C — the headless ingest function itself, which is dep-injected and channel-agnostic) and stopped before `mb-7vyz` to surface the three viable forks: (b) construct fresh VAD/STT/Cleaner per IPC call (in-boundary, costs a whisper-rs CUDA reload per import), (a-extended) author an ADR 0046 amendment for the channel topology change, or defer Phase D entirely until the architecture is decided. Documented in STATUS.md in-flight block.
+
+**Process win:** the dispatch's explicit "Stop and ask if" #3 paid for itself — without it Bernard would have either over-edited `hotkey/state.rs` (boundary violation) or sunk an iteration into a half-baked sibling-channel scaffold that doesn't actually solve the problem either.
 
 ---
 
