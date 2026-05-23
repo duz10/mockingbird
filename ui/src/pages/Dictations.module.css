@@ -80,6 +80,10 @@
 
 /* Session list */
 .list {
+  /* mb-t6bk: belt-and-braces — even if a child somehow exceeds its
+   * intrinsic width, we never want a horizontal scrollbar on the
+   * session list. Vertical only. */
+  overflow-x: hidden;
   /* mb-x3bj: the .leftPane is sticky + bounded, so the list IS
    * intentionally scoped-scrollable inside it — that's the canonical
    * sticky-sidebar pattern. The audit's nested-scroll bug was that
@@ -105,6 +109,13 @@
   /* Keep selection-highlight overrideable by .rowActive below. */
   background: transparent;
   transition: background var(--dur-1) var(--ease-out);
+  /* mb-t6bk: long injectionStatus chips (ABORTED_FOCUS_CHANGED et al)
+   * were forcing this column to grow past the 360px grid track and
+   * spawning a horizontal scrollbar on the entire .list. min-width:0
+   * lets the row participate in its parent's intrinsic-size shrinkage;
+   * overflow:hidden is the defensive cap. */
+  min-width: 0;
+  overflow: hidden;
 }
 .row:hover { background: var(--surf-3); }
 .row:focus-visible {
@@ -144,6 +155,12 @@
   align-items: center;
   font: var(--type-xs);
   color: var(--on-surf-faint);
+  /* mb-t6bk: wrap rather than scroll. When the injectionStatus chip
+   * is long enough that the whole meta line overflows the 360px
+   * column, push it to a second line instead of growing the row. */
+  flex-wrap: wrap;
+  min-width: 0;
+  row-gap: var(--s-1);
 }
 
 /* Detail pane */
