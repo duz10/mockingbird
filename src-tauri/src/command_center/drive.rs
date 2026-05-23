@@ -42,15 +42,18 @@ use super::state::{apply, CcEffect, CcInput, CcState, RecordingKind};
 /// Outcome of a runtime-start dispatch. Returned synchronously from
 /// [`CcEffects::dispatch_start`] so the engine can feed the result
 /// back into the FSM without leaking IO concerns into pure logic.
+///
+/// ADR 0045 collapsed this from a two-variant enum to a single
+/// `Replied { success: bool }`. The original `NoProgrammaticStart`
+/// variant existed for the Dictation tile, which used to dismiss
+/// instead of starting; programmatic dictation start now uses the
+/// same `Replied` path as Meeting and Activity, so the special case
+/// went away.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DispatchOutcome {
     /// Runtime accepted (`success: true`) or refused (`success: false`).
     /// Engine drives [`CcInput::RuntimeReplied`] next.
     Replied { success: bool },
-    /// Runtime has no programmatic start surface (Dictation —
-    /// the user holds Right Alt; picking the tile just dismisses
-    /// the Command Center). Engine drives [`CcInput::Dismiss`] next.
-    NoProgrammaticStart,
 }
 
 /// The full IO surface [`drive_engine`] needs. Production impl wraps
@@ -151,19 +154,15 @@ pub fn drive_engine<E: CcEffects>(
         CcEffect::None => {}
         CcEffect::ShowWindow { .. } => effects.show_window(),
         CcEffect::HideWindow => effects.hide_window(),
-        CcEffect::DispatchStart { kind } => match effects.dispatch_start(kind) {
-            DispatchOutcome::Replied { success } => {
-                drive_engine(
-                    state,
-                    first_run,
-                    effects,
-                    CcInput::RuntimeReplied { success },
-                );
-            }
-            DispatchOutcome::NoProgrammaticStart => {
-                drive_engine(state, first_run, effects, CcInput::Dismiss);
-            }
-        },
+        CcEffect::DispatchStart { kind } => {
+            let DispatchOutcome::Replied { success } = effects.dispatch_start(kind);
+            drive_engine(
+                state,
+                first_run,
+                effects,
+                CcInput::RuntimeReplied { success },
+            );
+        }
         CcEffect::DispatchStop { kind } => effects.dispatch_stop(kind),
     }
 
@@ -206,8 +205,8 @@ mod tests {
         /// this once before driving.
         current_session: StdMutex<Option<RecordingKind>>,
         /// Configurable: per-kind dispatch outcome. Defaults to
-        /// Replied{success:true} for Meeting/Activity,
-        /// NoProgrammaticStart for Dictation.
+        /// `Replied { success: true }` for all kinds (ADR 0045 —
+        /// Dictation now has a programmatic start like the others).
         start_outcomes: StdMutex<Vec<(RecordingKind, DispatchOutcome)>>,
         /// Side-effect: on a successful `dispatch_start` for
         /// Meeting/Activity, set current_session to Some(kind) so
@@ -274,15 +273,12 @@ mod tests {
                 .iter()
                 .position(|(k, _)| *k == kind)
                 .map(|i| outcomes.remove(i).1)
-                .unwrap_or_else(|| match kind {
-                    RecordingKind::Dictation => DispatchOutcome::NoProgrammaticStart,
-                    _ => DispatchOutcome::Replied { success: true },
-                });
-            // Production-semantic: a successful start of Meeting/Activity
-            // records the active session so the FSM's next current_session()
-            // read reflects it.
+                .unwrap_or(DispatchOutcome::Replied { success: true });
+            // Production-semantic: a successful start records the
+            // active session so the FSM's next current_session() read
+            // reflects it. Applies to all three kinds post-ADR 0045
+            // (Dictation now starts programmatically like the others).
             if matches!(outcome, DispatchOutcome::Replied { success: true })
-                && !matches!(kind, RecordingKind::Dictation)
                 && *self.auto_set_session_on_start.lock().unwrap()
             {
                 *self.current_session.lock().unwrap() = Some(kind);
@@ -371,16 +367,22 @@ mod tests {
         );
     }
 
-    // ---------- Path 3: tile pick (Dictation — push-to-talk) ----------
+    // ---------- Path 3: tile pick (Dictation — programmatic start, ADR 0045) ----------
 
     #[test]
-    fn path3_dictation_tile_pick_dismisses_and_emits_closed() {
-        // Dictation has no programmatic start; engine should treat
-        // the DispatchStart as a NoProgrammaticStart and recurse with
-        // Dismiss → HideWindow → emit Closed.
+    fn path3_dictation_tile_pick_lands_on_sessioncard() {
+        // ADR 0045: Dictation now starts programmatically like the
+        // other two kinds. The DispatchStart returns Replied{success:true},
+        // FSM goes Launching → ShowingSessionCard{Dictation}.
+        //
+        // Pre-ADR-0045 behavior (dismiss-and-emit-Closed) is preserved
+        // by `path3_dictation_tile_pick_runtime_refuses_returns_to_picker`
+        // for the failure case: if the runtime can't start (mic busy,
+        // synthetic-event channel closed, etc.) we land back on the
+        // picker for retry, just like Meeting/Activity.
         let (state, fr) = fresh(false);
         *state.lock().unwrap() = CcState::ShowingModePicker { first_run: false };
-        let fx = MockEffects::new(); // Default Dictation outcome is NoProgrammaticStart
+        let fx = MockEffects::new();
 
         drive_engine(
             &state,
@@ -391,25 +393,65 @@ mod tests {
             },
         );
 
-        assert_eq!(*state.lock().unwrap(), CcState::Closed);
+        assert_eq!(
+            *state.lock().unwrap(),
+            CcState::ShowingSessionCard {
+                kind: RecordingKind::Dictation
+            }
+        );
         let calls = fx.calls();
-        // Sequence: DispatchStart(Dictation), HideWindow (from inner Dismiss),
-        // EmitState(Closed) from inner Dismiss, EmitState(Closed) from outer.
-        // Both emits are Closed — same payload, React de-dupes.
         assert!(matches!(
             calls.first(),
             Some(Call::DispatchStart(RecordingKind::Dictation))
         ));
         assert!(
-            calls.contains(&Call::HideWindow),
-            "must hide window on Dictation pick (push-to-talk hint)"
+            !calls.contains(&Call::HideWindow),
+            "ADR 0045: dictation tile pick must NOT hide the window — \
+             it lands on a session card like Meeting/Activity"
         );
-        // Final emit must be Closed (the load-bearing post-effect snapshot
-        // invariant — without it, the outer would emit the stale Launching).
+        // mb-23rh / mb-q2if regression guard, now applied to Dictation:
+        // final emit must be SessionCard, not Launching.
         assert_eq!(
             fx.emit_payloads().last(),
-            Some(&(CcState::Closed, false)),
-            "outer emit must reflect actual post-effect state, NOT stale Launching{{Dictation}}",
+            Some(&(
+                CcState::ShowingSessionCard {
+                    kind: RecordingKind::Dictation
+                },
+                false
+            )),
+            "outer drive must NOT clobber the inner RuntimeReplied emit with stale Launching",
+        );
+    }
+
+    #[test]
+    fn path3_dictation_tile_pick_runtime_refuses_returns_to_picker() {
+        // ADR 0045 failure mode: synthetic event channel closed or
+        // some other runtime refusal. FSM goes Launching → back to
+        // ModePicker; user can retry or pick a different tile.
+        let (state, fr) = fresh(false);
+        *state.lock().unwrap() = CcState::ShowingModePicker { first_run: false };
+        let fx = MockEffects::new().with_start_outcome(
+            RecordingKind::Dictation,
+            DispatchOutcome::Replied { success: false },
+        );
+
+        drive_engine(
+            &state,
+            &fr,
+            &fx,
+            CcInput::PickMode {
+                kind: RecordingKind::Dictation,
+            },
+        );
+
+        assert_eq!(
+            *state.lock().unwrap(),
+            CcState::ShowingModePicker { first_run: false },
+            "refused runtime → back to picker so user can retry",
+        );
+        assert_eq!(
+            fx.emit_payloads().last(),
+            Some(&(CcState::ShowingModePicker { first_run: false }, false)),
         );
     }
 

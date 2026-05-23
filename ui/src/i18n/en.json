@@ -110,6 +110,8 @@
   "insights.today.title": "Today",
 
   "dictations.title": "Dictations",
+  "dictations.record.start": "Start Dictation",
+  "dictations.record.stop": "Stop Dictation",
   "dictations.search.placeholder": "Search transcripts (FTS5)…",
   "dictations.search.noResults": "No matches.",
   "dictations.empty.title": "No dictations yet",

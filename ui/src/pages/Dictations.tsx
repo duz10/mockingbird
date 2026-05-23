@@ -32,6 +32,7 @@ import {
   Spinner,
 } from "../components/primitives";
 import { LlmRunButton } from "../components/LlmRunButton";
+import { DictationRecordButton } from "./DictationRecordButton";
 import {
   CheckIcon,
   CopyIcon,
@@ -215,6 +216,9 @@ export function DictationsPage() {
 
       <div className={styles.shell}>
         <div className={styles.leftPane}>
+          {/* ADR 0045: programmatic start/stop, sibling to Right-Alt
+              PTT. Self-contained — owns its own dictation:state sub. */}
+          <DictationRecordButton />
           <SearchInput value={query} onChange={setQuery} />
           {leftPaneContent}
         </div>

@@ -421,18 +421,96 @@ impl CommandCenter {
 
     fn dispatch_stop(&self, kind: RecordingKind) {
         match kind {
-            RecordingKind::Dictation => {
-                // Mirror the recording-overlay's Esc-cancel: emit the
-                // same event the overlay does, so the dictation
-                // orchestrator transitions to Aborted gracefully.
-                if let Err(e) = self.inner.app.emit("dictation:cancel", ()) {
-                    tracing::warn!(target: "command_center", error = ?e, "emit dictation:cancel");
-                }
-            }
+            RecordingKind::Dictation => self.dispatch_dictation_stop(),
             RecordingKind::Meeting => self.dispatch_meeting_stop(),
             RecordingKind::Activity => self.dispatch_activity_stop(),
         }
     }
+
+    /// ADR 0045 — programmatic dictation start dispatched from the
+    /// CC Dictation tile pick. Calls `DictationRuntime::start()` and
+    /// flags the current session so the FSM's next read sees it.
+    ///
+    /// The runtime is registered as managed state at boot
+    /// (`lib.rs::run`). If it's missing (e.g. spawn failed at boot —
+    /// non-fatal, the rest of the app still works) the dispatch
+    /// fails and the FSM bounces back to the picker.
+    #[cfg(target_os = "windows")]
+    fn dispatch_dictation_start(&self) -> bool {
+        let Some(rt) = self
+            .inner
+            .app
+            .try_state::<crate::dictation::runtime::DictationRuntime>()
+        else {
+            tracing::warn!(
+                target: "command_center",
+                "no dictation runtime registered; cannot start dictation from CC"
+            );
+            return false;
+        };
+        match rt.start() {
+            Ok(()) => {
+                tracing::info!(
+                    target: "command_center",
+                    "dictation start dispatched from CC (ADR 0045 programmatic mode)"
+                );
+                self.set_current_session(Some(RecordingKind::Dictation));
+                true
+            }
+            Err(e) => {
+                tracing::warn!(
+                    target: "command_center",
+                    error = %e,
+                    "dictation start failed from CC"
+                );
+                false
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn dispatch_dictation_start(&self) -> bool {
+        tracing::info!(
+            target: "command_center",
+            "dictation start not available on this platform"
+        );
+        false
+    }
+
+    /// ADR 0045 — programmatic dictation stop. Used by the CC
+    /// SessionCard's Stop button. Sends a synthetic KeyUp through
+    /// the runtime; the orchestrator finalizes the session (commit +
+    /// inject) on its own thread.
+    ///
+    /// Note this is the FINALIZE path, not the cancel path. The
+    /// recording-pill overlay's Esc gesture remains the
+    /// cancel-and-discard signal. Sessions started via PTT (Right
+    /// Alt) are NOT stopped by this path — the FSM's `vk == held_vk`
+    /// guard rejects the synthetic KeyUp's sentinel VK. PTT users
+    /// release the key naturally; the CC SessionCard's Stop button
+    /// is for the programmatic-start case it was designed for.
+    #[cfg(target_os = "windows")]
+    fn dispatch_dictation_stop(&self) {
+        let Some(rt) = self
+            .inner
+            .app
+            .try_state::<crate::dictation::runtime::DictationRuntime>()
+        else {
+            tracing::warn!(target: "command_center", "no dictation runtime to stop");
+            return;
+        };
+        if let Err(e) = rt.stop() {
+            tracing::warn!(target: "command_center", error = %e, "dictation stop failed");
+        }
+        // Clear immediately. The FSM will see `current_session ==
+        // None` on the next read; the actual pipeline-complete event
+        // will arrive asynchronously and is observed via
+        // `dictation:state` on the UI side.
+        self.set_current_session(None);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn dispatch_dictation_stop(&self) {}
 
     #[cfg(target_os = "windows")]
     fn dispatch_meeting_stop(&self) {
@@ -632,18 +710,9 @@ impl<'a> CcEffects for TauriEffects<'a> {
 
     fn dispatch_start(&self, kind: RecordingKind) -> DispatchOutcome {
         match kind {
-            RecordingKind::Dictation => {
-                // Push-to-talk has no programmatic start. Per ADR 0037
-                // §4 the tile's UX is the "or just hold Right Alt"
-                // hint; picking it dismisses the CC. drive_engine
-                // recurses with Dismiss, which is identical to the
-                // pre-refactor `self.drive(CcInput::Dismiss)`.
-                tracing::info!(
-                    target: "command_center",
-                    "pick_mode(dictation) — dismissing; user holds Right Alt to start"
-                );
-                DispatchOutcome::NoProgrammaticStart
-            }
+            RecordingKind::Dictation => DispatchOutcome::Replied {
+                success: self.cc.dispatch_dictation_start(),
+            },
             RecordingKind::Meeting => DispatchOutcome::Replied {
                 success: self.cc.dispatch_meeting_start(),
             },

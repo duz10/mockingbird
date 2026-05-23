@@ -17,6 +17,7 @@
 
 pub mod active_mode;
 pub mod activity;
+pub mod dictation;
 pub mod dictionary;
 pub mod insights;
 pub mod learning;
@@ -118,6 +119,9 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         meetings::meeting_run_llm_pass,
         meetings::meeting_set_paused,
         meetings::meeting_is_paused,
+        // ADR 0045 — programmatic dictation start/stop (mb-ddfx).
+        dictation::dictation_start,
+        dictation::dictation_stop,
         // Phase 10 Wave 1A — Command Center IPC (ADR 0037).
         crate::command_center::ipc::cc_open_via_tray,
         crate::command_center::ipc::cc_dismiss,

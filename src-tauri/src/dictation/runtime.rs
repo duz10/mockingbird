@@ -165,7 +165,73 @@ impl DictationRuntime {
             "dictation runtime is Windows-only (Phase 9 platform parity)".into(),
         ))
     }
+
+    /// Programmatic start (ADR 0045 mode (b)).
+    ///
+    /// Injects a synthetic [`HotkeyEvent::KeyDown`] on the same
+    /// channel the OS hook feeds the state-driver. The FSM cannot
+    /// distinguish synthetic from real key events: it transitions
+    /// `Idle → PendingHold` and (after the 80 ms hold threshold)
+    /// promotes to `Recording`, emitting `StartCapture` to the
+    /// orchestrator. From there the path is identical to PTT.
+    ///
+    /// **VK choice.** Uses a sentinel VK (`0x07`, reserved by
+    /// Microsoft and never emitted by the LL hook for real input)
+    /// so a stray Right Alt release while a programmatic session
+    /// is active can't accidentally stop it via the `vk == held_vk`
+    /// guard in `HotkeyState::Recording`. Pair-matching only — the
+    /// state machine doesn't validate VK against any allow-list.
+    ///
+    /// Idempotent at the FSM level: a second `start()` while a
+    /// session is in flight lands a `KeyDown` in `Recording` /
+    /// `Processing`, both of which §6.1 ignores — so the call is a
+    /// no-op, not a corruption.
+    pub fn start(&self) -> AppResult<()> {
+        self.pause
+            .sender_clone()
+            .send(HotkeyEvent::KeyDown {
+                vk: PROGRAMMATIC_VK,
+                at: std::time::Instant::now(),
+            })
+            .map_err(|e| {
+                AppError::Hotkey(format!(
+                    "DictationRuntime::start: hotkey channel closed: {e}"
+                ))
+            })
+    }
+
+    /// Programmatic stop (ADR 0045 mode (b)).
+    ///
+    /// Injects a synthetic [`HotkeyEvent::KeyUp`] on the hotkey
+    /// channel. If a programmatic session is live (FSM in
+    /// `Recording`), this transitions to `Processing` and emits
+    /// `StopCapture` exactly like releasing the PTT key.
+    ///
+    /// Idempotent against an idle FSM: `KeyUp` in `Idle` /
+    /// `PendingHold` (with non-matching VK) / `Processing` are all
+    /// state-machine no-ops per §6.1. The most common cause of a
+    /// no-op call is the UI clicking Stop after the recording was
+    /// already finalized via Esc-cancel.
+    pub fn stop(&self) -> AppResult<()> {
+        self.pause
+            .sender_clone()
+            .send(HotkeyEvent::KeyUp {
+                vk: PROGRAMMATIC_VK,
+                at: std::time::Instant::now(),
+            })
+            .map_err(|e| {
+                AppError::Hotkey(format!(
+                    "DictationRuntime::stop: hotkey channel closed: {e}"
+                ))
+            })
+    }
 }
+
+/// Sentinel VK used for programmatic dictation start/stop. Picked
+/// from the Microsoft "reserved" range (`0x07`) so it can never
+/// collide with a real PTT key the user might configure. See
+/// `DictationRuntime::start` for the full rationale.
+const PROGRAMMATIC_VK: u32 = 0x07;
 
 #[cfg(target_os = "windows")]
 fn run_dictation_thread(

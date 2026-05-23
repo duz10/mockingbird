@@ -167,6 +167,18 @@ export const api = {
    */
   list_installed_models: () =>
     invoke<string[]>("list_installed_models"),
+
+  /** ADR 0045 — programmatic dictation start. Equivalent to pressing
+   *  Right Alt (push-to-talk); the orchestrator runs the same code
+   *  path. Returns once the synthetic event has been queued; the
+   *  recording is observed via the `dictation:state` event stream
+   *  (state flips to `"listening"` ~80 ms later). */
+  dictation_start: () => invoke<void>("dictation_start"),
+  /** ADR 0045 — programmatic dictation stop. Equivalent to releasing
+   *  the PTT key (finalize, NOT cancel — Esc on the recording-pill
+   *  overlay is still the cancel path). Idempotent: a no-op if the
+   *  state machine isn't currently in a programmatic recording. */
+  dictation_stop: () => invoke<void>("dictation_stop"),
 };
 
 /* ------------------------------------------------------------------ */
@@ -426,6 +438,8 @@ function fixtureFor<T>(command: string, args?: object): T {
     case "report_correction":
     case "trigger_learning_run":
     case "open_path":
+    case "dictation_start":
+    case "dictation_stop":
     case "activity_pause":
     case "activity_resume":
     case "activity_stop":

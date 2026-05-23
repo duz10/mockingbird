@@ -48,6 +48,32 @@
   min-height: 0;
 }
 
+/* Programmatic dictation start/stop button (ADR 0045) — sits above
+ * the search input in the left pane. Visually a primary action;
+ * delegates the actual styling to the design-system Button. */
+.recordRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+/* Pulsing dot that replaces the mic icon when a session is live.
+ * Honors prefers-reduced-motion: animation off, solid color stays. */
+.recordDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: dictation-pulse 1.4s var(--ease-out) infinite;
+}
+@keyframes dictation-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(1.18); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .recordDot { animation: none; }
+}
+
 /* Search input */
 .searchBox {
   position: relative;
