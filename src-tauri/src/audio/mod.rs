@@ -9,6 +9,7 @@
 //! is "fill the stubs", not "rewrite the layer".
 
 pub mod capture;
+pub mod decode;
 pub mod resampler;
 pub mod vad;
 pub mod vad_trim;

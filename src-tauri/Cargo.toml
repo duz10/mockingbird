@@ -57,6 +57,14 @@ crc32fast = { workspace = true }
 # Phase 10 Wave 5 — PDF export for Activity sessions (ADR 0044).
 printpdf  = { workspace = true }
 
+# ADR 0046 Iter 1 / mb-hxm4 — pure-Rust audio decode (.m4a/.wav/.mp3/.ogg)
+# for the headless ingest path ("+ Audio file" desktop import + Iter 3
+# mobile-inbox courier). default-features=false keeps the link surface to
+# only the formats we actually open: AAC + isomp4 (iPhone Voice Memos), WAV
+# (the open-ended file-picker fallback), MP3 (legacy uploads), Vorbis+OGG
+# (long tail). All MIT/Apache, no system codec deps.
+symphonia = { workspace = true }
+
 [dev-dependencies]
 tempfile  = { workspace = true }
 rstest    = { workspace = true }

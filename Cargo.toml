@@ -139,6 +139,20 @@ crc32fast      = "1.4"
 # `activity/pdf_export.rs`. Pinned narrow to ride patch updates.
 printpdf       = { version = "0.7", default-features = false }
 
+# ADR 0046 Iter 1 / mb-hxm4 — pure-Rust audio decode. Drops every codec
+# we don't open (FLAC, ALAC, Opus, ADPCM, ...) and the optional simd
+# accel; keeps AAC + isomp4 (iPhone Voice Memos), WAV / MP3 / OGG +
+# Vorbis (open-ended file picker). MIT/Apache, no system codec deps.
+symphonia      = { version = "0.5", default-features = false, features = [
+    "aac",      # iPhone Voice Memo codec
+    "isomp4",   # m4a container
+    "wav",      # WAV demuxer (PCM samples live behind the `pcm` codec)
+    "pcm",      # PCM sample decoder — needed for WAV + uncompressed AIFF
+    "mp3",
+    "vorbis",
+    "ogg",
+] }
+
 # Phase 4 — Sync HTTP for cleanup providers (Ollama + Claude).
 # See ADR 0021: kept sync to fit the orchestrator's sync architecture
 # without dragging in a tokio runtime per dictation. `rustls-tls`
