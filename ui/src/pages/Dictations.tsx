@@ -31,13 +31,13 @@ import {
   Pill,
   Spinner,
 } from "../components/primitives";
+import { LlmRunButton } from "../components/LlmRunButton";
 import {
   CheckIcon,
   CopyIcon,
   HistoryIcon,
   PlusIcon,
   SearchIcon,
-  SparklesIcon,
   TrashIcon,
 } from "../design/Icon";
 import { t } from "../i18n";
@@ -655,10 +655,12 @@ function LlmPassCard({ sessionId }: { sessionId: number }) {
             ))}
           </select>
         </label>
-        <Button onClick={runPass} disabled={running}>
-          <SparklesIcon size={14} />
-          {running ? t("dictations.llm.running") : t("dictations.llm.run")}
-        </Button>
+        <LlmRunButton
+          onClick={runPass}
+          running={running}
+          idleLabel={t("dictations.llm.run")}
+          runningLabel={t("dictations.llm.running")}
+        />
       </div>
 
       {error ? (

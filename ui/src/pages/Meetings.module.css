@@ -394,27 +394,56 @@
 /* LLM-pass panel                                               */
 /* ============================================================ */
 
+/* mb-l8ey: .llmPanel no longer owns the surface — the panel is
+ * now wrapped in a <Card> (glass-soft tier) by MeetingDetail.tsx,
+ * matching the Dictations LLM-pass treatment. This div is purely
+ * the inner flex-column layout container now. */
 .llmPanel {
   display: flex;
   flex-direction: column;
-  gap: var(--s-2);
-  padding: var(--s-3);
-  background: var(--surf-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-3);
+  gap: var(--s-3);
 }
 
 .llmRow {
   display: flex;
-  gap: var(--s-2);
+  gap: var(--s-3);
   align-items: center;
   flex-wrap: wrap;
 }
 
-.llmPromptSelect,
-.llmCustomInput {
+/* mb-l8ey: prompt label wrapping the select — matches the
+ * Dictations panel's "Prompt: <select>" affordance so both
+ * surfaces have the same visual grammar. */
+.llmPromptLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font: var(--type-sm);
+  color: var(--on-surf-muted);
   flex: 1;
   min-width: 200px;
+}
+
+.llmPromptSelect {
+  flex: 1;
+  min-width: 0;
+  padding: var(--s-1) var(--s-2);
+  background: var(--surf-2);
+  color: var(--on-surf);
+  border: 1px solid var(--on-surf-faint);
+  border-radius: var(--r-2);
+  font: var(--type-sm);
+  font-family: inherit;
+  cursor: pointer;
+}
+.llmPromptSelect:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.llmCustomInput {
+  flex: 1;
+  min-width: 280px;
   padding: var(--s-2);
   background: var(--surf-3);
   color: var(--on-surf);
@@ -423,7 +452,6 @@
   font: var(--type-sm);
   font-family: inherit;
 }
-.llmCustomInput { min-width: 280px; }
 
 .llmOutput {
   white-space: pre-wrap;

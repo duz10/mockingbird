@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Button, Card, Pill } from "../components/primitives";
+import { LlmRunButton } from "../components/LlmRunButton";
 import {
   CheckIcon,
   CopyIcon,
@@ -344,36 +345,41 @@ function LlmPassPanel({
   onRun: () => void;
 }) {
   const [ack, acknowledge] = useEphemeralAck();
+  // mb-l8ey: wrap in <Card> so this panel reads as a glass-soft
+  // sibling to the Dictations LLM pass panel. The inner .llmPanel
+  // div remains as the flex-column layout container but no longer
+  // owns a background of its own (Card owns the surface now).
   return (
-    <div className={styles.llmPanel} aria-label="LLM pass">
+    <Card title={t("meetings.llm.title")} ariaLabel="LLM pass">
+      <div className={styles.llmPanel}>
       <div className={styles.llmRow}>
-        <select
-          className={styles.llmPromptSelect}
-          value={state.promptId}
-          onChange={(e) =>
-            onChange({ promptId: e.target.value as typeof state.promptId })
-          }
-          aria-label="Prompt"
-        >
-          <option value="summary">{t("meetings.llm.prompt.summary")}</option>
-          <option value="action_items">
-            {t("meetings.llm.prompt.action_items")}
-          </option>
-          <option value="cleaner_punctuation">
-            {t("meetings.llm.prompt.cleaner_punctuation")}
-          </option>
-          <option value="custom">{t("meetings.llm.prompt.custom")}</option>
-        </select>
-        <Button
-          variant="primary"
+        <label className={styles.llmPromptLabel}>
+          {t("meetings.llm.prompt.label")}
+          <select
+            className={styles.llmPromptSelect}
+            value={state.promptId}
+            onChange={(e) =>
+              onChange({ promptId: e.target.value as typeof state.promptId })
+            }
+            aria-label="Prompt"
+          >
+            <option value="summary">{t("meetings.llm.prompt.summary")}</option>
+            <option value="action_items">
+              {t("meetings.llm.prompt.action_items")}
+            </option>
+            <option value="cleaner_punctuation">
+              {t("meetings.llm.prompt.cleaner_punctuation")}
+            </option>
+            <option value="custom">{t("meetings.llm.prompt.custom")}</option>
+          </select>
+        </label>
+        <LlmRunButton
           onClick={onRun}
-          disabled={state.running}
+          running={state.running}
+          idleLabel={t("meetings.llm.run")}
+          runningLabel={t("meetings.llm.running")}
           ariaLabel={t("meetings.detail.action.runLlmPass")}
-        >
-          {state.running
-            ? t("meetings.llm.running")
-            : t("meetings.detail.action.runLlmPass")}
-        </Button>
+        />
       </div>
       {state.promptId === "custom" ? (
         <textarea
@@ -416,7 +422,8 @@ function LlmPassPanel({
       )}
 
       <div className={styles.llmInvariant}>{t("meetings.llm.invariant")}</div>
-    </div>
+      </div>
+    </Card>
   );
 }
 
