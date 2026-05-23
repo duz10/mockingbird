@@ -338,6 +338,75 @@ ADR.
 **Live-fire smoke test:** Dustin's post-seal step (LESSONS P7 pattern;
 judges prove invariants but not a clean OS bring-up).
 
+### 3.16 `vault/` — Mobile extension via Obsidian Sync (ADR 0046, Iter 2 IN FLIGHT)
+Chartered by ADR 0046. Iter 1 (desktop file-ingest pipeline) sealed in
+2026-05-27. Iter 2 (outbound Obsidian projection) implementation complete
+2026-05-27 pending live-fire smoke. Iter 3 (mobile inbox / iOS Shortcut
+drop folder) + Iter 4 (full Mobile Sync settings tab + connection health)
+still to ship.
+
+**Subsystem entry point.** `VaultRuntime::new(&db)` constructed in
+`lib.rs::setup` immediately after `app.manage(AppState::new(...))`, BEFORE
+the dictation + meeting runtimes spawn. Both runtimes accept the
+`Arc<VaultRuntime>` handle in their `spawn()` signatures. The runtime is
+`.manage()`'d as Tauri state so the `vault_*` IPC commands can grab it.
+
+**Modules.**
+- `layout.rs` — idempotent zone creation under `<vault>/`:
+  `dictation/`, `meeting/`, `history/`, `history/_archive/`. Pure-Rust;
+  unit-tested via the throwaway-crate recipe.
+- `manifest.rs` — `manifest.json` schema + atomic `.tmp+rename` save +
+  BTreeMap-ordered serialization so on-disk bytes are deterministic
+  across runs. Per-record entries record relative path + content SHA-256.
+- `project.rs` — pure record→markdown projection. Hand-rolled YAML
+  front-matter (8-key fixed order, optional-omit, sorted tags, conservative
+  scalar quoting); SHA-256 content address; `YYYY-MM-DD-HHMM__<uuid8>.md`
+  filename. Golden-snapshot test pins the exact bytes.
+- `export_job.rs` — `VaultRuntime`. Single-in-flight job lock
+  (`Arc<Mutex<()>>`) + coalescing-trigger flag (`Arc<AtomicBool>`) so
+  concurrent `trigger()` calls collapse into one re-run rather than
+  piling up workers. `run_once_blocking(&db)` for the manual
+  `vault_export_now` IPC; `trigger(db)` for the fire-and-forget post-commit
+  hooks. Reconciliation pass: ensure zones → load manifest → query in-scope
+  records (dictation + meeting, filtered by `VaultSyncRecordTypes` +
+  `VaultRetentionDays`) → project each → atomic write only if content SHA
+  changed → archive stale records to `history/_archive/` → save manifest.
+
+**Trigger sites.** All purely additive (zero edits removed):
+- `dictation.rs::persist_complete` — PTT path, after the `session_saved`
+  event.
+- `dictation.rs::handle_headless` — file-import path (ADR §3.2) and
+  future mobile-inbox ingest (ADR §6).
+- `meetings/lifecycle.rs::stop_meeting` Complete branch — after the
+  meeting row + session-saved event commit.
+- Settings IPC (`vault_settings_set`) — flipping `MobileSyncEnabled` or
+  changing `VaultPath` triggers an immediate backfill so users don't have
+  to click "Export now".
+
+**IPC surface** (`commands/vault.rs`):
+- `vault_settings_get` / `vault_settings_set` — typed get/set for the
+  four user-visible keys (`MobileSyncEnabled`, `VaultPath`,
+  `VaultSyncRecordTypes`, `VaultRetentionDays`). Set IPC also refreshes
+  runtime config + fires trigger.
+- `vault_export_now` — manual reconciliation; returns `VaultExportSummary`
+  with `{ total, changes, archived, skipped }` driving the toast.
+- `vault_pick_directory` — native folder picker via `tauri-plugin-dialog`,
+  exposed as a Rust IPC so the renderer doesn't need a new JS dep.
+
+**Settings keys** (Iter 2 wired 4 of the 8 per ADR §10): `MobileSyncEnabled`
+(default false, opt-in), `VaultPath` (default null), `VaultSyncRecordTypes`
+(default "both"), `VaultRetentionDays` (default 30). Iter 4 stubs landed but
+unwired: `VaultSyncBackend`, `SyncTierByteCap`, `VaultDebugKeepCouriers`,
+`KeepAudioBlobs`.
+
+**UI surface** (Iter 2 preview): `ui/src/pages/SettingsMobilePreview.tsx`
+mounted in Settings → Advanced as a `<Card>` titled "Mobile Sync (preview)".
+Master toggle, vault path input + Browse button, status line, Export-now
+button. Iter 4 will lift this into a dedicated Mobile Sync tab with the
+remaining 6 controls.
+
+**Live-fire smoke test:** Dustin's hands-on click-through pending.
+
 ---
 
 ## 4. UI surface (React)
