@@ -60,6 +60,20 @@ For pure-Rust modules (no whisper-rs / ort / cuda deps), use the
 throwaway-crate recipe: copy source into `$env:TEMP\<modname>_tests\`,
 add only that module's real deps, run vanilla `cargo test` there.
 
+**2026-05-23 refinement (`mb-jbf7`):** the same bug bites `cargo build
+--release --example <name>` outputs **whenever the example transitively
+pulls in `whisper-rs` / `ort` / CUDA**. The `smoke_iter1_ingest` example
+built cleanly (41 MB binary, link-clean) and `verify_wave49.exe` runs
+fine (pure rusqlite, 1.7 MB) — but the smoke example exits
+`-1073741511` (0xc0000139) on `main`, identical signature to the test
+runner. Implication for ADR 0046 / future ingest smoke work:
+**programmatic Strategy-A end-to-end smoke through an `examples/` binary
+is NOT viable until `mb-0n8c` is root-caused.** Always pair a smoke
+example with a pure-rusqlite verification probe (see
+`verify_iter1_schema.py`) so the DB-schema-half of the smoke is
+separately verifiable. Live-fire ingest validation has to go through
+`mockingbird.exe` itself (Strategy B + human click-test).
+
 ### P3. The release exe lives at WORKSPACE-ROOT `target/release/`
 
 NOT at `src-tauri/target/release/`. Tauri 2 builds into the workspace root.
@@ -157,6 +171,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-23 | `[ADR 0046 Iter 1 / mb-jbf7]`    | Programmatic Strategy-A end-to-end smoke is blocked by mb-0n8c: example binaries that transitively link whisper-rs/ort/CUDA exit STATUS_ENTRYPOINT_NOT_FOUND identically to `cargo test --release`; pure-rusqlite examples (verify_wave49 shape) work fine. Pattern: pair every smoke example with a pure-rusqlite probe so the DB-schema half is verifiable independent of mb-0n8c, route the live-fire half through `mockingbird.exe` + Strategy B |
 | 2026-05-27 | `[ADR 0046 §3.2 / mb-7vyz]`      | Resolution of the earlier-today topology fork: in-thread `std::sync::mpsc → crossbeam-channel` bridge is the minimum-diff path; converting the `StateDriver` channel itself would have cascaded out-of-boundary, while bridging inside `run_dictation_thread` keeps every §3 "do not touch" file untouched and adds ~20 lines |
 | 2026-05-27 | `[ADR 0046 Iter 1 / mb-evn3 / mb-7vyz]` | The `StateAction` channel topology can't be naively extended for headless ingest — the orchestrator's input channel is fed by exactly one producer (StateDriver), so "add a new variant" requires a new sibling mpsc + run-loop multi-select, which is an ADR-amendment-sized change, not an in-boundary tweak |
 | 2026-05-27 | `[mb-tfyp / mb-sowc / ADR 0045]` | start_mode plumbing: the focus-drift abort heuristic conflates two semantically distinct outcomes (PTT target lost focus vs. in-app session never had a target); the fix is a new column + a new InjectionOutcome variant, NOT a new pill string on the legacy abort path |
@@ -207,6 +222,35 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-23 [ADR 0046 Iter 1 / mb-jbf7] Programmatic Strategy-A smoke is blocked by mb-0n8c; pair every smoke example with a pure-rusqlite probe instead
+
+**Context:** Iter 1 of ADR 0046 (desktop file-ingest) shipped through `mb-jqhw` / `mb-hxm4` / `mb-evn3` / `mb-7vyz` / `mb-thmd`. `mb-jbf7` was the live-fire smoke step. The kickoff offered Strategy A (a programmatic `cargo run --release --example smoke_iter1_ingest -- <fixture>` that drives `DictationRuntime` + `headless_ingest()` end-to-end) and Strategy B (just launch `mockingbird.exe` and let Dustin click-test). Strategy A was preferred because it covers criteria 1-4 + 7 of the bead programmatically and leaves only the UI-refetch (criterion 5) + PTT-regression (criterion 6) as human work.
+
+**Finding:** Strategy A is blocked by the same DLL-load-chain bug as `cargo test --release` (LESSONS PINNED P2 / `mb-0n8c`). The `smoke_iter1_ingest` example built cleanly (release-profile build through the wrapper, 41 MB binary, link-clean, fmt + clippy quiet), but every invocation — both via the cargo wrapper and direct — exits `-1073741511` (0xc0000139 / `STATUS_ENTRYPOINT_NOT_FOUND`) with empty stdout/stderr, regardless of:
+
+- `ORT_DYLIB_PATH` set externally (verified to point at the existing `onnxruntime.dll`)
+- CUDA v12.8 `bin\` prepended to PATH
+- CWD set to `target\release\` so `mockingbird_lib.dll` resolves
+- `target\release\` added to PATH for the same reason
+- The wrapper itself (which provides MSVC + CUDA env per ADR 0011)
+
+The failure signature is identical to the test runner: process dies before `main` runs, no Rust panic backtrace, exit code in the entrypoint-not-found family. The control case `verify_wave49.exe` (also under `examples/`, pure rusqlite, 1.7 MB, no whisper-rs / ort / CUDA deps) launches and runs to completion fine. So the bug isn't "examples are broken" — it's "any non-`mockingbird.exe` binary whose link graph pulls whisper-rs / ort / CUDA hits the entrypoint-resolution failure".
+
+**Implication for ADR 0046:** the SAME design (a tiny smoke example that spins up the real runtime + drives `headless_ingest`) would have been the obvious verification pattern for Iter 2 (Obsidian polling) and Iter 3 (paste path). It is now off the table until `mb-0n8c` is root-caused. Live-fire ingest verification has to go through `mockingbird.exe` (Strategy B) + a separate DB introspection probe.
+
+**Action / pattern:** when an iteration produces a new ingest entry point and the temptation is "write a smoke example to drive it programmatically", do BOTH of these instead:
+
+1. Build a pure-rusqlite verification probe (Python via `sqlite3` builtin, or a tiny Rust binary with only `rusqlite` in its dep tree — `verify_wave49.exe` shape, NOT `smoke_iter1_ingest.exe` shape). This proves the schema half of the smoke (migration applied, columns + indexes present, recent rows have the right `source` / `start_mode` / `status` values).
+2. Launch the real `mockingbird.exe` via `scripts\run-mockingbird.ps1` (Strategy B). Verify the process stays alive past warmup (~10s for whisper-rs CUDA + Silero VAD + Ollama warmup). Read the latest `%APPDATA%\com.dustin.mockingbird\logs\mockingbird.log.YYYY-MM-DD` and confirm there are no WARN/ERROR/panicked lines in the startup chunk. Then hand off the click-test to a human.
+
+The Iter 1 smoke example is kept in tree (`src-tauri/examples/smoke_iter1_ingest.rs` + `Cargo.toml` entry) so that when `mb-0n8c` is solved the smoke is ready to run as-is. It's a one-shot diagnostic, not committed-test infrastructure — gitignored fixture, real production DB, no CI hook. The pure-rusqlite probe `verify_iter1_schema.py` lives at the repo root for the same reason (one-shot, run when needed).
+
+P2 has been updated to flag examples as also affected; this body entry is the long-form.
+
+**Stats:** 1 build cycle for the smoke example (4m 30s), 1 build cycle for the rebuilt `mockingbird.exe` (5m 43s), 2 attempts at launching the smoke example (both fail identically), 1 successful Strategy-B launch + log inspection + schema probe. `mb-jbf7` stays open for Dustin's UI click-test (criteria 5 + 6) and the live-fire ingest verification (criteria 1-3, 7) — schema half (criterion 4) is PASS programmatically.
 
 ---
 

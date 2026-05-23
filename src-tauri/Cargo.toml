@@ -93,6 +93,15 @@ harness = false
 name = "verify_wave49"
 path = "examples/verify_wave49.rs"
 
+# ADR 0046 Iter 1 / mb-jbf7 — programmatic smoke for the desktop
+# file-import path. Spins up DictationRuntime + sends a
+# HeadlessIngestRequest through the same channel `dictation_import_file`
+# IPC uses. Lives in examples/ so it never enters CI; meant for one-shot
+# diagnostic + verification of the Iter 1 contract.
+[[example]]
+name = "smoke_iter1_ingest"
+path = "examples/smoke_iter1_ingest.rs"
+
 # Feature flags.
 #
 # `custom-protocol` is the Tauri 2 toggle that switches release builds
