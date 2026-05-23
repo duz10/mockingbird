@@ -53,10 +53,17 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**No in-flight phase or chartered epic.** Phase 10 sealed at
-`phase-10-complete` (this consolidation). Live-fire Win11 smoke test
-is Dustin's post-seal step — judges don't catch live-OS regressions
-(LESSONS PINNED P7 pattern; same shape as the post-MC `mb-x1x` flow).
+### In-flight: ADR 0046 — Mobile extension via synced Obsidian vault
+
+- **Status:** Accepted 2026-05-27 (`docs/adr/0046-mobile-extension-via-vault.md`). Iteration 1 starting (desktop file-ingest pipeline, no Obsidian touchpoints yet).
+- **Iteration 1 beads** (all P1, all unblocked): `mb-jqhw` (migration 018 `sessions.source`), `mb-hxm4` (symphonia decode helper), `mb-evn3` (headless ingest extraction + SessionsEventBus refactor), `mb-7vyz` ("+ Audio file" desktop button). Then `mb-thmd` (sealed-phases-untouched judge) + `mb-jbf7` (Iter 1 smoke).
+- **POC config (locked at Accept):** vault at `C:\Users\dboyd\mockingbird-vault\`, remote vault name `mockingbird-vault`, Obsidian Sync Standard tier with End-to-End encryption (key in user's password manager, Mockingbird never touches it). iOS Shortcut locked to Quick capture (Variant 1, one-tap, Low/32 kbps AAC mono). See ADR §"Realized POC configuration".
+- **Seal mechanic:** ADR Accepted (final) + STATUS update at end of Iter 4. **No new `phase-*-complete` tag** (lateral epic per LESSONS PINNED P5).
+- **Charter bead:** `mb-7c2c` (closed). Follow-up: `mb-0uqb` (P3) — revisit descoped sidecar-based silent-skip detection if POC users hit silent-skip in practice.
+
+Live-fire Win11 smoke test for Phase 10 is still Dustin's post-seal step
+(LESSONS PINNED P7 pattern; same shape as the post-MC `mb-x1x` flow) — judges
+don't catch live-OS regressions.
 
 **Standing P3 follow-ups carried over from Phase 10:**
 - `mb-vfyd` — `activity/blocker.rs` is 669 lines, over the 600-line guideline; split candidate.
