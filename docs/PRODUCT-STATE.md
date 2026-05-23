@@ -338,12 +338,13 @@ ADR.
 **Live-fire smoke test:** Dustin's post-seal step (LESSONS P7 pattern;
 judges prove invariants but not a clean OS bring-up).
 
-### 3.16 `vault/` — Mobile extension via Obsidian Sync (ADR 0046, Iter 2 IN FLIGHT)
-Chartered by ADR 0046. Iter 1 (desktop file-ingest pipeline) sealed in
-2026-05-27. Iter 2 (outbound Obsidian projection) implementation complete
-2026-05-27 pending live-fire smoke. Iter 3 (mobile inbox / iOS Shortcut
-drop folder) + Iter 4 (full Mobile Sync settings tab + connection health)
-still to ship.
+### 3.16 `vault/` — Mobile extension via Obsidian Sync (ADR 0046, Iter 2 SEALED)
+Chartered by ADR 0046. Iter 1 (desktop file-ingest pipeline) sealed
+2026-05-27. **Iter 2 (outbound Obsidian projection) SEALED 2026-05-27** —
+live-fire smoke green on desktop + iPhone Obsidian Mobile; outbound
+projection shipping end-to-end. Iter 3 (mobile inbox / iOS Shortcut
+drop folder) + Iter 4 (full Mobile Sync settings tab + connection health
++ nested-vault setup wizard `mb-3xww`) still to ship.
 
 **Subsystem entry point.** `VaultRuntime::new(&db)` constructed in
 `lib.rs::setup` immediately after `app.manage(AppState::new(...))`, BEFORE
@@ -405,7 +406,13 @@ Master toggle, vault path input + Browse button, status line, Export-now
 button. Iter 4 will lift this into a dedicated Mobile Sync tab with the
 remaining 6 controls.
 
-**Live-fire smoke test:** Dustin's hands-on click-through pending.
+**Live-fire smoke verification (2026-05-27).** Dustin's hands-on: backfill
+of 90 records against `C:\Users\dboyd\mockingbird-vault\` succeeded;
+auto-trigger on new PTT dictation fires within seconds; iPhone receives
+via Obsidian Sync within ~30s. Zero implementation bugs. One operational
+gotcha (Obsidian nested-vault trap) surfaced and resolved out-of-band;
+Iter 4 setup wizard will detect + guide (`mb-3xww`). See LESSONS
+2026-05-27.
 
 ---
 

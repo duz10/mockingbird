@@ -171,6 +171,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-27 | `[ADR 0046 Iter 2 SEAL / mb-3xww]` | Obsidian nested-vault trap during Mockingbird Mobile Sync setup: when an Obsidian vault is created via 'Create new vault' and the named folder already exists, Obsidian silently creates a nested `<vault>/<vault>/` structure; Mockingbird writes to outer, Obsidian reads from inner — symptom is "Vault up to date (N records)" toast is truthful but Obsidian shows nothing. Diagnosis: `Get-ChildItem <vault> -Force` shows both `.mockingbird/` AND a same-named nested folder; the nested folder contains `.obsidian/`. Fix: move `.obsidian/` + `Welcome.md` from inner to outer, delete empty inner (preserves Obsidian Sync pairing). Iter 4 wizard should detect + guide |
 | 2026-05-23 | `[ADR 0046 Iter 1 / mb-jbf7]`    | Programmatic Strategy-A end-to-end smoke is blocked by mb-0n8c: example binaries that transitively link whisper-rs/ort/CUDA exit STATUS_ENTRYPOINT_NOT_FOUND identically to `cargo test --release`; pure-rusqlite examples (verify_wave49 shape) work fine. Pattern: pair every smoke example with a pure-rusqlite probe so the DB-schema half is verifiable independent of mb-0n8c, route the live-fire half through `mockingbird.exe` + Strategy B |
 | 2026-05-27 | `[ADR 0046 §3.2 / mb-7vyz]`      | Resolution of the earlier-today topology fork: in-thread `std::sync::mpsc → crossbeam-channel` bridge is the minimum-diff path; converting the `StateDriver` channel itself would have cascaded out-of-boundary, while bridging inside `run_dictation_thread` keeps every §3 "do not touch" file untouched and adds ~20 lines |
 | 2026-05-27 | `[ADR 0046 Iter 1 / mb-evn3 / mb-7vyz]` | The `StateAction` channel topology can't be naively extended for headless ingest — the orchestrator's input channel is fed by exactly one producer (StateDriver), so "add a new variant" requires a new sibling mpsc + run-loop multi-select, which is an ADR-amendment-sized change, not an in-boundary tweak |
@@ -222,6 +223,43 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-27 [ADR 0046 Iter 2 SEAL / mb-3xww] Obsidian nested-vault trap during Mockingbird Mobile Sync setup
+
+**Context:** Iter 2 of ADR 0046 (outbound Obsidian projection) shipped across eight commits and a Mobile Sync (preview) section in Settings → Advanced. Dustin's hands-on smoke against `C:\Users\dboyd\mockingbird-vault\` with Obsidian Sync Standard tier paired to iPhone Obsidian Mobile. Backfill triggered, toast said "Vault up to date (90 records)." Mockingbird logs clean. iPhone Obsidian Mobile after sync round-trip: showed nothing but the `Welcome.md` Obsidian had created at vault init. Desktop Obsidian: same. But Mockingbird-side everything looked correct.
+
+**Symptom shape:** the toast was truthful, the files DID exist on disk, but Obsidian on both ends saw none of them. The instinct is "sync layer broken" or "projection broken" — both wrong.
+
+**Diagnosis pattern.** `Get-ChildItem C:\Users\dboyd\mockingbird-vault -Force` revealed two children: `.mockingbird/` (Mockingbird's manifest + bookkeeping, expected) AND a nested `mockingbird-vault/` folder of the same name as the parent. The nested folder contained `.obsidian/` and `Welcome.md`. **That's the smoking gun.**
+
+**Root cause (NOT a Mockingbird bug).** When the user runs Obsidian's "Create new vault" wizard and types a name that matches an already-existing folder on disk, Obsidian silently nests the actual vault one level deeper rather than refusing or warning. So:
+
+- Mockingbird's `VaultPath` setting pointed at `C:\Users\dboyd\mockingbird-vault\` (the OUTER folder — the one the user picked in the native folder picker).
+- Mockingbird wrote `dictation/*.md`, `meeting/*.md`, `.mockingbird/manifest.json` into the OUTER folder.
+- Obsidian's `.obsidian/` config (which determines what Obsidian treats as "the vault") lived in the INNER folder.
+- Obsidian on both desktop and iPhone treated the INNER folder as the vault, never saw the outer-folder writes.
+- Obsidian Sync synced the inner folder (an empty vault with only `Welcome.md`) successfully — the OUTER writes were simply outside Obsidian's known universe.
+
+Mockingbird never had a chance: it was given a path, it wrote to that path, the path was real, the writes succeeded. The path Obsidian considered the vault was somewhere else.
+
+**Resolution.** In-place migration, no Mockingbird code change, no re-pair of Obsidian Sync needed:
+
+1. Move `.obsidian/` from `<vault>/mockingbird-vault/.obsidian/` to `<vault>/.obsidian/`.
+2. Move `Welcome.md` (if the user wants to keep it) to the outer too.
+3. Delete the now-empty inner `mockingbird-vault/` folder.
+4. Obsidian on next launch re-anchors on the outer `.obsidian/` config and now sees everything Mockingbird has been writing. Obsidian Sync credentials live INSIDE `.obsidian/sync/`, so the credential file moves with the rest of `.obsidian/` — no re-pairing needed.
+
+This worked clean on the first attempt; the next dictation Dustin spoke synced to iPhone within ~30s.
+
+**Iter 4 implication (`mb-3xww`).** The Mockingbird Mobile Sync setup flow should detect this case and either (a) refuse to enable Mobile Sync until the user resolves it (with clear instructions), or (b) offer a one-click auto-migrate that does the move-inner-to-outer + delete-empty-inner dance. (b) is the better UX if the file-move is reliable; (a) is safer if there's any risk of misclassifying something legitimate as a nested vault.
+
+Detection is straightforward: when the user picks a `VaultPath`, list its children; if there's a same-named subfolder AND that subfolder contains `.obsidian/`, you've found the trap. Out of scope for the wizard: detecting non-nested but otherwise-misconfigured vaults (e.g. user pointed Mockingbird at the wrong folder entirely) — that's a much fuzzier UX problem.
+
+**Why this entry isn't PINNED.** It's an Obsidian-setup operational gotcha that bites once per user during setup, with a clear post-detection auto-fix. PINNED entries are load-bearing rules every session must remember. This is body-rank — Iter 4's `mb-3xww` work needs it, and any future Obsidian-vault-adjacent debugging will benefit from finding it via TOC + grep, but it doesn't shape how every session starts.
+
+**Process note.** Iter 2's gate strategy (cargo check + clippy + fmt + `--no-run` + UI build all green, with smoke deferred to Dustin's hands-on) worked exactly as intended here — judges + gates proved the *contracts* (atomic writes, deterministic projection, content-addressed manifest, opt-in default-OFF settings, sealed-phase isolation), and the live-fire smoke caught the *environment* mismatch that no static check could have seen. Same shape as Phase 10's live-fire smoke catching the Command Center black-box / Esc-handling regressions that the green Wave 6 judges couldn't catch (LESSONS PINNED P7). Pattern reinforced: live-fire smoke catches environment + setup + integration-with-third-party regressions; static + judge gates catch contract regressions. Both are necessary; neither is sufficient.
 
 ---
 
