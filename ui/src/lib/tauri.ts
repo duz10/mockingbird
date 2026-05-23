@@ -389,6 +389,31 @@ function fixtureFor<T>(command: string, args?: object): T {
     }
     case "set_setting":
       return fixture(command, undefined as unknown as T);
+    // Phase 10 Wave 1A — Command Center fixtures (mb-n455).
+    // Default to the "welcome" shape (firstRun=true + modePicker) so
+    // visiting `/command_center.html` in browser preview shows the
+    // picker without an override. qa-kitten flips this via
+    // `window.__MOCKINGBIRD_FIXTURES__.cc_get_state` to screenshot
+    // the modePicker (firstRun=false) and sessionCard states.
+    case "cc_get_state":
+      return fixture(command, {
+        state: "modePicker",
+        firstRun: true,
+      } as unknown as T);
+    // CC writes are all fire-and-forget from the UI's perspective;
+    // the real backend emits a state event back. In browser mode we
+    // no-op so clicks don't throw.
+    case "cc_open_via_tray":
+    case "cc_dismiss":
+    case "cc_pick_mode":
+    case "cc_stop_active_session":
+    case "cc_update_session":
+      return fixture(command, undefined as unknown as T);
+    // mb-xnn7 forensic beacon — slated for removal in MC v1.3. Until
+    // it's gone, give it a no-op fixture so the meeting overlay's
+    // browser-preview entry doesn't spew unhandled rejections.
+    case "meeting_debug_listener_ping":
+      return fixture(command, undefined as unknown as T);
     // Write commands — no-op in fixture mode.
     case "delete_session":
     case "mark_session_as_example":
