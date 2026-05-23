@@ -65,7 +65,9 @@ use rusqlite::Connection;
 use crate::audio::vad::VoiceActivityDetector;
 use crate::audio::{trim_speech, AudioCapture, TrimConfig};
 use crate::cleanup::Cleaner;
-use crate::db::sessions::{self, NewSession, ProcessingCompletion, SessionStatus, StartMode};
+use crate::db::sessions::{
+    self, NewSession, ProcessingCompletion, SessionSource, SessionStatus, StartMode,
+};
 use crate::db::transcripts;
 use crate::error::{AppError, AppResult};
 use crate::hotkey::state::StateAction;
@@ -825,6 +827,11 @@ impl DictationOrchestrator {
             dictionary_snapshot_id: self.config.dictionary_snapshot_id,
             example_set_id: self.config.example_set_id,
             start_mode: self.state.start_mode,
+            // ADR 0046 / mb-jqhw: PTT + in-app live-mic sessions all
+            // originate from this desktop's mic. 'desktop-import' and
+            // 'mobile-inbox' are written by the headless ingest path
+            // (dictation/ingest.rs), never by the orchestrator.
+            source: SessionSource::Desktop,
         };
         sessions::insert(conn, &new)
     }
@@ -851,6 +858,8 @@ impl DictationOrchestrator {
             dictionary_snapshot_id: self.config.dictionary_snapshot_id,
             example_set_id: self.config.example_set_id,
             start_mode: self.state.start_mode,
+            // ADR 0046 / mb-jqhw: same rationale as insert_session_row.
+            source: SessionSource::Desktop,
         };
         sessions::insert(conn, &new)
     }

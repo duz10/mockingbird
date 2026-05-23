@@ -36,6 +36,58 @@ pub struct NewSession {
     /// (`dictation_start` IPC) sessions. Persisted as TEXT (migration
     /// 017).
     pub start_mode: StartMode,
+
+    /// ADR 0046 + mb-jqhw — WHERE the audio came from. Orthogonal to
+    /// `start_mode`: a `Desktop` session may be either PTT or in-app,
+    /// but `DesktopImport` and `MobileInbox` are always `InApp`.
+    /// Persisted as TEXT (migration 018), default 'desktop'.
+    pub source: SessionSource,
+}
+
+/// Where the audio for a session originated.
+///
+/// Persisted to `sessions.source` (migration 018). Drives the Iter 2
+/// export-job filter (only `Desktop` and `DesktopImport` get projected
+/// out to the synced vault — `MobileInbox` rows would round-trip back
+/// to the same vault they came from and create export loops).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SessionSource {
+    /// Live mic capture on the desktop (PTT hold OR in-app Start
+    /// button). The PRE-ADR-0046 default; covers every existing row.
+    #[default]
+    Desktop,
+    /// User picked an audio file via the "+ Audio file" desktop
+    /// import button (mb-7vyz / ADR 0046 Iter 1).
+    DesktopImport,
+    /// Audio courier'd in via the iOS Shortcut → synced Obsidian vault
+    /// → inbox watcher flow (ADR 0046 Iter 3). Reserved; no callsite
+    /// emits this yet.
+    MobileInbox,
+}
+
+impl SessionSource {
+    /// Canonical DB string. Match the values the UI renders against —
+    /// see `ui/src/lib/types.ts` `SessionSource`.
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Desktop => "desktop",
+            Self::DesktopImport => "desktop-import",
+            Self::MobileInbox => "mobile-inbox",
+        }
+    }
+
+    /// Parse a DB string. Unknown values default to `Desktop` — the
+    /// safe fallback: an unknown source string most likely means a
+    /// downgrade ran against a newer-than-expected schema, and the
+    /// only honest answer is "some kind of local recording".
+    pub fn parse_db(s: &str) -> Self {
+        match s {
+            "desktop-import" => Self::DesktopImport,
+            "mobile-inbox" => Self::MobileInbox,
+            _ => Self::Desktop,
+        }
+    }
 }
 
 /// Discriminates the two ADR 0045 dictation start paths.
@@ -140,6 +192,10 @@ pub struct Session {
     /// (migration 017) — but kept as the typed enum here so callers
     /// can match without juggling strings.
     pub start_mode: StartMode,
+    /// ADR 0046 + mb-jqhw. NOT NULL with DEFAULT 'desktop' on disk
+    /// (migration 018). Same defensive-default-on-read pattern as
+    /// `start_mode`.
+    pub source: SessionSource,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -164,9 +220,9 @@ pub fn insert(conn: &Connection, new: &NewSession) -> AppResult<i64> {
             uuid, mode_id, hotkey_pressed, started_at, recording_ended_at, \
             status, foreground_app, foreground_window_title, audio_duration_ms, \
             audio_blob_path, prompt_id, dictionary_snapshot_id, example_set_id, \
-            start_mode \
+            start_mode, source \
          ) VALUES \
-         (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+         (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             new.uuid,
             new.mode_id,
@@ -182,6 +238,7 @@ pub fn insert(conn: &Connection, new: &NewSession) -> AppResult<i64> {
             new.dictionary_snapshot_id,
             new.example_set_id,
             new.start_mode.as_db_str(),
+            new.source.as_db_str(),
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -247,7 +304,7 @@ const SELECT_ALL: &str =
             foreground_window_title, audio_duration_ms, audio_blob_path, \
             prompt_id, dictionary_snapshot_id, example_set_id, \
             stt_latency_ms, cleanup_latency_ms, injection_latency_ms, \
-            injection_status, start_mode \
+            injection_status, start_mode, source \
      FROM sessions";
 
 fn fetch_one(
@@ -301,6 +358,14 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
             let s: Option<String> = row.get(20)?;
             s.as_deref().map(StartMode::parse_db).unwrap_or_default()
         },
+        source: {
+            // NOT NULL on disk (migration 018 DEFAULT 'desktop'), same
+            // defensive-default rationale as start_mode above.
+            let s: Option<String> = row.get(21)?;
+            s.as_deref()
+                .map(SessionSource::parse_db)
+                .unwrap_or_default()
+        },
     })
 }
 
@@ -352,7 +417,72 @@ mod tests {
             dictionary_snapshot_id: snapshot_id,
             example_set_id,
             start_mode: StartMode::Ptt,
+            source: SessionSource::Desktop,
         }
+    }
+
+    #[test]
+    fn session_source_db_strings_are_stable() {
+        // These end up in sessions.source and become part of the
+        // persisted provenance — changing them is a schema break.
+        assert_eq!(SessionSource::Desktop.as_db_str(), "desktop");
+        assert_eq!(SessionSource::DesktopImport.as_db_str(), "desktop-import");
+        assert_eq!(SessionSource::MobileInbox.as_db_str(), "mobile-inbox");
+        assert_eq!(SessionSource::parse_db("desktop"), SessionSource::Desktop);
+        assert_eq!(
+            SessionSource::parse_db("desktop-import"),
+            SessionSource::DesktopImport
+        );
+        assert_eq!(
+            SessionSource::parse_db("mobile-inbox"),
+            SessionSource::MobileInbox
+        );
+        // Unknown values fall back to the safe default.
+        assert_eq!(SessionSource::parse_db("bogus"), SessionSource::Desktop);
+    }
+
+    #[test]
+    fn insert_and_read_desktop_import_source() {
+        let db = Database::open_in_memory().unwrap();
+        let mut new = fresh_new_session(&db.conn);
+        new.source = SessionSource::DesktopImport;
+        let id = insert(&db.conn, &new).unwrap();
+        let got = get_by_id(&db.conn, id).unwrap().unwrap();
+        assert_eq!(got.source, SessionSource::DesktopImport);
+    }
+
+    #[test]
+    fn source_defaults_to_desktop_on_legacy_rows() {
+        // Simulate pre-migration-018 rows: bypass the NewSession API
+        // and INSERT manually omitting source. Because the column has
+        // DEFAULT 'desktop', the read should produce SessionSource::Desktop.
+        let db = Database::open_in_memory().unwrap();
+        let new = fresh_new_session(&db.conn);
+        db.conn
+            .execute(
+                "INSERT INTO sessions ( \
+                    uuid, mode_id, hotkey_pressed, started_at, recording_ended_at, \
+                    status, foreground_app, audio_duration_ms, \
+                    prompt_id, dictionary_snapshot_id, example_set_id \
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    "legacy-source-uuid",
+                    new.mode_id,
+                    new.hotkey_pressed,
+                    new.started_at,
+                    new.recording_ended_at,
+                    new.status.as_str(),
+                    new.foreground_app,
+                    new.audio_duration_ms,
+                    new.prompt_id,
+                    new.dictionary_snapshot_id,
+                    new.example_set_id,
+                ],
+            )
+            .unwrap();
+        let id = db.conn.last_insert_rowid();
+        let got = get_by_id(&db.conn, id).unwrap().unwrap();
+        assert_eq!(got.source, SessionSource::Desktop);
     }
 
     #[test]

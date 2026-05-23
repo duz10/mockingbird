@@ -56,6 +56,14 @@ const MIGRATION_016: &str = include_str!("migrations/016_activity_blocks_primary
 // app to lose focus to). Pure ADD COLUMN with DEFAULT 'ptt' backfill;
 // audit triggers don't cover the `sessions` table, no trigger update.
 const MIGRATION_017: &str = include_str!("migrations/017_dictation_start_mode.sql");
+// mb-jqhw / ADR 0046: adds `sessions.source` so we can distinguish PTT /
+// in-app live-mic sessions ('desktop'), "+ Audio file" desktop import
+// ('desktop-import'), and the future mobile-inbox courier flow
+// ('mobile-inbox'). Independent of `sessions.start_mode` (migration 017):
+// start_mode says "who pressed Start", source says "where the audio came
+// from". Pure ADD COLUMN with DEFAULT 'desktop' + a non-unique index for
+// the Iter 2 export-job source filter.
+const MIGRATION_018: &str = include_str!("migrations/018_session_source.sql");
 
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
@@ -177,6 +185,14 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         let prepared = substitute_prompt_bodies(MIGRATION_017);
         conn.execute_batch(&prepared)?;
     }
+    if current < 18 {
+        // mb-jqhw / ADR 0046: adds `sessions.source` ('desktop' default,
+        // 'desktop-import' for the + Audio file button, 'mobile-inbox' for
+        // the Iter 3 courier flow). Pure ADD COLUMN + CREATE INDEX.
+        // Substituter pass for the leftover-token guard.
+        let prepared = substitute_prompt_bodies(MIGRATION_018);
+        conn.execute_batch(&prepared)?;
+    }
     Ok(())
 }
 
@@ -235,7 +251,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "17");
+        assert_eq!(v, "18");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -254,7 +270,55 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "17");
+        assert_eq!(v, "18");
+    }
+
+    /// Migration 018 (mb-jqhw / ADR 0046) adds the `sessions.source`
+    /// column with DEFAULT 'desktop' plus a non-unique index for the
+    /// future export-job source filter. Verify both shapes land.
+    #[test]
+    fn migration_018_ships_sessions_source_column_and_index() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+
+        // Column exists with the expected type + default.
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(sessions)")
+            .expect("prepare table_info");
+        let found = stmt
+            .query_map([], |row| {
+                let name: String = row.get(1)?;
+                let ty: String = row.get(2)?;
+                let notnull: i64 = row.get(3)?;
+                let dflt: Option<String> = row.get(4)?;
+                Ok((name, ty, notnull, dflt))
+            })
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .find(|(n, _, _, _)| n == "source")
+            .expect("source column should exist after migration 018");
+        assert_eq!(found.1, "TEXT");
+        assert_eq!(found.2, 1, "source should be NOT NULL");
+        assert_eq!(
+            found.3.as_deref(),
+            Some("'desktop'"),
+            "source should default to 'desktop'"
+        );
+
+        // Index exists.
+        let idx: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type='index' AND name='idx_sessions_source'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            idx, 1,
+            "idx_sessions_source should exist after migration 018"
+        );
     }
 
     /// Migration 017 (mb-tfyp / ADR 0045 follow-up) adds the

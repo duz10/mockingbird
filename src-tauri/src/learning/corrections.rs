@@ -163,7 +163,7 @@ fn row_to_correction(row: &rusqlite::Row<'_>) -> rusqlite::Result<Correction> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::sessions::{self, NewSession, SessionStatus, StartMode};
+    use crate::db::sessions::{self, NewSession, SessionSource, SessionStatus, StartMode};
     use crate::db::Database;
 
     fn seed_session(conn: &Connection) -> i64 {
@@ -207,6 +207,7 @@ mod tests {
                 dictionary_snapshot_id: dict_id,
                 example_set_id: example_id,
                 start_mode: StartMode::Ptt,
+                source: SessionSource::Desktop,
             },
         )
         .unwrap()
