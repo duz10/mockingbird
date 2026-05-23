@@ -122,6 +122,8 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         // ADR 0045 — programmatic dictation start/stop (mb-ddfx).
         dictation::dictation_start,
         dictation::dictation_stop,
+        // ADR 0046 §3.2 — desktop audio-file import (mb-7vyz).
+        dictation::dictation_import_file,
         // Phase 10 Wave 1A — Command Center IPC (ADR 0037).
         crate::command_center::ipc::cc_open_via_tray,
         crate::command_center::ipc::cc_dismiss,

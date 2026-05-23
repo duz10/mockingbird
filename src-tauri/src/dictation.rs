@@ -52,15 +52,21 @@
 
 pub mod events;
 pub mod ingest;
+pub mod ingest_channel;
 pub mod llm_prompts;
 pub mod paste_payload;
 pub mod runtime;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+
+use crossbeam_channel::{select, Receiver as CrossbeamReceiver};
+
+use self::ingest::{headless_ingest, IngestDeps};
+use self::ingest_channel::HeadlessIngestRequest;
 
 use rusqlite::Connection;
 
@@ -340,18 +346,108 @@ impl DictationOrchestrator {
         }
     }
 
-    /// Run the event loop. Returns when the channel closes (Driver
-    /// thread exited).
-    pub fn run(mut self, actions: Receiver<StateAction>) -> AppResult<()> {
-        for action in actions.iter() {
-            if let Err(e) = self.handle(action) {
-                // Per ADR 0010 + the "never lose provenance" rule, a
-                // pipeline error doesn't kill the orchestrator. Log
-                // and continue.
-                tracing::error!(error = ?e, "orchestrator action failed");
+    /// Run the event loop. Returns when **both** input channels close.
+    ///
+    /// ## Two-channel topology (ADR 0046 §3.2)
+    ///
+    /// Two independent producers feed the orchestrator:
+    ///
+    /// 1. **`actions`** — `StateAction`s from the hotkey FSM, bridged
+    ///    into a crossbeam channel inside
+    ///    [`crate::dictation::runtime::run_dictation_thread`] (the
+    ///    upstream is still the unmodified `std::sync::mpsc` produced
+    ///    by `StateDriver::start`; the bridge is purely a type
+    ///    adapter so we can `select!` on it). PTT path.
+    ///
+    /// 2. **`headless_rx`** — [`HeadlessIngestRequest`]s from the
+    ///    `+ Audio file` IPC (Iter 1) and the future inbox watcher
+    ///    (Iter 3). Mobile / file-import path.
+    ///
+    /// `select!` picks whichever fires first; both arms run on this
+    /// thread so the orchestrator-owned `Box<dyn VoiceActivityDetector>`
+    /// / `Box<dyn SpeechToText>` / `Box<dyn Cleaner>` are reused
+    /// across both paths — no duplicate whisper-rs CUDA allocations.
+    ///
+    /// Shutdown semantics: the loop exits when **both** receivers
+    /// have disconnected. If only one disconnects, that arm is
+    /// effectively dead (`select!` keeps polling the live one); the
+    /// loop ends when there is nothing left to process anywhere.
+    /// In practice the dictation runtime drops both senders together
+    /// at shutdown, so the loop usually exits in one tick.
+    pub fn run(
+        mut self,
+        actions: CrossbeamReceiver<StateAction>,
+        headless_rx: CrossbeamReceiver<HeadlessIngestRequest>,
+    ) -> AppResult<()> {
+        // Track which legs are still alive so we exit cleanly once
+        // both producers are gone (rather than busy-looping on a
+        // closed receiver inside `select!`).
+        let mut actions_open = true;
+        let mut headless_open = true;
+        while actions_open || headless_open {
+            select! {
+                recv(actions) -> msg => match msg {
+                    Ok(action) => {
+                        if let Err(e) = self.handle(action) {
+                            // Per ADR 0010 + the "never lose provenance"
+                            // rule, a pipeline error doesn't kill the
+                            // orchestrator. Log and continue.
+                            tracing::error!(error = ?e, "orchestrator action failed");
+                        }
+                    }
+                    Err(_) => {
+                        tracing::info!("orchestrator: state-action channel closed");
+                        actions_open = false;
+                    }
+                },
+                recv(headless_rx) -> msg => match msg {
+                    Ok(req) => self.handle_headless(req),
+                    Err(_) => {
+                        tracing::info!("orchestrator: headless-ingest channel closed");
+                        headless_open = false;
+                    }
+                },
             }
         }
         Ok(())
+    }
+
+    /// Process one [`HeadlessIngestRequest`] from the sibling
+    /// channel. Reuses the orchestrator's existing VAD / STT /
+    /// Cleaner / DB / events deps so a file import or mobile-inbox
+    /// courier costs zero additional model loads.
+    ///
+    /// The result is sent back via the per-request reply channel.
+    /// If the caller has dropped its `reply_rx` (IPC panicked,
+    /// browser tab closed mid-import) we log and drop the result —
+    /// the orchestrator MUST stay live for the next request either
+    /// way.
+    fn handle_headless(&mut self, req: HeadlessIngestRequest) {
+        let HeadlessIngestRequest {
+            samples,
+            provenance,
+            reply_tx,
+        } = req;
+
+        // Build the borrowed dep bundle for one call. All borrows
+        // are released as soon as `headless_ingest` returns — the
+        // orchestrator's owned `Box<dyn ...>` fields stay put.
+        let deps = IngestDeps {
+            vad: self.vad.as_mut(),
+            stt: self.stt.as_mut(),
+            cleaner: self.cleaner.as_mut(),
+            db: &self.db,
+            events: &self.recording_window,
+            config: &self.config,
+        };
+        let result = headless_ingest(deps, samples, provenance);
+
+        if reply_tx.send(result).is_err() {
+            tracing::warn!(
+                "headless ingest reply channel closed; caller dropped \
+                 receiver before result arrived (DB row is fine; toast lost)"
+            );
+        }
     }
 
     fn handle(&mut self, action: StateAction) -> AppResult<()> {

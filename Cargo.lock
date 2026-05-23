@@ -2380,6 +2380,7 @@ dependencies = [
  "cpal",
  "crc32fast",
  "criterion",
+ "crossbeam-channel",
  "hound",
  "mockall",
  "ort",

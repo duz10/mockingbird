@@ -23,6 +23,7 @@ import type {
   MeetingSettingsSnapshot,
   ModeRow,
   SessionDetail,
+  SessionImportSummary,
   SessionSummary,
   SettingsSnapshot,
   TranscriptSearchHit,
@@ -179,6 +180,18 @@ export const api = {
    *  overlay is still the cancel path). Idempotent: a no-op if the
    *  state machine isn't currently in a programmatic recording. */
   dictation_stop: () => invoke<void>("dictation_stop"),
+  /** ADR 0046 §3.2 / mb-7vyz — desktop audio-file import.
+   *  Opens a native file picker, decodes the selected file via
+   *  symphonia, queues it onto the orchestrator's sibling headless-
+   *  ingest channel, and resolves with the new session id +
+   *  transcript preview when the pipeline completes.
+   *
+   *  Rejects with `"cancelled"` (literal string) if the user
+   *  dismisses the picker — callers should suppress the error toast
+   *  in that case. All other rejections carry a descriptive message
+   *  suitable for showing verbatim. */
+  dictation_import_file: () =>
+    invoke<SessionImportSummary>("dictation_import_file"),
 };
 
 /* ------------------------------------------------------------------ */
@@ -456,6 +469,16 @@ function fixtureFor<T>(command: string, args?: object): T {
     case "activity_retention_set":
     case "activity_export_pdf":
       return fixture(command, undefined as unknown as T);
+    case "dictation_import_file":
+      // ADR 0046 §3.2 / mb-7vyz — browser-preview stub. Real
+      // shell-side response shape is `SessionImportSummary`; here
+      // we return a deterministic synthetic so design work on the
+      // Dictations toast keeps rendering.
+      return fixture(command, {
+        sessionId: 9999,
+        source: "desktop-import",
+        transcriptPreview: "(preview) Imported audio file — Lorem ipsum dolor sit amet...",
+      } as SessionImportSummary) as T;
     default:
       throw new Error(`fixtureFor: no fixture for command "${command}"`);
   }

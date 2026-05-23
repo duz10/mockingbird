@@ -100,6 +100,22 @@ export interface SessionDetail {
   };
 }
 
+/** ADR 0046 §3.2 / mb-7vyz — response from the `dictation_import_file`
+ *  IPC. Surfaced to the Dictations page toast on success; not
+ *  persisted in the UI store (the SessionsEventBus event will
+ *  trigger a list refetch and the row picks itself up there). */
+export interface SessionImportSummary {
+  /** New `sessions.id` row id, for optional scroll-to-row. */
+  sessionId: number;
+  /** Always `"desktop-import"` for the + Audio file path; the Iter 3
+   *  inbox watcher persists `"mobile-inbox"` through the same
+   *  channel. Kept as a free-form string union for forward-compat. */
+  source: string;
+  /** First ~120 chars of the cleaned (or raw, on fallback) transcript
+   *  — already truncated server-side with a trailing ellipsis. */
+  transcriptPreview: string;
+}
+
 export interface TranscriptSearchHit {
   sessionId: number;
   stage: "raw" | "cleaned" | "final";

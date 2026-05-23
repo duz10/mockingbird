@@ -39,11 +39,13 @@ use std::thread::JoinHandle;
 
 use rusqlite::Connection;
 
+use super::ingest_channel::{self, HeadlessIngestRequest, HeadlessIngestSender};
 use super::{DictationOrchestrator, OrchestratorConfig};
 use crate::cleanup::{Cleaner, LlmCleaner, OllamaProvider, PassthroughCleaner};
 use crate::error::{AppError, AppResult};
 use crate::hotkey::driver::StateDriver;
 use crate::hotkey::pause::PauseHandle;
+use crate::hotkey::state::StateAction;
 use crate::hotkey::HotkeyEvent;
 use crate::injection::strategy::InjectionStrategy;
 use crate::recording_window::RecordingWindow;
@@ -80,6 +82,14 @@ pub struct DictationRuntime {
     /// reads + clears it at `start_capture` time. Stays `false`
     /// for every PTT session (the real OS hook never touches it).
     next_start_is_programmatic: Arc<AtomicBool>,
+
+    /// ADR 0046 §3.2 / mb-7vyz — producer half of the sibling
+    /// `crossbeam-channel` carrying [`HeadlessIngestRequest`]s to
+    /// the orchestrator. Cloneable — each IPC handler / future
+    /// inbox-watcher loop grabs its own clone via Tauri managed
+    /// state (`lib.rs` publishes `HeadlessIngestSender` as its own
+    /// managed-state entry by cloning this field at boot).
+    headless_ingest_tx: HeadlessIngestSender,
 
     /// Hook handle — Drop posts WM_QUIT to the hotkey thread.
     #[cfg(target_os = "windows")]
@@ -140,11 +150,18 @@ impl DictationRuntime {
         // its own clone so `start()` can flip it.
         let next_start_is_programmatic = Arc::new(AtomicBool::new(false));
         let programmatic_clone = next_start_is_programmatic.clone();
+        // ADR 0046 §3.2: build the sibling crossbeam channel for
+        // headless ingest. The runtime holds the sender so lib.rs
+        // can clone it into Tauri managed state at boot; the
+        // receiver is moved into the dictation thread alongside the
+        // existing action stream.
+        let (headless_ingest_tx, headless_ingest_rx) = ingest_channel::channel();
         let dictation_join = std::thread::Builder::new()
             .name("mockingbird-dictation".into())
             .spawn(move || {
                 if let Err(e) = run_dictation_thread(
                     action_rx,
+                    headless_ingest_rx,
                     rw_clone,
                     db,
                     config,
@@ -163,6 +180,7 @@ impl DictationRuntime {
             pause,
             recording_window,
             next_start_is_programmatic,
+            headless_ingest_tx,
             _hook: hook,
             _dictation_join: Some(dictation_join),
         })
@@ -176,14 +194,23 @@ impl DictationRuntime {
         _config: OrchestratorConfig,
         _user_overrides: HashMap<String, InjectionStrategy>,
     ) -> AppResult<Self> {
-        // The `next_start_is_programmatic` field is unused on non-Windows
-        // (`Self` is never actually constructed on those platforms), but
-        // referring to `AtomicBool` here keeps the import live without a
-        // cfg-gated use statement.
+        // The `next_start_is_programmatic` + headless-channel fields
+        // are unused on non-Windows (`Self` is never actually
+        // constructed on those platforms), but referring to the
+        // types here keeps the imports live without cfg-gated use
+        // statements.
         let _: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+        let (_tx, _rx) = ingest_channel::channel();
         Err(AppError::Other(
             "dictation runtime is Windows-only (Phase 9 platform parity)".into(),
         ))
+    }
+
+    /// Clone the headless-ingest sender so lib.rs can publish it as
+    /// its own Tauri managed-state entry. Cheap (`Arc` clone under
+    /// the hood) — call once at boot.
+    pub fn headless_ingest_sender(&self) -> HeadlessIngestSender {
+        self.headless_ingest_tx.clone()
     }
 
     /// Programmatic start (ADR 0045 mode (b)).
@@ -273,7 +300,8 @@ const PROGRAMMATIC_VK: u32 = 0x07;
 #[cfg(target_os = "windows")]
 #[allow(clippy::too_many_arguments)]
 fn run_dictation_thread(
-    actions: std::sync::mpsc::Receiver<crate::hotkey::state::StateAction>,
+    actions: std::sync::mpsc::Receiver<StateAction>,
+    headless_rx: crossbeam_channel::Receiver<HeadlessIngestRequest>,
     recording_window: RecordingWindow,
     db: Arc<Mutex<Connection>>,
     config: OrchestratorConfig,
@@ -306,7 +334,47 @@ fn run_dictation_thread(
         next_start_is_programmatic,
     );
 
-    orchestrator.run(actions)
+    // ADR 0046 §3.2 — bridge the std::sync::mpsc StateAction stream
+    // into a crossbeam channel so the orchestrator's `run` loop can
+    // `select!` it alongside `headless_rx`. The upstream
+    // `StateDriver::start` and `HotkeyStateMachine` are untouched
+    // (their channel type is fixed by `hotkey/driver.rs`, which is
+    // out of boundary per ADR 0046 §3); this bridge is a pure
+    // type-adapter that lives entirely inside the dictation runtime.
+    //
+    // Lifecycle: when `actions` closes (state-driver thread exits),
+    // the recv loop falls through, `actions_tx_cb` drops, and the
+    // orchestrator's recv arm closes on the next tick. Symmetric
+    // shutdown — no extra signal needed.
+    let (actions_tx_cb, actions_rx_cb) = crossbeam_channel::unbounded::<StateAction>();
+    let bridge = std::thread::Builder::new()
+        .name("mockingbird-dictation-bridge".into())
+        .spawn(move || {
+            for action in actions.iter() {
+                if actions_tx_cb.send(action).is_err() {
+                    // Orchestrator went away. Drain + exit so the
+                    // upstream channel can shut down cleanly.
+                    tracing::info!(
+                        "dictation bridge: orchestrator dropped action receiver; exiting"
+                    );
+                    break;
+                }
+            }
+            tracing::info!("dictation bridge: upstream StateAction channel closed");
+        })
+        .map_err(|e| AppError::Other(format!("dictation bridge spawn: {e}")))?;
+
+    let result = orchestrator.run(actions_rx_cb, headless_rx);
+
+    // Join the bridge so the thread name doesn't leak as zombie.
+    // It exits as soon as the upstream `actions` channel closes
+    // (driver thread gone) OR we drop `actions_rx_cb`, whichever
+    // comes first. Best-effort: a panic in the bridge is a non-fatal
+    // shutdown anomaly.
+    if let Err(e) = bridge.join() {
+        tracing::warn!(?e, "dictation bridge thread panicked during shutdown");
+    }
+    result
 }
 
 /// Ensure `ORT_DYLIB_PATH` is set so `ort` can `dlopen` the runtime.

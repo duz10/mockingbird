@@ -65,6 +65,11 @@ export function DictationsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // ADR 0046 §3.2 / mb-7vyz — "+ Audio file" import in-flight flag.
+  // Disables the button + swaps the label so a slow whisper-rs pass
+  // (~real-time on Voice-Memo-grade clips) can't be retriggered by an
+  // impatient double-click.
+  const [isImporting, setIsImporting] = useState(false);
 
   const setSelectedSession = useAppStore((s) => s.setSelectedSession);
 
@@ -180,6 +185,35 @@ export function DictationsPage() {
     showToast(t("dictations.copied"));
   }, [detail, showToast]);
 
+  // ADR 0046 §3.2 / mb-7vyz — desktop audio-file import. User picks
+  // a .m4a / .mp3 / .wav / etc; the orchestrator decodes + runs the
+  // full pipeline (VAD trim → STT → cleanup → DB persist). On
+  // success the SessionsEventBus event already triggers a refetch via
+  // the listen() effect above, so the explicit setSessions here is
+  // belt-and-suspenders (and ensures the new row appears even in
+  // browser-preview where there's no event bus).
+  const handleImport = useCallback(async () => {
+    setIsImporting(true);
+    try {
+      const summary = await api.dictation_import_file();
+      const list = await api.list_sessions(PAGE_SIZE, 0);
+      setSessions(list);
+      setSelectedId(summary.sessionId);
+      const preview = summary.transcriptPreview.trim();
+      showToast(preview.length > 0 ? `Imported: ${preview}` : "Imported audio file");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // The Rust side returns the literal string `"cancelled"` on
+      // user-dismissed picker — that's not a failure, just suppress
+      // the toast. Anything else is real and worth surfacing.
+      if (msg !== "cancelled") {
+        showToast(`Import failed: ${msg}`);
+      }
+    } finally {
+      setIsImporting(false);
+    }
+  }, [showToast]);
+
   // Decide what to render in the list pane.
   const leftPaneContent = useMemo(() => {
     if (sessions === null) return <Spinner />;
@@ -212,7 +246,22 @@ export function DictationsPage() {
 
   return (
     <>
-      <PageHeader title={t("dictations.title")} />
+      <PageHeader
+        title={t("dictations.title")}
+        actions={
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void handleImport()}
+            disabled={isImporting}
+            ariaLabel="Import audio file"
+            title="Import an audio file as a dictation."
+          >
+            <PlusIcon size={14} />
+            {isImporting ? "Importing…" : "Audio file"}
+          </Button>
+        }
+      />
 
       <div className={styles.shell}>
         <div className={styles.leftPane}>

@@ -29,6 +29,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
+use crossbeam_channel as cb;
+
 use mockingbird_lib::audio::vad::{VadFrame, VoiceActivityDetector};
 use mockingbird_lib::audio::AudioCapture;
 use mockingbird_lib::cleanup::{LlmCleaner, PassthroughCleaner, StubCleanupProvider};
@@ -248,14 +250,20 @@ fn build_orchestrator_with_cleaner(
 
 /// Drive a complete StartCapture → StopCapture cycle through the
 /// orchestrator's `run` loop. Returns after the loop terminates
-/// (which happens when the action sender drops).
+/// (which happens when BOTH input channels close — ADR 0046 §3.2).
 fn run_one_cycle(orchestrator: DictationOrchestrator) {
-    let (tx, rx) = mpsc::channel::<StateAction>();
-    tx.send(StateAction::StartCapture(HotkeyMode::Normal))
+    let (action_tx, action_rx) = cb::unbounded::<StateAction>();
+    let (_headless_tx, headless_rx) =
+        cb::unbounded::<mockingbird_lib::dictation::ingest_channel::HeadlessIngestRequest>();
+    action_tx
+        .send(StateAction::StartCapture(HotkeyMode::Normal))
         .unwrap();
-    tx.send(StateAction::StopCapture).unwrap();
-    drop(tx); // closes the iterator; run() returns Ok(())
-    orchestrator.run(rx).expect("orchestrator.run returned Err");
+    action_tx.send(StateAction::StopCapture).unwrap();
+    drop(action_tx); // close the actions arm
+    drop(_headless_tx); // close the headless arm; both gone => run() returns Ok(())
+    orchestrator
+        .run(action_rx, headless_rx)
+        .expect("orchestrator.run returned Err");
 }
 
 // --------------------------------------------------------------------
@@ -505,4 +513,40 @@ fn llm_cleanup_runs_in_orchestrator_and_injects_cleaned_text() {
         Some("stub-normal"),
         "cleaned-row model_used should reflect the actual model the provider used"
     );
+}
+
+// --------------------------------------------------------------------
+// ADR 0046 §3.2 — topology: orchestrator multi-select between
+// StateAction and HeadlessIngestRequest
+// --------------------------------------------------------------------
+
+/// Smoke test for the §3.2 multi-channel `run` loop: with BOTH channels
+/// closed the loop must exit cleanly. The previous single-channel
+/// shape would exit on EITHER close; this asserts the new
+/// `actions_open || headless_open` predicate doesn't accidentally hang
+/// when one arm closes before the other.
+#[test]
+fn run_loop_exits_when_both_channels_closed() {
+    let (orchestrator, _db, _injector, _hotkey_rx) = build_orchestrator(false, "topology smoke");
+
+    let (action_tx, action_rx) = cb::unbounded::<StateAction>();
+    let (headless_tx, headless_rx) =
+        cb::unbounded::<mockingbird_lib::dictation::ingest_channel::HeadlessIngestRequest>();
+
+    // Close actions first, headless second — verifies the loop
+    // survives the in-between state where one arm is dead and the
+    // other is still empty (the select! must keep polling until
+    // BOTH disconnect).
+    drop(action_tx);
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        drop(headless_tx);
+    });
+
+    // Bounded by std::time::Duration on the test runner; if `run`
+    // hangs the harness aborts via its own timeout. We just need
+    // it to return Ok within a few ms after both senders drop.
+    orchestrator
+        .run(action_rx, headless_rx)
+        .expect("orchestrator.run returned Err");
 }

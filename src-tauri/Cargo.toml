@@ -65,6 +65,11 @@ printpdf  = { workspace = true }
 # (long tail). All MIT/Apache, no system codec deps.
 symphonia = { workspace = true }
 
+# ADR 0046 §3.2 / mb-7vyz — sibling input channel for the orchestrator's
+# `run` loop (HeadlessIngestRequest), plus the mpsc→crossbeam bridge in
+# `dictation::runtime`. See ADR §3.2 for the topology rationale.
+crossbeam-channel = { workspace = true }
+
 [dev-dependencies]
 tempfile  = { workspace = true }
 rstest    = { workspace = true }

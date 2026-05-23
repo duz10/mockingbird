@@ -146,6 +146,13 @@ pub fn run() {
                         runtime
                             .recording_window
                             .set_app_handle(app.handle().clone());
+                        // ADR 0046 §3.2 / mb-7vyz — publish the
+                        // headless-ingest sender as its own managed-
+                        // state entry so IPC handlers (and the future
+                        // Iter 3 inbox watcher) can grab a clone via
+                        // `State<'_, HeadlessIngestSender>` without
+                        // reaching through DictationRuntime.
+                        app.manage(runtime.headless_ingest_sender());
                         tracing::info!("🐦 dictation runtime started; hold RightAlt to dictate");
                         app.manage(runtime);
                     }

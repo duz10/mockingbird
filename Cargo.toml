@@ -153,6 +153,17 @@ symphonia      = { version = "0.5", default-features = false, features = [
     "ogg",
 ] }
 
+# ADR 0046 §3.2 (mb-7vyz) — sibling input channel for the dictation
+# orchestrator's `run` loop, carrying `HeadlessIngestRequest`s from the
+# `+ Audio file` IPC (Iter 1) and the inbox-watcher courier flow (Iter 3).
+# std::sync::mpsc cannot be multi-`select!`ed, and the existing
+# `Receiver<StateAction>` is out-of-boundary to convert. A crossbeam pair
+# (with an in-thread mpsc→crossbeam bridge for the existing action stream)
+# is the minimum-diff topology that satisfies §3's headless-entry contract.
+# Already in the dep closure transitively (notify, rayon); promoted to a
+# direct dep so usage is explicit at the call site.
+crossbeam-channel = "0.5"
+
 # Phase 4 — Sync HTTP for cleanup providers (Ollama + Claude).
 # See ADR 0021: kept sync to fit the orchestrator's sync architecture
 # without dragging in a tokio runtime per dictation. `rustls-tls`

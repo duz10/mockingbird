@@ -157,6 +157,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-27 | `[ADR 0046 §3.2 / mb-7vyz]`      | Resolution of the earlier-today topology fork: in-thread `std::sync::mpsc → crossbeam-channel` bridge is the minimum-diff path; converting the `StateDriver` channel itself would have cascaded out-of-boundary, while bridging inside `run_dictation_thread` keeps every §3 "do not touch" file untouched and adds ~20 lines |
 | 2026-05-27 | `[ADR 0046 Iter 1 / mb-evn3 / mb-7vyz]` | The `StateAction` channel topology can't be naively extended for headless ingest — the orchestrator's input channel is fed by exactly one producer (StateDriver), so "add a new variant" requires a new sibling mpsc + run-loop multi-select, which is an ADR-amendment-sized change, not an in-boundary tweak |
 | 2026-05-27 | `[mb-tfyp / mb-sowc / ADR 0045]` | start_mode plumbing: the focus-drift abort heuristic conflates two semantically distinct outcomes (PTT target lost focus vs. in-app session never had a target); the fix is a new column + a new InjectionOutcome variant, NOT a new pill string on the legacy abort path |
 | 2026-05-26 | `[design-v1 / mb-n455]`          | Design System v1 audit + formalization shipped; six modes by which UI drift accumulated between phases; one specific bug class (the dead-token cascade silently rendering surfaces transparent) deserves a permanent guardrail; kitten's `getComputedStyle().backgroundColor` probe is blind to background-image gradients — false-positive trap |
@@ -206,6 +207,24 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-27 [ADR 0046 §3.2 / mb-7vyz] Resolution of the channel-topology fork: bridge mpsc→crossbeam IN THE DICTATION THREAD, don't convert the upstream channel
+
+**Context:** Earlier today (entry below) we surfaced three forks for headless ingest's channel-topology problem. ADR 0046 §3.2 amendment took option (a-extended): add a sibling crossbeam channel + multi-select in `run`. This entry records the **specific design call inside that fork** that wasn't obvious until the diff was on the table.
+
+**Finding:** When the orchestrator needs to `select!` between two channels but one of them is fed by a sealed/out-of-boundary producer, the smallest diff is to **bridge the inbound channel inside the dictation thread itself**, not to convert the upstream producer.
+
+Concretely: `StateDriver::start` (in the out-of-boundary `hotkey/driver.rs`) produces a `std::sync::mpsc::Receiver<StateAction>`. To `select!` against a new crossbeam channel I either had to (i) change the driver's channel type to crossbeam — touches sealed code in a way that ripples through every test using `StateDriver`, OR (ii) spawn a tiny adapter thread inside `run_dictation_thread` that does `for action in actions.iter() { crossbeam_tx.send(action) }`. Option (ii) is ~20 lines of pure type-adapter glue, lives entirely inside the dictation runtime, and the upstream `StateDriver` literally doesn't know the bridge exists. The bridge thread terminates symmetrically when either side closes — no extra shutdown signal.
+
+The orchestrator's `run` becomes a `select!` over two `crossbeam_channel::Receiver`s, and the loop's outer shape ("exit when both inputs are dead") is implemented with two `bool` latches rather than the old `for action in actions.iter()` pattern. Both arms remain trivially testable: a unit test can drive a `StartCapture → StopCapture` cycle by pushing onto the crossbeam side directly, no bridge needed.
+
+**Pattern for future epics:** when you need to multi-select a sealed-producer channel against a new sibling channel, the question is "where does the type adapter live?" — and the cheapest answer is almost always "inside the consumer thread, not at the producer." The producer thread doesn't care; only the consumer needs the select-capable types.
+
+**What we did:** Authored ADR 0046 §3.2, added `crossbeam-channel = "0.5"` (already in the dep closure via notify/rayon), introduced `dictation::ingest_channel::HeadlessIngestRequest` + factory `channel()`, and split the dictation thread into (a) the bridge + (b) the orchestrator-runs-with-two-crossbeam-receivers. Tests + fmt + clippy all green; `mockingbird.exe` was running so `cargo test --release` link was skipped per LESSONS P2.
+
+**Closes the loop on:** the "channel topology can't be naively extended" entry directly below.
 
 ---
 
