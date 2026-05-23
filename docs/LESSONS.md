@@ -207,6 +207,22 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 ---
 
+## 2026-05-27 [mb-ddfx / ADR 0045] Kickoff drift: 3 of 4 beads in the kickoff plan were already CLOSED on disk
+
+**Context:** The /goal kickoff for the "mb-ddfx + mb-aho4 + mb-l8ey + mb-t6bk" 4-bead lateral epic listed all four beads as outstanding work, with a suggested execution order that ended with the meaty mb-ddfx. Session-start ritual saved this one: STATUS read first, then `bd show` for each bead. Three of the four (mb-aho4, mb-l8ey, mb-t6bk) had already been closed in earlier commits (39d5a30, 168389d, a6eed93) and the work was visibly on disk. Only mb-ddfx (programmatic dictation start) and the absorbed mb-ytex remained.
+
+**Finding:** A kickoff prompt that bundles N beads under a single "epic" can drift between when it's drafted and when it's executed — especially when an iteration crashes out partway through. The correct response to "the kickoff says do X, Y, Z, W" is NEVER "start at X and work down". It's:
+
+1. `bd show <id>` (or `bd ready`) for every bead listed, before any code edit.
+2. If a bead is already CLOSED with a sensible close reason, verify the close reason matches what's on disk (one grep) — then skip and move on.
+3. The remaining outstanding beads are the actual scope.
+
+This is the same family of stale-context-vs-disk-state error as the 2026-05-17 incident (which was about sealed phases) and the 2026-05-23 incident (kickoff conflict with disk). The PINNED P4 guard rail catches the sealed-phase case; this is the smaller-grained "individual bead status" case. Doesn't warrant a new PINNED entry — the existing `bd ready` step in the start-of-iteration checklist would have caught this if I'd run it before reading the kickoff body. **Refresh:** always run `bd ready` (or at least `bd show` for explicitly-mentioned beads) AS PART OF the kickoff triage, not after.
+
+No wasted work was done. Caught at triage time; the report just calls out the three already-closed beads instead of re-doing them.
+
+---
+
 ## 2026-05-26 [design-v1 / mb-n455] Design System v1 audit + formalization shipped; the modes by which UI drift accumulated, the dead-token-cascade bug class, and the kitten-probe gradient blind spot
 
 **Context:** Dustin's first live-fire pass after `phase-10-complete` surfaced systemic UI drift, most visibly on the new Activity page (literally bare floating text on the photo bg — no card surfaces, no visible buttons). Bernard ran the kickoff plan as a 5-phase bead-only lateral epic (`mb-n455`, no ADR) with qa-kitten as the visual-audit specialist for baseline + re-audit. Final verdict: SHIP, 8/8 P1 + 9/12 P2 baseline findings resolved, 3 P2s reclassified as false-positives, 0 regressions, 2 P3 follow-ups filed.
