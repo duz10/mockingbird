@@ -4,7 +4,9 @@
 //! scenarios a production session would hit. Unit tests inside each
 //! module cover module-local invariants; these cover the seams.
 
-use mockingbird_lib::db::sessions::{NewSession, ProcessingCompletion, SessionStatus, StartMode};
+use mockingbird_lib::db::sessions::{
+    NewSession, ProcessingCompletion, SessionSource, SessionStatus, StartMode,
+};
 use mockingbird_lib::db::{
     audit::{self, AuditedTable, Operation},
     dictionary::{self, NewDictionaryEntry},
@@ -61,6 +63,7 @@ fn full_dictation_flow_end_to_end() {
         dictionary_snapshot_id: snapshot_id,
         example_set_id,
         start_mode: StartMode::Ptt,
+        source: SessionSource::Desktop,
     };
     let session_id = sessions::insert(conn, &new_session).unwrap();
 
@@ -218,6 +221,7 @@ fn session_insert_with_nonexistent_mode_id_errors_via_fk() {
         dictionary_snapshot_id: snapshot_id,
         example_set_id,
         start_mode: StartMode::Ptt,
+        source: SessionSource::Desktop,
     };
     assert!(
         sessions::insert(conn, &bad).is_err(),
@@ -265,6 +269,7 @@ fn create_snapshot_id_round_trips_through_session() {
             dictionary_snapshot_id: snapshot_id,
             example_set_id,
             start_mode: StartMode::Ptt,
+            source: SessionSource::Desktop,
         },
     )
     .unwrap();

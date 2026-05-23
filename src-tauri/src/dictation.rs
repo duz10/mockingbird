@@ -50,6 +50,8 @@
 //! - [`runtime`]: Wave 4.5 spawn glue that wires the orchestrator
 //!   into `lib.rs::run()` with the platform-default traits.
 
+pub mod events;
+pub mod ingest;
 pub mod llm_prompts;
 pub mod paste_payload;
 pub mod runtime;
@@ -204,11 +206,69 @@ struct SessionState {
 /// `dictation.active_mode_slug` setting + the `modes` table. This is
 /// what makes the Modes-page active selector take effect on the
 /// NEXT dictation without restart / cache-invalidation dance.
+///
+/// `pub(crate)` so the headless ingest path (`dictation::ingest`) can
+/// share the same mode-resolution result without re-implementing the
+/// fallback ladder (ADR 0046 §3 — `resolve_active_mode_from_db`).
 #[derive(Debug, Clone)]
-struct ResolvedMode {
-    mode_id: i64,
-    slug: String,
-    prompt_id: i64,
+pub(crate) struct ResolvedMode {
+    pub(crate) mode_id: i64,
+    pub(crate) slug: String,
+    pub(crate) prompt_id: i64,
+}
+
+/// Free-function mode resolver — shared by the orchestrator's
+/// per-session `resolve_active_mode` AND by the headless ingest path.
+///
+/// ADR 0046 §3 calls this out as one of the two sanctioned `dictation.rs`
+/// refactors: pull the body of `resolve_active_mode` into a free fn
+/// so the headless ingest module can reuse the same fallback ladder
+/// without taking a dependency on `DictationOrchestrator`.
+///
+/// The two graceful fallbacks (mutex poisoning, settings/modes lookup
+/// failure) collapse onto the caller-supplied `fallback`, which is
+/// the boot-time `OrchestratorConfig` for both production callers.
+pub(crate) fn resolve_active_mode_from_db(
+    db: &Arc<Mutex<Connection>>,
+    fallback_mode_id: i64,
+    fallback_slug: &str,
+    fallback_prompt_id: i64,
+) -> ResolvedMode {
+    let fallback = || ResolvedMode {
+        mode_id: fallback_mode_id,
+        slug: fallback_slug.to_string(),
+        prompt_id: fallback_prompt_id,
+    };
+    let conn = match db.lock() {
+        Ok(g) => g,
+        Err(_) => {
+            tracing::warn!("active-mode: db mutex poisoned; using boot-time config");
+            return fallback();
+        }
+    };
+    let slug: String = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            [crate::commands::active_mode::ACTIVE_MODE_KEY],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|_| fallback_slug.to_string());
+    match conn.query_row(
+        "SELECT id, prompt_id FROM modes WHERE slug = ?1",
+        [&slug],
+        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+    ) {
+        Ok((mode_id, prompt_id)) => ResolvedMode {
+            mode_id,
+            slug,
+            prompt_id,
+        },
+        Err(e) => {
+            tracing::warn!(error = ?e, mode = %slug,
+                "active-mode: modes-table lookup failed; using boot-time config");
+            fallback()
+        }
+    }
 }
 
 impl DictationOrchestrator {
@@ -250,6 +310,16 @@ impl DictationOrchestrator {
             next_start_is_programmatic,
             state: SessionState::default(),
         }
+    }
+
+    /// Emit the post-persist UI refetch signal via the
+    /// [`events::SessionsEventBus`] trait — same trait the headless
+    /// ingest path uses (ADR 0046 §3.1). `RecordingWindow` is the PTT
+    /// path's bus impl; routing through the trait keeps PTT and
+    /// headless emits going through one observable surface.
+    fn emit_session_saved(&self, id: i64) {
+        use crate::dictation::events::SessionsEventBus;
+        <RecordingWindow as SessionsEventBus>::emit_session_saved(&self.recording_window, id);
     }
 
     /// Send `PipelineComplete` to the state-machine driver.
@@ -376,41 +446,14 @@ impl DictationOrchestrator {
     /// killing the dictation. Cost: one indexed-PK lookup per
     /// session — negligible vs. STT/cleanup latency.
     fn resolve_active_mode(&self) -> ResolvedMode {
-        let fallback = || ResolvedMode {
-            mode_id: self.config.mode_id,
-            slug: self.config.mode_slug.clone(),
-            prompt_id: self.config.prompt_id,
-        };
-        let conn = match self.db.lock() {
-            Ok(g) => g,
-            Err(_) => {
-                tracing::warn!("active-mode: db mutex poisoned; using boot-time config");
-                return fallback();
-            }
-        };
-        let slug: String = conn
-            .query_row(
-                "SELECT value FROM settings WHERE key = ?1",
-                [crate::commands::active_mode::ACTIVE_MODE_KEY],
-                |r| r.get(0),
-            )
-            .unwrap_or_else(|_| self.config.mode_slug.clone());
-        match conn.query_row(
-            "SELECT id, prompt_id FROM modes WHERE slug = ?1",
-            [&slug],
-            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
-        ) {
-            Ok((mode_id, prompt_id)) => ResolvedMode {
-                mode_id,
-                slug,
-                prompt_id,
-            },
-            Err(e) => {
-                tracing::warn!(error = ?e, mode = %slug,
-                    "active-mode: modes-table lookup failed; using boot-time config");
-                fallback()
-            }
-        }
+        // ADR 0046 §3: body extracted into the free `resolve_active_mode_from_db`
+        // so the headless ingest path can share the same fallback ladder.
+        resolve_active_mode_from_db(
+            &self.db,
+            self.config.mode_id,
+            &self.config.mode_slug,
+            self.config.prompt_id,
+        )
     }
 
     /// Return the session-pinned mode, or fall back to the boot-time
@@ -757,7 +800,7 @@ impl DictationOrchestrator {
         // refetch (which goes through `list_sessions` -> DB) doesn't
         // race against our still-held connection.
         drop(conn);
-        self.recording_window.emit_session_saved(id);
+        self.emit_session_saved(id);
         Ok(())
     }
 
@@ -780,7 +823,7 @@ impl DictationOrchestrator {
         let id = self.insert_session_row(&conn, &recording_ended_iso, fg_keyup)?;
         sessions::update_status_error(&conn, id, &msg)?;
         drop(conn);
-        self.recording_window.emit_session_saved(id);
+        self.emit_session_saved(id);
         Ok(())
     }
 
@@ -800,7 +843,7 @@ impl DictationOrchestrator {
         let id = self.insert_session_row_no_fg(&conn, &recording_ended_iso)?;
         sessions::update_status_error(&conn, id, "no foreground window at key-up")?;
         drop(conn);
-        self.recording_window.emit_session_saved(id);
+        self.emit_session_saved(id);
         Ok(())
     }
 
