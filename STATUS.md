@@ -45,6 +45,7 @@
 - ADR 0042 — Activity Capture retention cascade (Accepted, sealed in `phase-10-complete`)
 - ADR 0043 — Activity Capture exclusion list + built-in rules (Accepted, sealed in `phase-10-complete`)
 - ADR 0044 — Activity Capture PDF export via `printpdf` (Accepted, sealed in `phase-10-complete`)
+- **Design System v1** — bead-only lateral epic (`mb-n455`, sealed 2026-05-26). Glass-tier semantic tokens (`--surface-glass-strong/soft/faint`), `--glass-blur-cap` (12px), canonical sticky-sidebar scroll convention (single-page scroller + `scrollbar-gutter: stable`), outline-button glass-faint default fill, full `100vh` → `100dvh` sweep, native form-control polish (themed range pill + custom select chevron + dark-pill retention inputs), Activity-page dead-token legacy bridge. 8/8 P1 + 9/12 P2 baseline-audit findings resolved (3 false-positives). 14 modified CSS files; no Rust changes. Baseline + final audits at `docs/audits/2026-05-26-design-v1-{baseline,final}/REPORT.md`. Conventions at `docs/design/conventions.md`. No ADR — work was token + CSS refinement, not architectural.
 
 If a kickoff prompt asks you to re-execute any of the above, **STOP** and surface
 the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently sealed".
@@ -62,6 +63,10 @@ is Dustin's post-seal step — judges don't catch live-OS regressions
 - `mb-fzeo` — phase10-deferral2: dictation runtime direct signal path (replace `cc_update_session` UI roundtrip).
 - `mb-mxal` — Activity Capture: consider relocating `mockingbird.db` from APPDATA Roaming to LOCALAPPDATA.
 - `mb-xnn7` — remove the `meeting_debug_listener_ping` IPC + its TS callers in `Meetings.tsx` / `MeetingOverlay.tsx` before the next MC enhancement epic ships.
+
+**Standing P3 follow-ups carried over from Design System v1 (`mb-n455`):**
+- `mb-5856` — SettingsMeetingTab: refactor its inline `<label.toggle><input><span>text</span></label>` markup to the canonical `<Switch>` component from `design/components/`. Visual pill flip is currently absent on those 5 toggles (text flow is fixed; only the green/coral state indicator is missing).
+- `mb-km6j` — Consolidate the 3 segmented-control patterns (Settings sub-tab strip / theme picker / sidebar nav) into a single primitive.
 
 **Parallel investigation bead (carryover, INDEPENDENT):** `mb-0n8c` (P2 chore) —
 root-cause `cargo test --release` `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)`

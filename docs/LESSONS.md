@@ -157,6 +157,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-26 | `[design-v1 / mb-n455]`          | Design System v1 audit + formalization shipped; six modes by which UI drift accumulated between phases; one specific bug class (the dead-token cascade silently rendering surfaces transparent) deserves a permanent guardrail; kitten's `getComputedStyle().backgroundColor` probe is blind to background-image gradients — false-positive trap |
 | 2026-05-26 | `[phase10-hotfix / mb-scla / mb-23rh]` | Two post-seal Phase 10 hotfixes: (1) `activity_blocks.primary_title` schema-vs-code drift slipped past green judges because `cargo test --release` is `--no-run` on this box — judges check contracts, not runtime SQL; (2) Command Center FSM `drive()` emitted the captured pre-effect `next` AFTER a recursive inner drive() had already emitted the post-effect state, clobbering the UI back into `Launching` and locking all tiles |
 | 2026-05-26 | `[phase10-wave-6b / SEAL]`       | Phase 10 sealed at `phase-10-complete`; Wiggum loop went green on iteration 1 of 3; narrowing the `sealed-phases-untouched` base ref from `phase-mc-complete` → `stable-alpha-v0.1` excluded an unrelated lateral epic from grader scope |
 | 2026-05-26 | `[phase10-wave-4]`               | 270s hard cap on agent foreground tool calls; backgrounded `start /B` cmd children survive parent shell exit; `is_multiple_of` is unstable on i64; release-mode `debug_assert!` defeats `#[should_panic]` in throwaway crate runs |
@@ -206,7 +207,19 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 ---
 
-## 2026-05-26 [phase10-hotfix-of-hotfix / mb-a0f3 / mb-q2if / mb-pxe7 / mb-dxpp] Capabilities-omission strikes for the THIRD time, and why ship-and-pray happened (again)
+## 2026-05-26 [design-v1 / mb-n455] Design System v1 audit + formalization shipped; the modes by which UI drift accumulated, the dead-token-cascade bug class, and the kitten-probe gradient blind spot
+
+**Context:** Dustin's first live-fire pass after `phase-10-complete` surfaced systemic UI drift, most visibly on the new Activity page (literally bare floating text on the photo bg — no card surfaces, no visible buttons). Bernard ran the kickoff plan as a 5-phase bead-only lateral epic (`mb-n455`, no ADR) with qa-kitten as the visual-audit specialist for baseline + re-audit. Final verdict: SHIP, 8/8 P1 + 9/12 P2 baseline findings resolved, 3 P2s reclassified as false-positives, 0 regressions, 2 P3 follow-ups filed.
+
+### Finding 1 — Six modes by which UI drift accumulates between phases
+
+The baseline audit's 30 findings clustered into six failure modes. Worth documenting so future phases catch them at PR time, not at first-live-fire time:
+
+1. **Dead-token cascade silently rendering transparent.** Phase 10's `Activity.module.css` consumed token names from a pre-W6 design-language vocabulary (`--surface-1`, `--surface-2`, `--text-1`, `--border-subtle`, `--accent-1`) that Wave 3+4 of the Design Language v1 epic had REMOVED. CSS spec says: when `var(--undefined)` has no fallback, the whole declaration is invalid and the cascade falls through to its initial value. For `background`, `border-color`, etc. that initial value is `transparent`. **No build error. No lint error. No test fails.** The surface just renders invisible. This is the single most insidious bug class in the design system; the only catch was a human glance at a photo background. Guardrail filed below.
+2. **Single-source-of-truth violations metastasizing.** The outline-button "transparent default" bug existed in `primitives.module.css` `.btn_ghost` for ~5 phases. Every phase that added a new outline action button picked it up. Fix was 2 lines in one file, but only because the abstraction existed; if Phase 10 had hand-rolled its own button styles (as Activity initially did), the sweep would have been 40+ sites.
+3. **`100vh` rot.** Each phase added new `100vh` references because the author was looking at adjacent files for the convention — and adjacent files were also `100vh`. Phase 8 was where `100dvh` should have landed but didn't. The sweep took 30 minutes once we decided to do it; the technical debt was 0 minutes per phase to write the wrong value.
+4. **Nested scrollers, normalized.** Same pattern as `100vh`. Each `overflow-y: auto` on a sidebar list looked correct in isolation; the bug only existed in the composition. The fix was inverting the entire scroll model (sticky sidebar in a single page-level scroller) which would have been ~30 minutes if done in Phase 8 and was ~2 hours retroactively across 3 pages.
+5. **Native form controls leaking through.** The HTML5 `<input type=range>` thumb, the native `<select>` chevron, the native `<input type=checkbox>` — all three rendered in OS chrome (bright blue / light gray / Windows-default) which broke the warm-neutral theme. Every phase author thought 
 
 **Context:** First Phase 10 hotfix (`ebe976b`) fixed the visible
 recursive-emit clobber (mb-23rh / mb-7ju5) and gates were green —
