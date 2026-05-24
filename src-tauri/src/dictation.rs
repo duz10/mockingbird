@@ -53,6 +53,7 @@
 pub mod events;
 pub mod ingest;
 pub mod ingest_channel;
+pub mod ingest_progress;
 pub mod llm_prompts;
 pub mod paste_payload;
 pub mod runtime;

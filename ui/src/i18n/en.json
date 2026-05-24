@@ -306,6 +306,15 @@
   "recording.action.cancel": "Cancel dictation",
   "recording.action.stop": "Stop",
 
+  "import.stage.decoding": "Decoding audio…",
+  "import.stage.transcribing": "Transcribing…",
+  "import.stage.cleaning": "Cleaning up…",
+  "import.stage.done": "Done ✓",
+  "import.stage.failed": "Import failed",
+  "import.source.desktop-import": "Audio file",
+  "import.source.mobile-inbox": "Mobile inbox",
+  "import.dismiss": "Dismiss",
+
   "common.save": "Save",
   "common.cancel": "Cancel",
   "common.delete": "Delete",

@@ -47,6 +47,7 @@ use rusqlite::Connection;
 use super::courier::{Courier, CourierHandle};
 use super::watcher::{InboxWatcher, InboxWatcherHandle, StableInboxFile};
 use crate::dictation::ingest_channel::HeadlessIngestSender;
+use crate::dictation::ingest_progress::{IngestProgressBus, NoopIngestProgressBus};
 use crate::error::{AppError, AppResult};
 use crate::settings::{model::SettingKey, Settings};
 use crate::vault::layout::VaultLayout;
@@ -139,6 +140,12 @@ pub struct InboxRuntime {
     config: Arc<RwLock<InboxConfig>>,
     state: Arc<Mutex<InboxState>>,
     headless_ingest_tx: HeadlessIngestSender,
+    /// Shared progress bus the spawned courier emits through (ADR
+    /// 0046 Iter 4 / mb-q1xt). Stored on the runtime rather than
+    /// per-courier so the same `AppIngestProgressBus` instance
+    /// survives stop/restart cycles -- avoiding a window where
+    /// emits silently drop because the bus was being reconstructed.
+    progress: Arc<dyn IngestProgressBus>,
 }
 
 impl InboxRuntime {
@@ -146,10 +153,22 @@ impl InboxRuntime {
     /// state. Call [`refresh_config`](Self::refresh_config) right
     /// after to read settings + start if appropriate.
     pub fn new(headless_ingest_tx: HeadlessIngestSender) -> Self {
+        Self::new_with_progress(headless_ingest_tx, Arc::new(NoopIngestProgressBus))
+    }
+
+    /// Construct with a custom progress bus. Used by `lib.rs::run`
+    /// to plug in the shared [`crate::dictation::ingest_progress::AppIngestProgressBus`]
+    /// so mobile-inbox arrivals light up the desktop progress overlay
+    /// alongside the IPC-driven `+ Audio file` path.
+    pub fn new_with_progress(
+        headless_ingest_tx: HeadlessIngestSender,
+        progress: Arc<dyn IngestProgressBus>,
+    ) -> Self {
         Self {
             config: Arc::new(RwLock::new(InboxConfig::default())),
             state: Arc::new(Mutex::new(InboxState::Stopped)),
             headless_ingest_tx,
+            progress,
         }
     }
 
@@ -268,6 +287,7 @@ impl InboxRuntime {
             file_rx,
             self.headless_ingest_tx.clone(),
             keep_audio_blobs,
+            Arc::clone(&self.progress),
         );
         let courier_handle = courier.start()?;
 

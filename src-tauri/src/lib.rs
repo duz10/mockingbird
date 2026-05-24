@@ -186,14 +186,31 @@ pub fn run() {
                         tracing::info!("🐦 dictation runtime started; hold RightAlt to dictate");
                         app.manage(runtime);
 
+                        // ADR 0046 Iter 4 / mb-q1xt — single shared
+                        // ingest-progress bus. Both `dictation_import_file`
+                        // (via `State<Arc<AppIngestProgressBus>>`) and the
+                        // inbox courier (via the constructor below) emit
+                        // through this one instance, so the React overlay
+                        // sees a single coherent event stream regardless
+                        // of origin.
+                        let progress_bus = std::sync::Arc::new(
+                            crate::dictation::ingest_progress::AppIngestProgressBus::new(),
+                        );
+                        progress_bus.set_app_handle(app.handle().clone());
+                        app.manage(std::sync::Arc::clone(&progress_bus));
+
                         // ADR 0046 Iter 3 / mb-3ivf — inbox runtime
                         // (Wave 3.3). Mirrors the vault export-job
                         // runtime's shape; gated by the SAME
                         // MobileSyncEnabled + VaultPath settings.
                         // Disabled-by-default so a stock install sees
                         // zero watcher overhead until the user opts in.
-                        let inbox_runtime =
-                            Arc::new(crate::inbox::runtime::InboxRuntime::new(headless_ingest_tx));
+                        let inbox_runtime = Arc::new(
+                            crate::inbox::runtime::InboxRuntime::new_with_progress(
+                                headless_ingest_tx,
+                                progress_bus,
+                            ),
+                        );
                         if let Err(e) = inbox_runtime.refresh_config(&shared_conn) {
                             tracing::error!(
                                 error = ?e,

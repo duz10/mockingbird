@@ -7,6 +7,7 @@
 import { useEffect, type ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 
+import { ImportProgressOverlay } from "./components/ImportProgressOverlay";
 import { Sidebar } from "./components/Sidebar";
 import { UnsplashBackground } from "./components/UnsplashBackground";
 import { api } from "./lib/tauri";
@@ -63,6 +64,14 @@ export function App({ children }: AppProps) {
           {children}
         </main>
       </div>
+      {/*
+        ADR 0046 Iter 4 / mb-q1xt — surfaces the `+ Audio file`
+        IPC + inbox-courier ingest pipeline. Self-mounted in the
+        main app shell because the recording overlay's webview is
+        owned by the dictation orchestrator and isn't trivially
+        repurposable for non-PTT progress.
+      */}
+      <ImportProgressOverlay />
     </>
   );
 }

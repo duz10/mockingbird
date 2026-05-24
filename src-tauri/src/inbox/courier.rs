@@ -62,6 +62,7 @@ use super::watcher::StableInboxFile;
 use crate::audio::decode::decode_to_pcm16_mono_16k;
 use crate::dictation::ingest::IngestProvenance;
 use crate::dictation::ingest_channel::{HeadlessIngestRequest, HeadlessIngestSender};
+use crate::dictation::ingest_progress::{self, IngestProgressBus, IngestProgressEvent};
 use crate::error::{AppError, AppResult};
 
 // --------------------------------------------------------------------
@@ -203,6 +204,12 @@ pub struct Courier {
     /// restarts the runtime, so this is effectively immutable
     /// per courier instance.
     keep_audio_blobs: bool,
+    /// ADR 0046 Iter 4 / mb-q1xt — best-effort progress emitter so
+    /// the desktop UI's import-progress overlay lights up for files
+    /// arriving via mobile sync, not just for the IPC-driven
+    /// `+ Audio file` path. Defaults to noop when constructed
+    /// without a real bus (tests / pre-Tauri-setup phase).
+    progress: Arc<dyn IngestProgressBus>,
 }
 
 impl Courier {
@@ -214,6 +221,7 @@ impl Courier {
         input_rx: Receiver<StableInboxFile>,
         headless_ingest_tx: HeadlessIngestSender,
         keep_audio_blobs: bool,
+        progress: Arc<dyn IngestProgressBus>,
     ) -> Self {
         Self {
             inbox_path,
@@ -221,6 +229,7 @@ impl Courier {
             headless_ingest_tx,
             in_flight: Arc::new(Mutex::new(())),
             keep_audio_blobs,
+            progress,
         }
     }
 
@@ -228,6 +237,7 @@ impl Courier {
     pub fn start(self) -> AppResult<CourierHandle> {
         let (shutdown_tx, shutdown_rx) = crossbeam_channel::bounded::<()>(1);
         let keep_audio_blobs = self.keep_audio_blobs;
+        let progress = Arc::clone(&self.progress);
         let thread = std::thread::Builder::new()
             .name("mockingbird-inbox-courier".into())
             .spawn(move || {
@@ -237,6 +247,7 @@ impl Courier {
                     &self.headless_ingest_tx,
                     &self.in_flight,
                     keep_audio_blobs,
+                    &*progress,
                     &shutdown_rx,
                 );
                 tracing::info!(target: "inbox::courier", "worker exiting");
@@ -264,6 +275,7 @@ fn courier_loop(
     headless_ingest_tx: &HeadlessIngestSender,
     in_flight: &Arc<Mutex<()>>,
     keep_audio_blobs: bool,
+    progress: &dyn IngestProgressBus,
     shutdown_rx: &crossbeam_channel::Receiver<()>,
 ) {
     use crossbeam_channel::{select, RecvError};
@@ -292,6 +304,7 @@ fn courier_loop(
                             headless_ingest_tx,
                             &ProductionFileOps,
                             keep_audio_blobs,
+                            progress,
                         );
                         log_outcome(&file, &outcome);
                     }
@@ -452,23 +465,46 @@ pub(crate) fn process_one(
     headless_ingest_tx: &HeadlessIngestSender,
     fs: &dyn FileOps,
     keep_audio_blobs: bool,
+    progress: &dyn IngestProgressBus,
 ) -> CourierOutcome {
-    // 1. Validate. Order matters: cheap checks first.
+    // Resolve filename up front so it can label every progress
+    // event (the failure paths below all need it too).
+    let original_filename = file
+        .path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("inbox-courier")
+        .to_string();
+
+    // 1. Validate. Order matters: cheap checks first. Validation
+    //    failures emit a single `failed` event -- no `decoding`
+    //    happened, so we don't need to clear an in-flight overlay.
     if let Err(failure) = validate(&file.path, fs) {
+        progress.emit(IngestProgressEvent::failed(
+            ingest_progress::source::MOBILE_INBOX,
+            &original_filename,
+            failure.to_string(),
+        ));
         return quarantine(inbox_path, file, failure, fs);
     }
 
     // 2. Decode. CPU-heavy; run synchronously on the courier
     //    thread (we're already off the IPC executor).
+    progress.emit(IngestProgressEvent::staged(
+        ingest_progress::stage::DECODING,
+        ingest_progress::source::MOBILE_INBOX,
+        &original_filename,
+    ));
     let samples = match fs.decode(&file.path) {
         Ok(s) => s,
         Err(e) => {
-            return quarantine(
-                inbox_path,
-                file,
-                CourierFailure::DecodeFailed(e.to_string()),
-                fs,
-            );
+            let err = e.to_string();
+            progress.emit(IngestProgressEvent::failed(
+                ingest_progress::source::MOBILE_INBOX,
+                &original_filename,
+                format!("decode failed: {err}"),
+            ));
+            return quarantine(inbox_path, file, CourierFailure::DecodeFailed(err), fs);
         }
     };
     tracing::info!(
@@ -479,13 +515,15 @@ pub(crate) fn process_one(
         "decoded"
     );
 
-    // 3. Build provenance + bounded(1) reply channel.
-    let original_filename = file
-        .path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("inbox-courier")
-        .to_string();
+    // 3. Build provenance + bounded(1) reply channel. Emit
+    //    `transcribing` BEFORE the send -- whisper + cleanup run
+    //    opaquely on the orchestrator's thread, so this single
+    //    label covers the entire crunch from the UI's POV.
+    progress.emit(IngestProgressEvent::staged(
+        ingest_progress::stage::TRANSCRIBING,
+        ingest_progress::source::MOBILE_INBOX,
+        &original_filename,
+    ));
     let provenance = IngestProvenance::mobile_inbox(original_filename.clone(), fs.now_iso());
 
     let (reply_tx, reply_rx) = crossbeam_channel::bounded(1);
@@ -497,6 +535,11 @@ pub(crate) fn process_one(
         })
         .is_err()
     {
+        progress.emit(IngestProgressEvent::failed(
+            ingest_progress::source::MOBILE_INBOX,
+            &original_filename,
+            "orchestrator unavailable".to_string(),
+        ));
         return quarantine(
             inbox_path,
             file,
@@ -511,14 +554,20 @@ pub(crate) fn process_one(
     let session_id = match reply_rx.recv() {
         Ok(Ok(id)) => id,
         Ok(Err(e)) => {
-            return quarantine(
-                inbox_path,
-                file,
-                CourierFailure::IngestFailed(e.to_string()),
-                fs,
-            );
+            let err = e.to_string();
+            progress.emit(IngestProgressEvent::failed(
+                ingest_progress::source::MOBILE_INBOX,
+                &original_filename,
+                format!("ingest failed: {err}"),
+            ));
+            return quarantine(inbox_path, file, CourierFailure::IngestFailed(err), fs);
         }
         Err(_) => {
+            progress.emit(IngestProgressEvent::failed(
+                ingest_progress::source::MOBILE_INBOX,
+                &original_filename,
+                "orchestrator dropped reply channel".to_string(),
+            ));
             return quarantine(
                 inbox_path,
                 file,
@@ -527,6 +576,14 @@ pub(crate) fn process_one(
             );
         }
     };
+    // 4b. Terminal `done` emit. Fires regardless of
+    //     archive-vs-delete branch below (the session row is
+    //     already committed at this point).
+    progress.emit(IngestProgressEvent::done(
+        ingest_progress::source::MOBILE_INBOX,
+        &original_filename,
+        session_id,
+    ));
 
     // 5. Archive OR delete on success, depending on the user's
     //    `KeepAudioBlobs` toggle. Either way the sessions row is
@@ -776,7 +833,14 @@ mod tests {
         fs.size_of.lock().unwrap().insert(file.path.clone(), 12_345);
         let tx = stub_orchestrator(Ok(42));
 
-        let outcome = process_one(&inbox, &file, &tx, &fs, true);
+        let outcome = process_one(
+            &inbox,
+            &file,
+            &tx,
+            &fs,
+            true,
+            &ingest_progress::NoopIngestProgressBus,
+        );
 
         match outcome {
             CourierOutcome::Archived {
@@ -811,7 +875,14 @@ mod tests {
         fs.size_of.lock().unwrap().insert(file.path.clone(), 12_345);
         let tx = stub_orchestrator(Ok(7));
 
-        let outcome = process_one(&inbox, &file, &tx, &fs, /*keep_audio_blobs=*/ false);
+        let outcome = process_one(
+            &inbox,
+            &file,
+            &tx,
+            &fs,
+            /*keep_audio_blobs=*/ false,
+            &ingest_progress::NoopIngestProgressBus,
+        );
 
         match outcome {
             CourierOutcome::Deleted { session_id } => assert_eq!(session_id, 7),
@@ -836,7 +907,14 @@ mod tests {
         fs.size_of.lock().unwrap().insert(file.path.clone(), 12_345);
         let tx = stub_orchestrator(Err(AppError::Stt("synthetic whisper crash".into())));
 
-        let outcome = process_one(&inbox, &file, &tx, &fs, true);
+        let outcome = process_one(
+            &inbox,
+            &file,
+            &tx,
+            &fs,
+            true,
+            &ingest_progress::NoopIngestProgressBus,
+        );
 
         match outcome {
             CourierOutcome::Quarantined { reason, failed_to } => {
@@ -855,7 +933,14 @@ mod tests {
         fs.size_of.lock().unwrap().insert(file.path.clone(), 0);
         let tx = stub_orchestrator(Ok(0));
 
-        let outcome = process_one(&inbox, &file, &tx, &fs, true);
+        let outcome = process_one(
+            &inbox,
+            &file,
+            &tx,
+            &fs,
+            true,
+            &ingest_progress::NoopIngestProgressBus,
+        );
         match outcome {
             CourierOutcome::Quarantined { reason, failed_to } => {
                 assert!(matches!(reason, CourierFailure::Empty));
@@ -874,7 +959,14 @@ mod tests {
         fs.size_of.lock().unwrap().insert(file.path.clone(), big);
         let tx = stub_orchestrator(Ok(0));
 
-        let outcome = process_one(&inbox, &file, &tx, &fs, true);
+        let outcome = process_one(
+            &inbox,
+            &file,
+            &tx,
+            &fs,
+            true,
+            &ingest_progress::NoopIngestProgressBus,
+        );
         assert!(matches!(
             outcome,
             CourierOutcome::Quarantined {
@@ -892,7 +984,14 @@ mod tests {
         fs.size_of.lock().unwrap().insert(file.path.clone(), 100);
         let tx = stub_orchestrator(Ok(0));
 
-        let outcome = process_one(&inbox, &file, &tx, &fs, true);
+        let outcome = process_one(
+            &inbox,
+            &file,
+            &tx,
+            &fs,
+            true,
+            &ingest_progress::NoopIngestProgressBus,
+        );
         assert!(matches!(
             outcome,
             CourierOutcome::Quarantined {
@@ -910,7 +1009,14 @@ mod tests {
         fs.size_of.lock().unwrap().insert(file.path.clone(), 100);
         let tx = stub_orchestrator(Ok(0));
 
-        let outcome = process_one(&inbox, &file, &tx, &fs, true);
+        let outcome = process_one(
+            &inbox,
+            &file,
+            &tx,
+            &fs,
+            true,
+            &ingest_progress::NoopIngestProgressBus,
+        );
         assert!(matches!(
             outcome,
             CourierOutcome::Quarantined {
@@ -931,7 +1037,14 @@ mod tests {
         let (tx, rx) = crossbeam_channel::unbounded::<HeadlessIngestRequest>();
         drop(rx);
 
-        let outcome = process_one(&inbox, &file, &tx, &fs, true);
+        let outcome = process_one(
+            &inbox,
+            &file,
+            &tx,
+            &fs,
+            true,
+            &ingest_progress::NoopIngestProgressBus,
+        );
         assert!(matches!(
             outcome,
             CourierOutcome::Quarantined {
@@ -939,6 +1052,94 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// In-test progress bus that records every emit in order.
+    /// Mirrors the capturing bus in `dictation/ingest_progress.rs`'s
+    /// own tests; kept local here so this file stays
+    /// throwaway-crate friendly (LESSONS P2).
+    #[derive(Default)]
+    struct RecordingBus {
+        events: StdMutex<Vec<(&'static str, &'static str, Option<i64>, Option<String>)>>,
+    }
+
+    impl IngestProgressBus for RecordingBus {
+        fn emit(&self, event: IngestProgressEvent) {
+            self.events.lock().unwrap().push((
+                event.stage,
+                event.source,
+                event.session_id,
+                event.error,
+            ));
+        }
+    }
+
+    #[test]
+    fn success_emits_decoding_then_transcribing_then_done_on_inbox_source() {
+        let inbox = PathBuf::from("/vault/inbox");
+        let file = synthetic_stable("/vault/inbox/Memo.m4a", 12_345);
+        let fs = FakeFs::new(12_345, true, "2026-05-27T18:00:00Z");
+        fs.size_of.lock().unwrap().insert(file.path.clone(), 12_345);
+        let tx = stub_orchestrator(Ok(7));
+        let bus = RecordingBus::default();
+
+        let _ = process_one(&inbox, &file, &tx, &fs, true, &bus);
+
+        let events = bus.events.lock().unwrap();
+        let stages: Vec<&str> = events.iter().map(|(s, _, _, _)| *s).collect();
+        assert_eq!(
+            stages,
+            vec!["decoding", "transcribing", "done"],
+            "got: {events:?}"
+        );
+        // Every event must carry the mobile-inbox source label.
+        for (_, src, _, _) in events.iter() {
+            assert_eq!(*src, "mobile-inbox");
+        }
+        // Only the terminal `done` emit carries session_id.
+        assert_eq!(events[0].2, None);
+        assert_eq!(events[1].2, None);
+        assert_eq!(events[2].2, Some(7));
+    }
+
+    #[test]
+    fn decode_failure_emits_decoding_then_failed_with_error() {
+        let inbox = PathBuf::from("/vault/inbox");
+        let file = synthetic_stable("/vault/inbox/Garbage.m4a", 100);
+        let fs = FakeFs::new(100, false, "2026-05-27T18:00:00Z");
+        fs.size_of.lock().unwrap().insert(file.path.clone(), 100);
+        let tx = stub_orchestrator(Ok(0));
+        let bus = RecordingBus::default();
+
+        let _ = process_one(&inbox, &file, &tx, &fs, true, &bus);
+
+        let events = bus.events.lock().unwrap();
+        let stages: Vec<&str> = events.iter().map(|(s, _, _, _)| *s).collect();
+        assert_eq!(stages, vec!["decoding", "failed"], "got: {events:?}");
+        // The `failed` emit MUST carry the error string so the
+        // overlay can quote it. Don't pin the exact message --
+        // just check it's non-empty.
+        let err = events[1].3.as_ref().expect("failed must carry error");
+        assert!(!err.is_empty());
+    }
+
+    #[test]
+    fn validation_failure_emits_only_failed_no_decoding() {
+        // Zero-byte file fails validation BEFORE the decode bracket --
+        // the user never saw a "decoding" toast, so we shouldn't
+        // emit one just to clear it.
+        let inbox = PathBuf::from("/vault/inbox");
+        let file = synthetic_stable("/vault/inbox/Empty.m4a", 0);
+        let fs = FakeFs::new(0, true, "2026-05-27T18:00:00Z");
+        fs.size_of.lock().unwrap().insert(file.path.clone(), 0);
+        let tx = stub_orchestrator(Ok(0));
+        let bus = RecordingBus::default();
+
+        let _ = process_one(&inbox, &file, &tx, &fs, true, &bus);
+
+        let events = bus.events.lock().unwrap();
+        let stages: Vec<&str> = events.iter().map(|(s, _, _, _)| *s).collect();
+        assert_eq!(stages, vec!["failed"], "got: {events:?}");
     }
 
     #[test]

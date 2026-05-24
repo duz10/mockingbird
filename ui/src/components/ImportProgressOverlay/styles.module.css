@@ -1,0 +1,170 @@
+/* Import-progress overlay — in-shell glass pill, bottom-right. */
+
+.shell {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 280px;
+  max-width: 420px;
+  padding: 10px 12px 10px 14px;
+  background: var(--surface-glass-strong, var(--surf-2));
+  backdrop-filter: blur(var(--glass-blur-cap, 12px));
+  -webkit-backdrop-filter: blur(var(--glass-blur-cap, 12px));
+  color: var(--on-surf);
+  border: 1px solid color-mix(in oklab, var(--on-surf) 8%, transparent);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px color-mix(in oklab, black 18%, transparent);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  pointer-events: auto;
+
+  /* Slide-in animation. Plain @keyframes — honors reduced-motion. */
+  animation: import_overlay_in 220ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+@keyframes import_overlay_in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell {
+    animation: none;
+  }
+}
+
+/* Pulse dot — left-side color status. Pulled inline (not from
+ * recording overlay) because the recording webview has its own dot;
+ * sharing the CSS would couple the two surfaces unnecessarily. */
+.pulse {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--rec-bg, var(--status-processing));
+  box-shadow: 0 0 0 0 var(--rec-glow, var(--status-processing));
+  flex-shrink: 0;
+  animation: import_pulse 1.4s infinite cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes import_pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--rec-glow) 60%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 10px color-mix(in oklab, var(--rec-glow) 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--rec-glow) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse {
+    animation: none;
+  }
+}
+
+/* Per-stage tokens. Mirrors the recording overlay's per-state colors
+ * but kept local because the import stage set isn't identical
+ * (no listening/pasting, has decoding instead). */
+.stage_decoding {
+  --rec-bg: var(--status-processing);
+  --rec-glow: var(--status-processing);
+}
+.stage_transcribing {
+  --rec-bg: var(--status-processing);
+  --rec-glow: var(--status-processing);
+}
+.stage_cleaning {
+  --rec-bg: var(--status-processing);
+  --rec-glow: var(--status-processing);
+}
+.stage_done {
+  --rec-bg: var(--status-ok);
+  --rec-glow: transparent;
+}
+.stage_failed {
+  --rec-bg: var(--status-error);
+  --rec-glow: var(--status-error);
+}
+
+.body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.label {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.detail {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: color-mix(in oklab, var(--on-surf) 70%, transparent);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.source {
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--on-surf) 6%, transparent);
+}
+
+.filename {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.error {
+  margin-top: 4px;
+  color: var(--status-error);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.dismiss {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  border-radius: 50%;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.dismiss:hover {
+  background: color-mix(in oklab, var(--on-surf) 10%, transparent);
+  opacity: 1;
+}
