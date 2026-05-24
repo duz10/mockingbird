@@ -25,6 +25,11 @@ pub mod db;
 pub mod dictation;
 pub mod error;
 pub mod hotkey;
+// ADR 0046 Iter 3 — inbound mobile-inbox subsystem. Sibling of
+// `vault::` (which owns the outbound projection). Wave 3.1 ships the
+// file-watcher + stability state machine; Waves 3.2 + 3.3 add the
+// courier processor and the runtime wiring respectively.
+pub mod inbox;
 pub mod injection;
 pub mod learning;
 pub mod logging;

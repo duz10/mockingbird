@@ -161,6 +161,16 @@ symphonia      = { version = "0.5", default-features = false, features = [
     "ogg",
 ] }
 
+# ADR 0046 §6 / Iter 3 / mb-9lgi — filesystem watcher for the inbox
+# courier flow (iOS Shortcut writes into `<vault>/inbox/`). ADR §6
+# mandates `notify-debouncer-full` over raw `notify` because Windows
+# `ReadDirectoryChangesW` events under bursts duplicate / lose / coalesce
+# poorly without debouncing — confirmed empirically by Wave 0 spike
+# Finding 3 (3-4 duplicate events within ~12 ms per logical change).
+# `notify-debouncer-full` 0.3.x depends on notify 6 and ships its own
+# debouncer thread.
+notify-debouncer-full = "0.3"
+
 # ADR 0046 §3.2 (mb-7vyz) — sibling input channel for the dictation
 # orchestrator's `run` loop, carrying `HeadlessIngestRequest`s from the
 # `+ Audio file` IPC (Iter 1) and the inbox-watcher courier flow (Iter 3).

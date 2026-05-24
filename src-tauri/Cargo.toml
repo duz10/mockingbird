@@ -74,6 +74,14 @@ symphonia = { workspace = true }
 # `dictation::runtime`. See ADR §3.2 for the topology rationale.
 crossbeam-channel = { workspace = true }
 
+# ADR 0046 §6 / Iter 3 / mb-9lgi — inbox file-watcher dep. The Wave 0
+# spike (`docs/spikes/iter3-sync-layer-findings.md`, Finding 3) shows
+# every logical FS change emits 3-4 duplicate events within ~12 ms;
+# notify-debouncer-full coalesces these into a single event per path
+# per 100 ms quiet window, on top of which our `inbox::watcher` runs
+# the size-stability state machine.
+notify-debouncer-full = { workspace = true }
+
 [dev-dependencies]
 tempfile  = { workspace = true }
 rstest    = { workspace = true }
