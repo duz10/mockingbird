@@ -338,13 +338,15 @@ ADR.
 **Live-fire smoke test:** Dustin's post-seal step (LESSONS P7 pattern;
 judges prove invariants but not a clean OS bring-up).
 
-### 3.16 `vault/` — Mobile extension via Obsidian Sync (ADR 0046, Iter 2 SEALED)
+### 3.16 `vault/` — Mobile extension via Obsidian Sync (ADR 0046, Iters 1-3 IMPLEMENTATION COMPLETE)
 Chartered by ADR 0046. Iter 1 (desktop file-ingest pipeline) sealed
 2026-05-27. **Iter 2 (outbound Obsidian projection) SEALED 2026-05-27** —
-live-fire smoke green on desktop + iPhone Obsidian Mobile; outbound
-projection shipping end-to-end. Iter 3 (mobile inbox / iOS Shortcut
-drop folder) + Iter 4 (full Mobile Sync settings tab + connection health
-+ nested-vault setup wizard `mb-3xww`) still to ship.
+live-fire smoke green on desktop + iPhone Obsidian Mobile. **Iter 3
+(mobile inbox → desktop courier) IMPLEMENTATION COMPLETE 2026-05-27** —
+watcher + courier + runtime live; live-fire end-to-end smoke green on a
+pre-existing voice memo (see §3.17). Iter 3 judge (`mb-ksau`) + Shortcut
+smoke (`mb-1yxp`) still owed. Iter 4 (full Mobile Sync settings tab +
+connection health + nested-vault setup wizard `mb-3xww`) still to ship.
 
 **Subsystem entry point.** `VaultRuntime::new(&db)` constructed in
 `lib.rs::setup` immediately after `app.manage(AppState::new(...))`, BEFORE
@@ -413,6 +415,72 @@ via Obsidian Sync within ~30s. Zero implementation bugs. One operational
 gotcha (Obsidian nested-vault trap) surfaced and resolved out-of-band;
 Iter 4 setup wizard will detect + guide (`mb-3xww`). See LESSONS
 2026-05-27.
+
+---
+
+### 3.17 `inbox/` — Mobile inbox courier (ADR 0046 Iter 3, implementation complete)
+Sibling subsystem to `vault/`. Where `vault/` projects desktop records
+OUT to the Obsidian vault for the iPhone to read, `inbox/` watches the
+vault for files the iPhone (via iOS Shortcut + Voice Memos) drops IN
+and walks them through the headless dictation ingest channel published
+by ADR 0046 §3.2 (Iter 1).
+
+**Gating.** The SAME `MobileSyncEnabled` + `VaultPath` settings that gate
+the outbound projection also gate the inbox. One toggle controls both
+directions; flipping it routes through `vault_settings_set` which refreshes
+BOTH runtimes in the same IPC tick.
+
+**Modules.**
+- `watcher.rs` — `notify`-crate filesystem watcher on `<vault>/inbox/`.
+  Filters: path-segment exclusions (`.obsidian` / `.git` / `.mockingbird` /
+  `_archive` / `_failed` / `_keep`), extension exclusions for
+  partial-write markers (`.tmp` / `.partial` / `.icloud` / `.crdownload` /
+  `.swp` / `.lock`), filename prefix exclusions (`~$` Office lockfiles),
+  and an extension allowlist of `m4a` / `wav` / `mp3`. 100ms debounce
+  per Wave 0 Finding 3 (every FS event fires 3-4x within ~5ms), 2-second
+  stability check per Wave 0 Finding 4 (defensive size-unchanged window
+  against future streaming-write semantics; binary files arrive
+  atomically today per Finding 1 so check completes on first try). Emits
+  `StableInboxFile { path, size, observed_at }` via crossbeam channel.
+- `courier.rs` — `Courier` worker, single-in-flight via `Mutex<()>`.
+  Per file: extension/size validation (`> 0`, `< 50 MB`), decode via
+  `audio::decode::decode_to_pcm16_mono_16k`, send
+  `HeadlessIngestRequest{provenance: SessionSource::MobileInbox, ...}`
+  on the Iter 1 channel, await reply. Success → atomic rename to
+  `inbox/_archive/<YYYY-MM-DD>/<original-filename>` (date subdir prevents
+  cross-day collisions). Failure → atomic rename to `inbox/_failed/`
+  with a `-N` suffix on collision. `FileOps` trait + `ProductionFileOps`
+  split keeps every routing branch fully testable without real disk I/O.
+- `runtime.rs` — `InboxRuntime`, mirrors `VaultRuntime`'s shape. Owns
+  `InboxConfig { enabled, vault_path }` snapshot + state machine
+  (`Stopped` ↔ `Running { vault_path, watcher, courier }`). 5 transitions
+  in `refresh_config`: stopped/idle → no-op; stopped/active → start;
+  running/idle → stop; running/same-path → no-op; running/different-path
+  → stop + start. On `start`, walks `<vault>/inbox/` non-recursively for
+  pre-existing audio files and pre-fills the channel BEFORE spawning the
+  watcher — closes the "recorded while laptop closed" startup-catchup
+  case from ADR §6.
+
+**Wiring in `lib.rs`.** Constructed inside the `Ok(DictationRuntime)` arm
+right after `app.manage(headless_ingest_tx.clone())`, parallel to the
+vault export-job runtime construction earlier in `setup`. Lives behind
+`#[cfg(target_os = "windows")]` for the same reason the dictation runtime
+does — the headless ingest channel is only published on Windows.
+
+**Live-fire end-to-end smoke (2026-05-27).** First launch after wiring:
+initial scan found a pre-existing `New Recording 38.m4a` (29.8s voice
+memo) sitting in `<vault>/inbox/`. Courier decoded it via symphonia,
+Iter 1's `headless_ingest` ran it through whisper-rs CUDA (1079ms STT) +
+Ollama cleanup (9866ms), wrote `sessions` row `session_id=116` with
+`source = 'mobile-inbox'`, and the courier atomically archived the
+source file to `<vault>/inbox/_archive/2026-05-24/`. Zero implementation
+bugs surfaced.
+
+**What's NOT in scope here** (Iter 4 hardening matrix `mb-qxrm`):
+conflict-file quarantine, dedup ledger, placeholder-note writes,
+machine-fingerprint mismatch handling, oversized silent-skip with
+sidecar marker, app-offline catch-up retry policy. The implementation
+slate (Waves 3.1-3.3) is the happy-path baseline; Iter 4 hardens it.
 
 ---
 
