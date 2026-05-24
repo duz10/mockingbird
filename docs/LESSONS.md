@@ -226,6 +226,20 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 ---
 
+## 2026-05-27 [ADR 0046 Iter 3 Wave 0 / mb-s8s2] Two small but real Windows tooling gotchas
+
+**Context:** Building `scripts\watch-vault.ps1` (PowerShell 5.1 FileSystemWatcher script for the sync-layer spike) and updating `mb-s8s2` description via `bd update`. Both hit silent failure modes worth recording.
+
+**Finding 1 — PowerShell 5.1 reads `.ps1` files as ANSI / Windows-1252 by default, not UTF-8.** Em-dashes (`U+2014`, encoded as 3 bytes `E2 80 94` in UTF-8) get decoded as three Latin-1 characters (`â € ”`). The middle byte `0x80` is the EUR sign in Windows-1252, but more importantly the `0x94` byte is interpreted as a smart double quote (`”`). When that lands inside a `Write-Host "..."` string the parser sees an unterminated string and continues parsing the next token as a command — producing baffling errors like `The term 'mb-s8s2' is not recognized as the name of a cmdlet`. Fix: ASCII-only inside `.ps1` files, or save with a UTF-8 BOM. Detection one-liner: `[regex]::Matches((Get-Content -Raw -Encoding UTF8 path.ps1), '[^\x00-\x7F]').Count`. Sweep script: `(Get-Content -Raw -Encoding UTF8 path) -replace [char]0x2014, '--' -replace [char]0x2019, "'" ...` then `[System.IO.File]::WriteAllText` with a no-BOM `UTF8Encoding`.
+
+**Finding 2 — `Register-ObjectEvent -Action { ... }` runs the action in a SEPARATE runspace from the script.** Anything the action block calls (script-scope functions, `$script:` variables) silently isn't visible, and any exception thrown inside the action is swallowed into the per-event runspace's `$Error` and never surfaces. The script appears to start fine, the watcher fires events, and... nothing happens. The diagnostic-friendly pattern is to register WITHOUT `-Action` (events accumulate in PowerShell's event queue) and dequeue them with `Wait-Event` / `Get-Event` in the main loop. Everything stays in one runspace, handlers can see script scope, and exceptions surface normally.
+
+**Finding 3 — `bd update <id> -d "<long string>"` SILENTLY truncates / does not apply the new description for strings over a few hundred characters on Windows.** Exit code 0, success message, but the JSONL on disk is unchanged. The reliable mechanism is `bd update <id> --body-file path.txt` (write the new description to a temp file first). Detection: `python -c "..."` against `.beads/issues.jsonl` to compare description length before/after. The `-d` flag is fine for short titles-style updates; treat anything multi-paragraph as `--body-file`-only.
+
+**Action:** All three are non-PINNED-worthy individually (they bite once and you remember), but recording them here so a future session's grep on `FileSystemWatcher` / `Register-ObjectEvent` / `bd update --description` finds the answers immediately. None changes the standard workflow; just trapdoors with documented hatches.
+
+---
+
 ## 2026-05-27 [ADR 0046 Iter 2 SEAL / mb-3xww] Obsidian nested-vault trap during Mockingbird Mobile Sync setup
 
 **Context:** Iter 2 of ADR 0046 (outbound Obsidian projection) shipped across eight commits and a Mobile Sync (preview) section in Settings → Advanced. Dustin's hands-on smoke against `C:\Users\dboyd\mockingbird-vault\` with Obsidian Sync Standard tier paired to iPhone Obsidian Mobile. Backfill triggered, toast said "Vault up to date (90 records)." Mockingbird logs clean. iPhone Obsidian Mobile after sync round-trip: showed nothing but the `Welcome.md` Obsidian had created at vault init. Desktop Obsidian: same. But Mockingbird-side everything looked correct.
