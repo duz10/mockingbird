@@ -31,6 +31,10 @@ import type {
   VaultSyncBackend,
 } from "../lib/types";
 
+import {
+  NestedVaultWizard,
+  type NestedVaultInfo,
+} from "./NestedVaultWizard";
 import styles from "./Settings.module.css";
 
 // --------------------------------------------------------------------
@@ -298,16 +302,75 @@ export function SettingsMobileSyncTab() {
     [snap],
   );
 
+  // ADR 0046 Iter 4 / mb-3xww — nested-vault wizard state. When
+  // the user picks a folder INSIDE an existing Obsidian vault, we
+  // open the wizard with the detection result + defer persistence
+  // until the user picks a branch.
+  const [nestedInfo, setNestedInfo] = useState<NestedVaultInfo | null>(null);
+
+  const tryPersistVaultPath = useCallback(
+    async (candidate: string) => {
+      try {
+        const check = await api.vault_check_path(candidate);
+        if (check.kind === "nestedVault") {
+          setNestedInfo({
+            candidatePath: candidate,
+            parentVault: check.parentVault,
+            suggestedSibling: check.suggestedSibling,
+          });
+          return;
+        }
+        await persist("vaultPath", candidate, { vaultPath: candidate });
+      } catch (e) {
+        setToast(`Vault path check failed: ${String(e)}`);
+      }
+    },
+    [persist],
+  );
+
   const handleBrowse = useCallback(async () => {
     try {
       const picked = await api.vault_pick_directory();
       if (picked) {
-        await persist("vaultPath", picked, { vaultPath: picked });
+        await tryPersistVaultPath(picked);
       }
     } catch (e) {
       setToast(`Folder picker failed: ${String(e)}`);
     }
-  }, [persist]);
+  }, [tryPersistVaultPath]);
+
+  // Wizard callbacks. Kept here (not inside the JSX) so the deps
+  // are explicit and React doesn't see fresh closures every render.
+  const handleNestedAccept = useCallback(
+    async (
+      finalPath: string,
+      { acceptedNested }: { acceptedNested: boolean },
+    ) => {
+      setNestedInfo(null);
+      try {
+        await persist("vaultPath", finalPath, { vaultPath: finalPath });
+        if (acceptedNested) {
+          // Out-of-scope: a persisted "accepted nested-vault risk"
+          // flag. For now we just log a tracing breadcrumb via
+          // a toast (visible to the user) so support has something
+          // to grep for. Promote to a SettingKey if churn shows up.
+          setToast(
+            "Saved nested vault path. Watch for Obsidian sync conflicts.",
+          );
+        }
+      } catch (e) {
+        setToast(`Save failed: ${String(e)}`);
+      }
+    },
+    [persist],
+  );
+
+  const handleNestedPickDifferent = useCallback(() => {
+    setNestedInfo(null);
+    // Re-open the picker on the next tick so React has time to
+    // unmount the dialog before the native modal grabs focus.
+    setTimeout(() => void handleBrowse(), 0);
+  }, [handleBrowse]);
 
   const handleExportNow = useCallback(async () => {
     setExportBusy(true);
@@ -680,6 +743,19 @@ export function SettingsMobileSyncTab() {
           {toast}
         </div>
       ) : null}
+
+      {/* ADR 0046 Iter 4 / mb-3xww — nested-vault wizard. Rendered
+          inline so the dim-out backdrop covers the Settings page; we
+          deliberately don't portal-mount because there's no other
+          DOM that could end up above this dialog in normal use. */}
+      {nestedInfo && (
+        <NestedVaultWizard
+          info={nestedInfo}
+          onAccept={(p, opts) => void handleNestedAccept(p, opts)}
+          onPickDifferent={handleNestedPickDifferent}
+          onCancel={() => setNestedInfo(null)}
+        />
+      )}
     </>
   );
 }

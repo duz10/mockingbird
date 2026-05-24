@@ -29,6 +29,7 @@ import type {
   SettingsSnapshot,
   TranscriptSearchHit,
   VaultExportSummary,
+  VaultPathCheck,
   VaultRuntimeStatus,
   VaultSettingsSnapshot,
 } from "./types";
@@ -229,6 +230,19 @@ export const api = {
    *  currently sitting in `_failed/`. */
   inbox_runtime_status: () =>
     invoke<InboxRuntimeStatus>("inbox_runtime_status"),
+
+  // ADR 0046 Iter 4 / mb-3xww — nested-vault detection wizard.
+  /** Pre-flight a candidate vault path. Returns `{kind: "ok"}` when
+   *  safe to use, or `{kind: "nestedVault", parentVault, suggestedSibling}`
+   *  when the user picked a folder INSIDE an existing Obsidian vault.
+   *  Pure inspection — does NOT mutate settings. */
+  vault_check_path: (path: string) =>
+    invoke<VaultPathCheck>("vault_check_path", { path }),
+  /** Create a directory (and any missing parents) at `path`. Used by
+   *  the "Use a sibling location instead" branch of the nested-vault
+   *  wizard — the suggested sibling won't exist on disk yet. */
+  vault_ensure_dir: (path: string) =>
+    invoke<void>("vault_ensure_dir", { path }),
 };
 
 /* ------------------------------------------------------------------ */
@@ -274,6 +288,13 @@ function fixtureFor<T>(command: string, args?: object): T {
     case "vault_pick_directory":
       // Browser-preview stub: pretend the user picked a path.
       return fixture(command, "C:\\Users\\you\\mockingbird-vault") as T;
+    case "vault_check_path":
+      // Browser preview defaults to the happy path. Playwright
+      // specs that want to exercise the nested-vault wizard set a
+      // command fixture override explicitly.
+      return fixture(command, { kind: "ok" } as VaultPathCheck) as T;
+    case "vault_ensure_dir":
+      return fixture(command, undefined) as T;
     case "meeting_settings_get_all":
       return fixture(command, {
         hotkeyModifier: "VK_RCONTROL",

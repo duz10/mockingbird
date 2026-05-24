@@ -315,6 +315,14 @@
   "import.source.mobile-inbox": "Mobile inbox",
   "import.dismiss": "Dismiss",
 
+  "nestedVault.title": "Vault location concern",
+  "nestedVault.body.intro": "The folder you picked is inside an existing Obsidian vault:",
+  "nestedVault.body.risk": "Both vaults would try to manage the same .obsidian/ configuration, which can cause sync conflicts and unexpected file rewrites.",
+  "nestedVault.sibling.title": "Use a sibling location instead (recommended)",
+  "nestedVault.sibling.action": "Use sibling location",
+  "nestedVault.pickDifferent": "Pick a different location",
+  "nestedVault.useAnyway": "Use anyway",
+
   "common.save": "Save",
   "common.cancel": "Cancel",
   "common.delete": "Delete",

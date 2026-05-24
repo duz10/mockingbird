@@ -432,3 +432,20 @@ export interface VaultExportSummary {
   archived: number;
   skipped: boolean;
 }
+
+/** ADR 0046 Iter 4 / mb-3xww — pre-flight check for a candidate
+ *  vault path. The Settings UI runs this BEFORE persisting
+ *  `VaultPath` so it can surface a guided dialog when the user
+ *  pointed at a folder INSIDE an existing Obsidian vault (both
+ *  vaults would then race to own `.obsidian/`, which is one of
+ *  the original Iter 2 smoke-test traps).
+ *
+ *  Wire-format mirror of the Rust `commands::vault::VaultPathCheck`
+ *  enum, serialized with `tag: "kind"`. */
+export type VaultPathCheck =
+  | { kind: "ok" }
+  | {
+      kind: "nestedVault";
+      parentVault: string;
+      suggestedSibling: string | null;
+    };
