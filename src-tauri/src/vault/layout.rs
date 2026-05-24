@@ -168,6 +168,47 @@ impl<'a> VaultLayout<'a> {
     }
 }
 
+// --------------------------------------------------------------------
+// Nested-vault trap detection (ADR 0046 Iter 4 / mb-3xww)
+// --------------------------------------------------------------------
+
+/// Walk the directory tree UPWARDS from `candidate`, looking for an
+/// ancestor that contains a `.obsidian/` subfolder. If any ancestor
+/// is itself an Obsidian vault, the proposed root is *nested*
+/// inside that vault — both vaults would race to own the same
+/// `.obsidian/` config and Obsidian Sync loops on the conflict.
+///
+/// Returns:
+/// - `None` when no ancestor has `.obsidian/` (the safe case).
+/// - `Some(parent_vault_path)` when a nested-vault trap is detected;
+///   the Settings UI surfaces a guided dialog so the user can pick
+///   a sibling location instead.
+///
+/// `candidate` itself is intentionally NOT inspected — a user who
+/// picks an existing Obsidian vault root as their Mockingbird vault
+/// is doing the supported "share the same root" setup.
+pub fn detect_nested_vault(candidate: &Path) -> Option<PathBuf> {
+    let mut current = candidate.parent()?;
+    loop {
+        if current.join(".obsidian").is_dir() {
+            return Some(current.to_path_buf());
+        }
+        current = current.parent()?;
+    }
+}
+
+/// Suggest a SIBLING vault path next to the detected parent vault.
+/// Used by the nested-vault dialog's "Use a sibling location"
+/// recommendation: takes the parent Obsidian vault path and returns
+/// `<parent_of_obsidian_vault>/<obsidian-vault-name>-mockingbird`.
+/// If the parent has no parent (root drive), returns `None` — the
+/// UI falls back to letting the user pick manually.
+pub fn suggest_sibling_vault(parent_vault: &Path) -> Option<PathBuf> {
+    let grandparent = parent_vault.parent()?;
+    let name = parent_vault.file_name()?.to_str()?;
+    Some(grandparent.join(format!("{name}-mockingbird")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,6 +288,59 @@ mod tests {
             AppError::Vault(msg) => assert!(msg.contains("not a directory")),
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn detect_nested_vault_flags_ancestor_obsidian_folder() {
+        // <td>/my-obsidian/.obsidian/ (parent vault) +
+        // <td>/my-obsidian/mockingbird/ (proposed nested vault).
+        let td = TempDir::new().unwrap();
+        let parent_vault = td.path().join("my-obsidian");
+        let mockingbird = parent_vault.join("mockingbird");
+        fs::create_dir_all(parent_vault.join(".obsidian")).unwrap();
+        fs::create_dir_all(&mockingbird).unwrap();
+
+        let detected = detect_nested_vault(&mockingbird).expect("nested");
+        assert_eq!(detected, parent_vault);
+    }
+
+    #[test]
+    fn detect_nested_vault_returns_none_for_clean_path() {
+        let td = TempDir::new().unwrap();
+        let clean = td.path().join("fresh-vault");
+        fs::create_dir_all(&clean).unwrap();
+        assert!(detect_nested_vault(&clean).is_none());
+    }
+
+    #[test]
+    fn detect_nested_vault_ignores_candidate_own_obsidian_dir() {
+        // Candidate itself has .obsidian/ — that's the user picking
+        // their Obsidian vault root as the Mockingbird vault. Allowed.
+        let td = TempDir::new().unwrap();
+        let candidate = td.path().join("shared-vault");
+        fs::create_dir_all(candidate.join(".obsidian")).unwrap();
+        assert!(detect_nested_vault(&candidate).is_none());
+    }
+
+    #[test]
+    fn detect_nested_vault_walks_multiple_levels_up() {
+        let td = TempDir::new().unwrap();
+        let parent_vault = td.path().join("top-vault");
+        let deep = parent_vault.join("a").join("b").join("c").join("nested");
+        fs::create_dir_all(parent_vault.join(".obsidian")).unwrap();
+        fs::create_dir_all(&deep).unwrap();
+        let detected = detect_nested_vault(&deep).expect("nested");
+        assert_eq!(detected, parent_vault);
+    }
+
+    #[test]
+    fn suggest_sibling_vault_appends_mockingbird_suffix() {
+        let parent = PathBuf::from("C:\\Users\\you\\my-vault");
+        let suggested = suggest_sibling_vault(&parent).expect("sibling");
+        assert_eq!(
+            suggested,
+            PathBuf::from("C:\\Users\\you\\my-vault-mockingbird")
+        );
     }
 
     #[test]

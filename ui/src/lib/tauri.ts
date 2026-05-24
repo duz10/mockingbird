@@ -16,6 +16,7 @@
 import type {
   ActiveMode,
   DictionaryEntry,
+  InboxRuntimeStatus,
   InsightsSnapshot,
   LearningRun,
   LlmPassPromptArg,
@@ -28,6 +29,7 @@ import type {
   SettingsSnapshot,
   TranscriptSearchHit,
   VaultExportSummary,
+  VaultRuntimeStatus,
   VaultSettingsSnapshot,
 } from "./types";
 
@@ -215,6 +217,18 @@ export const api = {
    *  Rust IPC so the UI doesn't need `@tauri-apps/plugin-dialog`. */
   vault_pick_directory: () =>
     invoke<string | null>("vault_pick_directory"),
+
+  // ADR 0046 Iter 4 / mb-vg3p — Mobile Sync settings-tab health card.
+  /** Snapshot of the outbound projection runtime: running flag,
+   *  manifest age, and last filesystem error if any. Polled every
+   *  5 s while the Mobile Sync tab is visible. */
+  vault_runtime_status: () =>
+    invoke<VaultRuntimeStatus>("vault_runtime_status"),
+  /** Snapshot of the inbox courier runtime: running flag, watch
+   *  path, newest archived file timestamp, and the count of files
+   *  currently sitting in `_failed/`. */
+  inbox_runtime_status: () =>
+    invoke<InboxRuntimeStatus>("inbox_runtime_status"),
 };
 
 /* ------------------------------------------------------------------ */

@@ -1,5 +1,8 @@
 // Settings page — left-rail tabs, right panel renders the active tab.
-// 4 tabs: General, Models, History & data, Advanced.
+// Tabs: General, Models, History & data, Meetings, Mobile Sync, Advanced.
+// ADR 0046 Iter 4 / mb-vg3p added the Mobile Sync tab; the inline
+// preview that used to live under Advanced was lifted into the new
+// dedicated tab and deleted.
 //
 // State source of truth: `useAppStore.settings`. Writes go through
 // `api.update_setting(key, value)` which we round-trip back into the
@@ -31,10 +34,16 @@ import { CommandCenterChordRow } from "./SettingsCommandCenterRow";
 import { SettingsActivityAudioRow } from "./SettingsActivityAudioRow";
 import { SettingsActivityHardeningRow } from "./SettingsActivityHardeningRow";
 import { SettingsMeetingTab } from "./SettingsMeetingTab";
-import { SettingsMobilePreview } from "./SettingsMobilePreview";
+import { SettingsMobileSyncTab } from "./SettingsMobileSyncTab";
 import styles from "./Settings.module.css";
 
-type Tab = "general" | "models" | "history" | "meeting" | "advanced";
+type Tab =
+  | "general"
+  | "models"
+  | "history"
+  | "meeting"
+  | "mobileSync"
+  | "advanced";
 
 export function SettingsPage() {
   const settings = useAppStore((s) => s.settings);
@@ -84,6 +93,7 @@ export function SettingsPage() {
           <TabBtn id="models" active={tab} setActive={setTab} label={t("settings.tab.models")} />
           <TabBtn id="history" active={tab} setActive={setTab} label={t("settings.tab.history")} />
           <TabBtn id="meeting" active={tab} setActive={setTab} label={t("settings.tab.meeting")} />
+          <TabBtn id="mobileSync" active={tab} setActive={setTab} label={t("settings.tab.mobileSync")} />
           <TabBtn id="advanced" active={tab} setActive={setTab} label={t("settings.tab.advanced")} />
         </nav>
 
@@ -98,6 +108,7 @@ export function SettingsPage() {
           {tab === "models" && <ModelsPanel settings={settings} patch={patch} />}
           {tab === "history" && <HistoryPanel settings={settings} patch={patch} />}
           {tab === "meeting" && <SettingsMeetingTab />}
+          {tab === "mobileSync" && <SettingsMobileSyncTab />}
           {tab === "advanced" && <AdvancedPanel settings={settings} patch={patch} />}
         </div>
       </div>
@@ -609,7 +620,6 @@ function AdvancedPanel({ settings, patch }: PanelProps) {
 
   return (
     <>
-      <SettingsMobilePreview />
       <Card title={t("settings.advanced.learning")}>
         <p style={{ margin: 0, color: "var(--on-surf-muted)", font: "var(--type-sm)" }}>
           {t("settings.advanced.learning.help")}

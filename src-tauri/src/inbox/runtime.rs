@@ -55,12 +55,12 @@ use crate::vault::layout::VaultLayout;
 // Config snapshot (lighter than VaultConfig — we only need two keys)
 // --------------------------------------------------------------------
 
-/// The two settings rows that gate the inbox subsystem.
+/// The settings rows that gate the inbox subsystem.
 ///
 /// Kept as its own struct (rather than reusing `vault::VaultConfig`)
-/// so a future inbox-specific knob (`InboxDebounceMs`,
-/// `InboxKeepFiles`, …) can land here without dragging the export
-/// job into a config it doesn't care about.
+/// so inbox-specific knobs (`KeepAudioBlobs`, future `InboxDebounceMs`
+/// …) can land here without dragging the export job into a config
+/// it doesn't care about.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InboxConfig {
     /// Mirror of `MobileSyncEnabled`. False → runtime stays Stopped.
@@ -69,6 +69,12 @@ pub struct InboxConfig {
     /// `enabled` is true (the user toggled sync on before picking
     /// a directory).
     pub vault_path: Option<PathBuf>,
+    /// ADR 0046 Iter 4 — mirror of `KeepAudioBlobs`. When false,
+    /// the courier DELETES the source audio after a successful
+    /// ingest instead of moving it to `_archive/`. Hot-reload is
+    /// achieved by restarting the courier on change (handled by
+    /// `refresh_config`).
+    pub keep_audio_blobs: bool,
 }
 
 impl InboxConfig {
@@ -91,9 +97,15 @@ impl InboxConfig {
             Ok(Some(p)) if !p.trim().is_empty() => Some(PathBuf::from(p)),
             _ => None,
         };
+        // Default to true (matches `SettingKey::KeepAudioBlobs`
+        // default_value()) so an existing user whose DB hasn't yet
+        // seen a write of this key gets the safer keep-the-audio
+        // behaviour.
+        let keep_audio_blobs = s.get::<bool>(SettingKey::KeepAudioBlobs).unwrap_or(true);
         Ok(Self {
             enabled,
             vault_path,
+            keep_audio_blobs,
         })
     }
 }
@@ -111,6 +123,10 @@ enum InboxState {
         /// `refresh_config` can detect a path-change while running
         /// and trigger a restart.
         vault_path: PathBuf,
+        /// `KeepAudioBlobs` value the running courier was started
+        /// with. Stored so `refresh_config` can detect a toggle
+        /// (without path change) and restart the courier.
+        keep_audio_blobs: bool,
         watcher: Option<InboxWatcherHandle>,
         courier: Option<CourierHandle>,
     },
@@ -152,16 +168,19 @@ impl InboxRuntime {
     pub fn refresh_config(&self, db: &Arc<Mutex<Connection>>) -> AppResult<()> {
         let new_cfg = InboxConfig::load(db)?;
 
-        // Snapshot the previous active-path under the read lock so
-        // we can free the lock before the (potentially slow)
-        // start/stop dance. RwLock is poison-resistant; treat
-        // poisoning as "treat as no previous state".
-        let prev_active_path = match self.state.lock() {
+        // Snapshot the previous active-path AND the previously-applied
+        // KeepAudioBlobs value so we can detect when a config-only
+        // toggle (no path change) requires a courier restart.
+        let (prev_active_path, prev_keep) = match self.state.lock() {
             Ok(g) => match &*g {
-                InboxState::Running { vault_path, .. } => Some(vault_path.clone()),
-                InboxState::Stopped => None,
+                InboxState::Running {
+                    vault_path,
+                    keep_audio_blobs,
+                    ..
+                } => (Some(vault_path.clone()), Some(*keep_audio_blobs)),
+                InboxState::Stopped => (None, None),
             },
-            Err(_) => None,
+            Err(_) => (None, None),
         };
 
         // Write the new config first so any concurrent
@@ -178,15 +197,21 @@ impl InboxRuntime {
         let now_active = new_cfg.is_active();
         let now_path = new_cfg.vault_path.clone();
 
+        let keep = new_cfg.keep_audio_blobs;
         match (prev_active_path, now_active, now_path) {
             (None, false, _) => Ok(()),
-            (None, true, Some(p)) => self.start(&p),
+            (None, true, Some(p)) => self.start(&p, keep),
             (Some(_), false, _) => self.stop(),
-            (Some(prev), true, Some(new_p)) if prev == new_p => Ok(()),
+            (Some(prev), true, Some(new_p))
+                if prev == new_p && prev_keep.map(|k| k == keep).unwrap_or(false) =>
+            {
+                Ok(())
+            }
             (Some(_), true, Some(new_p)) => {
-                // Path changed under us — full restart.
+                // Path or KeepAudioBlobs changed under us — full
+                // restart so the courier picks up the new value.
                 self.stop()?;
-                self.start(&new_p)
+                self.start(&new_p, keep)
             }
             // (Some(_), true, None) is impossible because is_active()
             // returning true requires vault_path = Some(_) — but match
@@ -203,7 +228,7 @@ impl InboxRuntime {
     /// Validates the vault layout (creates `inbox/` + `_failed/` if
     /// missing), constructs the watcher→courier channel, pre-fills
     /// it with the initial scan, then spawns the two workers.
-    fn start(&self, vault_path: &std::path::Path) -> AppResult<()> {
+    fn start(&self, vault_path: &std::path::Path, keep_audio_blobs: bool) -> AppResult<()> {
         // Ensure zones exist (idempotent — the export job does this
         // too, but the inbox runtime can outlive a `_failed/` rmdir
         // by the user, so re-creating on every start keeps us
@@ -238,7 +263,12 @@ impl InboxRuntime {
 
         // Spawn the courier FIRST so it's already reading by the
         // time the watcher publishes its first live event.
-        let courier = Courier::new(inbox_path.clone(), file_rx, self.headless_ingest_tx.clone());
+        let courier = Courier::new(
+            inbox_path.clone(),
+            file_rx,
+            self.headless_ingest_tx.clone(),
+            keep_audio_blobs,
+        );
         let courier_handle = courier.start()?;
 
         let watcher = InboxWatcher::new(inbox_path.clone(), file_tx);
@@ -250,6 +280,7 @@ impl InboxRuntime {
             .map_err(|_| AppError::Other("inbox: state mutex poisoned".into()))?;
         *state_guard = InboxState::Running {
             vault_path: vault_path.to_path_buf(),
+            keep_audio_blobs,
             watcher: Some(watcher_handle),
             courier: Some(courier_handle),
         };
@@ -394,14 +425,17 @@ mod tests {
         let off = InboxConfig {
             enabled: false,
             vault_path: Some(PathBuf::from("/v")),
+            keep_audio_blobs: true,
         };
         let no_path = InboxConfig {
             enabled: true,
             vault_path: None,
+            keep_audio_blobs: true,
         };
         let both = InboxConfig {
             enabled: true,
             vault_path: Some(PathBuf::from("/v")),
+            keep_audio_blobs: true,
         };
         assert!(!off.is_active());
         assert!(!no_path.is_active());

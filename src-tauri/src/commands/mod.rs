@@ -169,6 +169,12 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         vault::vault_settings_set,
         vault::vault_export_now,
         vault::vault_pick_directory,
+        // ADR 0046 Iter 4 / mb-vg3p — runtime health card.
+        vault::vault_runtime_status,
+        vault::inbox_runtime_status,
+        // ADR 0046 Iter 4 / mb-3xww — nested-vault guided dialog.
+        vault::vault_check_path,
+        vault::vault_ensure_dir,
     ])
 }
 

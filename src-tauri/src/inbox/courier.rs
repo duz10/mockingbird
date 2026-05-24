@@ -143,6 +143,12 @@ pub enum CourierOutcome {
         /// Destination path the courier file was renamed to.
         archive_to: PathBuf,
     },
+    /// Ingest succeeded; source file deleted because
+    /// `KeepAudioBlobs` is off.
+    Deleted {
+        /// `sessions.id` of the newly written row.
+        session_id: i64,
+    },
     /// Ingest failed for some reason; file moved to `_failed/`.
     Quarantined {
         /// Why the ingest failed (validation / decode / orchestrator).
@@ -190,6 +196,13 @@ pub struct Courier {
     input_rx: Receiver<StableInboxFile>,
     headless_ingest_tx: HeadlessIngestSender,
     in_flight: Arc<Mutex<()>>,
+    /// ADR 0046 Iter 4 — mirror of `SettingKey::KeepAudioBlobs`.
+    /// When true (default), successful ingests move the courier to
+    /// `_archive/<YYYY-MM-DD>/`. When false, the source audio is
+    /// DELETED after a successful ingest. Changing the setting
+    /// restarts the runtime, so this is effectively immutable
+    /// per courier instance.
+    keep_audio_blobs: bool,
 }
 
 impl Courier {
@@ -200,18 +213,21 @@ impl Courier {
         inbox_path: PathBuf,
         input_rx: Receiver<StableInboxFile>,
         headless_ingest_tx: HeadlessIngestSender,
+        keep_audio_blobs: bool,
     ) -> Self {
         Self {
             inbox_path,
             input_rx,
             headless_ingest_tx,
             in_flight: Arc::new(Mutex::new(())),
+            keep_audio_blobs,
         }
     }
 
     /// Spawn the worker thread. Returns a handle for shutdown.
     pub fn start(self) -> AppResult<CourierHandle> {
         let (shutdown_tx, shutdown_rx) = crossbeam_channel::bounded::<()>(1);
+        let keep_audio_blobs = self.keep_audio_blobs;
         let thread = std::thread::Builder::new()
             .name("mockingbird-inbox-courier".into())
             .spawn(move || {
@@ -220,12 +236,17 @@ impl Courier {
                     &self.input_rx,
                     &self.headless_ingest_tx,
                     &self.in_flight,
+                    keep_audio_blobs,
                     &shutdown_rx,
                 );
                 tracing::info!(target: "inbox::courier", "worker exiting");
             })
             .map_err(|e| AppError::Other(format!("inbox courier: spawn thread: {e}")))?;
-        tracing::info!(target: "inbox::courier", "courier started");
+        tracing::info!(
+            target: "inbox::courier",
+            keep_audio_blobs,
+            "courier started"
+        );
         Ok(CourierHandle {
             shutdown_tx,
             thread: Some(thread),
@@ -242,6 +263,7 @@ fn courier_loop(
     input_rx: &Receiver<StableInboxFile>,
     headless_ingest_tx: &HeadlessIngestSender,
     in_flight: &Arc<Mutex<()>>,
+    keep_audio_blobs: bool,
     shutdown_rx: &crossbeam_channel::Receiver<()>,
 ) {
     use crossbeam_channel::{select, RecvError};
@@ -269,6 +291,7 @@ fn courier_loop(
                             &file,
                             headless_ingest_tx,
                             &ProductionFileOps,
+                            keep_audio_blobs,
                         );
                         log_outcome(&file, &outcome);
                     }
@@ -294,6 +317,14 @@ fn log_outcome(file: &StableInboxFile, outcome: &CourierOutcome) {
                 session_id = session_id,
                 dst = %archive_to.display(),
                 "ingest ok; archived"
+            );
+        }
+        CourierOutcome::Deleted { session_id } => {
+            tracing::info!(
+                target: "inbox::courier",
+                src = %file.path.display(),
+                session_id = session_id,
+                "ingest ok; source deleted (KeepAudioBlobs=off)"
             );
         }
         CourierOutcome::Quarantined { reason, failed_to } => {
@@ -333,6 +364,11 @@ pub(crate) trait FileOps {
     /// Current UTC ISO-8601 timestamp. Threaded so tests get
     /// deterministic provenance.
     fn now_iso(&self) -> String;
+
+    /// Delete a file. Used when `KeepAudioBlobs` is off and a
+    /// successful ingest's source audio should be removed instead
+    /// of archived.
+    fn delete_file(&self, path: &Path) -> AppResult<()>;
 }
 
 pub(crate) struct ProductionFileOps;
@@ -395,6 +431,11 @@ impl FileOps for ProductionFileOps {
     fn now_iso(&self) -> String {
         chrono::Utc::now().to_rfc3339()
     }
+
+    fn delete_file(&self, path: &Path) -> AppResult<()> {
+        std::fs::remove_file(path)
+            .map_err(|e| AppError::Vault(format!("courier: remove {}: {}", path.display(), e)))
+    }
 }
 
 // --------------------------------------------------------------------
@@ -410,6 +451,7 @@ pub(crate) fn process_one(
     file: &StableInboxFile,
     headless_ingest_tx: &HeadlessIngestSender,
     fs: &dyn FileOps,
+    keep_audio_blobs: bool,
 ) -> CourierOutcome {
     // 1. Validate. Order matters: cheap checks first.
     if let Err(failure) = validate(&file.path, fs) {
@@ -486,25 +528,38 @@ pub(crate) fn process_one(
         }
     };
 
-    // 5. Archive on success.
-    let archive_to = archive_destination(inbox_path, &original_filename, fs);
-    if let Err(e) = fs.move_file(&file.path, &archive_to) {
-        // We've already written the sessions row, so quarantine
-        // here would leave a dangling row + a courier file. Best
-        // we can do is log loudly + return Archived with the
-        // (failed) destination so the caller knows.
-        tracing::error!(
-            target: "inbox::courier",
+    // 5. Archive OR delete on success, depending on the user's
+    //    `KeepAudioBlobs` toggle. Either way the sessions row is
+    //    already committed — we never re-quarantine here, because
+    //    that would leave a dangling DB row pointing at a
+    //    quarantined file.
+    if keep_audio_blobs {
+        let archive_to = archive_destination(inbox_path, &original_filename, fs);
+        if let Err(e) = fs.move_file(&file.path, &archive_to) {
+            tracing::error!(
+                target: "inbox::courier",
+                session_id,
+                src = %file.path.display(),
+                dst = %archive_to.display(),
+                error = %e,
+                "INGESTED but archive move failed; manual cleanup needed"
+            );
+        }
+        CourierOutcome::Archived {
             session_id,
-            src = %file.path.display(),
-            dst = %archive_to.display(),
-            error = %e,
-            "INGESTED but archive move failed; manual cleanup needed"
-        );
-    }
-    CourierOutcome::Archived {
-        session_id,
-        archive_to,
+            archive_to,
+        }
+    } else {
+        if let Err(e) = fs.delete_file(&file.path) {
+            tracing::error!(
+                target: "inbox::courier",
+                session_id,
+                src = %file.path.display(),
+                error = %e,
+                "INGESTED but source delete failed (KeepAudioBlobs=off); manual cleanup needed"
+            );
+        }
+        CourierOutcome::Deleted { session_id }
     }
 }
 
@@ -628,12 +683,13 @@ mod tests {
     use std::sync::Mutex as StdMutex;
     use std::time::SystemTime;
 
-    /// In-memory file-ops double. Tracks every `move_file` call so
-    /// tests can assert routing.
+    /// In-memory file-ops double. Tracks every `move_file` / `delete_file`
+    /// call so tests can assert routing.
     struct FakeFs {
         size_of: StdMutex<std::collections::HashMap<PathBuf, u64>>,
         decode_result: StdMutex<AppResult<Vec<i16>>>,
         moves: StdMutex<Vec<(PathBuf, PathBuf)>>,
+        deletes: StdMutex<Vec<PathBuf>>,
         now_iso: String,
     }
 
@@ -651,6 +707,7 @@ mod tests {
                     Err(AppError::Audio("synthetic decode failure".into()))
                 }),
                 moves: StdMutex::new(Vec::new()),
+                deletes: StdMutex::new(Vec::new()),
                 now_iso: now_iso.to_string(),
             }
         }
@@ -682,6 +739,10 @@ mod tests {
         }
         fn now_iso(&self) -> String {
             self.now_iso.clone()
+        }
+        fn delete_file(&self, path: &Path) -> AppResult<()> {
+            self.deletes.lock().unwrap().push(path.to_path_buf());
+            Ok(())
         }
     }
 
@@ -715,7 +776,7 @@ mod tests {
         fs.size_of.lock().unwrap().insert(file.path.clone(), 12_345);
         let tx = stub_orchestrator(Ok(42));
 
-        let outcome = process_one(&inbox, &file, &tx, &fs);
+        let outcome = process_one(&inbox, &file, &tx, &fs, true);
 
         match outcome {
             CourierOutcome::Archived {
@@ -739,6 +800,34 @@ mod tests {
         );
     }
 
+    /// ADR 0046 Iter 4 — with `KeepAudioBlobs=false`, the source
+    /// audio is deleted instead of archived. The sessions row is
+    /// still committed (the courier outcome carries the id).
+    #[test]
+    fn keep_audio_blobs_off_deletes_source_after_success() {
+        let inbox = PathBuf::from("/vault/inbox");
+        let file = synthetic_stable("/vault/inbox/Memo.m4a", 12_345);
+        let fs = FakeFs::new(12_345, true, "2026-05-27T18:00:00Z");
+        fs.size_of.lock().unwrap().insert(file.path.clone(), 12_345);
+        let tx = stub_orchestrator(Ok(7));
+
+        let outcome = process_one(&inbox, &file, &tx, &fs, /*keep_audio_blobs=*/ false);
+
+        match outcome {
+            CourierOutcome::Deleted { session_id } => assert_eq!(session_id, 7),
+            other => panic!("expected Deleted, got {other:?}"),
+        }
+        // Source path was deleted, never moved.
+        let deletes = fs.deletes.lock().unwrap();
+        assert_eq!(deletes.len(), 1);
+        assert_eq!(deletes[0], file.path);
+        let moves = fs.moves.lock().unwrap();
+        assert!(
+            moves.is_empty(),
+            "expected no archive move with KeepAudioBlobs=off, got {moves:?}"
+        );
+    }
+
     #[test]
     fn ingest_failure_routes_to_failed() {
         let inbox = PathBuf::from("/vault/inbox");
@@ -747,7 +836,7 @@ mod tests {
         fs.size_of.lock().unwrap().insert(file.path.clone(), 12_345);
         let tx = stub_orchestrator(Err(AppError::Stt("synthetic whisper crash".into())));
 
-        let outcome = process_one(&inbox, &file, &tx, &fs);
+        let outcome = process_one(&inbox, &file, &tx, &fs, true);
 
         match outcome {
             CourierOutcome::Quarantined { reason, failed_to } => {
@@ -766,7 +855,7 @@ mod tests {
         fs.size_of.lock().unwrap().insert(file.path.clone(), 0);
         let tx = stub_orchestrator(Ok(0));
 
-        let outcome = process_one(&inbox, &file, &tx, &fs);
+        let outcome = process_one(&inbox, &file, &tx, &fs, true);
         match outcome {
             CourierOutcome::Quarantined { reason, failed_to } => {
                 assert!(matches!(reason, CourierFailure::Empty));
@@ -785,7 +874,7 @@ mod tests {
         fs.size_of.lock().unwrap().insert(file.path.clone(), big);
         let tx = stub_orchestrator(Ok(0));
 
-        let outcome = process_one(&inbox, &file, &tx, &fs);
+        let outcome = process_one(&inbox, &file, &tx, &fs, true);
         assert!(matches!(
             outcome,
             CourierOutcome::Quarantined {
@@ -803,7 +892,7 @@ mod tests {
         fs.size_of.lock().unwrap().insert(file.path.clone(), 100);
         let tx = stub_orchestrator(Ok(0));
 
-        let outcome = process_one(&inbox, &file, &tx, &fs);
+        let outcome = process_one(&inbox, &file, &tx, &fs, true);
         assert!(matches!(
             outcome,
             CourierOutcome::Quarantined {
@@ -821,7 +910,7 @@ mod tests {
         fs.size_of.lock().unwrap().insert(file.path.clone(), 100);
         let tx = stub_orchestrator(Ok(0));
 
-        let outcome = process_one(&inbox, &file, &tx, &fs);
+        let outcome = process_one(&inbox, &file, &tx, &fs, true);
         assert!(matches!(
             outcome,
             CourierOutcome::Quarantined {
@@ -842,7 +931,7 @@ mod tests {
         let (tx, rx) = crossbeam_channel::unbounded::<HeadlessIngestRequest>();
         drop(rx);
 
-        let outcome = process_one(&inbox, &file, &tx, &fs);
+        let outcome = process_one(&inbox, &file, &tx, &fs, true);
         assert!(matches!(
             outcome,
             CourierOutcome::Quarantined {

@@ -369,19 +369,56 @@ export interface MeetingTickEvent {
   sysDb: number;
 }
 
-/** ADR 0046 Iter 2 / mb-vg3p — typed snapshot of the four
- *  Mobile-Sync settings keys. Read via `api.vault_settings_get()`;
- *  individual fields written via `api.vault_settings_set(key, value)`
- *  (key matches the Rust-side `SettingKey::as_str()` value:
- *  `"mobile_sync_enabled"`, `"vault_path"`, `"vault_sync_record_types"`,
- *  `"vault_retention_days"`). The set IPC also fires a backfill
- *  trigger so a freshly-enabled vault populates without an explicit
- *  Export-now click. */
+/** ADR 0046 Iter 2 / mb-vg3p — typed snapshot of every Mobile-Sync
+ *  settings key. Read via `api.vault_settings_get()`; individual
+ *  fields written via `api.vault_settings_set(key, value)` where
+ *  `key` matches the Rust-side `SettingKey::as_str()` value
+ *  (snake_case — see `dbKeyForVaultSetting` in `SettingsMobileSyncTab`).
+ *  The set IPC also fires a backfill trigger so a freshly-enabled
+ *  vault populates without an explicit Export-now click.
+ *
+ *  Iter 4 / mb-vg3p extends the snapshot with the four remaining
+ *  ADR 0046 keys: `vaultSyncBackend`, `syncTierByteCap`,
+ *  `keepAudioBlobs`, `vaultDebugKeepCouriers`. */
+export type VaultSyncBackend =
+  | "obsidian-sync-standard"
+  | "obsidian-sync-plus"
+  | "manual";
+
 export interface VaultSettingsSnapshot {
   mobileSyncEnabled: boolean;
   vaultPath: string | null;
   vaultSyncRecordTypes: "dictation" | "meeting" | "both";
   vaultRetentionDays: number;
+  vaultSyncBackend: VaultSyncBackend;
+  /** Per-file size warning threshold in bytes. */
+  syncTierByteCap: number;
+  /** When true, the inbox courier moves processed files to
+   *  `_archive/` instead of deleting them. */
+  keepAudioBlobs: boolean;
+  /** Developer-only retention of intermediate courier files. */
+  vaultDebugKeepCouriers: boolean;
+}
+
+/** ADR 0046 Iter 4 / mb-vg3p — outbound projection runtime status.
+ *  Polled every 5s while the Mobile Sync settings tab is mounted.
+ *  Cheap to compute (reads config + stats `manifest.json`). */
+export interface VaultRuntimeStatus {
+  running: boolean;
+  manifestAgeMs: number | null;
+  manifestModifiedIso: string | null;
+  lastError: string | null;
+}
+
+/** ADR 0046 Iter 4 / mb-vg3p — inbox courier runtime status.
+ *  Polled alongside `VaultRuntimeStatus`. `failedCount` drives the
+ *  "open `inbox/_failed/`" link when greater than zero. */
+export interface InboxRuntimeStatus {
+  running: boolean;
+  watchPath: string | null;
+  lastArchivedIso: string | null;
+  failedCount: number;
+  lastError: string | null;
 }
 
 /** Result of a manual `vault_export_now` IPC call. `skipped` is true

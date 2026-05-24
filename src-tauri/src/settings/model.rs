@@ -362,11 +362,25 @@ impl SettingKey {
             Self::VaultPath => serde_json::json!(null),
             Self::VaultSyncRecordTypes => serde_json::json!("both"),
             Self::VaultRetentionDays => serde_json::json!(30),
-            // Iter 4 stubs.
-            Self::VaultSyncBackend => serde_json::json!("obsidian-sync"),
-            Self::SyncTierByteCap => serde_json::json!(4_000_000),
+            // Iter 4 — surfaced via the Mobile Sync settings tab.
+            // `vault_sync_backend` selects the Obsidian Sync tier so
+            // the byte-cap warning + iOS Shortcut tier hints make
+            // sense; default is the most common (Standard) plan.
+            Self::VaultSyncBackend => serde_json::json!("obsidian-sync-standard"),
+            // 5 MB matches Obsidian Sync Standard's per-file ceiling.
+            // Plus tier raises this; the UI flips the default when
+            // the user switches `VaultSyncBackend` but the persisted
+            // value is whatever the user last set.
+            Self::SyncTierByteCap => serde_json::json!(5_000_000),
+            // Dev-only toggle; OFF means the courier's normal
+            // archive/clean behaviour runs.
             Self::VaultDebugKeepCouriers => serde_json::json!(false),
-            Self::KeepAudioBlobs => serde_json::json!(false),
+            // ON by default per ADR 0046 Iter 4: a user enabling
+            // mobile sync probably wants their audio retained
+            // alongside the transcript so they can re-transcribe
+            // after a model upgrade. Turning OFF deletes the source
+            // audio after a successful ingest to save space.
+            Self::KeepAudioBlobs => serde_json::json!(true),
         }
     }
 
@@ -537,17 +551,20 @@ mod tests {
         assert_eq!(SettingKey::VaultRetentionDays.default_value(), json!(30));
         assert_eq!(
             SettingKey::VaultSyncBackend.default_value(),
-            json!("obsidian-sync")
+            json!("obsidian-sync-standard")
         );
         assert_eq!(
             SettingKey::SyncTierByteCap.default_value(),
-            json!(4_000_000)
+            json!(5_000_000)
         );
         assert_eq!(
             SettingKey::VaultDebugKeepCouriers.default_value(),
             json!(false)
         );
-        assert_eq!(SettingKey::KeepAudioBlobs.default_value(), json!(false));
+        // Iter 4: KeepAudioBlobs flipped to default-ON so enabling
+        // mobile sync retains source audio for future re-transcribes;
+        // the user opts INTO deletion via the Advanced toggle.
+        assert_eq!(SettingKey::KeepAudioBlobs.default_value(), json!(true));
     }
 
     /// Phase 10 Wave 1A defaults must match ADR 0037 §Decision items
