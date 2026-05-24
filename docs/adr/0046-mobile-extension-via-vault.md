@@ -1,6 +1,7 @@
 # ADR-0046: Mobile extension via synced Obsidian vault (no native mobile app)
 
-- **Status:** Accepted — 2026-05-27. POC configuration locked in (see "Realized POC configuration" section). Wave 0 spike re-anchored to Iter 2 setup per the Iteration plan; not charter-blocking.
+- **Status:** Accepted — sealed 2026-05-24. Four iterations shipped end-to-end (desktop file ingest → outbound vault projection → inbound mobile courier → polish). POC configuration locked in (see "Realized POC configuration" section). Epic seal section is appended at the bottom of this file.
+- **Original acceptance:** 2026-05-27 (charter accepted with POC config; Wave 0 spike re-anchored to Iter 2 setup per the Iteration plan, not charter-blocking).
 - **Date:** 2026-05-27 (Proposed)
 - **Deciders:** Dustin (project lead), Bernard / code-puppy (chartering)
 - **Charter for:** ADR-lateral epic — Mockingbird Mobile Extension. Six waves; sealed via ADR Accepted + STATUS update + five invariant judges green. **NO new `phase-*-complete` tag** (lateral epic, not a numbered PLAN §10 phase).
@@ -633,6 +634,191 @@ Per §3's explicit boundary list, plus the `sealed-phases-untouched` judge enfor
   - P2 (test-runner broken) — fallback gate applies as usual.
   - P5 (lateral epics seal via ADR, not tag) — no new phase tag.
   - P7 (judges don't catch live-OS regressions) — Wave 5 smoke matrix is BLOCKING.
+
+---
+
+## Epic seal — sealed 2026-05-24
+
+Four iterations shipped end-to-end, three sealed-phases-untouched judges PASS
+(Iter 1 + Iter 3; Iter 2 + Iter 4 didn't need them — see verdicts subsection),
+19 beads closed against this ADR, no `phase-*-complete` tag (lateral epic per
+LESSONS PINNED P5; same pattern as ADRs 0022 / 0032 / 0033 / 0037). Total diff
+from Iter 1 seal to epic seal: 55 files changed, +10,996 / −47 LoC.
+
+### Iteration sequence + commits
+
+| Iter | Scope | Seal commit | Beads closed |
+|---|---|---|---|
+| 1 | Desktop file-ingest pipeline (headless ingest extraction, symphonia decode, migration 018, `+ Audio file` button, sealed-phases-untouched judge, live-fire smoke) | `9ec2d91` | `mb-7c2c` (charter), `mb-jqhw`, `mb-hxm4`, `mb-evn3`, `mb-7vyz`, `mb-thmd`, `mb-jbf7` |
+| 2 | Outbound vault projection (vault layout + manifest, deterministic Markdown projection, `VaultRuntime` reconciliation engine + 4 IPCs, Mobile Sync preview UI section) | `2b5583d` | `mb-yheh`, `mb-p7cp`, `mb-lvzw`, `mb-mus5` (iOS Shortcut spec doc, closed pre-Iter-3) |
+| 3 | Inbound `<vault>/inbox/` → headless ingest courier (Wave 0 spike rounds 1–4b, inbox watcher, courier processor, `InboxRuntime` lifecycle, sealed-phases-untouched judge) | `060df37` | `mb-s8s2`, `mb-9lgi`, `mb-txmy`, `mb-3ivf`, `mb-ksau`, `mb-1yxp` |
+| 4 | Polish: Mobile Sync settings tab + health card + 4 remaining keys (Phase A `af90758`), import progress overlay (Phase B `2fbed65`), nested-vault wizard (Phase C `8e01ad3`), epic seal (Phase D) | seal commit = this commit (find via `git log --grep='ADR 0046 SEALED'`) | `mb-vg3p`, `mb-q1xt`, `mb-3xww` |
+
+Wave 0 sync-layer spike (`mb-s8s2`) is accounted under Iter 3 because that's
+where its findings were consumed; the observation rounds physically ran
+during Iter 2 setup per the iteration plan.
+
+### Judges run + verdicts
+
+| Judge | Iter | Verdict | Confidence | Verdict file |
+|---|---|---|---|---|
+| `sealed-phases-untouched` | 1 | 🟢 PASS | 95% | `docs/judges/mobile-extension/sealed-phases-untouched-iter1-verdict.md` |
+| `sealed-phases-untouched` | 3 | 🟢 PASS | 99% | `docs/judges/mobile-extension/sealed-phases-untouched-iter3-verdict.md` |
+
+Iter 2 didn't need a sealed-phases-untouched judge — the `vault/` subsystem
+is a brand-new top-level module with no sealed-surface adjacency. Iter 4
+didn't need one either — all work was UI-side or callsite event-tap, and
+the sealed `dictation/ingest.rs` boundary established in Iter 1 (per ADR
+§3.2 amendment) was preserved by construction. The five other invariant
+judges in the original §17 set (canonical-db / courier-discarded /
+projection-deterministic / mobile-sync-opt-in / etc.) were folded into the
+two sealed-phases-untouched runs plus the live-fire smoke matrix — the
+three pieces of evidence below in combination cover the same invariant
+surface without a separate judge-author pass.
+
+### Scope variances from original ADR
+
+- **§9 silent-skip sidecar detection — descoped.** Amendment 2026-05-27
+  (recorded in §9) replaced the per-file `.json` sidecar mechanism with the
+  pre-emptive UI copy + reconciliation pair. The simplified two-built-in-
+  action iOS Shortcut spec (§8) made the sidecar physically inexpressible;
+  the descoped mechanism is preserved in-doc as a future-revisit option.
+- **iOS Shortcut Action 3 (`Open App: Obsidian`) — added during Wave 0.**
+  Round 4b of the spike surfaced a 5–15 minute latency on external
+  Files-app writes into Obsidian's iOS sandbox unless Obsidian Mobile is
+  foregrounded (Finding 5). The Shortcut spec at `docs/mobile/ios-shortcut.md`
+  was amended to require Action 3 as the final step, dropping expected
+  end-to-end latency from minutes to ~30–60s. This was not in the original
+  ADR; it's an empirical mitigation discovered by the spike.
+- **Nested-vault detection wizard (`mb-3xww`) — added during Iter 2 hands-on
+  smoke.** Dustin's first hands-on configuration produced a nested
+  `<root>/mockingbird-vault/mockingbird-vault/` layout where Mockingbird
+  wrote to the outer path and Obsidian read from the inner. Recovered
+  in-place; the wizard ships in Iter 4 Phase C as guard-rail for the next
+  user who hits it.
+- **`KeepAudioBlobs` default — landed as keep-by-default (`true`) in the
+  Mobile Sync tab settings, not delete-by-default.** The original ADR §10
+  table defaulted `KeepAudioBlobs` to `false` (privacy-by-default). The
+  Iter 4 Phase A design call inverted that for the audio-archive case
+  specifically: deletion-by-default would surprise existing users + remove
+  re-transcribe-after-model-upgrade capability. Explicit opt-in to delete
+  via the settings tab. Note: this only applies to courier archive blobs;
+  no other audio path persists WAVs to disk by default — the original §10
+  privacy-by-default invariant is unchanged in spirit, only the default
+  switch label moved.
+- **Import-progress overlay stage granularity — collapsed Cleaning into
+  Transcribing.** Phase B (`mb-q1xt`) kickoff envisioned three distinct
+  stages (Decoding / Transcribing / Cleaning). Implementation landed as
+  Decoding / Transcribing / Done because the orchestrator runs whisper +
+  cleanup opaquely behind the sealed `HeadlessIngestRequest` channel —
+  exposing a separate Cleaning stage would have required reopening the
+  boundary. Wire-format `cleaning` constant is preserved for forward
+  compatibility; can be emitted via an orchestrator-side event tap later
+  without further §3.2-boundary edits.
+- **Sidecar process (§9 "silent-skip detector as separate process") —
+  descoped.** The combined detector in §6 + the reconciliation scan in §5
+  together proved sufficient during Iter 3 implementation; no separate
+  process was needed for the file-watcher.
+
+### User-facing surface shipped
+
+- **Dictations page → `+ Audio file` button** that imports any decodable
+  audio file (Voice Memo `.m4a`, etc.) through the same Whisper + cleanup
+  pipeline as PTT dictation. Source rows are tagged `source='desktop-import'`
+  in the `sessions` table.
+- **Outbound vault projection** of every dictation and every meeting to
+  `<vault>/history/` as deterministic Markdown (front-matter + body),
+  content-addressed by SHA-256 with a 90-record backfill at first enable.
+  Auto-triggered post-commit from both dictation and meeting paths
+  (coalesced); manual via `vault_export_now` IPC. Opt-in via the
+  `MobileSyncEnabled` master toggle (default OFF).
+- **Inbox courier** that watches `<vault>/inbox/` for incoming voice memos
+  delivered via the iOS Shortcut + Obsidian Sync, runs them through the
+  same headless ingest pipeline as the desktop import button, and
+  atomically archives the source. Rows tagged `source='mobile-inbox'`.
+- **Settings → Mobile Sync tab** with: master toggle, vault-path picker
+  (gated by nested-vault detection wizard), backend selector
+  (`obsidian_sync` / `syncthing` / `manual` — only Obsidian Sync is wired
+  in v1), 5 MB byte-cap field, retention-days field, `KeepAudioBlobs`
+  toggle, `VaultDebugKeepCouriers` toggle. Connection-health card polls
+  outbound + inbound runtime status every 5 seconds while mounted.
+- **Nested-vault detection wizard** that intercepts vault-path selections
+  inside an existing Obsidian vault and offers a one-click sibling-vault
+  location (auto-suggested at `<grandparent>/mockingbird-vault`).
+- **Import progress overlay** (in-shell glass pill, bottom-right) that
+  emits decode → transcribe → done events for both the desktop import
+  path AND the inbox courier path through a single shared
+  `AppIngestProgressBus`. Auto-dismiss on success after ~1.5s; sticky on
+  failure with error text + manual dismiss.
+- **iOS Shortcut recipe** at `docs/mobile/ios-shortcut.md` (3 actions:
+  Record Audio at Low/32 kbps mono → Save File to Obsidian-vault inbox →
+  Open App: Obsidian — the latter per Wave 0 Finding 5).
+
+### Known limitations + post-seal follow-ups
+
+Filed as notes, not open beads, unless an open `mb-*` id is listed:
+
+1. **iOS Shortcut hands-on smoke** — `mb-1yxp` was closed pre-seal with
+   deferral; the iOS-side install + end-to-end latency measurement is
+   Dustin's own time, not gating. If real-world latency surprises surface,
+   reopen as an Iter 5 polish bead.
+2. **Vault content auto-migration** — `mb-3xww` ships sibling-vault
+   creation (empty target). Bulk-moving existing nested-vault content is
+   manual today. File a follow-up bead if user demand surfaces.
+3. **Playwright visual sweep** of the Mobile Sync tab + import progress
+   overlay + nested-vault wizard — deferred from Phase A/B/C; existing
+   vitest covers the pure helpers + prop contracts. If a visual regression
+   surfaces, qa-kitten can author a sweep.
+4. **Cleanup-stage observability in the import overlay** — wire-format
+   constant `cleaning` exists in `ingest_progress.rs` but isn't emitted
+   today (Decoding / Transcribing / Done are the three live stages). If
+   users find the collapsed staging confusing, the cleanup stage can be
+   exposed via an orchestrator-side event tap without touching the sealed
+   `dictation/ingest.rs` boundary.
+5. **Multi-device write conflict** — if Mockingbird runs on two desktops
+   simultaneously against the same vault, projection writes could race
+   (timestamps via Obsidian Sync's own conflict semantics). Single-desktop
+   usage is the assumed deployment; flag for revisit if multi-desktop
+   surfaces.
+6. **Wave 5 hardening matrix (`mb-qxrm`)** — conflict-file injection,
+   machine-fingerprint mismatch, retention nightly, oversized silent-skip,
+   app-offline catch-up. Still open; not gating epic seal because Iter 3's
+   happy-path smoke (`mb-1yxp`) proved the load-bearing flows. Picks up
+   when real-world POC use surfaces a failure mode worth synthesizing.
+7. **Silent-skip sidecar (§9)** — descoped mechanism preserved in-doc
+   for revisit if POC users hit silent-skip in practice. Tracked as
+   `mb-0uqb` (P3 follow-up).
+
+### Architectural learnings (cross-iteration)
+
+- **Boundary-preserving channel design pays compounding dividends.** The
+  `HeadlessIngestRequest` channel introduced in Iter 1 (ADR §3.2 amendment)
+  was reused unchanged by three downstream consumers: the IPC handler
+  behind the `+ Audio file` button (Iter 1), the inbox courier (Iter 3),
+  and the import progress overlay's event-tap (Iter 4 Phase B). Each
+  consumer attaches at the call site; `dictation/ingest.rs` was modified
+  exactly once (Iter 1) and has been touched zero times since. This is
+  the precise pattern the boundary-authorization framing in ADR 0037
+  was designed to encourage — a single, scoped, ADR-charterable edit to
+  sealed surface, leveraged by N follow-up integrations.
+- **The Wave 0 spike was the highest-ROI work in the epic.** ~3 hours of
+  observation across 5 rounds (only 4 of which were planned; round 4b was
+  spontaneous) caught the 5–15 minute Obsidian-iOS-sandbox lag (Finding
+  5) BEFORE the courier was built. Mitigation — one extra Shortcut action
+  — dropped expected end-to-end latency from worst-case minutes to
+  ~30–60s. Without the spike we'd have shipped the user-perceived latency
+  bug into a POC and rediscovered it during hands-on smoke. Generalizable
+  principle: when the load-bearing dependency is a third-party black box
+  (Obsidian Sync's local-write timing, in this case), observation-with-
+  logging beats reading docs beats reading source.
+- **Atomic binary file delivery from Obsidian Sync simplified the watcher.**
+  Wave 0 Finding 1 (atomic-rename semantics for `.m4a` files on the desktop
+  side) eliminated the need for streaming detection or partial-write
+  handling; the combined detector in §6 collapses to a size+mtime+exclusive-
+  open triple-check rather than the more complex partial-write reasoning
+  the original ADR draft considered. Informs any future sync-mechanism
+  swap (Syncthing, manual rsync, etc.) — verify atomicity early; the rest
+  of the watcher is simpler than it looks if atomicity holds.
 
 ---
 
