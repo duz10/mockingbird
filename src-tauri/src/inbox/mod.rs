@@ -29,7 +29,8 @@
 // Phase A (Wave 3.1) — file-watcher + stability state machine.
 pub mod watcher;
 
-// Wave 3.2 (`courier`) lands in Phase B of the same dispatch;
-// Wave 3.3 (`runtime`) lands in Phase C. Module declarations are
-// added at the top of each phase's commit so each diff is
-// independently coherent.
+// Phase B (Wave 3.2) — validate / decode / ingest / archive courier.
+pub mod courier;
+
+// Wave 3.3 (`runtime`) lands in Phase C; module declaration added
+// in that commit so each diff stays coherent.
