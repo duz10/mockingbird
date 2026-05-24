@@ -181,9 +181,26 @@ pub fn run() {
                         // Iter 3 inbox watcher) can grab a clone via
                         // `State<'_, HeadlessIngestSender>` without
                         // reaching through DictationRuntime.
-                        app.manage(runtime.headless_ingest_sender());
+                        let headless_ingest_tx = runtime.headless_ingest_sender();
+                        app.manage(headless_ingest_tx.clone());
                         tracing::info!("🐦 dictation runtime started; hold RightAlt to dictate");
                         app.manage(runtime);
+
+                        // ADR 0046 Iter 3 / mb-3ivf — inbox runtime
+                        // (Wave 3.3). Mirrors the vault export-job
+                        // runtime's shape; gated by the SAME
+                        // MobileSyncEnabled + VaultPath settings.
+                        // Disabled-by-default so a stock install sees
+                        // zero watcher overhead until the user opts in.
+                        let inbox_runtime =
+                            Arc::new(crate::inbox::runtime::InboxRuntime::new(headless_ingest_tx));
+                        if let Err(e) = inbox_runtime.refresh_config(&shared_conn) {
+                            tracing::error!(
+                                error = ?e,
+                                "inbox runtime: initial refresh_config failed; mobile inbox disabled this session"
+                            );
+                        }
+                        app.manage(Arc::clone(&inbox_runtime));
                     }
                     Err(e) => {
                         // Non-fatal: the Tauri shell + IPC still work.

@@ -26,6 +26,7 @@ use tauri::{AppHandle, Runtime, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::commands::{into_err, lock_db, AppStateHandle};
+use crate::inbox::runtime::InboxRuntime;
 use crate::settings::{model::SettingKey, Settings};
 use crate::vault::export_job::{ReconciliationSummary, VaultRuntime};
 
@@ -74,6 +75,7 @@ pub fn vault_settings_get(db: State<'_, AppStateHandle>) -> Result<VaultSettings
 pub fn vault_settings_set(
     db: State<'_, AppStateHandle>,
     vault: State<'_, Arc<VaultRuntime>>,
+    inbox: State<'_, Arc<InboxRuntime>>,
     key: String,
     value: serde_json::Value,
 ) -> Result<(), String> {
@@ -94,6 +96,11 @@ pub fn vault_settings_set(
     }
     let db_arc = Arc::clone(&db.inner().db);
     vault.refresh_config(&db_arc).map_err(into_err)?;
+    // ADR 0046 Iter 3 / mb-3ivf — the inbox runtime is gated by the
+    // SAME MobileSyncEnabled + VaultPath keys as the outbound vault
+    // projection, so it needs the same refresh on every settings
+    // write. start/stop transitions happen inside refresh_config.
+    inbox.refresh_config(&db_arc).map_err(into_err)?;
     // Fire-and-forget backfill so a freshly-enabled vault populates
     // without the user needing to click "Export now". Coalesces if
     // a worker is already running.

@@ -32,5 +32,6 @@ pub mod watcher;
 // Phase B (Wave 3.2) — validate / decode / ingest / archive courier.
 pub mod courier;
 
-// Wave 3.3 (`runtime`) lands in Phase C; module declaration added
-// in that commit so each diff stays coherent.
+// Phase C (Wave 3.3) — InboxRuntime lifecycle, gated by
+// MobileSyncEnabled + VaultPath. Mirrors VaultRuntime's shape.
+pub mod runtime;
