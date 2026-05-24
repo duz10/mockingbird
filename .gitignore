@@ -47,6 +47,9 @@ __pycache__/
 
 # Logs
 *.log
+# ...but spike log fixtures under docs/spikes/ are intentionally committed
+# (small JSONL evidence backing the findings docs that reference them)
+!docs/spikes/**/*.log
 
 # User-local reference docs (kept on disk but not in source control)
 Code-Puppy-Capabilities-Insight.docx
