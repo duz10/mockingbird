@@ -226,6 +226,19 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 ---
 
+## 2026-05-28 [ADR 0047 Wave 2A / mb-da5t] `SettingKey::all().len()` assertion silently drifted because the cargo gate never runs assertions
+
+**Context:** While wiring the new `LlmSkipWordThreshold` setting key for Wave 2.2, noticed the `all_enumerates_every_variant` test in `settings/model.rs` asserts `assert_eq!(SettingKey::all().len(), 36)` but the actual `all()` array at HEAD already contained **37** entries (Wave 1.2's `LlmShrinkFallbackThreshold` had been added to `all()` but its count comment + assertion were never bumped). The drift had been sitting unnoticed since whenever Wave 1.2 landed.
+
+**Finding:** This is **Finding 1 of LESSONS 2026-05-26** (schema-vs-code drift hidden by `--no-run`) wearing a new costume. The cargo gate on this box is `test --release --no-run` (LESSONS P2); `--no-run` proves types + traits + link surface, but **never executes any `assert_eq!` or `#[test]` body**. Any test that's wrong at runtime but compiles cleanly will silently rot. The `all().len() == N` count tests are a load-bearing canary precisely BECAUSE they're cheap to bump and easy to forget; the canary only catches drift if someone runs it. On this box, no one does, until the throwaway-crate recipe runs the affected module live.
+
+**Action:**
+1. When adding a new `SettingKey`, ALWAYS bump the comment AND the `assert_eq!` in `all_enumerates_every_variant` in the same hunk. Same applies to any other `assert_eq!(X.len(), N)` style canary.
+2. If you touch `settings/model.rs` for any reason, do a quick eyeball check of that test's number vs the actual length of `all()`. The Wave 1.2 author missed it; Wave 2.2 caught + fixed it inline as part of commit `7330884`.
+3. Consider running pure-Rust assertion-bearing tests via the throwaway-crate recipe (LESSONS P2) when you suspect a drift. For `settings/model.rs` that's harder (rusqlite ties it to the DB layer), but for any pure-data module it's a 30-second sanity check that closes the assertion-hidden gap.
+
+---
+
 ## 2026-05-27 [ADR 0046 Iter 3 Waves 3.1-3.3 / mb-9lgi+mb-txmy+mb-3ivf] First-launch live-fire of the inbox subsystem went green on a pre-existing file; one cosmetic post-archive watcher event was logged but is harmless
 
 **Context:** Three serial commits landed the inbox file-watcher, courier processor, and InboxRuntime + wiring (Waves 3.1 / 3.2 / 3.3 of ADR 0046 Iter 3). First app launch after wiring picked up a `New Recording 38.m4a` voice memo already sitting in `<vault>/inbox/` from a prior manual test, decoded it, drove it through whisper-rs CUDA + Ollama cleanup, wrote `sessions` row `session_id=116` with `source='mobile-inbox'`, and atomically archived the source. End-to-end on commit one; the dispatch's three-phase plan + Wave-0 spike findings paid off completely.
