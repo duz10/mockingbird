@@ -31,10 +31,41 @@ use crate::cleanup::provider::{CleanupProvider, CleanupRequest};
 use crate::cleanup::OllamaProvider;
 use crate::error::{AppError, AppResult};
 
-/// System header prepended to the assembled LLM-pass prompt. Kept
-/// short and assertive — see prompt files for the per-pass body.
-pub const SYSTEM_HEADER: &str = "You are a meeting-transcript assistant. \
+/// System header for the summary / action-items built-ins AND for any
+/// user-supplied custom prompt — concision is the safer general default.
+///
+/// Kept short and assertive; the per-pass body in the prompt file does
+/// the heavy lifting.
+pub const SYSTEM_HEADER_CONCISE: &str = "You are a meeting-transcript assistant. \
 Be concise. Do not invent facts not in the transcript.";
+
+/// System header for the `cleaner_punctuation` built-in. The cleaner is
+/// a punctuation / whitespace pass, NOT a summarizer; the previous
+/// global concise header was instructing the model to drop content,
+/// which is exactly wrong for this prompt (ADR 0047 §Wave 1.1).
+pub const SYSTEM_HEADER_PUNCTUATION: &str = "You are a transcript punctuation assistant. \
+Preserve every word; modify only whitespace and punctuation.";
+
+/// Pick the system header that goes with a given prompt.
+///
+/// Mapping (ADR 0047 §Wave 1.1):
+///   - `BuiltIn("cleaner_punctuation")` → preservation header
+///   - `BuiltIn("summary" | "action_items")` → concision header
+///   - `BuiltIn(other)` → concision header (also the only sane default
+///     if a new built-in is added without updating this mapping —
+///     `resolve_builtin` will reject the unknown name first)
+///   - `Custom(_)` → concision header. User-custom prompts are
+///     general-purpose; concision is the safer fallback and matches
+///     the meetings-engine framing this header has always carried.
+pub const fn header_for_prompt(prompt: &LlmPassPrompt) -> &'static str {
+    match prompt {
+        LlmPassPrompt::BuiltIn(name) => match name.as_bytes() {
+            b"cleaner_punctuation" => SYSTEM_HEADER_PUNCTUATION,
+            _ => SYSTEM_HEADER_CONCISE,
+        },
+        LlmPassPrompt::Custom(_) => SYSTEM_HEADER_CONCISE,
+    }
+}
 
 /// Default LLM-pass model when the caller doesn't override. Matches the
 /// Phase-4 dictation default; the meeting feature stays in the same
@@ -115,10 +146,15 @@ fn resolve_builtin(name: &str) -> AppResult<&'static str> {
 /// Assemble the full prompt sent to Ollama:
 ///   `{system_header}\n\n{prompt_body}\n\n---\n\n{transcript_text}`.
 ///
+/// The header is selected via [`header_for_prompt`] so the
+/// `cleaner_punctuation` pass gets a preservation header instead of
+/// the concision header that fits summary / action_items.
+///
 /// Pure function so the `mc-no-llm-in-critical-path` judge can prove
 /// the formatter doesn't call this transitively.
-pub fn assemble_prompt(prompt_body: &str, transcript_text: &str) -> String {
-    format!("{SYSTEM_HEADER}\n\n{prompt_body}\n\n---\n\n{transcript_text}")
+pub fn assemble_prompt(prompt: &LlmPassPrompt, prompt_body: &str, transcript_text: &str) -> String {
+    let header = header_for_prompt(prompt);
+    format!("{header}\n\n{prompt_body}\n\n---\n\n{transcript_text}")
 }
 
 /// Run one LLM pass. Synchronous (matches the cleanup provider's
@@ -141,7 +177,7 @@ pub fn run_llm_pass_with_provider(
     provider: &OllamaProvider,
 ) -> AppResult<LlmPassResult> {
     let prompt_body = resolve_prompt_body(&req.prompt)?;
-    let full_prompt = assemble_prompt(prompt_body, transcript_text);
+    let full_prompt = assemble_prompt(&req.prompt, prompt_body, transcript_text);
     let model_id = req
         .model_id
         .as_deref()
@@ -248,12 +284,13 @@ mod tests {
 
     #[test]
     fn assemble_prompt_layout_is_stable() {
-        let assembled = assemble_prompt("BODY", "TRANSCRIPT");
-        assert!(assembled.starts_with(SYSTEM_HEADER));
+        let prompt = LlmPassPrompt::BuiltIn("summary");
+        let assembled = assemble_prompt(&prompt, "BODY", "TRANSCRIPT");
+        assert!(assembled.starts_with(SYSTEM_HEADER_CONCISE));
         assert!(assembled.contains("\n\nBODY\n\n---\n\nTRANSCRIPT"));
         // System header MUST come first so the model sees it before
         // any user content. This is the only ordering invariant we pin.
-        let header_idx = assembled.find(SYSTEM_HEADER).unwrap();
+        let header_idx = assembled.find(SYSTEM_HEADER_CONCISE).unwrap();
         let body_idx = assembled.find("BODY").unwrap();
         let transcript_idx = assembled.find("TRANSCRIPT").unwrap();
         assert!(header_idx < body_idx);
@@ -262,8 +299,88 @@ mod tests {
 
     #[test]
     fn assemble_prompt_handles_empty_transcript() {
-        let assembled = assemble_prompt("BODY", "");
+        let prompt = LlmPassPrompt::BuiltIn("summary");
+        let assembled = assemble_prompt(&prompt, "BODY", "");
         assert!(assembled.ends_with("\n\n---\n\n"));
+    }
+
+    // -------- ADR 0047 §Wave 1.1 — per-pass system header mapping. --------
+
+    /// `cleaner_punctuation`'s assembled prompt must NOT carry the
+    /// concision instruction — that was the production bug. The
+    /// punctuation pass exists to preserve every word; "be concise"
+    /// is exactly the wrong steer.
+    #[test]
+    fn cleaner_punctuation_prompt_does_not_include_concise() {
+        let prompt = LlmPassPrompt::BuiltIn("cleaner_punctuation");
+        let assembled = assemble_prompt(&prompt, "BODY", "TRANSCRIPT");
+        assert!(
+            !assembled.to_lowercase().contains("concise"),
+            "cleaner_punctuation header must not contain 'concise'; got: {assembled}"
+        );
+        // Sanity: the preservation header IS present.
+        assert!(
+            assembled.contains("Preserve every word"),
+            "expected preservation header for cleaner_punctuation; got: {assembled}"
+        );
+    }
+
+    /// `summary`'s assembled prompt MUST keep the concision
+    /// instruction — this is the legacy behaviour we want to preserve.
+    #[test]
+    fn summary_prompt_keeps_concise_header() {
+        let prompt = LlmPassPrompt::BuiltIn("summary");
+        let assembled = assemble_prompt(&prompt, "BODY", "TRANSCRIPT");
+        assert!(
+            assembled.to_lowercase().contains("concise"),
+            "summary header should request concision; got: {assembled}"
+        );
+    }
+
+    /// `action_items` also gets the concision header (legacy parity).
+    #[test]
+    fn action_items_prompt_keeps_concise_header() {
+        let prompt = LlmPassPrompt::BuiltIn("action_items");
+        let assembled = assemble_prompt(&prompt, "BODY", "TRANSCRIPT");
+        assert!(
+            assembled.to_lowercase().contains("concise"),
+            "action_items header should request concision; got: {assembled}"
+        );
+    }
+
+    /// `Custom(_)` falls back to the concision header per ADR 0047
+    /// §Wave 1.1 — user-custom prompts are general-purpose and concision
+    /// is the safer default. (The dictation-driven LLM-pass path wraps
+    /// its bodies in `Custom`; it accepts this trade-off.)
+    #[test]
+    fn custom_prompt_gets_concise_header() {
+        let prompt = LlmPassPrompt::Custom("do whatever".into());
+        let assembled = assemble_prompt(&prompt, "BODY", "TRANSCRIPT");
+        assert!(
+            assembled.contains(SYSTEM_HEADER_CONCISE),
+            "Custom prompts should get the concision header; got: {assembled}"
+        );
+    }
+
+    /// `header_for_prompt` directly: the mapping is the contract.
+    #[test]
+    fn header_for_prompt_maps_each_variant() {
+        assert_eq!(
+            header_for_prompt(&LlmPassPrompt::BuiltIn("cleaner_punctuation")),
+            SYSTEM_HEADER_PUNCTUATION
+        );
+        assert_eq!(
+            header_for_prompt(&LlmPassPrompt::BuiltIn("summary")),
+            SYSTEM_HEADER_CONCISE
+        );
+        assert_eq!(
+            header_for_prompt(&LlmPassPrompt::BuiltIn("action_items")),
+            SYSTEM_HEADER_CONCISE
+        );
+        assert_eq!(
+            header_for_prompt(&LlmPassPrompt::Custom("x".into())),
+            SYSTEM_HEADER_CONCISE
+        );
     }
 
     /// One-shot HTTP/1.1 server that responds with a canned Ollama
