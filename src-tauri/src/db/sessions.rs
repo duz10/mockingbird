@@ -290,6 +290,55 @@ pub fn update_processing_complete(
     Ok(())
 }
 
+/// mb-v2fa / ADR 0047 §Wave 2.5 -- set `edit_free_within_5min = 1`
+/// on a session that just got injected successfully. The orchestrator
+/// calls this right after `update_processing_complete` when
+/// `InjectionOutcome` is one of the success variants
+/// (`Ok` or `OkClipboardNotRestored`). For every other outcome
+/// (aborts, failures, in-app, headless ingest) the column stays
+/// NULL, which the Insights aggregation reads as "excluded from
+/// the metric population".
+///
+/// This intentionally lives in one place so the "only success
+/// injects are eligible" rule is enforced by the caller's match
+/// rather than buried in SQL `CASE` logic.
+pub fn mark_injected_for_edit_metric(conn: &Connection, id: i64) -> AppResult<()> {
+    conn.execute(
+        "UPDATE sessions SET edit_free_within_5min = 1 WHERE id = ?1",
+        params![id],
+    )?;
+    Ok(())
+}
+
+/// mb-v2fa / ADR 0047 §Wave 2.5 -- record that the user did an
+/// edit-equivalent action (LlmPassCard run, raw copy) on a
+/// previously-injected session. Conditional UPDATE:
+///
+///   * No-op if `edit_free_within_5min` is NULL (the session never
+///     injected -- not in the metric population) or already 0
+///     (already counted; idempotent).
+///   * No-op if `processing_completed_at` is more than 5 min ago.
+///     The 5-min observation window is anchored to injection time,
+///     not session creation; once it elapses the row's metric
+///     value is locked in.
+///   * Otherwise flip the column to 0.
+///
+/// SQLite's `datetime('now', '-5 minutes')` evaluates against
+/// UTC, matching the ISO-8601 `Z`-suffixed strings
+/// `update_processing_complete` writes via `dictation::now_iso`.
+pub fn mark_edit_observed(conn: &Connection, id: i64) -> AppResult<()> {
+    conn.execute(
+        "UPDATE sessions \
+         SET edit_free_within_5min = 0 \
+         WHERE id = ?1 \
+           AND edit_free_within_5min = 1 \
+           AND processing_completed_at IS NOT NULL \
+           AND datetime(processing_completed_at) >= datetime('now', '-5 minutes')",
+        params![id],
+    )?;
+    Ok(())
+}
+
 pub fn update_status_error(conn: &Connection, id: i64, error_message: &str) -> AppResult<()> {
     conn.execute(
         "UPDATE sessions SET status = 'error', error_message = ?1 WHERE id = ?2",
@@ -666,6 +715,118 @@ mod tests {
             assert_eq!(SessionStatus::parse(s.as_str()).unwrap(), s);
         }
         assert!(SessionStatus::parse("BOGUS").is_err());
+    }
+
+    /// Helper: read the raw `edit_free_within_5min` value as `Option<i64>`
+    /// so tests can distinguish NULL / 0 / 1 explicitly.
+    fn read_edit_free(conn: &Connection, id: i64) -> Option<i64> {
+        conn.query_row(
+            "SELECT edit_free_within_5min FROM sessions WHERE id = ?1",
+            params![id],
+            |r| r.get::<_, Option<i64>>(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn edit_free_within_5min_defaults_to_null_on_insert() {
+        let db = Database::open_in_memory().unwrap();
+        let new = fresh_new_session(&db.conn);
+        let id = insert(&db.conn, &new).unwrap();
+        assert_eq!(
+            read_edit_free(&db.conn, id),
+            None,
+            "new rows must read as NULL until injection succeeds"
+        );
+    }
+
+    #[test]
+    fn mark_injected_for_edit_metric_sets_one() {
+        let db = Database::open_in_memory().unwrap();
+        let new = fresh_new_session(&db.conn);
+        let id = insert(&db.conn, &new).unwrap();
+        mark_injected_for_edit_metric(&db.conn, id).unwrap();
+        assert_eq!(read_edit_free(&db.conn, id), Some(1));
+    }
+
+    #[test]
+    fn mark_edit_observed_flips_one_to_zero_within_window() {
+        let db = Database::open_in_memory().unwrap();
+        let new = fresh_new_session(&db.conn);
+        let id = insert(&db.conn, &new).unwrap();
+        mark_injected_for_edit_metric(&db.conn, id).unwrap();
+        // Anchor processing_completed_at to NOW so we're well inside
+        // the 5-min window. SQLite's datetime('now') yields the
+        // canonical UTC string the production code writes via
+        // dictation::now_iso (modulo seconds precision).
+        db.conn
+            .execute(
+                "UPDATE sessions SET processing_completed_at = datetime('now') WHERE id = ?1",
+                params![id],
+            )
+            .unwrap();
+        mark_edit_observed(&db.conn, id).unwrap();
+        assert_eq!(read_edit_free(&db.conn, id), Some(0));
+    }
+
+    #[test]
+    fn mark_edit_observed_is_noop_outside_window() {
+        let db = Database::open_in_memory().unwrap();
+        let new = fresh_new_session(&db.conn);
+        let id = insert(&db.conn, &new).unwrap();
+        mark_injected_for_edit_metric(&db.conn, id).unwrap();
+        // Age the row 10 minutes -- past the 5-min window.
+        db.conn
+            .execute(
+                "UPDATE sessions SET processing_completed_at = datetime('now', '-10 minutes') \
+                 WHERE id = ?1",
+                params![id],
+            )
+            .unwrap();
+        mark_edit_observed(&db.conn, id).unwrap();
+        assert_eq!(
+            read_edit_free(&db.conn, id),
+            Some(1),
+            "outside the 5-min window the metric stays locked at 1"
+        );
+    }
+
+    #[test]
+    fn mark_edit_observed_is_noop_when_never_injected() {
+        // Session was created but never had mark_injected_for_edit_metric
+        // called -- e.g. in-app, abort, file import. mark_edit_observed
+        // must leave NULL untouched. This is the cross-check that the
+        // Insights aggregation can rely on NULL == "not in the
+        // population" and not have to filter on injection_status
+        // separately.
+        let db = Database::open_in_memory().unwrap();
+        let new = fresh_new_session(&db.conn);
+        let id = insert(&db.conn, &new).unwrap();
+        db.conn
+            .execute(
+                "UPDATE sessions SET processing_completed_at = datetime('now') WHERE id = ?1",
+                params![id],
+            )
+            .unwrap();
+        mark_edit_observed(&db.conn, id).unwrap();
+        assert_eq!(read_edit_free(&db.conn, id), None);
+    }
+
+    #[test]
+    fn mark_edit_observed_is_idempotent_after_first_flip() {
+        let db = Database::open_in_memory().unwrap();
+        let new = fresh_new_session(&db.conn);
+        let id = insert(&db.conn, &new).unwrap();
+        mark_injected_for_edit_metric(&db.conn, id).unwrap();
+        db.conn
+            .execute(
+                "UPDATE sessions SET processing_completed_at = datetime('now') WHERE id = ?1",
+                params![id],
+            )
+            .unwrap();
+        mark_edit_observed(&db.conn, id).unwrap();
+        mark_edit_observed(&db.conn, id).unwrap();
+        assert_eq!(read_edit_free(&db.conn, id), Some(0));
     }
 
     #[test]

@@ -94,6 +94,14 @@ const MIGRATION_021: &str = include_str!("migrations/021_casual_7b_model.sql");
 // opt-in runtime gate present" so a future migration can branch on it.
 const MIGRATION_022: &str = include_str!("migrations/022_q5_model_opt_in.sql");
 
+// 023 -- mb-v2fa / ADR 0047 §Wave 2.5: edit-free-send metric. Adds
+// `sessions.edit_free_within_5min INTEGER` (nullable tri-state:
+// NULL = not observed, 1 = injected and edit-free within 5 min,
+// 0 = injected and user took an edit-equivalent action within 5
+// min). Pure ADD COLUMN. Schema header documents the state
+// machine + the call sites that flip it.
+const MIGRATION_023: &str = include_str!("migrations/023_session_edit_free_send.sql");
+
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
 ///
@@ -265,6 +273,14 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         let prepared = substitute_prompt_bodies(MIGRATION_022);
         conn.execute_batch(&prepared)?;
     }
+    if current < 23 {
+        // mb-v2fa / ADR 0047 §Wave 2.5: edit-free-send metric.
+        // Pure ADD COLUMN -- no prompt bodies, no triggers, no
+        // FK changes. Substituter pass for the leftover-token
+        // guard only.
+        let prepared = substitute_prompt_bodies(MIGRATION_023);
+        conn.execute_batch(&prepared)?;
+    }
     Ok(())
 }
 
@@ -323,7 +339,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "22");
+        assert_eq!(v, "23");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -342,7 +358,43 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "22");
+        assert_eq!(v, "23");
+    }
+
+    /// Migration 023 (mb-v2fa / ADR 0047 §Wave 2.5) adds the
+    /// `sessions.edit_free_within_5min` nullable INTEGER column.
+    /// Verify shape + default. The state-machine semantics are
+    /// covered by integration tests in `db::sessions`.
+    #[test]
+    fn migration_023_ships_edit_free_within_5min_column() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(sessions)")
+            .expect("prepare table_info");
+        let found = stmt
+            .query_map([], |row| {
+                let name: String = row.get(1)?;
+                let ty: String = row.get(2)?;
+                let notnull: i64 = row.get(3)?;
+                let dflt: Option<String> = row.get(4)?;
+                Ok((name, ty, notnull, dflt))
+            })
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .find(|(n, _, _, _)| n == "edit_free_within_5min")
+            .expect("edit_free_within_5min column should exist after migration 023");
+        assert_eq!(found.1, "INTEGER");
+        assert_eq!(
+            found.2, 0,
+            "edit_free_within_5min must be nullable (NULL = not-yet-observed)"
+        );
+        assert!(
+            found.3.is_none(),
+            "edit_free_within_5min must have no default; legacy + in-flight rows must read as NULL"
+        );
     }
 
     /// Migration 022 (mb-5a4y / ADR 0047 §Wave 2.4) is a documentation

@@ -80,6 +80,7 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         sessions::mark_session_as_example,
         sessions::report_correction,
         sessions::dictation_run_llm_pass,
+        sessions::dictation_mark_edit_observed,
         // Dictionary
         dictionary::list_dictionary,
         dictionary::upsert_dictionary_entry,

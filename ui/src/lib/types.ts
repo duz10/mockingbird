@@ -65,6 +65,24 @@ export interface InsightsSnapshot {
   topCorrections: { before: string; count: number }[];
   /** Average WPM over the last 30 days. `null` when no qualifying samples. */
   wpm: { avgWpm: number | null; samples: number };
+  /** ADR 0047 §Wave 2.5 / mb-v2fa -- edit-free-send rate, the
+   *  inverse-of-success metric for the cleanup-pipeline refinement
+   *  epic. Sessions that never injected (in-app, abort, headless
+   *  ingest) are excluded from both numerator and denominator. */
+  editFreeSend: {
+    lifetime: EditFreeBucket;
+    last30d: EditFreeBucket;
+  };
+}
+
+export interface EditFreeBucket {
+  /** Total injected sessions in the window (denominator). */
+  injected: number;
+  /** Injected sessions that survived 5 min without an
+   *  edit-equivalent action (numerator). */
+  editFree: number;
+  /** `editFree / injected`, 0..=1. `null` when injected = 0. */
+  percentage: number | null;
 }
 
 export interface SessionSummary {

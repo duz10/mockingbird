@@ -110,6 +110,15 @@ export const api = {
       promptId,
       modelId,
     }),
+  /** ADR 0047 §Wave 2.5 / mb-v2fa -- record an edit-equivalent
+   *  action (today: the Dictations detail Copy button). The backend
+   *  is conditional on the session being inside its 5-min injection
+   *  window AND already armed at 1; legacy / never-injected /
+   *  out-of-window calls are silent no-ops. Treat the returned
+   *  promise as fire-and-forget at the call site -- a metric write
+   *  failing must not break the copy flow. */
+  dictation_mark_edit_observed: (sessionId: number) =>
+    invoke<void>("dictation_mark_edit_observed", { sessionId }),
 
   // Dictionary
   list_dictionary: () => invoke<DictionaryEntry[]>("list_dictionary"),
@@ -332,6 +341,9 @@ function fixtureFor<T>(command: string, args?: object): T {
           "**Summary** — this is a fixture LLM-pass output for the Dictations tab. Browser-preview only.",
         latencyMs: 1240,
       }) as T;
+    case "dictation_mark_edit_observed":
+      // Fire-and-forget metric write -- browser preview returns null.
+      return fixture(command, null) as T;
     // Phase 10 Wave 1B — Activity capture fixtures.
     case "activity_list_sessions":
       return fixture(command, [
@@ -652,6 +664,10 @@ export const FIXTURES: {
       { before: "oh-em-gee", count: 2 },
     ],
     wpm: { avgWpm: 142.7, samples: 184 },
+    editFreeSend: {
+      lifetime: { injected: 179, editFree: 156, percentage: 156 / 179 },
+      last30d: { injected: 42, editFree: 38, percentage: 38 / 42 },
+    },
   },
   sessions: Array.from({ length: 40 }, (_, i) => ({
     id: 100 + i,

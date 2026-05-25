@@ -182,6 +182,16 @@ export function DictationsPage() {
   const handleCopy = useCallback(async () => {
     if (!detail) return;
     await navigator.clipboard.writeText(detail.final || detail.cleaned || detail.raw);
+    // ADR 0047 §Wave 2.5 / mb-v2fa -- manual Copy is an
+    // edit-equivalent action: the user is moving the text by hand,
+    // which usually means the auto-injection didn't land where it
+    // needed to or they want it somewhere else. Fire-and-forget;
+    // backend conditionally no-ops outside the 5-min window.
+    void api
+      .dictation_mark_edit_observed(detail.session.id)
+      .catch(() => {
+        // Silent: a metric write failing must not block the copy.
+      });
     showToast(t("dictations.copied"));
   }, [detail, showToast]);
 

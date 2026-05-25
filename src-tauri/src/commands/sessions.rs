@@ -343,6 +343,23 @@ pub fn dictation_run_llm_pass(
         model_id,
     };
     let result = run_llm_pass(&req, &transcript_text).map_err(into_err)?;
+    // mb-v2fa / ADR 0047 §Wave 2.5 -- a successful LLM-pass run is
+    // an edit-equivalent action: the user wanted output different
+    // from what got injected. If the session is still inside its
+    // 5-min observation window, flip its metric to 0. The helper
+    // is a no-op for legacy / never-injected / out-of-window rows.
+    // Failure to record the metric must NEVER fail the user-facing
+    // run -- log + continue.
+    {
+        let conn = lock_db(&db)?;
+        if let Err(e) = sessions::mark_edit_observed(&conn, session_id) {
+            tracing::warn!(
+                error = ?e,
+                session_id,
+                "mark_edit_observed (llm pass) failed",
+            );
+        }
+    }
     // Defensive postprocess: small models tend to wrap output in an
     // outer ```markdown ... ``` fence regardless of the prompt's
     // instructions. Strip it so the UI renders the content directly.
@@ -351,4 +368,23 @@ pub fn dictation_run_llm_pass(
         text: strip_markdown_code_fence(&result.text),
         latency_ms: result.latency_ms,
     })
+}
+
+/// mb-v2fa / ADR 0047 §Wave 2.5 -- the UI calls this when the user
+/// takes an edit-equivalent action that doesn't already round-trip
+/// through another IPC. Today that's the Dictations detail Copy
+/// button (the LLM-pass run path is already instrumented inline
+/// inside `dictation_run_llm_pass`).
+///
+/// Conditional UPDATE: no-op if the row is not in the metric
+/// population (NULL `edit_free_within_5min`) or its 5-min window
+/// has elapsed. Never errors on the caller's behalf -- a metric
+/// write failing must not break a user-facing copy/click.
+#[tauri::command]
+pub fn dictation_mark_edit_observed(
+    db: State<'_, AppStateHandle>,
+    session_id: i64,
+) -> Result<(), String> {
+    let conn = lock_db(&db)?;
+    sessions::mark_edit_observed(&conn, session_id).map_err(into_err)
 }

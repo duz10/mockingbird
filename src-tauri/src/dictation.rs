@@ -920,6 +920,26 @@ impl DictationOrchestrator {
             },
         )?;
 
+        // mb-v2fa / ADR 0047 §Wave 2.5 -- arm the edit-free-send
+        // metric ONLY when the paste actually landed. Abort /
+        // failure / in-app variants stay NULL, which the Insights
+        // aggregation reads as "excluded from the population". This
+        // is the only place success-inject is observed centrally;
+        // keeping the eligibility match here means the SQL helper
+        // doesn't need to know about every InjectionOutcome variant.
+        if matches!(
+            p.outcome,
+            InjectionOutcome::Ok | InjectionOutcome::OkClipboardNotRestored
+        ) {
+            if let Err(e) = sessions::mark_injected_for_edit_metric(&conn, id) {
+                tracing::warn!(
+                    error = ?e,
+                    session_id = id,
+                    "persist edit-free-send metric arm failed"
+                );
+            }
+        }
+
         // Drop the DB lock before emitting so the frontend's
         // refetch (which goes through `list_sessions` -> DB) doesn't
         // race against our still-held connection.

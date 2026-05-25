@@ -36,6 +36,41 @@ pub struct InsightsSnapshot {
     pub top_corrections: Vec<CorrectionEntry>,
     /// Words-per-minute stats over the last 30 days.
     pub wpm: WpmStats,
+    /// ADR 0047 §Wave 2.5 / mb-v2fa -- edit-free-send rate, the
+    /// inverse-of-success metric that proves whether the rest of
+    /// the cleanup-pipeline refinement worked. See
+    /// `EditFreeSendStats`.
+    pub edit_free_send: EditFreeSendStats,
+}
+
+/// ADR 0047 §Wave 2.5 / mb-v2fa -- aggregation of
+/// `sessions.edit_free_within_5min` over two time windows.
+///
+/// The metric is binary per session: an injected session either
+/// did or did not have an edit-equivalent action within 5 min of
+/// injection. Sessions that never injected (in-app, abort, headless
+/// ingest) are excluded from both numerator AND denominator -- they
+/// have no `edit_free_within_5min` value to aggregate over.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditFreeSendStats {
+    /// All-time bucket.
+    pub lifetime: EditFreeBucket,
+    /// Last 30 days, anchored to `processing_completed_at`.
+    pub last30d: EditFreeBucket,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditFreeBucket {
+    /// Total injected sessions in the window (denominator).
+    pub injected: i64,
+    /// Injected sessions that survived the 5-min observation
+    /// window without an edit-equivalent action (numerator).
+    pub edit_free: i64,
+    /// `edit_free / injected`, 0..=1. `None` when injected = 0
+    /// (avoid divide-by-zero; UI renders as "—" instead).
+    pub percentage: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]

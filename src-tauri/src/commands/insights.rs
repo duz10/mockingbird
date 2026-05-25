@@ -11,8 +11,9 @@ use rusqlite::Connection;
 use tauri::State;
 
 use crate::commands::types::{
-    CorrectionEntry, DictTermEntry, HeatmapDay, InsightsSnapshot, InsightsToday, LatencyBreakdown,
-    LearningSummary, LifetimeTotals, ModeMixEntry, TopAppEntry, WpmStats,
+    CorrectionEntry, DictTermEntry, EditFreeBucket, EditFreeSendStats, HeatmapDay,
+    InsightsSnapshot, InsightsToday, LatencyBreakdown, LearningSummary, LifetimeTotals,
+    ModeMixEntry, TopAppEntry, WpmStats,
 };
 use crate::commands::{into_err, lock_db, AppStateHandle};
 
@@ -39,6 +40,7 @@ pub fn insights_snapshot(db: State<'_, AppStateHandle>) -> Result<InsightsSnapsh
     let top_dict_terms = top_dict_terms(&conn).map_err(into_err)?;
     let top_corrections = top_corrections(&conn).map_err(into_err)?;
     let wpm = wpm_stats_30d(&conn).map_err(into_err)?;
+    let edit_free_send = edit_free_send_stats(&conn).map_err(into_err)?;
 
     Ok(InsightsSnapshot {
         today,
@@ -55,6 +57,71 @@ pub fn insights_snapshot(db: State<'_, AppStateHandle>) -> Result<InsightsSnapsh
         top_dict_terms,
         top_corrections,
         wpm,
+        edit_free_send,
+    })
+}
+
+/// mb-v2fa / ADR 0047 §Wave 2.5 -- aggregate the edit-free-send
+/// rate over the lifetime + last-30-days windows.
+///
+/// Denominator: sessions with `edit_free_within_5min IS NOT NULL`.
+/// That filters to "injected and observed" automatically because
+/// `mark_injected_for_edit_metric` is the only call site that writes
+/// a non-NULL value, and it's only called from the orchestrator's
+/// success-injection branch. Aborts, in-app sessions, and headless
+/// ingest rows all stay NULL and drop out of both numerator and
+/// denominator.
+///
+/// Numerator: rows still at 1 (untouched within the 5-min window).
+///
+/// The 30-day variant anchors on `processing_completed_at` (which
+/// is also the metric's anchor) rather than `started_at`, so a
+/// session that started 31 days ago but completed yesterday is
+/// in-window. In practice processing latency is < 30 s, so the
+/// distinction matters only for the file-import path with a very
+/// slow STT pass -- but it's the conceptually correct anchor.
+fn edit_free_send_stats(conn: &Connection) -> rusqlite::Result<EditFreeSendStats> {
+    let lifetime = edit_free_bucket(conn, None)?;
+    let last30d = edit_free_bucket(conn, Some("datetime('now', '-30 days')"))?;
+    Ok(EditFreeSendStats { lifetime, last30d })
+}
+
+/// Compute one bucket. `window_lower` is an optional SQL expression
+/// that yields the lower bound on `processing_completed_at`. `None`
+/// means "lifetime, no lower bound". Inlined as a SQL fragment
+/// (NOT a bound param) because rusqlite would refuse to bind
+/// `datetime('now', '-30 days')` as a parameter -- it has to be
+/// part of the prepared statement. The values are constants we own;
+/// there is no SQL-injection surface here.
+fn edit_free_bucket(
+    conn: &Connection,
+    window_lower: Option<&str>,
+) -> rusqlite::Result<EditFreeBucket> {
+    let where_clause = match window_lower {
+        None => "WHERE edit_free_within_5min IS NOT NULL".to_string(),
+        Some(expr) => format!(
+            "WHERE edit_free_within_5min IS NOT NULL \
+                AND processing_completed_at IS NOT NULL \
+                AND datetime(processing_completed_at) >= {expr}"
+        ),
+    };
+    let sql = format!(
+        "SELECT \
+            COUNT(*) AS injected, \
+            COALESCE(SUM(edit_free_within_5min), 0) AS edit_free \
+         FROM sessions {where_clause}"
+    );
+    let (injected, edit_free): (i64, i64) =
+        conn.query_row(&sql, [], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let percentage = if injected > 0 {
+        Some(edit_free as f64 / injected as f64)
+    } else {
+        None
+    };
+    Ok(EditFreeBucket {
+        injected,
+        edit_free,
+        percentage,
     })
 }
 
@@ -551,5 +618,88 @@ mod tests {
         let s = sparkline_7d(&db.conn).unwrap();
         assert_eq!(s.len(), 7);
         assert!(s.iter().all(|v| *v == 0));
+    }
+
+    // ── ADR 0047 §Wave 2.5 / mb-v2fa: edit-free-send aggregation ───
+
+    /// Empty DB has zero injected sessions in either window;
+    /// percentage is `None` (UI shows "—").
+    #[test]
+    fn edit_free_send_empty_db_yields_zero_buckets_with_none_percentage() {
+        let db = Database::open_in_memory().unwrap();
+        let stats = edit_free_send_stats(&db.conn).unwrap();
+        assert_eq!(stats.lifetime.injected, 0);
+        assert_eq!(stats.lifetime.edit_free, 0);
+        assert!(stats.lifetime.percentage.is_none());
+        assert_eq!(stats.last30d.injected, 0);
+        assert!(stats.last30d.percentage.is_none());
+    }
+
+    /// Seed a small population by hand:
+    ///  - 3 injected sessions, 2 edit-free (=1), 1 edited (=0).
+    ///  - 2 never-injected sessions (NULL) -- must drop out.
+    ///  - 1 injected session aged 60 days -- in lifetime, out of
+    ///    last-30-days.
+    /// Expected: lifetime = 4 injected / 3 edit-free (75%);
+    ///           last30d  = 3 injected / 2 edit-free (~66.6%).
+    #[test]
+    fn edit_free_send_excludes_null_and_windows_correctly() {
+        let db = Database::open_in_memory().unwrap();
+        // Use raw SQL to skip the NewSession FK plumbing -- we're
+        // exercising the aggregator, not the row schema. The only
+        // columns the aggregator reads are edit_free_within_5min
+        // and processing_completed_at.
+        let insert = |edit_free: Option<i64>, completed: &str| {
+            db.conn
+                .execute(
+                    "INSERT INTO sessions ( \
+                        uuid, mode_id, hotkey_pressed, started_at, recording_ended_at, \
+                        status, edit_free_within_5min, processing_completed_at \
+                     ) VALUES ( \
+                        hex(randomblob(8)), 1, 'PTT', datetime('now'), datetime('now'), \
+                        'complete', ?1, ?2 \
+                     )",
+                    rusqlite::params![edit_free, completed],
+                )
+                .unwrap();
+        };
+        // 3 recent injected, 2 edit-free.
+        insert(Some(1), "now");
+        insert(Some(1), "now");
+        insert(Some(0), "now");
+        // 2 never injected (NULL).
+        insert(None, "now");
+        insert(None, "now");
+        // 1 lifetime-only injected (60d ago).
+        db.conn
+            .execute(
+                "INSERT INTO sessions ( \
+                    uuid, mode_id, hotkey_pressed, started_at, recording_ended_at, \
+                    status, edit_free_within_5min, processing_completed_at \
+                 ) VALUES ( \
+                    hex(randomblob(8)), 1, 'PTT', datetime('now', '-60 days'), \
+                    datetime('now', '-60 days'), 'complete', 1, \
+                    datetime('now', '-60 days') \
+                 )",
+                [],
+            )
+            .unwrap();
+
+        let stats = edit_free_send_stats(&db.conn).unwrap();
+        assert_eq!(
+            stats.lifetime.injected, 4,
+            "lifetime includes the 60d-old row"
+        );
+        assert_eq!(stats.lifetime.edit_free, 3);
+        let lt_pct = stats.lifetime.percentage.unwrap();
+        assert!((lt_pct - 0.75).abs() < 1e-9, "lifetime pct {lt_pct}");
+
+        assert_eq!(
+            stats.last30d.injected, 3,
+            "last30d excludes the 60d-old row"
+        );
+        assert_eq!(stats.last30d.edit_free, 2);
+        let l30_pct = stats.last30d.percentage.unwrap();
+        assert!((l30_pct - 2.0 / 3.0).abs() < 1e-9, "last30d pct {l30_pct}");
     }
 }

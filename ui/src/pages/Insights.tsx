@@ -173,6 +173,7 @@ function UsageTab({ snap }: { snap: InsightsSnapshot }) {
 
 function LifetimeTiles({ snap }: { snap: InsightsSnapshot }) {
   const lt = snap.lifetime;
+  const efs = snap.editFreeSend;
   return (
     <div className={styles.tiles}>
       <Tile
@@ -208,8 +209,44 @@ function LifetimeTiles({ snap }: { snap: InsightsSnapshot }) {
           String(snap.longestStreakDays),
         )}
       />
+      <EditFreeTile
+        label={t("insights.editFree.lifetime.label")}
+        bucket={efs.lifetime}
+        tooltip={t("insights.editFree.tooltip")}
+      />
+      <EditFreeTile
+        label={t("insights.editFree.last30d.label")}
+        bucket={efs.last30d}
+        tooltip={t("insights.editFree.tooltip")}
+      />
     </div>
   );
+}
+
+/* ADR 0047 §Wave 2.5 / mb-v2fa -- edit-free-send tile.
+ *
+ * Headline: percentage. Hint: "X of Y injected". When there are zero
+ * injected sessions in the window (a fresh install, or a user who
+ * only uses the in-app Start button) the value collapses to an em
+ * dash; the tile still renders so the metric is discoverable.
+ */
+function EditFreeTile({
+  label,
+  bucket,
+  tooltip,
+}: {
+  label: string;
+  bucket: InsightsSnapshot["editFreeSend"]["lifetime"];
+  tooltip: string;
+}) {
+  const pctText =
+    bucket.percentage === null
+      ? "—"
+      : `${Math.round(bucket.percentage * 100)}%`;
+  const hint = t("insights.editFree.fraction")
+    .replace("{numerator}", String(bucket.editFree))
+    .replace("{denominator}", String(bucket.injected));
+  return <Tile label={label} value={pctText} hint={hint} title={tooltip} />;
 }
 
 function TodayBlock({ snap }: { snap: InsightsSnapshot }) {
@@ -274,12 +311,19 @@ interface TileProps {
   value: string;
   hint?: string;
   accent?: "streak";
+  /** Native browser tooltip on hover. Used by the edit-free-send
+   *  tiles to explain the metric the first time a user encounters
+   *  it (ADR 0047 §Wave 2.5). No CSS-positioned popover needed --
+   *  the metric is on the Insights page, the user is already in a
+   *  reading mood. */
+  title?: string;
 }
 
-function Tile({ label, value, hint, accent }: TileProps) {
+function Tile({ label, value, hint, accent, title }: TileProps) {
   return (
     <div
       className={`${styles.tile} ${accent === "streak" ? styles.tileStreak : ""}`}
+      title={title}
     >
       <div className={styles.tileLabel}>{label}</div>
       <div className={styles.tileValue}>{value}</div>
