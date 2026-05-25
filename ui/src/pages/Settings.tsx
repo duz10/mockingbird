@@ -33,14 +33,19 @@ import { formatRelative } from "../lib/format";
 import { CommandCenterChordRow } from "./SettingsCommandCenterRow";
 import { SettingsActivityAudioRow } from "./SettingsActivityAudioRow";
 import { SettingsActivityHardeningRow } from "./SettingsActivityHardeningRow";
+import { SettingsDictationTab } from "./SettingsDictationTab";
 import { SettingsMeetingTab } from "./SettingsMeetingTab";
 import { SettingsMobileSyncTab } from "./SettingsMobileSyncTab";
 import styles from "./Settings.module.css";
 
+// ADR 0047 Wave 2C / mb-h0nn: the old `"history"` tab id is now
+// `"dictation"`. The label key follows suit (`settings.tab.history` →
+// `settings.tab.dictation`); the old key stays in en.json one cycle
+// for back-compat and is removed at the next i18n consolidation.
 type Tab =
   | "general"
   | "models"
-  | "history"
+  | "dictation"
   | "meeting"
   | "mobileSync"
   | "advanced";
@@ -91,7 +96,7 @@ export function SettingsPage() {
         <nav className={styles.tabs} aria-label="Settings sections">
           <TabBtn id="general" active={tab} setActive={setTab} label={t("settings.tab.general")} />
           <TabBtn id="models" active={tab} setActive={setTab} label={t("settings.tab.models")} />
-          <TabBtn id="history" active={tab} setActive={setTab} label={t("settings.tab.history")} />
+          <TabBtn id="dictation" active={tab} setActive={setTab} label={t("settings.tab.dictation")} />
           <TabBtn id="meeting" active={tab} setActive={setTab} label={t("settings.tab.meeting")} />
           <TabBtn id="mobileSync" active={tab} setActive={setTab} label={t("settings.tab.mobileSync")} />
           <TabBtn id="advanced" active={tab} setActive={setTab} label={t("settings.tab.advanced")} />
@@ -106,7 +111,9 @@ export function SettingsPage() {
             />
           )}
           {tab === "models" && <ModelsPanel settings={settings} patch={patch} />}
-          {tab === "history" && <HistoryPanel settings={settings} patch={patch} />}
+          {tab === "dictation" && (
+            <SettingsDictationTab settings={settings} patch={patch} />
+          )}
           {tab === "meeting" && <SettingsMeetingTab />}
           {tab === "mobileSync" && <SettingsMobileSyncTab />}
           {tab === "advanced" && <AdvancedPanel settings={settings} patch={patch} />}
@@ -524,71 +531,6 @@ function ModelsPanel({ settings, patch }: PanelProps) {
         />
       </Card>
     </>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* History & data panel                                                 */
-/* ------------------------------------------------------------------ */
-
-function HistoryPanel({ settings, patch }: PanelProps) {
-  return (
-    <Card title={t("settings.tab.history")}>
-      <Row
-        label={t("settings.history.retentionDays")}
-        control={
-          <select
-            className={styles.select}
-            value={String(settings.retentionDays)}
-            onChange={(e) =>
-              void patch(
-                "history.retention_days",
-                e.target.value,
-                { retentionDays: Number(e.target.value) },
-              )
-            }
-            aria-label={t("settings.history.retentionDays")}
-          >
-            <option value="30">{t("settings.history.retention.30")}</option>
-            <option value="90">{t("settings.history.retention.90")}</option>
-            <option value="180">{t("settings.history.retention.180")}</option>
-            <option value="365">{t("settings.history.retention.365")}</option>
-            <option value="-1">{t("settings.history.retention.forever")}</option>
-          </select>
-        }
-      />
-      <Row
-        label={t("settings.history.audioRetention")}
-        help={t("settings.history.audioRetention.help")}
-        control={
-          <Toggle
-            checked={settings.audioRetention}
-            onChange={(v) =>
-              void patch("history.audio_retention", v, { audioRetention: v })
-            }
-            ariaLabel={t("settings.history.audioRetention")}
-          />
-        }
-      />
-      <Row
-        label={t("settings.history.purge")}
-        control={
-          <Button
-            variant="danger"
-            onClick={() => {
-              const code = window.prompt(t("settings.history.purge.confirm"));
-              if (code === "PURGE") {
-                // Wire to a future `purge_all_history` command; for now
-                // this is a no-op so the UX is testable.
-                window.alert("Purge is wired but the IPC handler ships in Phase 7.");
-              }
-            }}
-          >
-            {t("settings.history.purge")}
-          </Button>
-        }
-      />
-    </Card>
   );
 }
 
