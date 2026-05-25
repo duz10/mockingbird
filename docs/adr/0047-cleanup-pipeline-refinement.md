@@ -1,7 +1,7 @@
 # ADR-0047: Cleanup pipeline refinement — over-consolidation hotfixes, scoped passes, and pull-only compression
 
-- **Status:** Proposed
-- **Date:** 2026-05-24
+- **Status:** Accepted (sealed 2026-05-25)
+- **Date:** 2026-05-24 (Proposed) / 2026-05-25 (Accepted)
 - **Deciders:** Dustin (project lead), code-puppy / Bernard (implementor)
 - **Supersedes:** none
 - **Amends / extends:** ADR 0022 (three-mode cleanup pipeline), ADR 0024
@@ -458,6 +458,101 @@ referencing this ADR for context:
   `mc-two-channel-merged`, `mc-no-llm-in-critical-path`,
   `mc-dictation-untouched`). Dry-run via the existing rig
   before sealing each wave.
+
+---
+
+## Outcome (2026-05-25 — SEALED)
+
+All three waves shipped across 12 commits + this seal commit. ADR is
+**Accepted**; no new `phase-*-complete` tag (lateral epic per LESSONS
+PINNED P5).
+
+### Commits (chronological)
+
+| # | Hash | Wave / Scope |
+|---|---|---|
+| 0  | `c7af486` | Charter ADR (this file, Proposed). |
+| W2 | `5daa977` | Wave 2.1 + 2.6 prompt bodies (`normal_v6_additive.md`, `compress.md`) — landed early. |
+| 1.1 | `d6974a2` | Per-pass system headers in `meetings/llm_pass.rs` (`SYSTEM_HEADER_PUNCTUATION` for `cleaner_punctuation`; concision retained for `summary` / `action_items` / `Custom`). The load-bearing fix for over-consolidation. |
+| 1.2 | `760fa5a` | Shrink-fallback length-ratio guard in `cleanup/llm_cleaner.rs` + `SettingKey::LlmShrinkFallbackThreshold` (default 0.65). |
+| 1.3 | `9d93712` | `stt::prompt_builder::build_prompt` wired into Whisper `initial_prompt` at both dictation call sites; dictionary substitution moves upstream of the LLM. |
+| 1.4 | `c63411b` | Migration 019: normal + formal temperature 0.1 → 0.2 (casual already 0.2; meetings LLM-pass already 0.2). |
+| 2.2 | `7330884` | LLM-skip-on-short-utterance: dictations ≤ `SettingKey::LlmSkipWordThreshold` words (default 12) skip the LLM unless `looks_listy()`; un-stubbed `looks_listy()` to consume preprocessor ordinal-cue + enumeration-marker signals. **Consumed `mb-cjc` (ADR 0022 Wave 3).** |
+| 2.1 | `e72dc63` | `SettingKey::DictationCleanupLevel` dial (`None` / `Light` / `Medium` / `High`); default `High` (preserves prior behaviour); `Medium` uses `normal_v6_additive.md`. |
+| —  | `1193a6c` | LESSONS note: `SettingKey::all().len()` drift hidden by `--no-run` test gate. |
+| 2.3 | `bec4682` | Migration 021: casual mode repointed to `qwen2.5:7b-instruct-q4_K_M` (skip path absorbs the latency tax on one-liners). |
+| 2.4 | `f646f4b` | Migration 022 + `SettingKey::PreferQ5Models` opt-in runtime gate + VRAM probe (≥6 GB total VRAM required for Q5_K_M; defaults off for existing installs). |
+| 2.5 | `c1cd2e5` | `sessions.edit_free_within_5min` instrumentation (column + 5-minute watcher + Insights tile in "Your usage"). |
+| 2.6 | `0b186d2` | Compress Transform wired on `LlmPassCard` as on-demand pull-only affordance. |
+| 3.1 | `daca115` | Wave 3 verification: 20 preamble-bearing fixtures + Ollama-live runner; eval result 18/20 passing on `qwen2.5:3b-instruct-q4_K_M` (Wave 1.1 default). |
+| 3.2 | _this seal commit_ | ADR Proposed → Accepted; STATUS.md + PRODUCT-STATE.md updated. |
+
+### Shipped surface
+
+- **4 P0 fixes (Wave 1):** per-pass system headers (1.1), length-ratio
+  shrink fallback (1.2), Whisper `initial_prompt` wired from dictionary
+  (1.3), temperature standardized to 0.2 across modes (1.4).
+- **Cleanup-level dial:** new `DictationCleanupLevel` setting
+  (`None` / `Light` / `Medium` / `High`); default `High` preserves prior
+  behaviour. UI surface deferred to `mb-h0nn`; today the dial is
+  power-user-tunable via direct settings edit.
+- **LLM skip on short utterances:** ≤12 words bypasses the LLM unless
+  `looks_listy()`; eliminates ~70% of casual one-liners from the LLM
+  hot path.
+- **Casual → 7B-Q4:** matches restraint headroom the 3B model lacked
+  (ADR 0022 §Context); paired with the skip path so one-liners don't
+  pay the 7B latency tax.
+- **Q5_K_M opt-in:** `SettingKey::PreferQ5Models` (defaults off);
+  VRAM-gated at ≥6 GB total. Existing installs unchanged; new installs
+  also default off pending field observation. UI surface deferred to
+  `mb-h0nn`.
+- **Compress Transform:** new on-demand `LlmPassCard` action +
+  `dictation/prompts/compress.md` body — the pull-only affordance for
+  the consolidation behaviour Wave 1.1 removed from the always-on push
+  path.
+- **Edit-free-send instrumentation:** `sessions.edit_free_within_5min`
+  column + 5-minute watcher + Insights tile. **This is the empirical
+  signal that will tell us whether to flip `DictationCleanupLevel`'s
+  default to `Light` in a successor ADR amendment.**
+
+### Eval results
+
+`docs/cleanup/eval-adr0047-cleaner-punctuation.md` (commit `daca115`):
+**18/20 fixtures preserve all expected phrases** on the default
+meetings model (`qwen2.5:3b-instruct-q4_K_M`). Zero fixtures show the
+historical over-consolidation pattern (entire preambles / clauses
+dropped); the 2 misses are residual 3B phrase-level edits (one
+inserted preposition, one hedge paraphrase) — much milder than the
+class Wave 1.1 was chartered against. **Wave 1.1 is empirically
+validated.**
+
+Wave 3.2's optional LLM judge was intentionally skipped — the
+"no `concise` in cleaner_punctuation header" invariant is already
+statically covered by the unit tests in `meetings/llm_pass.rs`
+(commit `d6974a2`); the fixture-based eval is the more valuable
+end-to-end artifact and adding a judge would duplicate verification
+cost without adding signal.
+
+### Bead ledger
+
+| Bead | State | Notes |
+|---|---|---|
+| `mb-wy9f` | Closed (commit `f5e038c`) | Wave 1 P0 hotfixes. |
+| `mb-0x0j` | Closed (commit `e17a481`) | Wave 2 prompt bodies. |
+| `mb-da5t` | Closed | Wave 2A (skip + dial). |
+| `mb-5a4y` | Closed (commit `97aa6b0`) | Wave 2B (migrations 021 + 022). |
+| `mb-v2fa` | Closed (commit `5273b87`) | Wave 2C (edit-free-send + Compress Transform). |
+| `mb-cjc`  | Closed | Consumed by Wave 2.2 (ADR 0022 Wave 3 short-utterance skip). |
+| `mb-4t27` | Closed _at this seal commit_ | Wave 3 verification + seal. |
+| `mb-nc9u` | Open (P2 standing) | `mode_eval` grid re-run for migration 019 (Dustin-owned). |
+| `mb-h0nn` | Open (P2 standing) | UI surface for `DictationCleanupLevel` dial + Q5 toggle. |
+
+### Acceptance note
+
+Sealed via this ADR's Accepted status + STATUS.md update (this seal
+commit) + PRODUCT-STATE.md update. **No `phase-*-complete` tag** per
+LESSONS PINNED P5 — lateral epics seal via ADR Acceptance, not by
+minting a new phase tag. `git tag --list "phase-*"` is unchanged.
 
 ---
 
