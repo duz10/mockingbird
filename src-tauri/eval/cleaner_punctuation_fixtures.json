@@ -1,0 +1,106 @@
+{
+  "_comment": "ADR 0047 §Wave 3.1 regression fixtures. Synthetic transcripts (no real user data) designed to expose over-consolidation patterns the cleaner_punctuation LLM pass historically exhibited under the old global SYSTEM_HEADER (Be concise...). With the per-pass preservation header shipped in Wave 1.1 (commit d6974a2), each fixture's expected_preserve phrases MUST survive byte-for-byte; the pass is whitespace + punctuation only. Each expected_preserve entry is matched against the LLM output as a whole-word phrase (lowercase, punctuation-stripped, whitespace-collapsed) — see runner.",
+  "fixtures": [
+    {
+      "id": "01_preamble_short",
+      "input": "yesterday I was thinking about how the meeting last week went",
+      "expected_preserve": ["yesterday", "thinking", "meeting", "last week"]
+    },
+    {
+      "id": "02_hedged_opinion",
+      "input": "I kind of feel like maybe we should rewrite the parser sort of from scratch",
+      "expected_preserve": ["kind of", "maybe", "sort of", "rewrite", "parser", "from scratch"]
+    },
+    {
+      "id": "03_parenthetical_aside",
+      "input": "the dictionary entries which by the way are loaded from sqlite need to be capped at two hundred tokens",
+      "expected_preserve": ["dictionary entries", "which by the way", "loaded from sqlite", "two hundred tokens"]
+    },
+    {
+      "id": "04_two_secondary_clauses",
+      "input": "we should ship the dial feature even though the UI is not ready although the backend handles all four levels correctly",
+      "expected_preserve": ["dial feature", "even though", "UI", "not ready", "although", "backend", "all four levels"]
+    },
+    {
+      "id": "05_self_corrective_phrasing",
+      "input": "the model is qwen two point five three B I mean seven B for casual now",
+      "expected_preserve": ["qwen two point five", "three B", "I mean", "seven B", "casual"]
+    },
+    {
+      "id": "06_preamble_with_doubling",
+      "input": "so basically what I want to say is the cleanup pipeline needs to stop dropping the preamble content I keep losing my first sentence every single time",
+      "expected_preserve": ["so basically", "cleanup pipeline", "dropping the preamble", "first sentence", "every single time"]
+    },
+    {
+      "id": "07_multiclause_planning",
+      "_note": "Originally included `q five toggle` in expected_preserve, but the prompt body explicitly ALLOWS numeral standardization (`q five` -> `Q5`). Replaced with a non-numeric preamble phrase so the fixture exercises content-preservation, not a behavior the prompt promises to do.",
+      "input": "okay let's plan the next sprint we have three big items the dial UI the mode eval rerun and the quant toggle and probably the documentation pass at the end",
+      "expected_preserve": ["plan", "next sprint", "three big items", "dial UI", "mode eval rerun", "quant toggle", "documentation pass"]
+    },
+    {
+      "id": "08_explanation_with_aside",
+      "input": "the length ratio shrink fallback fires whenever the cleaned text is less than sixty five percent of the input which is honestly a reasoned guess not a measured optimum",
+      "expected_preserve": ["length ratio", "shrink fallback", "sixty five percent", "honestly", "reasoned guess", "not a measured optimum"]
+    },
+    {
+      "id": "09_thinking_out_loud",
+      "input": "I was wondering whether we should hide the q five option entirely on machines with less than six gigabytes of vram or just default it off and let advanced users flip it",
+      "expected_preserve": ["wondering", "hide", "q five option", "six gigabytes", "vram", "advanced users", "flip"]
+    },
+    {
+      "id": "10_personal_anecdote_lead",
+      "input": "yesterday I dictated a really long meeting recap and the cleaner ate the second half because it decided the rest was redundant which obviously is not what I wanted",
+      "expected_preserve": ["yesterday", "dictated", "long meeting recap", "second half", "redundant", "obviously", "not what I wanted"]
+    },
+    {
+      "id": "11_dependent_clause_chain",
+      "input": "before I forget the migration that bumps the temperature also needs to be re evaluated against the baseline fixtures because the empirical justification only covered casual originally",
+      "expected_preserve": ["before I forget", "migration", "bumps the temperature", "baseline fixtures", "empirical justification", "casual"]
+    },
+    {
+      "id": "12_listy_but_inline",
+      "input": "the three modes we ship are casual which is the chatty one normal which is the default and formal which is for emails and documents",
+      "expected_preserve": ["three modes", "casual", "chatty", "normal", "default", "formal", "emails and documents"]
+    },
+    {
+      "id": "13_hedged_recommendation",
+      "input": "I guess if I had to pick one I would probably go with the length ratio guard since it's the cheapest defense and it catches the worst case directly",
+      "expected_preserve": ["I guess", "pick one", "probably", "length ratio guard", "cheapest defense", "worst case"]
+    },
+    {
+      "id": "14_question_then_answer",
+      "input": "what's the actual user visible signal that the epic worked it's the edit free send column which flips true if the user doesn't tweak the output within five minutes",
+      "expected_preserve": ["actual user visible signal", "epic worked", "edit free send", "flips true", "five minutes"]
+    },
+    {
+      "id": "15_dense_technical_aside",
+      "input": "the vram probe runs at first boot and stores the result so we don't repeatedly query the gpu which is surprisingly expensive on some driver versions",
+      "expected_preserve": ["vram probe", "first boot", "stores the result", "repeatedly query", "gpu", "surprisingly expensive", "driver versions"]
+    },
+    {
+      "id": "16_thinking_with_pivot",
+      "input": "originally I was going to flip the default cleanup level to light but actually we agreed to observe edit free send rates first before committing to that change",
+      "expected_preserve": ["originally", "flip the default", "cleanup level", "light", "actually", "edit free send rates", "before committing"]
+    },
+    {
+      "id": "17_emphasis_with_hedges",
+      "input": "the most important thing honestly is that the cleaner punctuation pass never drops a single content word it has literally one job which is whitespace and punctuation",
+      "expected_preserve": ["most important thing", "honestly", "cleaner punctuation", "never drops", "single content word", "literally one job", "whitespace and punctuation"]
+    },
+    {
+      "id": "18_meta_request",
+      "input": "I want to add a feature where users can rerun the LLM pass on a saved dictation with a different prompt sort of like a transform menu",
+      "expected_preserve": ["add a feature", "rerun the LLM pass", "saved dictation", "different prompt", "sort of like", "transform menu"]
+    },
+    {
+      "id": "19_concession_then_claim",
+      "input": "okay the deterministic preprocessor handles most cases fine but for the multi paragraph dictations we still need an LLM pass otherwise the structure is totally lost",
+      "expected_preserve": ["deterministic preprocessor", "most cases", "multi paragraph dictations", "LLM pass", "structure", "totally lost"]
+    },
+    {
+      "id": "20_long_recap_with_aside",
+      "input": "so the way the new pipeline works is the preprocessor runs first then if the utterance is over twelve words and not listy we call the LLM and if the result is less than sixty five percent of the input we fall back to the preprocessor only output which is how we avoid the dropped preamble problem entirely",
+      "expected_preserve": ["new pipeline", "preprocessor runs first", "twelve words", "not listy", "less than sixty five percent", "fall back", "preprocessor only", "dropped preamble problem"]
+    }
+  ]
+}
