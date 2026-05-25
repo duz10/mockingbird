@@ -107,6 +107,31 @@ const LAYOUT_CUES: &[(&str, &str)] = &[
     ("line break", "\n"),
 ];
 
+/// Ordinal cues — sequence words that strongly signal an enumerated
+/// list when more than one shows up in a single utterance. Matched
+/// case-insensitively at word boundaries (anywhere in the text). The
+/// `≥ 2` threshold in [`ProcessedNotes::looks_listy`] is what makes
+/// these usable: a single "first" is often content; "first ... second"
+/// is almost certainly a list.
+///
+/// See ADR 0047 §Wave 2.2 + `detect_list_signals`.
+const ORDINAL_CUES: &[&str] = &[
+    "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
+    "lastly", "finally",
+];
+
+/// Enumeration markers — spoken cardinal numbers at clause boundaries.
+/// More ambiguous than ordinals ("I have two cats" isn't a list) so:
+/// (a) only counted at sentence-initial / post-punctuation position,
+/// and (b) the [`ProcessedNotes::looks_listy`] threshold is `≥ 3`
+/// (vs `≥ 2` for ordinals). Together those guards keep the
+/// false-positive rate low.
+///
+/// See ADR 0047 §Wave 2.2 + `detect_list_signals`.
+const ENUMERATION_MARKERS: &[&str] = &[
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+];
+
 /// Quote/bracket cues. Bilateral — opens render the OPEN glyph, closes
 /// render the CLOSE glyph. We don't try to balance them; that's the
 /// speaker's responsibility.
@@ -144,17 +169,31 @@ pub struct ProcessedNotes {
     pub quote_bracket_cues_rendered: usize,
     pub sentences_capitalized: usize,
     pub terminal_punctuation_added: bool,
+    /// Count of [`ORDINAL_CUES`] occurrences in the processed text.
+    /// Anywhere, case-insensitive, word-boundary matched. Used by
+    /// [`Self::looks_listy`]; the ADR 0047 §Wave 2.2 threshold is `≥ 2`.
+    pub ordinal_cues_detected: usize,
+    /// Count of [`ENUMERATION_MARKERS`] occurrences at clause boundaries
+    /// (sentence-initial or after `.,!?`). Used by [`Self::looks_listy`];
+    /// the ADR 0047 §Wave 2.2 threshold is `≥ 3` (stricter than the
+    /// ordinal cutoff because raw cardinal-number words are noisier).
+    pub enumeration_markers_detected: usize,
 }
 
 impl ProcessedNotes {
-    /// Rough signal for the Wave-3 LLM-skip heuristic: "did the
-    /// preprocessor see anything list-shaped in this transcript?"
-    /// If true, the LLM must run to render the list correctly.
+    /// "Did the preprocessor see anything list-shaped in this
+    /// transcript?" — the gate for the Wave-2.2 LLM-skip heuristic.
+    /// If true, the LLM must run so the list gets rendered correctly
+    /// (the preprocessor itself never inserts bullet/numbered list
+    /// structure — that's out of its scope, per the module docs).
+    ///
+    /// Thresholds chosen in ADR 0047 §Wave 2.2: `≥ 2 ordinal cues`
+    /// OR `≥ 3 enumeration markers`. The OR is deliberate — a
+    /// speaker who said "first ... second" is enumerating even
+    /// without numbers, and a speaker who said "one, two, three"
+    /// is enumerating even without ordinal words.
     pub fn looks_listy(&self) -> bool {
-        // Currently always false because Wave 1 doesn't detect lists
-        // (that's the LLM's job). Wave 3 will set this based on
-        // verbal-cue counts and word-count heuristics.
-        false
+        self.ordinal_cues_detected >= 2 || self.enumeration_markers_detected >= 3
     }
 }
 
@@ -214,6 +253,11 @@ impl Preprocessor {
         text = capitalize_sentences(&text, &mut notes);
         text = add_terminal_punctuation(&text, &mut notes);
 
+        // 6. List-signal detection — runs LAST so we measure the
+        //    final text the LLM (or skip-path consumer) will see.
+        //    Pure read pass; no text mutation.
+        detect_list_signals(&text, &mut notes);
+
         Processed { text, notes }
     }
 }
@@ -250,6 +294,37 @@ fn render_punctuation_cues(input: &str, notes: &mut ProcessedNotes) -> String {
     // space included in the regex.
     out = drop_space_before_punctuation(&out);
     out
+}
+
+/// Count ordinal cues + clause-boundary enumeration markers in the
+/// preprocessor's output. Pure read pass — does not mutate `input`.
+///
+/// The downstream consumer ([`ProcessedNotes::looks_listy`]) uses
+/// the counts to decide whether the LLM-skip heuristic in
+/// `cleanup/llm_cleaner.rs::run_cleanup` may bypass the LLM on a
+/// short utterance. Under-counting here costs a needless LLM call;
+/// over-counting here costs a list that the LLM never gets a chance
+/// to render. Conservative on enumeration markers (clause-boundary
+/// only) because false positives there are pricier than false
+/// negatives on ordinal cues.
+fn detect_list_signals(input: &str, notes: &mut ProcessedNotes) {
+    static ORDINAL_RE: OnceLock<Regex> = OnceLock::new();
+    let ordinal_re = ORDINAL_RE.get_or_init(|| {
+        let alt = ORDINAL_CUES.join("|");
+        Regex::new(&format!(r"(?i)\b(?:{alt})\b")).expect("ordinal cue regex")
+    });
+    notes.ordinal_cues_detected = ordinal_re.find_iter(input).count();
+
+    static ENUM_RE: OnceLock<Regex> = OnceLock::new();
+    let enum_re = ENUM_RE.get_or_init(|| {
+        // Clause boundary: start-of-string OR `.,!?\n` followed by
+        // whitespace. Then the number-word at a word boundary. This
+        // pattern only matches enumeration-like uses; "I have two
+        // cats" doesn't qualify because `two` is mid-clause.
+        let alt = ENUMERATION_MARKERS.join("|");
+        Regex::new(&format!(r"(?i)(?:^|[.,!?\n]\s*)(?:{alt})\b")).expect("enumeration marker regex")
+    });
+    notes.enumeration_markers_detected = enum_re.find_iter(input).count();
 }
 
 fn render_layout_cues(input: &str, notes: &mut ProcessedNotes) -> String {
@@ -734,19 +809,27 @@ mod tests {
 
     #[test]
     fn list_pattern_passes_through_for_llm() {
-        // The preprocessor doesn't detect lists — that's the LLM's
-        // job. But it must NOT mangle a list-shaped input. Compare
-        // word set to ensure no content was dropped.
+        // The preprocessor doesn't render lists (no bullets / numbers
+        // inserted) — that's the LLM's job. But the list-shape
+        // SIGNAL must be detected so `looks_listy()` can gate the
+        // Wave-2.2 LLM-skip path. Compare word set to ensure no
+        // content was dropped, AND assert listy detection.
         let input = "here I have a list of keyboard supplies first thing is air duster second is alcohol wipes third is an extra cable";
-        let out = run(input);
+        let processed = Preprocessor::new().process(input);
         for needle in [
             "list", "keyboard", "supplies", "air", "duster", "alcohol", "wipes", "extra", "cable",
         ] {
             assert!(
-                out.to_lowercase().contains(needle),
-                "content word {needle:?} missing from {out:?}"
+                processed.text.to_lowercase().contains(needle),
+                "content word {needle:?} missing from {:?}",
+                processed.text
             );
         }
+        assert!(
+            processed.notes.looks_listy(),
+            "input with three ordinals should look listy; got notes={:?}",
+            processed.notes
+        );
     }
 
     // -- Determinism --------------------------------------------------
@@ -769,6 +852,75 @@ mod tests {
         let a = p.process("um hello, you know, world").text;
         let b = p.process("um hello, you know, world").text;
         assert_eq!(a, b);
+    }
+
+    // -- List-signal detection (ADR 0047 §Wave 2.2) ------------------
+
+    #[test]
+    fn looks_listy_default_is_false() {
+        // Default-constructed notes — zero of both signals — must
+        // not flag as listy. Protects the LLM-skip path from
+        // accidentally engaging on a fresh ProcessedNotes value
+        // (e.g. the empty-input early-return in `process`).
+        let n = ProcessedNotes::default();
+        assert!(!n.looks_listy());
+    }
+
+    #[test]
+    fn looks_listy_trips_on_two_ordinals() {
+        let n = notes("first finish the migration second review the PR");
+        assert!(
+            n.ordinal_cues_detected >= 2,
+            "expected ≥2 ordinals; got {}",
+            n.ordinal_cues_detected
+        );
+        assert!(n.looks_listy(), "two-ordinal input should look listy");
+    }
+
+    #[test]
+    fn looks_listy_does_not_trip_on_single_ordinal() {
+        // Single ordinal is often content ("the first day of school");
+        // the ≥2 threshold deliberately ignores it.
+        let n = notes("the first day of school was great");
+        assert_eq!(n.ordinal_cues_detected, 1);
+        assert!(!n.looks_listy(), "single ordinal should NOT look listy");
+    }
+
+    #[test]
+    fn looks_listy_trips_on_three_enumeration_markers() {
+        // Clause-boundary number words: "one, two, three" at
+        // sentence-start + after commas — the textbook spoken
+        // enumeration shape.
+        let n =
+            notes("the steps are. one, prepare the room. two, set the table. three, serve dinner");
+        assert!(
+            n.enumeration_markers_detected >= 3,
+            "expected ≥3 enumeration markers; got {}",
+            n.enumeration_markers_detected
+        );
+        assert!(n.looks_listy(), "three-enum input should look listy");
+    }
+
+    #[test]
+    fn looks_listy_ignores_midclause_number_words() {
+        // "I have two cats and three dogs" should NOT count as
+        // enumeration — the number words are mid-clause content, not
+        // list prefixes. The clause-boundary anchor in the regex is
+        // what enforces this.
+        let n = notes("I have two cats and three dogs and five fish at home");
+        assert_eq!(
+            n.enumeration_markers_detected, 0,
+            "mid-clause number words must not count"
+        );
+        assert!(!n.looks_listy());
+    }
+
+    #[test]
+    fn looks_listy_false_on_plain_sentence() {
+        let n = notes("this is a normal dictation with no list shape at all");
+        assert_eq!(n.ordinal_cues_detected, 0);
+        assert_eq!(n.enumeration_markers_detected, 0);
+        assert!(!n.looks_listy());
     }
 
     #[test]

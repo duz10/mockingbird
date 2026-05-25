@@ -223,6 +223,20 @@ pub enum SettingKey {
     /// Lower the value to suppress the guard (more permissive);
     /// raise it to be more conservative. `0.0` disables.
     LlmShrinkFallbackThreshold,
+
+    // ----- ADR 0047 Wave 2.2 — LLM-skip-on-short-utterance dial. -----
+    //
+    /// Word-count ceiling under which short, non-listy utterances
+    /// skip the LLM cleanup pass entirely and return the deterministic
+    /// preprocessor's output directly (ADR 0047 §Wave 2.2). Default
+    /// `12` — the empirically observed inflection point between
+    /// "one-liner that the preprocessor already handled cleanly" and
+    /// "long enough that an LLM pass might add value".
+    ///
+    /// The skip is also gated on `pre.notes.looks_listy() == false`;
+    /// any utterance with list signals always reaches the LLM so the
+    /// list can be rendered. `0` disables the skip (always run LLM).
+    LlmSkipWordThreshold,
 }
 
 impl SettingKey {
@@ -271,6 +285,8 @@ impl SettingKey {
             Self::KeepAudioBlobs => "keep_audio_blobs",
             // ADR 0047 Wave 1.2.
             Self::LlmShrinkFallbackThreshold => "llm_shrink_fallback_threshold",
+            // ADR 0047 Wave 2.2.
+            Self::LlmSkipWordThreshold => "llm_skip_word_threshold",
         }
     }
 
@@ -319,6 +335,8 @@ impl SettingKey {
             "keep_audio_blobs" => Ok(Self::KeepAudioBlobs),
             // ADR 0047 Wave 1.2.
             "llm_shrink_fallback_threshold" => Ok(Self::LlmShrinkFallbackThreshold),
+            // ADR 0047 Wave 2.2.
+            "llm_skip_word_threshold" => Ok(Self::LlmSkipWordThreshold),
             other => Err(AppError::Other(format!("unknown setting key: {other:?}"))),
         }
     }
@@ -403,6 +421,11 @@ impl SettingKey {
             // Stored as a setting so we can tune without code change
             // (ADR §Risk #2).
             Self::LlmShrinkFallbackThreshold => serde_json::json!(0.65),
+            // ADR 0047 Wave 2.2 — 12 words is the empirical inflection
+            // point between "preprocessor already handled this" and
+            // "long enough for an LLM pass to matter". Stored as a
+            // setting so the threshold is tunable without code change.
+            Self::LlmSkipWordThreshold => serde_json::json!(12),
         }
     }
 
@@ -453,6 +476,8 @@ impl SettingKey {
             Self::KeepAudioBlobs,
             // ADR 0047 Wave 1.2.
             Self::LlmShrinkFallbackThreshold,
+            // ADR 0047 Wave 2.2.
+            Self::LlmSkipWordThreshold,
         ]
     }
 }
@@ -556,8 +581,10 @@ mod tests {
         //   + 3 Phase 10 W1A (CommandCenter* + LegacyMeetingChordEnabled)
         //   + 1 Phase 10 W4 (ActivityAudioEnabled)
         //   + 4 Phase 10 W5 (ActivityRetention* x 4)
-        //   + 8 ADR 0046 Iter 2 (MobileSync/Vault* x 8) = 36.
-        assert_eq!(SettingKey::all().len(), 36);
+        //   + 8 ADR 0046 Iter 2 (MobileSync/Vault* x 8)
+        //   + 1 ADR 0047 Wave 1.2 (LlmShrinkFallbackThreshold)
+        //   + 1 ADR 0047 Wave 2.2 (LlmSkipWordThreshold) = 38.
+        assert_eq!(SettingKey::all().len(), 38);
     }
 
     /// ADR 0046 Iter 2 defaults must match §10 ("opt-in by default";

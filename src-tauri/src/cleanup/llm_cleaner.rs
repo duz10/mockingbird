@@ -46,6 +46,12 @@ use super::provider::{CleanupProvider, CleanupRequest};
 /// See [`LlmCleaner::run_cleanup`] / ADR 0047 §Wave 1.2.
 const SHRINK_FALLBACK_SUFFIX: &str = "-shrink-fallback";
 
+/// Prefix stamped onto `model_used` when the LLM-skip-on-short-utterance
+/// path returns the preprocessor output directly without ever calling
+/// the LLM provider. Stable string so downstream provenance queries
+/// can grep for it. See [`LlmCleaner::run_cleanup`] / ADR 0047 §Wave 2.2.
+const PREPROCESSOR_ONLY_PROVENANCE: &str = "preprocessor-only";
+
 /// Cleaner backed by a real LLM provider.
 pub struct LlmCleaner {
     provider: Box<dyn CleanupProvider>,
@@ -104,6 +110,37 @@ impl LlmCleaner {
             .unwrap_or(0.65)
     }
 
+    /// Read the configured LLM-skip word-count ceiling (ADR 0047
+    /// §Wave 2.2). Same mutex-poison-tolerant pattern as
+    /// [`Self::read_shrink_threshold`]: the skip is a latency
+    /// optimisation, not a safety guard, so a settings-read failure
+    /// collapses to the documented default rather than blocking the
+    /// cleanup pipeline.
+    fn read_skip_word_threshold(&self) -> u32 {
+        let Ok(conn) = self.db.lock() else {
+            return SettingKey::LlmSkipWordThreshold
+                .default_value()
+                .as_u64()
+                .map(|v| v as u32)
+                .unwrap_or(12);
+        };
+        Settings::new(&conn)
+            .get::<u32>(SettingKey::LlmSkipWordThreshold)
+            .unwrap_or(12)
+    }
+
+    /// Stamp `last_model_used` with the preprocessor-only provenance
+    /// string. Used by the Wave-2.2 LLM-skip path AND (in Wave-2.1)
+    /// the cleanup-level `Light` branch. Both code paths return the
+    /// preprocessor output without calling the LLM, so they share
+    /// the same provenance shape: `preprocessor-only+<PREPROCESSOR_VERSION>`.
+    fn stamp_preprocessor_only_model(&self) {
+        let stamped = format!("{PREPROCESSOR_ONLY_PROVENANCE}+{PREPROCESSOR_VERSION}");
+        if let Ok(mut slot) = self.last_model_used.lock() {
+            *slot = stamped;
+        }
+    }
+
     /// Inner helper that performs the full cleanup pipeline. Separated
     /// so `clean()` can swallow errors + log them while keeping the
     /// happy path readable.
@@ -118,6 +155,32 @@ impl LlmCleaner {
         let pre = self.preprocessor.process(raw);
         let pre_ms = pre_started.elapsed().as_millis() as u64;
         let pre_text = pre.text;
+
+        // 0.5 ADR 0047 §Wave 2.2 — LLM-skip-on-short-utterance.
+        //     Short, non-listy utterances skip the LLM entirely and
+        //     return the preprocessor output directly. ~70% of casual
+        //     one-liners fit this profile; bypassing the LLM saves
+        //     a few hundred ms of latency and removes the model's
+        //     opportunity to over-consolidate.
+        //
+        //     Listy utterances always run the LLM regardless of length,
+        //     because the preprocessor itself never renders list
+        //     structure (out of scope per its module docs).
+        let skip_threshold = self.read_skip_word_threshold();
+        let pre_word_count = pre_text.split_whitespace().count();
+        let is_listy = pre.notes.looks_listy();
+        if skip_threshold > 0 && pre_word_count <= skip_threshold as usize && !is_listy {
+            tracing::info!(
+                pre_word_count,
+                skip_threshold,
+                preprocessor_ms = pre_ms,
+                mode = mode_slug,
+                provenance = %format!("{PREPROCESSOR_ONLY_PROVENANCE}+{PREPROCESSOR_VERSION}"),
+                "llm-skip-short-utterance: returning preprocessor output"
+            );
+            self.stamp_preprocessor_only_model();
+            return Ok(pre_text);
+        }
 
         // 1-2. Prompt body for this mode.
         let conn = self
@@ -526,6 +589,119 @@ mod tests {
         assert!(
             !model.contains("-shrink-fallback"),
             "model_name should NOT be stamped when guard doesn't trip; got: {model}"
+        );
+    }
+
+    // -------- ADR 0047 §Wave 2.2 — LLM-skip-on-short-utterance. --------
+
+    /// Short (<= threshold words) non-listy input — the LLM is
+    /// bypassed entirely and `pre_text` is returned, with the
+    /// provenance string stamped as `preprocessor-only+<ver>`.
+    #[test]
+    fn llm_skip_short_non_listy_returns_preprocessor_output() {
+        let db = fresh_db();
+        // 8 words, no ordinals, no enumeration markers — well under
+        // the default 12-word threshold AND non-listy.
+        let raw = "please send the report to alice by tomorrow";
+        // The configurable stub would return a fingerprint string IF
+        // it ran; the skip path means the stub must NOT run, so this
+        // string must NOT appear in the output.
+        let provider = ConfigurableStubCleanupProvider {
+            text_to_return: "LLM RAN — SKIP FAILED".into(),
+        };
+        let mut cleaner = LlmCleaner::new(
+            Box::new(provider),
+            db,
+            "configurable-stub-model".into(),
+            0.3,
+            256,
+        );
+        let out = cleaner.clean(raw, "normal").unwrap();
+        assert!(
+            !out.contains("LLM RAN"),
+            "LLM provider should not have been called; got: {out}"
+        );
+        // The preprocessor capitalises + adds a terminal period.
+        assert!(
+            out.starts_with('P') && out.ends_with('.'),
+            "expected preprocessor-shaped output; got: {out}"
+        );
+        let model = cleaner.model_name();
+        assert!(
+            model.contains(PREPROCESSOR_ONLY_PROVENANCE),
+            "model_name should be stamped preprocessor-only; got: {model}"
+        );
+        assert!(
+            model.contains(PREPROCESSOR_VERSION),
+            "model_name should carry preprocessor version; got: {model}"
+        );
+    }
+
+    /// Short input WITH list signals — the LLM must still run so
+    /// the list can be rendered. The threshold-by-itself rule is
+    /// not enough; `looks_listy()` is the override gate.
+    #[test]
+    fn llm_skip_does_not_trip_when_input_looks_listy() {
+        let db = fresh_db();
+        // 10 words containing two ordinals ("first", "second") —
+        // under the 12-word ceiling but listy. The skip must NOT
+        // fire; the LLM must run.
+        let raw = "first finish the migration second review the pr from alice";
+        let provider = ConfigurableStubCleanupProvider {
+            text_to_return: "LLM RAN ON LISTY INPUT".into(),
+        };
+        let mut cleaner = LlmCleaner::new(
+            Box::new(provider),
+            db,
+            "configurable-stub-model".into(),
+            0.3,
+            256,
+        );
+        let out = cleaner.clean(raw, "normal").unwrap();
+        assert_eq!(
+            out, "LLM RAN ON LISTY INPUT",
+            "listy input must reach the LLM despite short length; got: {out}"
+        );
+        let model = cleaner.model_name();
+        assert!(
+            !model.contains(PREPROCESSOR_ONLY_PROVENANCE),
+            "model_name must NOT be preprocessor-only when LLM ran; got: {model}"
+        );
+    }
+
+    /// Input over the threshold — the LLM runs even on non-listy
+    /// content. The skip is a one-liner latency optimisation only;
+    /// longer utterances always reach the model.
+    #[test]
+    fn llm_skip_does_not_trip_above_word_threshold() {
+        let db = fresh_db();
+        // 20 words — above the default 12 — plain prose with no
+        // list signals. The LLM must run.
+        let raw = "the quick brown fox jumps over the lazy dog and \
+                   then runs through the forest to find a sunny spot";
+        // 20-word LLM reply so the shrink-fallback guard (Wave 1.2)
+        // doesn't trip and confuse this test's expectations.
+        let provider = ConfigurableStubCleanupProvider {
+            text_to_return: "The quick brown fox jumps over the lazy dog \
+                             and then runs through the forest to find a sunny spot."
+                .into(),
+        };
+        let mut cleaner = LlmCleaner::new(
+            Box::new(provider),
+            db,
+            "configurable-stub-model".into(),
+            0.3,
+            256,
+        );
+        let out = cleaner.clean(raw, "normal").unwrap();
+        assert!(
+            out.contains("The quick brown fox"),
+            "long input should reach the LLM; got: {out}"
+        );
+        let model = cleaner.model_name();
+        assert!(
+            !model.contains(PREPROCESSOR_ONLY_PROVENANCE),
+            "model_name must NOT be preprocessor-only when LLM ran; got: {model}"
         );
     }
 
