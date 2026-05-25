@@ -79,6 +79,13 @@ const MIGRATION_019: &str = include_str!("migrations/019_normalize_temperatures.
 // substitution.
 const MIGRATION_020: &str = include_str!("migrations/020_dictation_cleanup_level.sql");
 
+// 021 — mb-5a4y / ADR 0047 §Wave 2.3: repoint `casual` mode's
+// `model_id` from qwen2.5:3b-instruct-q4_K_M to qwen2.5:7b-instruct-
+// q4_K_M. Pure UPDATE; no prompt bodies; no DDL. Depends on the
+// Wave 2A LLM-skip-on-short-utterance path (commit 7330884) being
+// in place so one-liners don't pay the 7B latency.
+const MIGRATION_021: &str = include_str!("migrations/021_casual_7b_model.sql");
+
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
 ///
@@ -227,6 +234,18 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         let prepared = substitute_prompt_bodies(MIGRATION_020);
         conn.execute_batch(&prepared)?;
     }
+    if current < 21 {
+        // mb-5a4y / ADR 0047 §Wave 2.3: repoint `casual` mode at
+        // qwen2.5:7b-instruct-q4_K_M (same model already backing
+        // `normal` + `formal`). Wave 2A's LLM-skip path keeps
+        // one-liners on the preprocessor-only fast path, so the 7B
+        // tax only applies to long-form casual dictations -- which
+        // is the population where 3B's over-consolidation symptom
+        // bit hardest. Pure UPDATE; no prompt bodies. Substituter
+        // pass for the leftover-token guard.
+        let prepared = substitute_prompt_bodies(MIGRATION_021);
+        conn.execute_batch(&prepared)?;
+    }
     Ok(())
 }
 
@@ -285,7 +304,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "20");
+        assert_eq!(v, "21");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -304,7 +323,49 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "20");
+        assert_eq!(v, "21");
+    }
+
+    /// Migration 021 (mb-5a4y / ADR 0047 §Wave 2.3) repoints the
+    /// `casual` mode at qwen2.5:7b-instruct-q4_K_M so it matches the
+    /// model already backing `normal` and `formal`. The 3B compromise
+    /// is no longer needed because Wave 2A's LLM-skip-on-short-
+    /// utterance path keeps casual one-liners off the LLM entirely
+    /// (so the 7B latency only applies to long-form casual
+    /// dictations -- the population where 3B's over-consolidation
+    /// symptom actually bit).
+    #[test]
+    fn migration_021_repoints_casual_to_7b_q4_k_m() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+
+        let casual_model: String = conn
+            .query_row(
+                "SELECT model_id FROM modes WHERE slug = 'casual'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("casual mode row should exist after migration 021");
+        assert_eq!(
+            casual_model, "qwen2.5:7b-instruct-q4_K_M",
+            "casual should be repointed at the 7B Q4_K_M model"
+        );
+
+        // Sibling sanity check -- all three tone modes should now
+        // share the same model_id (was the goal of 021). Drift here
+        // signals an accidental UPDATE that escaped the WHERE clause.
+        for slug in ["casual", "normal", "formal"] {
+            let model: String = conn
+                .query_row("SELECT model_id FROM modes WHERE slug = ?1", [slug], |r| {
+                    r.get(0)
+                })
+                .unwrap_or_else(|_| panic!("mode row for slug={slug} should exist"));
+            assert_eq!(
+                model, "qwen2.5:7b-instruct-q4_K_M",
+                "slug={slug} expected the 7B Q4_K_M model, got {model}"
+            );
+        }
     }
 
     /// Migration 020 (mb-da5t / ADR 0047 §Wave 2.1) ships the
