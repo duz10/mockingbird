@@ -391,6 +391,7 @@
   "meetings.llm.prompt.summary": "Summary",
   "meetings.llm.prompt.action_items": "Action items",
   "meetings.llm.prompt.cleaner_punctuation": "Cleaner punctuation",
+  "meetings.llm.prompt.compress": "Compress",
   "meetings.llm.prompt.custom": "Custom prompt…",
   "meetings.llm.notRun": "No LLM pass run yet. Pick a prompt and click Run to generate one.",
   "meetings.llm.running": "Running LLM pass…",

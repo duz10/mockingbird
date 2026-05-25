@@ -611,7 +611,11 @@ function DetailView({
 /* persisted — same invariant as the meeting LLM pass.                */
 /* ------------------------------------------------------------------ */
 
-type DictLlmPrompt = "summary" | "action_items" | "cleaner_punctuation";
+type DictLlmPrompt =
+  | "summary"
+  | "action_items"
+  | "cleaner_punctuation"
+  | "compress";
 
 const LLM_PROMPT_OPTIONS: Array<{ id: DictLlmPrompt; labelKey: string }> = [
   { id: "summary", labelKey: "meetings.llm.prompt.summary" },
@@ -620,6 +624,11 @@ const LLM_PROMPT_OPTIONS: Array<{ id: DictLlmPrompt; labelKey: string }> = [
     id: "cleaner_punctuation",
     labelKey: "meetings.llm.prompt.cleaner_punctuation",
   },
+  // ADR 0047 §Wave 2.6 — the pull-only "tighten this up" Transform.
+  // Lives next to the other built-ins because the picker shape is
+  // identical; what makes Compress different is the prompt body, not
+  // the IPC plumbing.
+  { id: "compress", labelKey: "meetings.llm.prompt.compress" },
 ];
 
 /* ------------------------------------------------------------------ */

@@ -45,6 +45,17 @@ pub const ACTION_ITEMS_BODY: &str = include_str!("prompts/action_items.md");
 /// single dictating speaker. See `prompts/cleaner_punctuation.md`.
 pub const CLEANER_PUNCTUATION_BODY: &str = include_str!("prompts/cleaner_punctuation.md");
 
+/// Built-in prompt: lossless compression / "tighten this up" transform.
+/// See `prompts/compress.md`.
+///
+/// ADR 0047 §Wave 2.6: this is the pull-only affordance for the
+/// consolidation behaviour that the rest of the epic removes from
+/// the always-on cleanup path. The body's non-negotiables are
+/// "never drop a fact / never invent / keep the register"; the
+/// model has explicit license to compress only because the user
+/// asked for it by clicking the button.
+pub const COMPRESS_BODY: &str = include_str!("prompts/compress.md");
+
 /// Strip an outer markdown code fence from an LLM-pass result, if
 /// one is present.
 ///
@@ -105,6 +116,7 @@ pub fn resolve_dictation_prompt(name: &str) -> AppResult<&'static str> {
         "summary" => Ok(SUMMARY_BODY),
         "action_items" => Ok(ACTION_ITEMS_BODY),
         "cleaner_punctuation" => Ok(CLEANER_PUNCTUATION_BODY),
+        "compress" => Ok(COMPRESS_BODY),
         other => Err(AppError::MeetingCapture(format!(
             "unknown built-in dictation prompt: {other:?}"
         ))),
@@ -225,14 +237,38 @@ mod tests {
     }
 
     #[test]
-    fn all_three_built_ins_resolve_distinct_bodies() {
+    fn all_four_built_ins_resolve_distinct_bodies() {
         // Cheap regression guard against an accidental copy-paste
         // where two prompts point at the same `include_str!`.
         let s = resolve_dictation_prompt("summary").unwrap();
         let a = resolve_dictation_prompt("action_items").unwrap();
         let c = resolve_dictation_prompt("cleaner_punctuation").unwrap();
+        let z = resolve_dictation_prompt("compress").unwrap();
+        // Every pair is distinct — a 4-way assertion is exhaustive.
         assert_ne!(s, a);
-        assert_ne!(a, c);
         assert_ne!(s, c);
+        assert_ne!(s, z);
+        assert_ne!(a, c);
+        assert_ne!(a, z);
+        assert_ne!(c, z);
+    }
+
+    #[test]
+    fn compress_body_forbids_dropping_facts_and_inventing() {
+        // The ADR 0047 §Wave 2.6 non-negotiables. If a future edit
+        // removes either invariant from the markdown, the whole
+        // "pull-only Transform" framing breaks — the model would
+        // be back to the old over-consolidating-by-default behaviour
+        // we are explicitly architecting out of the push path.
+        let body = resolve_dictation_prompt("compress").unwrap();
+        let lower = body.to_lowercase();
+        assert!(
+            lower.contains("never drop a fact"),
+            "compress prompt must forbid dropping facts"
+        );
+        assert!(
+            lower.contains("never invent"),
+            "compress prompt must forbid invention"
+        );
     }
 }

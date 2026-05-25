@@ -296,8 +296,18 @@ export interface MeetingMatch {
   channel: string;
 }
 
-/** Built-in LLM-pass prompts. Custom prompts ride as `{ custom: body }`. */
-export type BuiltInPromptId = "summary" | "action_items" | "cleaner_punctuation";
+/** Built-in LLM-pass prompts. Custom prompts ride as `{ custom: body }`.
+ *
+ * NOTE: this union spans every built-in any caller might pass. The
+ * dictation handler accepts the full set; the meetings handler
+ * recognises summary / action_items / cleaner_punctuation only and
+ * rejects unknown names. UI pickers gate per-context.
+ */
+export type BuiltInPromptId =
+  | "summary"
+  | "action_items"
+  | "cleaner_punctuation"
+  | "compress";
 
 /** Wire shape for `meeting_run_llm_pass.promptId`. */
 export type LlmPassPromptArg = BuiltInPromptId | { custom: string };
