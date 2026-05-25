@@ -293,11 +293,17 @@ pub fn headless_ingest(
         "headless_ingest: VAD trim done"
     );
 
-    // STT.
+    // STT. Build the Whisper `initial_prompt` from the live
+    // dictionary (ADR 0047 Wave 1.3). No foreground-app context for
+    // the headless path -- the file ingest isn't targeting any
+    // particular app, so dictionary entries score on recency *
+    // frequency only. `None` on every error / empty-dict path means
+    // Whisper transcribes bias-free, identical to the prior behaviour.
+    let initial_prompt = crate::stt::initial_prompt::build_from_db(deps.db, None);
     let stt_start = std::time::Instant::now();
     let stt_result = deps.stt.transcribe(TranscribeRequest {
         audio: &trimmed,
-        initial_prompt: None,
+        initial_prompt: initial_prompt.as_deref(),
         force_cpu: false,
     });
     let stt_latency_ms = stt_start.elapsed().as_millis() as i64;

@@ -6,6 +6,7 @@
 //! Wave 3 VAD too). Wave 4 fills in whisper-rs CUDA + CPU fallback
 //! per ADR 0011.
 
+pub mod initial_prompt;
 pub mod prompt_builder;
 pub mod whisper;
 

@@ -673,10 +673,19 @@ impl DictationOrchestrator {
             crate::recording_window::state::TRANSCRIBING,
             Some(&mode_slug),
         );
+        // Build the Whisper `initial_prompt` from the live
+        // dictionary, biased toward terms whose `app_context`
+        // matches the foreground at key-up (ADR 0047 Wave 1.3).
+        // `None` on any error / empty-dict path -- Whisper then
+        // transcribes bias-free, matching the prior behaviour.
+        let initial_prompt = crate::stt::initial_prompt::build_from_db(
+            &self.db,
+            Some(fg_keyup.process_name.as_str()),
+        );
         let stt_start = Instant::now();
         let stt_result = self.stt.transcribe(TranscribeRequest {
             audio: &trimmed,
-            initial_prompt: None, // prompt-builder wiring is Phase 4
+            initial_prompt: initial_prompt.as_deref(),
             force_cpu: false,
         });
         let stt_latency_ms = stt_start.elapsed().as_millis() as i64;
