@@ -65,6 +65,12 @@ const MIGRATION_017: &str = include_str!("migrations/017_dictation_start_mode.sq
 // the Iter 2 export-job source filter.
 const MIGRATION_018: &str = include_str!("migrations/018_session_source.sql");
 
+// 019 — mb-wy9f / ADR 0047 §Wave 1.4: bump `normal` + `formal`
+// dictation-mode temperatures from 0.1 to 0.2 so they match the
+// already-shipped meetings LLM pass (DEFAULT_TEMPERATURE in
+// `meetings/llm_pass.rs`). Pure UPDATE; no prompt bodies; no DDL.
+const MIGRATION_019: &str = include_str!("migrations/019_normalize_temperatures.sql");
+
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
 ///
@@ -193,6 +199,17 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         let prepared = substitute_prompt_bodies(MIGRATION_018);
         conn.execute_batch(&prepared)?;
     }
+    if current < 19 {
+        // mb-wy9f / ADR 0047 §Wave 1.4: bump normal + formal dictation
+        // temperatures from 0.1 to 0.2 so they match the already-
+        // shipped meetings LLM pass (DEFAULT_TEMPERATURE = 0.2 in
+        // meetings/llm_pass.rs). Aligns the over-cooled modes with
+        // casual's 0.2 baseline (set in migration 010 / ADR 0024 Wave C).
+        // Pure UPDATE -- no prompt bodies, no DDL. Substituter pass
+        // for the leftover-token guard.
+        let prepared = substitute_prompt_bodies(MIGRATION_019);
+        conn.execute_batch(&prepared)?;
+    }
     Ok(())
 }
 
@@ -251,7 +268,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "18");
+        assert_eq!(v, "19");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -270,7 +287,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "18");
+        assert_eq!(v, "19");
     }
 
     /// Migration 018 (mb-jqhw / ADR 0046) adds the `sessions.source`
@@ -319,6 +336,34 @@ mod tests {
             idx, 1,
             "idx_sessions_source should exist after migration 018"
         );
+    }
+
+    /// Migration 019 (mb-wy9f / ADR 0047 Wave 1.4) bumps the `normal`
+    /// and `formal` mode temperatures from 0.1 to 0.2 so they match
+    /// the meetings LLM-pass precedent. `casual` was already 0.2
+    /// (migration 010 / ADR 0024 Wave C); we assert all three end up
+    /// at the same value so future drift jumps out in this test.
+    #[test]
+    fn migration_019_normalizes_normal_and_formal_temperatures_to_0_2() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+
+        for slug in ["casual", "normal", "formal"] {
+            let temp: f64 = conn
+                .query_row(
+                    "SELECT temperature FROM modes WHERE slug = ?1",
+                    [slug],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| panic!("row for slug={slug} should exist"));
+            // f64 equality is fine here -- the value was written
+            // verbatim by the migration; no arithmetic in between.
+            assert!(
+                (temp - 0.2).abs() < f64::EPSILON,
+                "slug={slug} expected temperature=0.2, got {temp}"
+            );
+        }
     }
 
     /// Migration 017 (mb-tfyp / ADR 0045 follow-up) adds the
