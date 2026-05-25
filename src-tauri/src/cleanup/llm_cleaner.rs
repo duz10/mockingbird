@@ -37,8 +37,14 @@ use crate::cleanup::{
 };
 use crate::db::{dictionary, prompts};
 use crate::error::{AppError, AppResult};
+use crate::settings::{model::SettingKey, Settings};
 
 use super::provider::{CleanupProvider, CleanupRequest};
+
+/// Suffix stamped onto `model_used` when the shrink-fallback trips.
+/// Stable string so downstream provenance queries can grep for it.
+/// See [`LlmCleaner::run_cleanup`] / ADR 0047 §Wave 1.2.
+const SHRINK_FALLBACK_SUFFIX: &str = "-shrink-fallback";
 
 /// Cleaner backed by a real LLM provider.
 pub struct LlmCleaner {
@@ -77,6 +83,25 @@ impl LlmCleaner {
             last_model_used: Mutex::new(provider_name.to_string()),
             preprocessor: Preprocessor::new(),
         }
+    }
+
+    /// Read the configured shrink-fallback threshold. Defaults to the
+    /// `SettingKey` default (`0.65`) if the row is missing or corrupt;
+    /// `Settings::get` already encapsulates that fallback. Errors
+    /// (e.g. mutex poisoning) collapse onto the default rather than
+    /// failing the cleanup — the safer behaviour is "don't trip on
+    /// settings read", since the guard is itself a safety net.
+    fn read_shrink_threshold(&self) -> f32 {
+        let Ok(conn) = self.db.lock() else {
+            return SettingKey::LlmShrinkFallbackThreshold
+                .default_value()
+                .as_f64()
+                .map(|v| v as f32)
+                .unwrap_or(0.65);
+        };
+        Settings::new(&conn)
+            .get::<f32>(SettingKey::LlmShrinkFallbackThreshold)
+            .unwrap_or(0.65)
     }
 
     /// Inner helper that performs the full cleanup pipeline. Separated
@@ -138,6 +163,44 @@ impl LlmCleaner {
             mode_slug,
         };
         let result = self.provider.cleanup(req)?;
+
+        // ADR 0047 §Wave 1.2 — length-ratio sanity check. If the LLM
+        // returned a transcript materially shorter than what the
+        // deterministic preprocessor produced AND the preprocessor
+        // detected no self-corrections (which would legitimately
+        // shrink the text), treat it as content loss and fall back
+        // to the preprocessor output.
+        //
+        // Word counts (not chars) because shrinkage is a semantic
+        // signal — "I'm gonna..." → "I am going to" is char-shrinkage
+        // we WANT. Catching word-loss is the goal.
+        let threshold = self.read_shrink_threshold();
+        let pre_words = pre_text.split_whitespace().count();
+        let cleaned_words = result.text.split_whitespace().count();
+        let no_self_corrections = pre.notes.self_corrections == 0;
+        let trips_guard = threshold > 0.0
+            && pre_words > 0
+            && no_self_corrections
+            && (cleaned_words as f32) < threshold * (pre_words as f32);
+
+        if trips_guard {
+            tracing::warn!(
+                pre_words,
+                cleaned_words,
+                threshold,
+                mode = mode_slug,
+                model = %result.model_used,
+                "cleanup shrink-fallback tripped; returning preprocessor output"
+            );
+            let stamped_model = format!(
+                "{}+{}{}",
+                result.model_used, PREPROCESSOR_VERSION, SHRINK_FALLBACK_SUFFIX
+            );
+            if let Ok(mut slot) = self.last_model_used.lock() {
+                *slot = stamped_model;
+            }
+            return Ok(pre_text);
+        }
 
         // Record the model the provider actually used for the next
         // `model_name()` call. Suffix with the preprocessor version
@@ -210,7 +273,7 @@ impl Cleaner for LlmCleaner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cleanup::provider::StubCleanupProvider;
+    use crate::cleanup::provider::{CleanupResult, StubCleanupProvider};
     use crate::db::dictionary::NewDictionaryEntry;
     use crate::db::examples::{self, NewStyleExample};
     use crate::db::Database;
@@ -218,6 +281,38 @@ mod tests {
     fn fresh_db() -> Arc<Mutex<Connection>> {
         let db = Database::open_in_memory().unwrap();
         Arc::new(Mutex::new(db.conn))
+    }
+
+    /// Test-only cleanup provider that returns a caller-supplied
+    /// string regardless of the request. Used by the ADR 0047 §Wave 1.2
+    /// shrink-fallback tests where the prod `StubCleanupProvider`'s
+    /// mode-keyed transformations don't give us control over output
+    /// length.
+    ///
+    /// Deliberately separate from `StubCleanupProvider` per ADR §Wave 1.2
+    /// ("don't pollute the production stub").
+    struct ConfigurableStubCleanupProvider {
+        text_to_return: String,
+    }
+
+    impl CleanupProvider for ConfigurableStubCleanupProvider {
+        fn cleanup(&self, _request: CleanupRequest<'_>) -> AppResult<CleanupResult> {
+            Ok(CleanupResult {
+                text: self.text_to_return.clone(),
+                model_used: "configurable-stub".to_string(),
+                latency_ms: 0,
+                input_tokens: None,
+                output_tokens: None,
+            })
+        }
+
+        fn provider_name(&self) -> &'static str {
+            "configurable-stub"
+        }
+
+        fn supports_model(&self, _model_id: &str) -> bool {
+            true
+        }
     }
 
     #[test]
@@ -339,6 +434,99 @@ mod tests {
         );
         let out = cleaner.clean("hello world", "normal").unwrap();
         assert_eq!(out, "Hello world.");
+    }
+
+    // -------- ADR 0047 §Wave 1.2 — shrink-fallback length-ratio guard. --------
+
+    /// LLM returns ~30% of input length and the preprocessor saw no
+    /// self-corrections → fallback to preprocessor output, model_used
+    /// stamped with `-shrink-fallback`.
+    ///
+    /// We craft a long raw transcript with no self-correction markers
+    /// so `pre.notes.self_corrections == 0` after preprocessing; the
+    /// configurable stub returns a much shorter string; the guard
+    /// trips and pre_text is returned.
+    #[test]
+    fn shrink_fallback_trips_when_llm_drops_content_and_no_self_corrections() {
+        let db = fresh_db();
+        // 30 words of vanilla declarative content — no "I mean" /
+        // "actually" / "no wait" self-correction markers that would
+        // legitimately cause the preprocessor to drop tokens.
+        let raw = "the quick brown fox jumps over the lazy dog \
+                   and then it jumps over the river and then it \
+                   runs through the forest and finds a quiet spot \
+                   under a big oak tree to rest";
+        // Three-word reply — way under 65% of the ~30-word input.
+        let provider = ConfigurableStubCleanupProvider {
+            text_to_return: "too short reply".into(),
+        };
+        let mut cleaner = LlmCleaner::new(
+            Box::new(provider),
+            db,
+            "configurable-stub-model".into(),
+            0.3,
+            256,
+        );
+        let out = cleaner.clean(raw, "normal").unwrap();
+        // Fallback returns the preprocessor output, not the LLM
+        // output — so it must contain the original content, not the
+        // "too short reply" string.
+        assert!(
+            !out.contains("too short reply"),
+            "expected fallback to preprocessor output; got LLM output: {out}"
+        );
+        assert!(
+            out.to_lowercase().contains("quick brown fox"),
+            "expected preprocessor output to contain original content; got: {out}"
+        );
+        let model = cleaner.model_name();
+        assert!(
+            model.contains("-shrink-fallback"),
+            "model_name should be stamped with the shrink-fallback suffix; got: {model}"
+        );
+    }
+
+    /// LLM returns ~30% of input length BUT the preprocessor detected
+    /// self-corrections → LLM output passes through unchanged.
+    /// Self-correction is the legitimate reason content was dropped;
+    /// the guard must not trip.
+    ///
+    /// Self-correction phrases stitched into the raw text trigger the
+    /// preprocessor's `self_corrections` counter (see `preprocessor.rs`).
+    #[test]
+    fn shrink_fallback_does_not_trip_when_self_corrections_present() {
+        let db = fresh_db();
+        // Raw with explicit self-correction phrasing that the
+        // preprocessor stitches into a shorter pre_text. The
+        // self-correction regex in `cleanup::preprocessor` requires
+        // a leading comma ("X, wait, Y" / "X, no I mean Y" etc.) so
+        // the input is comma-delimited deliberately.
+        let raw = "send the report to alice, wait, send the report \
+                   to bob, scratch that, send the report to carol \
+                   and also tell david about the deadline next \
+                   friday morning before the standup meeting";
+        // Three-word reply — again under 65% of the input.
+        let provider = ConfigurableStubCleanupProvider {
+            text_to_return: "send to carol".into(),
+        };
+        let mut cleaner = LlmCleaner::new(
+            Box::new(provider),
+            db,
+            "configurable-stub-model".into(),
+            0.3,
+            256,
+        );
+        let out = cleaner.clean(raw, "normal").unwrap();
+        // Guard didn't trip → LLM output passes through unchanged.
+        assert_eq!(
+            out, "send to carol",
+            "self-correction present → guard should not trip; got: {out}"
+        );
+        let model = cleaner.model_name();
+        assert!(
+            !model.contains("-shrink-fallback"),
+            "model_name should NOT be stamped when guard doesn't trip; got: {model}"
+        );
     }
 
     #[test]

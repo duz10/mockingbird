@@ -210,6 +210,19 @@ pub enum SettingKey {
     /// because audio is large and most sync tiers charge per byte.
     /// Default `false`.
     KeepAudioBlobs,
+
+    // ----- ADR 0047 Wave 1.2 — cleanup shrink-fallback dial. -----
+    //
+    /// Fraction-of-words threshold below which the dictation LLM
+    /// cleanup pass is treated as having dropped content and falls
+    /// back to the deterministic preprocessor output (ADR 0047
+    /// §Wave 1.2). Default `0.65` — anything shorter than 65% of the
+    /// pre-text word count, with no preprocessor-detected self-
+    /// corrections to explain the loss, is the wrong answer.
+    ///
+    /// Lower the value to suppress the guard (more permissive);
+    /// raise it to be more conservative. `0.0` disables.
+    LlmShrinkFallbackThreshold,
 }
 
 impl SettingKey {
@@ -256,6 +269,8 @@ impl SettingKey {
             Self::SyncTierByteCap => "sync_tier_byte_cap",
             Self::VaultDebugKeepCouriers => "vault_debug_keep_couriers",
             Self::KeepAudioBlobs => "keep_audio_blobs",
+            // ADR 0047 Wave 1.2.
+            Self::LlmShrinkFallbackThreshold => "llm_shrink_fallback_threshold",
         }
     }
 
@@ -302,6 +317,8 @@ impl SettingKey {
             "sync_tier_byte_cap" => Ok(Self::SyncTierByteCap),
             "vault_debug_keep_couriers" => Ok(Self::VaultDebugKeepCouriers),
             "keep_audio_blobs" => Ok(Self::KeepAudioBlobs),
+            // ADR 0047 Wave 1.2.
+            "llm_shrink_fallback_threshold" => Ok(Self::LlmShrinkFallbackThreshold),
             other => Err(AppError::Other(format!("unknown setting key: {other:?}"))),
         }
     }
@@ -381,6 +398,11 @@ impl SettingKey {
             // after a model upgrade. Turning OFF deletes the source
             // audio after a successful ingest to save space.
             Self::KeepAudioBlobs => serde_json::json!(true),
+            // ADR 0047 Wave 1.2 — 0.65 chosen as the inflection point
+            // between "plausibly-aggressive cleanup" and "content loss".
+            // Stored as a setting so we can tune without code change
+            // (ADR §Risk #2).
+            Self::LlmShrinkFallbackThreshold => serde_json::json!(0.65),
         }
     }
 
@@ -429,6 +451,8 @@ impl SettingKey {
             Self::SyncTierByteCap,
             Self::VaultDebugKeepCouriers,
             Self::KeepAudioBlobs,
+            // ADR 0047 Wave 1.2.
+            Self::LlmShrinkFallbackThreshold,
         ]
     }
 }
