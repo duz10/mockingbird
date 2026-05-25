@@ -71,6 +71,14 @@ const MIGRATION_018: &str = include_str!("migrations/018_session_source.sql");
 // `meetings/llm_pass.rs`). Pure UPDATE; no prompt bodies; no DDL.
 const MIGRATION_019: &str = include_str!("migrations/019_normalize_temperatures.sql");
 
+// 020 — mb-da5t / ADR 0047 §Wave 2.1: ship the `normal_v6_additive`
+// prompt body under a dedicated `mode_slug='normal_additive'` so the
+// new `DictationCleanupLevel::Medium` branch can look it up
+// independently of the tone-mode prompts. Single INSERT into
+// `prompts`; schema_version bump 19 -> 20. Requires prompt-body
+// substitution.
+const MIGRATION_020: &str = include_str!("migrations/020_dictation_cleanup_level.sql");
+
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
 ///
@@ -210,6 +218,15 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         let prepared = substitute_prompt_bodies(MIGRATION_019);
         conn.execute_batch(&prepared)?;
     }
+    if current < 20 {
+        // mb-da5t / ADR 0047 §Wave 2.1: ship the normal_v6_additive
+        // prompt body under mode_slug='normal_additive', version=1
+        // for the DictationCleanupLevel::Medium branch. Append-only
+        // INSERT (ADR 0008 compliant). Substitution required for the
+        // __PROMPT_NORMAL_V6_ADDITIVE_BODY__ token.
+        let prepared = substitute_prompt_bodies(MIGRATION_020);
+        conn.execute_batch(&prepared)?;
+    }
     Ok(())
 }
 
@@ -268,7 +285,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "19");
+        assert_eq!(v, "20");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -287,7 +304,50 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "19");
+        assert_eq!(v, "20");
+    }
+
+    /// Migration 020 (mb-da5t / ADR 0047 §Wave 2.1) ships the
+    /// additive-only prompt body under a dedicated mode_slug so the
+    /// Medium cleanup-level branch can resolve it without colliding
+    /// with the existing casual / normal / formal tone prompts.
+    #[test]
+    fn migration_020_ships_normal_additive_prompt() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+
+        let body: String = conn
+            .query_row(
+                "SELECT body FROM prompts WHERE mode_slug='normal_additive' AND version=1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("normal_additive v1 prompt row should exist after migration 020");
+        assert!(
+            !body.is_empty(),
+            "normal_additive v1 prompt body should not be empty"
+        );
+        assert!(
+            body.to_lowercase().contains("additive"),
+            "prompt body should reference its additive nature; got: {body}"
+        );
+
+        // Existing normal v5 is the canonical Normal tone prompt and
+        // must STILL be the latest version for `mode_slug='normal'`.
+        // The additive prompt deliberately uses a separate slug to
+        // avoid colliding with the tone-mode latest-version chain.
+        let normal_latest_version: i64 = conn
+            .query_row(
+                "SELECT MAX(version) FROM prompts WHERE mode_slug='normal'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            normal_latest_version, 5,
+            "migration 020 must not bump `normal`'s latest version chain"
+        );
     }
 
     /// Migration 018 (mb-jqhw / ADR 0046) adds the `sessions.source`

@@ -29,7 +29,48 @@ pub use ollama::OllamaProvider;
 pub use preprocessor::{Preprocessor, Processed, ProcessedNotes, PREPROCESSOR_VERSION};
 pub use provider::{CleanupProvider, CleanupRequest, CleanupResult, StubCleanupProvider};
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::AppResult;
+
+/// How aggressively the dictation cleanup pipeline runs (ADR 0047 §Wave 2.1).
+///
+/// Orthogonal to the tone mode (`casual` / `normal` / `formal`):
+/// tone selects voice + register, level selects how much the pipeline
+/// is allowed to touch the text. Defaults to [`Self::High`] so existing
+/// installs see no behaviour change at upgrade.
+///
+/// Serializes lowercase (`"none"` / `"light"` / `"medium"` / `"high"`)
+/// to match the existing settings string-value convention
+/// (`MeetingDefaultSource`, `Theme`, etc.).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DictationCleanupLevel {
+    /// Raw STT output, byte-for-byte. Skip preprocessor + LLM.
+    /// Provenance: `"raw-passthrough"`.
+    None,
+    /// Deterministic preprocessor only. No LLM call.
+    /// Provenance: `"preprocessor-only+<ver>"`.
+    Light,
+    /// Preprocessor + LLM with the additive-only prompt
+    /// (`normal_v6_additive`). LLM may insert punctuation, paragraph
+    /// breaks, and list structure, but may not remove or modify
+    /// content words. Tone mode is ignored at this level.
+    /// Provenance: `"<model>+additive+<ver>"`.
+    Medium,
+    /// Existing pre-Wave-2 behaviour: preprocessor + LLM with the
+    /// mode-specific prompt (`casual_v2` / `normal_v5` / `formal_v2`).
+    /// The LLM has full register-shift + list-rendering authority.
+    /// Provenance: `"<model>+<ver>"` (unchanged from pre-Wave-2).
+    #[default]
+    High,
+}
+
+/// Mode slug under which the Medium-level additive prompt is stored
+/// in the `prompts` table. Reserved here as a `pub const` so the
+/// migration 020 SQL, the `LlmCleaner` Medium-branch lookup, and any
+/// future provenance-grepping code all reference the same string.
+pub const ADDITIVE_PROMPT_MODE_SLUG: &str = "normal_additive";
 
 /// Cleanup trait. `clean(raw, mode_slug)` returns the polished text
 /// that will be injected.

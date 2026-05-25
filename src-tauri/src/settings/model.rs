@@ -237,6 +237,16 @@ pub enum SettingKey {
     /// any utterance with list signals always reaches the LLM so the
     /// list can be rendered. `0` disables the skip (always run LLM).
     LlmSkipWordThreshold,
+
+    // ----- ADR 0047 Wave 2.1 — dictation cleanup level dial. -----
+    //
+    /// How aggressively the dictation cleanup pipeline runs (ADR 0047
+    /// §Wave 2.1). Orthogonal to tone mode. Stored as a lowercase
+    /// string (`"none"` / `"light"` / `"medium"` / `"high"`); decoded
+    /// via [`crate::cleanup::DictationCleanupLevel`]. Default `"high"`
+    /// to preserve existing behaviour at upgrade; the user opts down
+    /// the dial via Settings.
+    DictationCleanupLevel,
 }
 
 impl SettingKey {
@@ -287,6 +297,8 @@ impl SettingKey {
             Self::LlmShrinkFallbackThreshold => "llm_shrink_fallback_threshold",
             // ADR 0047 Wave 2.2.
             Self::LlmSkipWordThreshold => "llm_skip_word_threshold",
+            // ADR 0047 Wave 2.1.
+            Self::DictationCleanupLevel => "dictation_cleanup_level",
         }
     }
 
@@ -337,6 +349,8 @@ impl SettingKey {
             "llm_shrink_fallback_threshold" => Ok(Self::LlmShrinkFallbackThreshold),
             // ADR 0047 Wave 2.2.
             "llm_skip_word_threshold" => Ok(Self::LlmSkipWordThreshold),
+            // ADR 0047 Wave 2.1.
+            "dictation_cleanup_level" => Ok(Self::DictationCleanupLevel),
             other => Err(AppError::Other(format!("unknown setting key: {other:?}"))),
         }
     }
@@ -426,6 +440,11 @@ impl SettingKey {
             // "long enough for an LLM pass to matter". Stored as a
             // setting so the threshold is tunable without code change.
             Self::LlmSkipWordThreshold => serde_json::json!(12),
+            // ADR 0047 Wave 2.1 — default "high" preserves existing
+            // behaviour at upgrade. Flipping the default down the dial
+            // is explicitly out of charter (parked for a successor ADR
+            // amendment after `edit_free_send` observation).
+            Self::DictationCleanupLevel => serde_json::json!("high"),
         }
     }
 
@@ -478,6 +497,8 @@ impl SettingKey {
             Self::LlmShrinkFallbackThreshold,
             // ADR 0047 Wave 2.2.
             Self::LlmSkipWordThreshold,
+            // ADR 0047 Wave 2.1.
+            Self::DictationCleanupLevel,
         ]
     }
 }
@@ -583,8 +604,9 @@ mod tests {
         //   + 4 Phase 10 W5 (ActivityRetention* x 4)
         //   + 8 ADR 0046 Iter 2 (MobileSync/Vault* x 8)
         //   + 1 ADR 0047 Wave 1.2 (LlmShrinkFallbackThreshold)
-        //   + 1 ADR 0047 Wave 2.2 (LlmSkipWordThreshold) = 38.
-        assert_eq!(SettingKey::all().len(), 38);
+        //   + 1 ADR 0047 Wave 2.2 (LlmSkipWordThreshold)
+        //   + 1 ADR 0047 Wave 2.1 (DictationCleanupLevel) = 39.
+        assert_eq!(SettingKey::all().len(), 39);
     }
 
     /// ADR 0046 Iter 2 defaults must match §10 ("opt-in by default";

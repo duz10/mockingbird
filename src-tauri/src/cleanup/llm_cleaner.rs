@@ -33,7 +33,8 @@ use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 
 use crate::cleanup::{
-    few_shot, preprocessor::Preprocessor, prompt_builder, Cleaner, PREPROCESSOR_VERSION,
+    few_shot, preprocessor::Preprocessor, prompt_builder, Cleaner, DictationCleanupLevel,
+    ADDITIVE_PROMPT_MODE_SLUG, PREPROCESSOR_VERSION,
 };
 use crate::db::{dictionary, prompts};
 use crate::error::{AppError, AppResult};
@@ -51,6 +52,15 @@ const SHRINK_FALLBACK_SUFFIX: &str = "-shrink-fallback";
 /// the LLM provider. Stable string so downstream provenance queries
 /// can grep for it. See [`LlmCleaner::run_cleanup`] / ADR 0047 §Wave 2.2.
 const PREPROCESSOR_ONLY_PROVENANCE: &str = "preprocessor-only";
+
+/// Provenance stamped onto `model_used` for the `DictationCleanupLevel::None`
+/// branch — raw STT, no preprocessor, no LLM. See ADR 0047 §Wave 2.1.
+const RAW_PASSTHROUGH_PROVENANCE: &str = "raw-passthrough";
+
+/// Infix stamped onto `model_used` for the `DictationCleanupLevel::Medium`
+/// branch so provenance distinguishes additive-prompt LLM passes from
+/// the High-level mode-specific passes. See ADR 0047 §Wave 2.1.
+const ADDITIVE_INFIX: &str = "+additive";
 
 /// Cleaner backed by a real LLM provider.
 pub struct LlmCleaner {
@@ -129,6 +139,20 @@ impl LlmCleaner {
             .unwrap_or(12)
     }
 
+    /// Read the configured dictation cleanup level (ADR 0047 §Wave 2.1).
+    /// Same mutex-poison + missing-row tolerance as the other readers:
+    /// failures collapse to `High` (the default), which preserves
+    /// existing behaviour rather than silently downgrading the user's
+    /// pipeline.
+    fn read_cleanup_level(&self) -> DictationCleanupLevel {
+        let Ok(conn) = self.db.lock() else {
+            return DictationCleanupLevel::default();
+        };
+        Settings::new(&conn)
+            .get::<DictationCleanupLevel>(SettingKey::DictationCleanupLevel)
+            .unwrap_or_default()
+    }
+
     /// Stamp `last_model_used` with the preprocessor-only provenance
     /// string. Used by the Wave-2.2 LLM-skip path AND (in Wave-2.1)
     /// the cleanup-level `Light` branch. Both code paths return the
@@ -145,6 +169,27 @@ impl LlmCleaner {
     /// so `clean()` can swallow errors + log them while keeping the
     /// happy path readable.
     fn run_cleanup(&mut self, raw: &str, mode_slug: &str) -> AppResult<String> {
+        // -1. Cleanup-level dial (ADR 0047 §Wave 2.1). Branches:
+        //     - None   -> raw STT passthrough (skip preprocessor + LLM)
+        //     - Light  -> preprocessor only (skip LLM regardless)
+        //     - Medium -> preprocessor + LLM with additive prompt
+        //     - High   -> preprocessor + LLM with mode prompt (default)
+        //     The skip-short-utterance check at step 0.5 still applies
+        //     to Medium + High; at None / Light there's no LLM to skip.
+        let level = self.read_cleanup_level();
+        if matches!(level, DictationCleanupLevel::None) {
+            tracing::info!(
+                mode = mode_slug,
+                level = "none",
+                provenance = %RAW_PASSTHROUGH_PROVENANCE,
+                "cleanup level=None: returning raw STT unchanged"
+            );
+            if let Ok(mut slot) = self.last_model_used.lock() {
+                *slot = RAW_PASSTHROUGH_PROVENANCE.to_string();
+            }
+            return Ok(raw.to_string());
+        }
+
         // 0. Deterministic pre-pass. Strips fillers, collapses
         //    stutters, stitches self-corrections, renders verbal
         //    cues ("period", "new paragraph", …), capitalises
@@ -155,6 +200,20 @@ impl LlmCleaner {
         let pre = self.preprocessor.process(raw);
         let pre_ms = pre_started.elapsed().as_millis() as u64;
         let pre_text = pre.text;
+
+        if matches!(level, DictationCleanupLevel::Light) {
+            tracing::info!(
+                mode = mode_slug,
+                level = "light",
+                preprocessor_ms = pre_ms,
+                fillers_stripped = pre.notes.fillers_stripped,
+                stutters_collapsed = pre.notes.stutters_collapsed,
+                provenance = %format!("{PREPROCESSOR_ONLY_PROVENANCE}+{PREPROCESSOR_VERSION}"),
+                "cleanup level=Light: returning preprocessor output"
+            );
+            self.stamp_preprocessor_only_model();
+            return Ok(pre_text);
+        }
 
         // 0.5 ADR 0047 §Wave 2.2 — LLM-skip-on-short-utterance.
         //     Short, non-listy utterances skip the LLM entirely and
@@ -182,20 +241,34 @@ impl LlmCleaner {
             return Ok(pre_text);
         }
 
-        // 1-2. Prompt body for this mode.
+        // 1-2. Prompt body. At level=Medium we override the tone-mode
+        //      lookup and use the additive prompt regardless of
+        //      mode_slug (the level dial is orthogonal to tone). At
+        //      level=High we use the tone-mode prompt as before.
         let conn = self
             .db
             .lock()
             .map_err(|_| AppError::Cleanup("db mutex poisoned during cleanup".into()))?;
-        let prompt = prompts::get_latest_for_mode(&conn, mode_slug)?
-            .ok_or_else(|| AppError::Cleanup(format!("no prompt for mode {mode_slug:?}")))?;
+        let prompt_slug = if matches!(level, DictationCleanupLevel::Medium) {
+            ADDITIVE_PROMPT_MODE_SLUG
+        } else {
+            mode_slug
+        };
+        let prompt = prompts::get_latest_for_mode(&conn, prompt_slug)?
+            .ok_or_else(|| AppError::Cleanup(format!("no prompt for mode {prompt_slug:?}")))?;
 
         // 3. Dictionary + examples. Dictionary: all (already small).
         //    Examples: top-N per mode, app context unknown at this
         //    layer (Phase 4 stub — Phase 6 will plumb the foreground
-        //    app through the cleaner call).
+        //    app through the cleaner call). At level=Medium we key
+        //    few-shot on the additive slug too — tone-mode style
+        //    examples encourage register-shifting / consolidating
+        //    output, which would directly contradict the additive
+        //    prompt's "preserve every word" rule. With no seeded
+        //    examples for `normal_additive`, the prompt's three
+        //    baked-in examples carry the few-shot load.
         let dict = dictionary::list_all(&conn)?;
-        let candidates = few_shot::select_candidates(&conn, mode_slug, None)?;
+        let candidates = few_shot::select_candidates(&conn, prompt_slug, None)?;
         let examples = few_shot::fit_to_budget(candidates);
         drop(conn); // release lock before the HTTP call.
 
@@ -269,8 +342,17 @@ impl LlmCleaner {
         // `model_name()` call. Suffix with the preprocessor version
         // so provenance captures BOTH stages in one string — no
         // schema change needed (ADR 0008 satisfied via the existing
-        // model_used column).
-        let stamped_model = format!("{}+{}", result.model_used, PREPROCESSOR_VERSION);
+        // model_used column). At level=Medium also stamp the additive
+        // infix so the dial choice is recoverable from `model_used`
+        // alone.
+        let stamped_model = if matches!(level, DictationCleanupLevel::Medium) {
+            format!(
+                "{}{ADDITIVE_INFIX}+{}",
+                result.model_used, PREPROCESSOR_VERSION
+            )
+        } else {
+            format!("{}+{}", result.model_used, PREPROCESSOR_VERSION)
+        };
         if let Ok(mut slot) = self.last_model_used.lock() {
             *slot = stamped_model.clone();
         }
@@ -702,6 +784,150 @@ mod tests {
         assert!(
             !model.contains(PREPROCESSOR_ONLY_PROVENANCE),
             "model_name must NOT be preprocessor-only when LLM ran; got: {model}"
+        );
+    }
+
+    // -------- ADR 0047 §Wave 2.1 — DictationCleanupLevel dial. --------
+
+    /// Helper: write a DictationCleanupLevel into the settings table
+    /// before constructing the cleaner. Mirrors what the UI / IPC
+    /// would do at runtime.
+    fn set_level(db: &Arc<Mutex<Connection>>, level: DictationCleanupLevel) {
+        let conn = db.lock().unwrap();
+        Settings::new(&conn)
+            .set(SettingKey::DictationCleanupLevel, &level)
+            .unwrap();
+    }
+
+    /// Level = None: raw STT passthrough. Preprocessor + LLM are both
+    /// bypassed; provenance is `raw-passthrough`.
+    #[test]
+    fn level_none_returns_raw_unchanged_and_skips_everything() {
+        let db = fresh_db();
+        set_level(&db, DictationCleanupLevel::None);
+        // Provider returns a fingerprint so we can detect erroneous calls.
+        let provider = ConfigurableStubCleanupProvider {
+            text_to_return: "LLM RAN AT LEVEL NONE".into(),
+        };
+        let mut cleaner = LlmCleaner::new(
+            Box::new(provider),
+            db,
+            "configurable-stub-model".into(),
+            0.3,
+            256,
+        );
+        let raw = "um  uh hello world";
+        let out = cleaner.clean(raw, "normal").unwrap();
+        assert_eq!(out, raw, "level=None must return raw verbatim");
+        assert_eq!(cleaner.model_name(), RAW_PASSTHROUGH_PROVENANCE);
+    }
+
+    /// Level = Light: preprocessor runs; LLM bypassed regardless of
+    /// word count or list shape. Provenance is `preprocessor-only+<ver>`.
+    #[test]
+    fn level_light_returns_preprocessor_output_and_skips_llm() {
+        let db = fresh_db();
+        set_level(&db, DictationCleanupLevel::Light);
+        let provider = ConfigurableStubCleanupProvider {
+            text_to_return: "LLM RAN AT LEVEL LIGHT".into(),
+        };
+        let mut cleaner = LlmCleaner::new(
+            Box::new(provider),
+            db,
+            "configurable-stub-model".into(),
+            0.3,
+            256,
+        );
+        // 25-word input — ABOVE the 12-word skip threshold — so we
+        // know Light's LLM bypass is driven by the level, not the
+        // Wave-2.2 short-utterance skip.
+        let raw = "this is a longer dictation that goes well past twelve words \
+                   so the short utterance skip does not fire for this test case at all";
+        let out = cleaner.clean(raw, "normal").unwrap();
+        assert!(
+            !out.contains("LLM RAN"),
+            "level=Light must not call LLM; got: {out}"
+        );
+        assert!(
+            out.starts_with('T') && out.ends_with('.'),
+            "level=Light should return preprocessor-shaped output; got: {out}"
+        );
+        let model = cleaner.model_name();
+        assert!(
+            model.contains(PREPROCESSOR_ONLY_PROVENANCE),
+            "level=Light provenance must be preprocessor-only; got: {model}"
+        );
+    }
+
+    /// Level = Medium: preprocessor + LLM with the additive prompt
+    /// (regardless of mode_slug). Provenance carries the `+additive`
+    /// infix so the dial choice is recoverable.
+    #[test]
+    fn level_medium_uses_additive_prompt_regardless_of_tone() {
+        let db = fresh_db();
+        set_level(&db, DictationCleanupLevel::Medium);
+        let provider = ConfigurableStubCleanupProvider {
+            text_to_return: "Medium output.".into(),
+        };
+        let mut cleaner = LlmCleaner::new(
+            Box::new(provider),
+            db,
+            "configurable-stub-model".into(),
+            0.3,
+            256,
+        );
+        // Long enough to bypass the short-utterance skip; uses the
+        // "casual" tone slug to prove the additive prompt overrides
+        // the tone-mode lookup.
+        let raw = "this is a fifteen word dictation about the additive only \
+                   prompt branch for level medium today";
+        let out = cleaner.clean(raw, "casual").unwrap();
+        assert_eq!(
+            out, "Medium output.",
+            "level=Medium should pass through the configurable stub's LLM output"
+        );
+        let model = cleaner.model_name();
+        assert!(
+            model.contains(ADDITIVE_INFIX.trim_start_matches('+')),
+            "level=Medium provenance must carry the additive infix; got: {model}"
+        );
+        assert!(
+            model.contains(PREPROCESSOR_VERSION),
+            "level=Medium provenance must carry preprocessor version; got: {model}"
+        );
+    }
+
+    /// Level = High: existing behaviour. Provenance is
+    /// `<model>+<preprocessor_version>`, no additive infix.
+    #[test]
+    fn level_high_preserves_existing_behaviour() {
+        let db = fresh_db();
+        // High is the default — don't even need to set it.
+        let provider = ConfigurableStubCleanupProvider {
+            text_to_return: "High output.".into(),
+        };
+        let mut cleaner = LlmCleaner::new(
+            Box::new(provider),
+            db,
+            "configurable-stub-model".into(),
+            0.3,
+            256,
+        );
+        let raw = "this is a fifteen word dictation that should reach the LLM \
+                   at level high without the additive infix today";
+        let out = cleaner.clean(raw, "normal").unwrap();
+        assert_eq!(
+            out, "High output.",
+            "level=High should pass through the configurable stub's LLM output"
+        );
+        let model = cleaner.model_name();
+        assert!(
+            !model.contains(ADDITIVE_INFIX.trim_start_matches('+')),
+            "level=High must NOT carry additive infix; got: {model}"
+        );
+        assert!(
+            model.contains(PREPROCESSOR_VERSION),
+            "level=High provenance must carry preprocessor version; got: {model}"
         );
     }
 
