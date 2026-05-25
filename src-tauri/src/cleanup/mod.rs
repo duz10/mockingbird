@@ -22,6 +22,8 @@ pub mod preprocessor;
 pub mod prompt_builder;
 pub mod provider;
 pub mod token_budget;
+// ADR 0047 §Wave 2.4 — VRAM probe for the Q5_K_M opt-in gate.
+pub mod vram_probe;
 
 pub use claude::ClaudeProvider;
 pub use llm_cleaner::LlmCleaner;

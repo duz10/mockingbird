@@ -86,6 +86,14 @@ const MIGRATION_020: &str = include_str!("migrations/020_dictation_cleanup_level
 // in place so one-liners don't pay the 7B latency.
 const MIGRATION_021: &str = include_str!("migrations/021_casual_7b_model.sql");
 
+// 022 — mb-5a4y / ADR 0047 §Wave 2.4: Q5_K_M opt-in checkpoint.
+// Documentation-only migration; writes zero rows. The Q5 substitution
+// runtime gate lives in `cleanup::llm_cleaner::maybe_promote_to_q5`,
+// gated on `SettingKey::PreferQ5Models` (declared in settings/model.rs,
+// default false). schema_version bump 21 -> 22 marks the DB as "Q5
+// opt-in runtime gate present" so a future migration can branch on it.
+const MIGRATION_022: &str = include_str!("migrations/022_q5_model_opt_in.sql");
+
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
 ///
@@ -246,6 +254,17 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         let prepared = substitute_prompt_bodies(MIGRATION_021);
         conn.execute_batch(&prepared)?;
     }
+    if current < 22 {
+        // mb-5a4y / ADR 0047 §Wave 2.4: Q5_K_M opt-in checkpoint.
+        // Documentation-only migration -- the actual Q5 substitution
+        // happens at request time in cleanup/llm_cleaner.rs gated on
+        // SettingKey::PreferQ5Models (default false). Bumping
+        // schema_version to 22 marks the DB as having the runtime
+        // gate present. Substituter pass for the leftover-token
+        // guard.
+        let prepared = substitute_prompt_bodies(MIGRATION_022);
+        conn.execute_batch(&prepared)?;
+    }
     Ok(())
 }
 
@@ -304,7 +323,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "21");
+        assert_eq!(v, "22");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -323,7 +342,60 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "21");
+        assert_eq!(v, "22");
+    }
+
+    /// Migration 022 (mb-5a4y / ADR 0047 §Wave 2.4) is a documentation
+    /// checkpoint -- writes zero rows, bumps schema_version to 22 to
+    /// mark the DB as having the Q5 opt-in runtime gate present. The
+    /// actual Q5 substitution happens in `cleanup::llm_cleaner` gated
+    /// on `SettingKey::PreferQ5Models`. Verify the schema_version bump
+    /// and that no `modes.model_id` was silently changed.
+    #[test]
+    fn migration_022_bumps_schema_version_without_touching_modes() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+
+        // schema_version is at 22 after the full apply_all run.
+        let v: String = conn
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key='schema_version'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(v, "22");
+
+        // Migration 022 must not have moved any modes.model_id. The
+        // three tone modes should still all be on qwen2.5:7b-instruct-
+        // q4_K_M (set by migrations 008 + 021); the Q5 path is purely
+        // a runtime substitution.
+        for slug in ["casual", "normal", "formal"] {
+            let model: String = conn
+                .query_row("SELECT model_id FROM modes WHERE slug = ?1", [slug], |r| {
+                    r.get(0)
+                })
+                .unwrap_or_else(|_| panic!("mode row for slug={slug} should exist"));
+            assert_eq!(
+                model, "qwen2.5:7b-instruct-q4_K_M",
+                "migration 022 must not have changed modes.model_id; slug={slug} got {model}"
+            );
+        }
+
+        // No row should have been INSERTed into `settings` either --
+        // PreferQ5Models's default lives in the typed registry.
+        let q5_row_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM settings WHERE key = 'prefer_q5_models'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            q5_row_count, 0,
+            "migration 022 must not pre-INSERT the PreferQ5Models row"
+        );
     }
 
     /// Migration 021 (mb-5a4y / ADR 0047 §Wave 2.3) repoints the

@@ -62,6 +62,44 @@ const RAW_PASSTHROUGH_PROVENANCE: &str = "raw-passthrough";
 /// the High-level mode-specific passes. See ADR 0047 §Wave 2.1.
 const ADDITIVE_INFIX: &str = "+additive";
 
+/// Q4_K_M quantisation suffix on Ollama model IDs (e.g.
+/// `qwen2.5:7b-instruct-q4_K_M`). Used by [`maybe_promote_to_q5`] to
+/// detect substitutable Q4 IDs.
+const Q4_K_M_SUFFIX: &str = "-q4_K_M";
+
+/// Q5_K_M quantisation suffix -- the substitute for Q4_K_M when the
+/// user has opted in via `SettingKey::PreferQ5Models` (ADR 0047
+/// §Wave 2.4).
+const Q5_K_M_SUFFIX: &str = "-q5_K_M";
+
+/// Provenance suffix appended to `model_used` when the Q5 opt-in
+/// substitution actually fired on this call. Lets downstream queries
+/// distinguish an opt-in-promoted call from one that was Q5-by-default
+/// in some future migration.
+const Q5_OPT_IN_SUFFIX: &str = "+q5-opt-in";
+
+/// If `prefer_q5` is true AND `model_id` ends in `-q4_K_M`, return
+/// the Q5 substitution. Otherwise return `model_id` unchanged.
+///
+/// ADR 0047 §Wave 2.4 — runtime gate for the Q5 opt-in. Done as a
+/// pure string substitution (rather than a model-table lookup) so
+/// the opt-in is reversible by toggling the setting; no schema
+/// rollback needed.
+///
+/// If the substituted model isn't actually pulled in Ollama, the
+/// OllamaProvider's existing error path catches the failure and the
+/// `Cleaner::clean` outer match falls back to raw. The cost-of-mistake
+/// is one bad cleanup that falls back to raw -- no worse than the
+/// existing failure mode for any missing model.
+fn maybe_promote_to_q5(model_id: &str, prefer_q5: bool) -> String {
+    if prefer_q5 && model_id.ends_with(Q4_K_M_SUFFIX) {
+        let stem = &model_id[..model_id.len() - Q4_K_M_SUFFIX.len()];
+        format!("{stem}{Q5_K_M_SUFFIX}")
+    } else {
+        model_id.to_string()
+    }
+}
+
 /// Cleaner backed by a real LLM provider.
 pub struct LlmCleaner {
     provider: Box<dyn CleanupProvider>,
@@ -151,6 +189,18 @@ impl LlmCleaner {
         Settings::new(&conn)
             .get::<DictationCleanupLevel>(SettingKey::DictationCleanupLevel)
             .unwrap_or_default()
+    }
+
+    /// Read the Q5 opt-in flag (ADR 0047 §Wave 2.4). Mutex-poison +
+    /// missing-row tolerant: failures collapse to `false` (the default),
+    /// which keeps the pipeline on Q4 -- the conservative answer.
+    fn read_prefer_q5(&self) -> bool {
+        let Ok(conn) = self.db.lock() else {
+            return false;
+        };
+        Settings::new(&conn)
+            .get::<bool>(SettingKey::PreferQ5Models)
+            .unwrap_or(false)
     }
 
     /// Stamp `last_model_used` with the preprocessor-only provenance
@@ -290,10 +340,21 @@ impl LlmCleaner {
         }
 
         // 5. Provider call.
+        //
+        // ADR 0047 §Wave 2.4 — substitute Q5_K_M for Q4_K_M when the
+        // user has opted in via SettingKey::PreferQ5Models. Done at
+        // request time (not at construction) so toggling the setting
+        // takes effect on the next dictation without restart. The
+        // substitution is purely string-suffix-based so it's generic
+        // across casual / normal / formal (all three share the
+        // qwen2.5:Nb-instruct-q4_K_M shape since migrations 008/021).
+        let prefer_q5 = self.read_prefer_q5();
+        let resolved_model_id = maybe_promote_to_q5(&self.model_id, prefer_q5);
+        let q5_opt_in_fired = resolved_model_id != self.model_id;
         let req = CleanupRequest {
             prompt: &built.prompt,
             raw_transcript: &pre_text,
-            model_id: &self.model_id,
+            model_id: &resolved_model_id,
             temperature: self.temperature,
             max_tokens: self.max_tokens,
             mode_slug,
@@ -319,6 +380,19 @@ impl LlmCleaner {
             && no_self_corrections
             && (cleaned_words as f32) < threshold * (pre_words as f32);
 
+        // Q5-opt-in provenance suffix (ADR 0047 §Wave 2.4). Append
+        // whenever the substitution fired on this call so the
+        // `transcripts.model_used` column tells the truth about WHICH
+        // quantisation actually ran -- not just what the modes table
+        // configured. Useful for grep-style provenance forensics and
+        // for the `edit_free_send` metric (Wave 2.5) to slice opt-in
+        // vs base-Q4 cleanup quality once both populations exist.
+        let q5_suffix = if q5_opt_in_fired {
+            Q5_OPT_IN_SUFFIX
+        } else {
+            ""
+        };
+
         if trips_guard {
             tracing::warn!(
                 pre_words,
@@ -326,11 +400,12 @@ impl LlmCleaner {
                 threshold,
                 mode = mode_slug,
                 model = %result.model_used,
+                q5_opt_in = q5_opt_in_fired,
                 "cleanup shrink-fallback tripped; returning preprocessor output"
             );
             let stamped_model = format!(
-                "{}+{}{}",
-                result.model_used, PREPROCESSOR_VERSION, SHRINK_FALLBACK_SUFFIX
+                "{}+{}{SHRINK_FALLBACK_SUFFIX}{q5_suffix}",
+                result.model_used, PREPROCESSOR_VERSION
             );
             if let Ok(mut slot) = self.last_model_used.lock() {
                 *slot = stamped_model;
@@ -344,14 +419,14 @@ impl LlmCleaner {
         // schema change needed (ADR 0008 satisfied via the existing
         // model_used column). At level=Medium also stamp the additive
         // infix so the dial choice is recoverable from `model_used`
-        // alone.
+        // alone. At Q5 opt-in, append the q5-opt-in suffix likewise.
         let stamped_model = if matches!(level, DictationCleanupLevel::Medium) {
             format!(
-                "{}{ADDITIVE_INFIX}+{}",
+                "{}{ADDITIVE_INFIX}+{}{q5_suffix}",
                 result.model_used, PREPROCESSOR_VERSION
             )
         } else {
-            format!("{}+{}", result.model_used, PREPROCESSOR_VERSION)
+            format!("{}+{}{q5_suffix}", result.model_used, PREPROCESSOR_VERSION)
         };
         if let Ok(mut slot) = self.last_model_used.lock() {
             *slot = stamped_model.clone();
@@ -370,6 +445,7 @@ impl LlmCleaner {
                 + pre.notes.layout_cues_rendered
                 + pre.notes.quote_bracket_cues_rendered,
             llm_ms = result.latency_ms,
+            q5_opt_in = q5_opt_in_fired,
             "cleanup completed"
         );
 
@@ -942,5 +1018,196 @@ mod tests {
             256,
         );
         assert_eq!(cleaner.model_name(), "stub");
+    }
+
+    // -------- ADR 0047 §Wave 2.4 — Q5_K_M opt-in substitution. --------
+
+    /// Pure-function unit tests for `maybe_promote_to_q5`. No DB, no
+    /// stub provider; just verify the suffix-substitution logic.
+    #[test]
+    fn maybe_promote_to_q5_substitutes_q4_suffix_when_opted_in() {
+        assert_eq!(
+            maybe_promote_to_q5("qwen2.5:7b-instruct-q4_K_M", true),
+            "qwen2.5:7b-instruct-q5_K_M"
+        );
+        assert_eq!(
+            maybe_promote_to_q5("qwen2.5:3b-instruct-q4_K_M", true),
+            "qwen2.5:3b-instruct-q5_K_M"
+        );
+    }
+
+    #[test]
+    fn maybe_promote_to_q5_is_a_no_op_when_opt_out() {
+        // Even when the model_id matches the substitution pattern,
+        // prefer_q5=false must leave the id untouched.
+        assert_eq!(
+            maybe_promote_to_q5("qwen2.5:7b-instruct-q4_K_M", false),
+            "qwen2.5:7b-instruct-q4_K_M"
+        );
+    }
+
+    #[test]
+    fn maybe_promote_to_q5_is_a_no_op_for_non_q4_model_ids() {
+        // Already-Q5 stays Q5 (no double-substitution).
+        assert_eq!(
+            maybe_promote_to_q5("qwen2.5:7b-instruct-q5_K_M", true),
+            "qwen2.5:7b-instruct-q5_K_M"
+        );
+        // Different quantisation (e.g. q8_0) is left alone -- the
+        // substitution is suffix-specific.
+        assert_eq!(
+            maybe_promote_to_q5("qwen2.5:7b-instruct-q8_0", true),
+            "qwen2.5:7b-instruct-q8_0"
+        );
+        // Cloud / non-Ollama model ids never match the suffix.
+        assert_eq!(
+            maybe_promote_to_q5("claude-3-5-sonnet-20241022", true),
+            "claude-3-5-sonnet-20241022"
+        );
+    }
+
+    /// Test-only stub provider that echoes the request's `model_id`
+    /// back as `result.model_used`. Lets the Q5 opt-in tests assert
+    /// what the LlmCleaner actually asked the provider for, not just
+    /// what got persisted to `last_model_used`.
+    struct ModelEchoingStubCleanupProvider {
+        text_to_return: String,
+    }
+
+    impl CleanupProvider for ModelEchoingStubCleanupProvider {
+        fn cleanup(&self, request: CleanupRequest<'_>) -> AppResult<CleanupResult> {
+            Ok(CleanupResult {
+                text: self.text_to_return.clone(),
+                // KEY: echo the model_id the cleaner sent us, so the
+                // test can verify whether the Q5 substitution fired.
+                model_used: request.model_id.to_string(),
+                latency_ms: 0,
+                input_tokens: None,
+                output_tokens: None,
+            })
+        }
+
+        fn provider_name(&self) -> &'static str {
+            "model-echoing-stub"
+        }
+
+        fn supports_model(&self, _model_id: &str) -> bool {
+            true
+        }
+    }
+
+    /// Helper: flip the PreferQ5Models setting before constructing
+    /// the cleaner. Mirrors what the Settings UI / IPC would do.
+    fn set_prefer_q5(db: &Arc<Mutex<Connection>>, prefer: bool) {
+        let conn = db.lock().unwrap();
+        Settings::new(&conn)
+            .set(SettingKey::PreferQ5Models, &prefer)
+            .unwrap();
+    }
+
+    /// PreferQ5Models=false (default) → model_id passes through to the
+    /// provider unchanged AND the `+q5-opt-in` provenance suffix is
+    /// absent. Covers both casual and normal mode slugs to confirm the
+    /// behaviour isn't tone-specific.
+    #[test]
+    fn q5_opt_in_off_preserves_q4_model_id() {
+        for mode_slug in ["casual", "normal"] {
+            let db = fresh_db();
+            // PreferQ5Models default is false; do not set explicitly
+            // (and assert the default-off behaviour holds).
+            let provider = ModelEchoingStubCleanupProvider {
+                text_to_return: "Echoed Q4 reply.".into(),
+            };
+            let mut cleaner = LlmCleaner::new(
+                Box::new(provider),
+                db,
+                "qwen2.5:7b-instruct-q4_K_M".into(),
+                0.3,
+                256,
+            );
+            let raw = "this is a fifteen word dictation that should reach the LLM \
+                       at level high without any q five substitution today";
+            let _out = cleaner.clean(raw, mode_slug).unwrap();
+            let model = cleaner.model_name();
+            assert!(
+                model.starts_with("qwen2.5:7b-instruct-q4_K_M"),
+                "mode={mode_slug}: provider should have received Q4 id; provenance: {model}"
+            );
+            assert!(
+                !model.contains(Q5_OPT_IN_SUFFIX.trim_start_matches('+')),
+                "mode={mode_slug}: q5-opt-in suffix must be absent when default-off; got: {model}"
+            );
+        }
+    }
+
+    /// PreferQ5Models=true AND model_id ends in `-q4_K_M` → the
+    /// provider receives the `-q5_K_M` substitution AND the
+    /// `+q5-opt-in` provenance suffix is stamped. Covers both casual
+    /// and normal mode slugs to confirm the substitution is generic,
+    /// not casual-specific (per dispatch spec).
+    #[test]
+    fn q5_opt_in_on_substitutes_q5_and_stamps_provenance() {
+        for mode_slug in ["casual", "normal"] {
+            let db = fresh_db();
+            set_prefer_q5(&db, true);
+            let provider = ModelEchoingStubCleanupProvider {
+                text_to_return: "Echoed Q5 reply.".into(),
+            };
+            let mut cleaner = LlmCleaner::new(
+                Box::new(provider),
+                db,
+                "qwen2.5:7b-instruct-q4_K_M".into(),
+                0.3,
+                256,
+            );
+            let raw = "this is a fifteen word dictation that should reach the LLM \
+                       so the q five substitution path fires for the model id";
+            let _out = cleaner.clean(raw, mode_slug).unwrap();
+            let model = cleaner.model_name();
+            assert!(
+                model.starts_with("qwen2.5:7b-instruct-q5_K_M"),
+                "mode={mode_slug}: provider should have received Q5 id; provenance: {model}"
+            );
+            assert!(
+                model.contains("q5-opt-in"),
+                "mode={mode_slug}: provenance must carry q5-opt-in suffix; got: {model}"
+            );
+            assert!(
+                model.contains(PREPROCESSOR_VERSION),
+                "mode={mode_slug}: provenance must still carry preprocessor version; got: {model}"
+            );
+        }
+    }
+
+    /// PreferQ5Models=true but the active model_id is already Q5 (or
+    /// a different quantisation) → no double-substitution, no
+    /// provenance suffix. The opt-in is a no-op when there's nothing
+    /// to promote.
+    #[test]
+    fn q5_opt_in_on_does_not_double_substitute_existing_q5() {
+        let db = fresh_db();
+        set_prefer_q5(&db, true);
+        let provider = ModelEchoingStubCleanupProvider {
+            text_to_return: "Already Q5.".into(),
+        };
+        let mut cleaner = LlmCleaner::new(
+            Box::new(provider),
+            db,
+            "qwen2.5:7b-instruct-q5_K_M".into(),
+            0.3,
+            256,
+        );
+        let raw = "this is a fifteen word dictation that should reach the LLM \
+                   today without the substitution firing because already q five";
+        let _out = cleaner.clean(raw, "normal").unwrap();
+        let model = cleaner.model_name();
+        assert!(
+            model.starts_with("qwen2.5:7b-instruct-q5_K_M"),
+            "already-Q5 model_id should pass through; got: {model}"
+        );
+        assert!(
+            !model.contains("q5-opt-in"),
+            "q5-opt-in suffix must be absent when substitution didn't fire; got: {model}"
+        );
     }
 }

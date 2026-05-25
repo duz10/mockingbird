@@ -247,6 +247,25 @@ pub enum SettingKey {
     /// to preserve existing behaviour at upgrade; the user opts down
     /// the dial via Settings.
     DictationCleanupLevel,
+
+    // ----- ADR 0047 Wave 2.4 — Q5_K_M opt-in dial. -----
+    //
+    /// Opt-in flag for the higher-quality Q5_K_M Ollama model
+    /// quantisation. When `true`, [`crate::cleanup::llm_cleaner::LlmCleaner`]
+    /// substitutes any `-q4_K_M` suffix in the active mode's
+    /// `model_id` with `-q5_K_M` at request time (Q5 is ~500 MB
+    /// larger and produces noticeably better cleanup but won't fit
+    /// alongside Whisper-large-v3-turbo on a 6 GB GPU). Default
+    /// `false` -- existing installs stay on Q4 unless the user
+    /// explicitly opts in via Settings (ADR 0047 §Wave 2.4: "a user
+    /// who upgrades shouldn't have their working pipeline silently
+    /// transition to a heavier model").
+    ///
+    /// First-run wizard / VRAM probe wiring (`crate::cleanup::vram_probe`)
+    /// can flip this to `true` automatically when total VRAM clears
+    /// the 6 GB threshold; on this dev box (RTX 2060, 6144 MiB) the
+    /// probe reports exactly the threshold, so opt-in stays manual.
+    PreferQ5Models,
 }
 
 impl SettingKey {
@@ -299,6 +318,8 @@ impl SettingKey {
             Self::LlmSkipWordThreshold => "llm_skip_word_threshold",
             // ADR 0047 Wave 2.1.
             Self::DictationCleanupLevel => "dictation_cleanup_level",
+            // ADR 0047 Wave 2.4.
+            Self::PreferQ5Models => "prefer_q5_models",
         }
     }
 
@@ -351,6 +372,8 @@ impl SettingKey {
             "llm_skip_word_threshold" => Ok(Self::LlmSkipWordThreshold),
             // ADR 0047 Wave 2.1.
             "dictation_cleanup_level" => Ok(Self::DictationCleanupLevel),
+            // ADR 0047 Wave 2.4.
+            "prefer_q5_models" => Ok(Self::PreferQ5Models),
             other => Err(AppError::Other(format!("unknown setting key: {other:?}"))),
         }
     }
@@ -445,6 +468,12 @@ impl SettingKey {
             // is explicitly out of charter (parked for a successor ADR
             // amendment after `edit_free_send` observation).
             Self::DictationCleanupLevel => serde_json::json!("high"),
+            // ADR 0047 Wave 2.4 — default OFF. Existing installs stay
+            // on Q4 unless the user opts in via Settings (or the
+            // first-run wizard's VRAM probe flips it). Conservative
+            // posture per ADR §Risks #3 -- a silent upgrade onto a
+            // heavier model could blow VRAM on 6 GB cards.
+            Self::PreferQ5Models => serde_json::json!(false),
         }
     }
 
@@ -499,6 +528,8 @@ impl SettingKey {
             Self::LlmSkipWordThreshold,
             // ADR 0047 Wave 2.1.
             Self::DictationCleanupLevel,
+            // ADR 0047 Wave 2.4.
+            Self::PreferQ5Models,
         ]
     }
 }
@@ -605,8 +636,9 @@ mod tests {
         //   + 8 ADR 0046 Iter 2 (MobileSync/Vault* x 8)
         //   + 1 ADR 0047 Wave 1.2 (LlmShrinkFallbackThreshold)
         //   + 1 ADR 0047 Wave 2.2 (LlmSkipWordThreshold)
-        //   + 1 ADR 0047 Wave 2.1 (DictationCleanupLevel) = 39.
-        assert_eq!(SettingKey::all().len(), 39);
+        //   + 1 ADR 0047 Wave 2.1 (DictationCleanupLevel)
+        //   + 1 ADR 0047 Wave 2.4 (PreferQ5Models) = 40.
+        assert_eq!(SettingKey::all().len(), 40);
     }
 
     /// ADR 0046 Iter 2 defaults must match §10 ("opt-in by default";

@@ -1,0 +1,68 @@
+-- ──────────────────────────────────────────────────────────────────────
+-- Migration 022 — ADR 0047 §Wave 2.4: Q5_K_M opt-in checkpoint.
+--
+-- This migration is a documentation checkpoint -- the schema version
+-- bump marks the database as "Q5 opt-in runtime gate present" so a
+-- future migration (or downgrade-safety check) can branch on
+-- schema_version >= 22 without consulting the binary.
+--
+-- ## Why no INSERT / UPDATE here
+--
+-- The Q5 opt-in setting (`SettingKey::PreferQ5Models`) is declared in
+-- the typed-settings registry (`src-tauri/src/settings/model.rs`).
+-- `Settings::get` returns the registry default (`false`) whenever the
+-- row is missing -- the same pattern migration 020 uses for the
+-- DictationCleanupLevel setting. Pre-INSERTing a default-false row
+-- would create noise in the `settings` table without changing any
+-- observable behaviour; existing users get the default from the
+-- registry on first read, and the row only materialises when the
+-- user actually flips the toggle.
+--
+-- ## Why no `modes.model_id` change
+--
+-- The actual Q5 substitution happens at request time in
+-- `cleanup/llm_cleaner.rs::maybe_promote_to_q5`, gated on the
+-- `PreferQ5Models` setting. Keeping the `modes` table on Q4_K_M means:
+--
+--   1. **Rollback is free** -- flipping the setting back to false on
+--      the next dictation returns to the exact pre-opt-in model.
+--      No schema rollback, no per-row UPDATE replay.
+--   2. **Existing installs stay safe by default** -- the ADR §Wave 2.4
+--      "default-off for existing installs" requirement is satisfied
+--      by the setting's default, not by a conditional UPDATE that
+--      would have to detect "fresh install" vs "upgrade" in SQL.
+--   3. **The opt-in is reversible at the dial level** -- the toggle
+--      affects ALL three tone modes (casual / normal / formal)
+--      uniformly because the runtime gate is suffix-based, not
+--      model-table-driven. One bool, three behaviours -- the
+--      contract a UI toggle wants.
+--
+-- ## Runtime wiring (cross-reference)
+--
+--   * `SettingKey::PreferQ5Models` declared in `settings/model.rs`
+--     with default `false` (ADR §Risk #3 conservative posture).
+--   * Runtime gate in `cleanup::llm_cleaner::maybe_promote_to_q5`
+--     -- pure string substitution, `-q4_K_M` → `-q5_K_M`.
+--   * VRAM probe in `cleanup::vram_probe::probe_vram_mib` -- consumed
+--     by the first-run wizard (when one lands) or the Settings UI
+--     toggle (deferred to bead mb-h0nn alongside the cleanup-level
+--     dial UI). The probe is NOT consulted at request time;
+--     the user's explicit setting choice is the only gate.
+--   * Provenance: `cleanup::llm_cleaner` suffixes `model_used` with
+--     `+q5-opt-in` whenever the substitution fires, so downstream
+--     `transcripts.model_used` queries can slice opt-in vs base-Q4
+--     populations.
+--
+-- ## ADR 0008 compliance
+--
+-- This migration writes zero rows. The schema_version row is updated
+-- in-place per the convention of every prior migration (migrations
+-- 001-021). No `prompts`, `modes`, `settings`, or other table is
+-- touched.
+-- ──────────────────────────────────────────────────────────────────────
+
+BEGIN TRANSACTION;
+
+UPDATE schema_meta SET value = '22' WHERE key = 'schema_version';
+
+COMMIT;
