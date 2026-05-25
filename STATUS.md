@@ -186,7 +186,10 @@ fixture additions to feed the mode_eval rig).
 - `mb-xwi` — Phases 5/6/7 main-phase work from PLAN §10 (Recording UX polish,
   History/Settings/About windows, code signing). The long pole.
 - `mb-nc9u` — `mode_eval` grid re-run for migration 019 (normal/formal temperature 0.1 → 0.2). Owned by Dustin; picks up when fixtures are ready.
-- `mb-h0nn` — ADR 0047 Wave 2C UI: `DictationCleanupLevel` dial + Q5 toggle surface in Settings. Dial + toggle are live in `SettingKey` today; users can flip via direct settings edit until the UI ships.
+- `mb-e2t8` — ADR 0047 Wave 2.4 follow-up: expose `cleanup::vram_probe::probe_vram_mib()` as a Tauri command. UI consumer (Settings → Dictation tab Q5 toggle readout) is already in place; ships the "VRAM probe unavailable" placeholder until this Rust command lands. Single-command dispatch — code-puppy / Rust-side scope.
+
+**Recently closed standing P2s:**
+- `mb-h0nn` — ADR 0047 Wave 2C UI: SHIPPED 2026-05-25 in commit `efe08ed`. Promoted the slim "Dictation data" tab into a full "Dictation" tab mirroring SettingsMeetingTab's shape (Cleanup behaviour / Activation / Per-mode tuning / Data retention). DictationCleanupLevel dial + PreferQ5Models toggle live via the typed-settings registry (same `legacy_get_setting` / `legacy_set_setting` pattern SettingsMeetingTab uses). VRAM probe display deferred to mb-e2t8.
 
 **P3 backlog:** see `bd ready` — 6 issues (tray deep-link, Settings.tsx split,
 DPAPI for Unsplash key, Unsplash glyph review, ESLint v9 migration, hide-disabled-AI-modes toggle).
