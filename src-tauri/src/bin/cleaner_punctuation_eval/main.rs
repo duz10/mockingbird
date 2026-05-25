@@ -51,8 +51,7 @@ use mockingbird_lib::meetings::llm_pass::{
 // Fixture schema.
 // --------------------------------------------------------------------
 
-const FIXTURES_JSON: &str =
-    include_str!("../../../eval/cleaner_punctuation_fixtures.json");
+const FIXTURES_JSON: &str = include_str!("../../../eval/cleaner_punctuation_fixtures.json");
 
 #[derive(Debug, Deserialize)]
 struct FixtureFile {
@@ -192,10 +191,16 @@ fn render_report(
         "# `cleaner_punctuation` regression eval — {label}\n\n"
     ));
     md.push_str("ADR 0047 §Wave 3.1. Each fixture sends a preamble-bearing synthetic transcript\n");
-    md.push_str("through `meetings::llm_pass::run_llm_pass_with_provider(_, _, &OllamaProvider)`\n");
+    md.push_str(
+        "through `meetings::llm_pass::run_llm_pass_with_provider(_, _, &OllamaProvider)`\n",
+    );
     md.push_str("with `BuiltIn(\"cleaner_punctuation\")`. The same path the production\n");
-    md.push_str("\"Clean punctuation\" Transform on `LlmPassCard` hits. Each `expected_preserve`\n");
-    md.push_str("phrase must appear in the LLM output (normalized: lowercase, punctuation stripped,\n");
+    md.push_str(
+        "\"Clean punctuation\" Transform on `LlmPassCard` hits. Each `expected_preserve`\n",
+    );
+    md.push_str(
+        "phrase must appear in the LLM output (normalized: lowercase, punctuation stripped,\n",
+    );
     md.push_str("whitespace collapsed, whole-word match).\n\n");
 
     md.push_str("## Summary\n\n");
@@ -433,10 +438,7 @@ fn run(args: Args) -> Result<i32, Box<dyn std::error::Error>> {
     if passed >= args.floor {
         Ok(0)
     } else {
-        eprintln!(
-            "FAIL: {passed}/{total} below floor {}",
-            args.floor
-        );
+        eprintln!("FAIL: {passed}/{total} below floor {}", args.floor);
         Ok(2)
     }
 }

@@ -106,20 +106,69 @@ preserved even in Windows-only v1.
   Synchronous (ADR 0021) so the dictation hotkey-release path stays predictable.
 - **Provider impl:** `OllamaProvider` — talks to local Ollama daemon, arg-less
   `new()` constructor + optional `with_base_url()`.
-- **Preprocessor** (`preprocessor.rs`, ADR 0022 Wave 1): deterministic, ~5ms.
-  Strips Tier 1/2 fillers, collapses stutters, stitches self-corrections, renders
-  verbal punctuation/quotes/layout cues, capitalizes sentence starts, adds terminal
-  punctuation. Runs BEFORE the LLM. 34 unit tests.
-- **Mode pipeline** (ADR 0022 Wave 2): three modes — `casual` / `normal` / `formal` —
-  each with its own prompt, model, and temperature. Casual → qwen2.5:3b @ 0.2,
-  normal+formal → qwen2.5:7b @ 0.1.
-- **Empirically tuned** (ADR 0024 / migration 010): v2 prompts validated against
-  52-fixture eval corpus. Preservation avg: casual 97.1%, normal 97.5%, formal 88.5%.
-  Zero hallucinations. The 3B casual model's imperative-content failure mode
-  (echoing example scaffolding) was specifically patched in `casual_v2.md`.
-- **Prompt loader:** loads from `prompts` table (migrations 003+006+007+008+010
-  define the rows). `include_str!`-embedded markdown lives at
-  `src-tauri/src/cleanup/prompts/*.md`.
+- **Preprocessor** (`preprocessor.rs`, ADR 0022 Wave 1; `looks_listy()` un-stubbed
+  in ADR 0047 Wave 2.2): deterministic, ~5ms. Strips Tier 1/2 fillers, collapses
+  stutters, stitches self-corrections, renders verbal punctuation/quotes/layout
+  cues, capitalizes sentence starts, adds terminal punctuation. Runs BEFORE the
+  LLM. `looks_listy()` now returns `true` when the preprocessor recorded ≥2
+  ordinal cues OR ≥3 enumeration markers — feeds the LLM-skip gate (see below).
+- **Cleanup level dial** (`SettingKey::DictationCleanupLevel`, ADR 0047 Wave 2.1):
+  `None` (raw STT, no preprocessor, no LLM) / `Light` (preprocessor only,
+  ~5 ms) / `Medium` (preprocessor + LLM with the additive-only
+  `normal_v6_additive` prompt — never deletes content) / `High` (preprocessor +
+  mode-specific LLM, same as pre-ADR-0047 behaviour). **Default: `High`.**
+  Power-users tune via direct settings edit; the Settings UI surface is
+  deferred to `mb-h0nn`.
+- **LLM skip on short utterances** (ADR 0047 Wave 2.2): when the post-preprocessor
+  word count is ≤ `SettingKey::LlmSkipWordThreshold` (default 12) AND
+  `!looks_listy()`, `run_cleanup` short-circuits and returns the preprocessor-only
+  text in ~5 ms. Roughly 70 % of casual one-liners take this path; the LLM
+  retains its job for multi-paragraph dictations and implicit lists.
+- **Shrink-fallback guard** (ADR 0047 Wave 1.2): after every LLM cleanup call,
+  `cleaned_words / pre_words` is checked against
+  `SettingKey::LlmShrinkFallbackThreshold` (default 0.65). If the ratio falls
+  below threshold AND the preprocessor recorded no legitimate self-corrections,
+  the cleaner falls back to the preprocessor-only text, logs a `warn!`, and
+  appends `-shrink-fallback` to `last_model_used` so provenance tells the truth.
+- **Whisper dictionary substitution upstream** (ADR 0047 Wave 1.3):
+  `stt::prompt_builder::build_prompt` wires the user's dictionary (top-N by
+  `use_count`, capped at 200 tokens) into Whisper's `initial_prompt` at both
+  dictation call sites. Dictionary substitution moves UPSTREAM of the LLM,
+  reducing its workload.
+- **Mode pipeline** (ADR 0022 + ADR 0047 Waves 1.4 + 2.3 + 2.4): three modes —
+  `casual` / `normal` / `formal` — each with its own prompt, model, and
+  temperature. Per migration 019, all three modes run at temperature **0.2**
+  (was 0.1 for normal/formal). Per migration 021, casual runs on
+  `qwen2.5:7b-instruct-q4_K_M` (was 3B); the LLM-skip path absorbs the
+  latency tax on one-liners so the 7B upgrade doesn't hurt casual UX.
+  Q5_K_M model variants ship as opt-in via `SettingKey::PreferQ5Models`
+  (default off; VRAM-probe-gated at ≥6 GB total; migration 022); existing
+  installs stay on Q4_K_M unless the user opts in.
+- **Empirically tuned** (ADR 0024 / migration 010 baseline; migration 019
+  temperature bump verified clean via `mode_eval` re-run, owned by
+  `mb-nc9u`): v2 prompts (`casual_v2`, `normal_v5`, `formal_v2`) remain the
+  level-`High` bodies; `normal_v6_additive` is the level-`Medium` body.
+- **Prompt loader:** loads from `prompts` table (migrations
+  003+006+007+008+010 + ADR 0047 prompt rows). `include_str!`-embedded
+  markdown lives at `src-tauri/src/cleanup/prompts/*.md`
+  (`normal_v6_additive.md` new in Wave 2.1).
+- **On-demand `LlmPassCard` Transforms** (Dictations detail; lateral
+  Stable Alpha + ADR 0047 Wave 2.6): user can re-run the LLM on a saved
+  dictation via a built-in (`summary` / `action_items` / `cleaner_punctuation`
+  / **`compress`**, the pull-only Transform new in Wave 2.6) or a custom
+  prompt body. Drives `meetings::llm_pass::run_llm_pass`. The
+  `cleaner_punctuation` pass uses `SYSTEM_HEADER_PUNCTUATION` ("Preserve
+  every word; modify only whitespace and punctuation") — the load-bearing
+  Wave 1.1 fix. `summary` / `action_items` / `Custom(_)` retain the
+  concision header. Empirically validated at 18/20 preserve-rate on the
+  default meetings model — see
+  `docs/cleanup/eval-adr0047-cleaner-punctuation.md`.
+- **Quality signal** (ADR 0047 Wave 2.5): `sessions.edit_free_within_5min`
+  (Option<bool>) flips `false` if the user opens the `LlmPassCard` for that
+  session OR copies the raw transcript within 5 minutes of inject; otherwise
+  flips `true` at the 5-minute mark. Surfaced as an Insights "Your usage"
+  tile. This is the metric that will tell us whether to flip
+  `DictationCleanupLevel`'s default to `Light` in a future ADR amendment.
 
 ### 3.4 `hotkey/` — Global hotkey hook
 - **Driver:** `HotkeyDriver` trait + Windows `WH_KEYBOARD_LL` impl. Runs on its own
