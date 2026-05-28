@@ -66,37 +66,39 @@ deps so vanilla `cargo test` runs live and sidesteps LESSONS P2), schema
 types + serde round-trip tests (now 5/5 passing on vanilla `cargo test`
 including the corpus-files safety net).
 Closed in Wave 0: `mb-4wxw`, `mb-w1lw`, `mb-i9l1`.
-**Wave 1 SEALED — corpus complete (30/30 pairs).** `mb-t7w5` CLOSED.
-Corpus notes + capture anchor (`2026-06-14T08:00:00Z`) + persona
-index + final batch ledger + distribution + taxonomy-coverage note at
+**Wave 1 SEALED — corpus complete (32/32 pairs, full taxonomy coverage).**
+`mb-t7w5` CLOSED; `mb-901u` CLOSED (Note gap resolved inline by Wave 1
+addendum, not deferred to v2). Corpus notes + capture anchor
+(`2026-06-14T08:00:00Z`) + persona index + final batch ledger +
+distribution + taxonomy-coverage note at
 `experimental/kg-validation/corpus/CORPUS_NOTES.md`. Final persona
-coverage: 01 (working-class) x5, 02 (tradesperson) x4, 03 (salaried
-professional) x6, 04 (side-hustler) x5, 05 (caregiver) x5, 06 (recent
+coverage: 01 (working-class) x6, 02 (tradesperson) x4, 03 (salaried
+professional) x7, 04 (side-hustler) x5, 05 (caregiver) x5, 06 (recent
 grad) x5. Difficulty: 13 clean single-item, 13 multi-item rambler
 (incl. 1 five-item peak-hard at persona-05-case-03), 2 junk
 (persona-01-case-05, persona-05-case-05), 4 dedicated no-date
 hard-gate, 8+ ambiguous-category (incl. 3 `objective` tests), 1
-`reference` type test. Calibration locks (cumulative across all 3
-batches): side-hustle/Etsy/freelance = `professional`; task-due tracks
-the action's deadline not the underlying event-date; softened
-"I was thinking I should..." = `idea` not `task`; `objective` =
-long-term identity/direction (not day-to-day logistics);
-`reference` = save-info-for-later (not action);
-work-adjacent personal finance (e.g. 401k rollover) = `personal`;
-junk = zero entries. **Note on taxonomy:** `EntryType::Note` is
-intentionally absent from the Phase 0 corpus — every fixture either
-commits to an action, hedges as an idea, or saves a reference /
-research target. Tracked as P3 follow-up `mb-901u` ("decide if Note
-belongs in v2 fixture batch"); not a Phase 0 blocker. Schema-level
-unknown-variant protection is provided by serde deserialization.
-Durable safety-net tests in `src/schema.rs`:
-`corpus_files_parse_as_answer_keys` (globs `corpus/answer-keys/*.json`,
-deserializes each as `AnswerKey`, asserts `expected_entry_count ==
-entries.len()` AND the junk-bucket invariant `is_junk → count=0 &&
-entries.is_empty()`) plus the new
-`corpus_exercises_full_category_taxonomy` (asserts Personal /
-Professional / Objective all appear once the corpus is ≥20 keys).
-Sandbox gate green (6/6 tests). Q1 / Q2 / Q3 v1
+`reference` type test, 2 `note` type tests (Wave 1 addendum:
+persona-01-case-06 personal-note FYI vs.\ persona-03-case-07
+professional-note witnessed). Calibration locks (cumulative across all
+3 batches + addendum): side-hustle/Etsy/freelance = `professional`;
+task-due tracks the action's deadline not the underlying event-date;
+softened "I was thinking I should..." = `idea` not `task`; `objective`
+= long-term identity/direction (not day-to-day logistics); `reference`
+= save-info-for-later from elsewhere; `note` = firsthand-witnessed
+fact or self-reminder to file (no action implied); work-adjacent
+personal finance (e.g. 401k rollover) = `personal`; junk = zero
+entries. **Taxonomy:** all 5 `EntryType` variants (task / idea /
+research / reference / note) and all 3 `Category` variants now
+exercised in fixtures; schema-level unknown-variant protection still
+backed by serde deserialization. Durable safety-net tests in
+`src/schema.rs`: `corpus_files_parse_as_answer_keys` (globs
+`corpus/answer-keys/*.json`, deserializes each as `AnswerKey`,
+asserts `expected_entry_count == entries.len()` AND the junk-bucket
+invariant `is_junk → count=0 && entries.is_empty()`) plus the
+promoted `corpus_exercises_full_taxonomy` (asserts all 3 Category
+variants AND all 5 EntryType variants once the corpus is ≥20 keys).
+Sandbox gate green (6/6 tests, fmt clean, clippy --all-targets clean). Q1 / Q2 / Q3 v1
 architectural decisions (vault subtree, positional routing, files-as-
 source-of-truth) are recorded verbatim in ADR 0048 for inheritance
 by the future v1 charter ADR (provisionally 0049, drafted post-gate).

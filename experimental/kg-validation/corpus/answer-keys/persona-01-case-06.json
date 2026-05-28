@@ -1,0 +1,9 @@
+{
+  "dictation_id": "persona-01-case-06",
+  "expected_entry_count": 1,
+  "is_junk_no_entry_expected": false,
+  "entries": [
+    { "category": "personal", "entry_type": "note", "due_iso": null,
+      "acceptable_topic_tag_sets": [["apartment", "gate-code", "fyi"], ["home", "access-code"]] }
+  ]
+}

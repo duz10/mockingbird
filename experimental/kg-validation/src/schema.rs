@@ -364,17 +364,16 @@ mod tests {
     }
 
     /// Coarse coverage check: once the corpus is substantial (≥20 keys),
-    /// every [`Category`] variant should be exercised at least once. We
-    /// don't extend this to [`EntryType`] yet — the Phase 0 30-pair
-    /// corpus deliberately omits `EntryType::Note` (every captured
-    /// thought in the fixtures either commits to an action, hedges as
-    /// an idea, or saves a reference / research target). The honest
-    /// posture is to document the gap as a follow-up rather than force
-    /// a synthetic Note fixture solely to satisfy a coverage assertion.
+    /// every [`Category`] variant AND every [`EntryType`] variant should
+    /// be exercised at least once. Bundling both assertions in one test
+    /// keeps the corpus-walk cost paid once; the assertions themselves
+    /// are independent (Category-level coverage was the original
+    /// guarantee; EntryType coverage was added once the Wave 1 addendum
+    /// closed the Note gap — see CORPUS_NOTES.md batch ledger).
     /// Schema-level "unknown variant" protection is already provided by
     /// the serde-deserialization step in `corpus_files_parse_as_answer_keys`.
     #[test]
-    fn corpus_exercises_full_category_taxonomy() {
+    fn corpus_exercises_full_taxonomy() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("corpus")
             .join("answer-keys");
@@ -384,9 +383,10 @@ mod tests {
 
         // `Vec` instead of `HashSet` keeps the schema enums free of an
         // otherwise-unjustified `Hash` derive purely for test purposes.
-        // The dataset is tiny (≤ 30 keys × a handful of entries each),
-        // so O(n) `contains` is fine.
+        // The dataset is tiny (≤ a few dozen keys × a handful of entries
+        // each), so O(n) `contains` is fine.
         let mut categories_seen: Vec<Category> = Vec::new();
+        let mut entry_types_seen: Vec<EntryType> = Vec::new();
         let mut keys_loaded = 0usize;
 
         for entry in std::fs::read_dir(&dir).expect("read corpus/answer-keys dir") {
@@ -404,6 +404,9 @@ mod tests {
                 if !categories_seen.contains(&expected.category) {
                     categories_seen.push(expected.category);
                 }
+                if !entry_types_seen.contains(&expected.entry_type) {
+                    entry_types_seen.push(expected.entry_type);
+                }
             }
         }
 
@@ -419,6 +422,19 @@ mod tests {
             assert!(
                 categories_seen.contains(&c),
                 "corpus does not exercise Category::{c:?} (seen: {categories_seen:?})"
+            );
+        }
+
+        for t in [
+            EntryType::Task,
+            EntryType::Research,
+            EntryType::Idea,
+            EntryType::Note,
+            EntryType::Reference,
+        ] {
+            assert!(
+                entry_types_seen.contains(&t),
+                "corpus does not exercise EntryType::{t:?} (seen: {entry_types_seen:?})"
             );
         }
     }
