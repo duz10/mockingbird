@@ -1,0 +1,1 @@
+Okay so the job application for the marketing role at Stripe — I need to finish the cover letter tonight, OR honestly maybe rewrite it from scratch because the one I have is too generic. And separately I was thinking I should join a recreational soccer league or something, it's been months since I've done anything physical that wasn't just like walking to the train.

@@ -1,0 +1,19 @@
+{
+  "dictation_id": "persona-06-case-02",
+  "expected_entry_count": 2,
+  "is_junk_no_entry_expected": false,
+  "entries": [
+    {
+      "category": "professional",
+      "entry_type": "task",
+      "due_iso": "2026-06-14",
+      "acceptable_topic_tag_sets": [["job-application", "stripe", "cover-letter"], ["stripe", "marketing", "application"]]
+    },
+    {
+      "category": "personal",
+      "entry_type": "idea",
+      "due_iso": null,
+      "acceptable_topic_tag_sets": [["fitness", "soccer"], ["hobbies", "exercise", "soccer"]]
+    }
+  ]
+}

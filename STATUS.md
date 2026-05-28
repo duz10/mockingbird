@@ -66,14 +66,19 @@ deps so vanilla `cargo test` runs live and sidesteps LESSONS P2), schema
 types + serde round-trip tests (now 5/5 passing on vanilla `cargo test`
 including the corpus-files safety net).
 Closed in Wave 0: `mb-4wxw`, `mb-w1lw`, `mb-i9l1`.
-**Wave 1 Batch 1 landed (5/30 pairs)** — `mb-t7w5` in_progress.
-Corpus notes + capture anchor (`2026-06-14T08:00:00Z`) + persona index
-at `experimental/kg-validation/corpus/CORPUS_NOTES.md`. Personas 01
-(working-class), 02 (tradesperson), 03 (salaried professional), 05
-(caregiver), 06 (recent grad) each have a case-01 (dictation +
-answer-key) pair on disk. Batch 2 (multi-item ramblers + ambiguous-
-category, side-hustler debut) and Batch 3 (no-date + junk + under-
-represented personas) still pending Dustin's pair-by-pair review.
+**Wave 1 Batches 1-2 landed (15/30 pairs). Batch 3 next.** —
+`mb-t7w5` in_progress. Corpus notes + capture anchor
+(`2026-06-14T08:00:00Z`) + persona index at
+`experimental/kg-validation/corpus/CORPUS_NOTES.md`. Persona coverage
+so far: 01 (working-class) x3, 02 (tradesperson) x2, 03 (salaried
+professional) x3, 04 (side-hustler) x3, 05 (caregiver) x2, 06 (recent
+grad) x2. Batch 2 added the side-hustler debut (persona 04) plus
+multi-item ramblers and ambiguous-category cases (calibration locks
+applied: side-hustle/Etsy/freelance = `professional`; task-due tracks
+the action's deadline not the underlying event-date; softened
+"I was thinking I should..." = `idea` not `task`). Batch 3 (no-date
++ junk + underrepresented difficulty buckets) still pending Dustin's
+pair-by-pair review.
 New durable safety-net test `corpus_files_parse_as_answer_keys`
 (`src/schema.rs`) globs `corpus/answer-keys/*.json` and deserializes
 each as `AnswerKey` + spot-checks `expected_entry_count` vs.

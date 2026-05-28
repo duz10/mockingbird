@@ -1,0 +1,25 @@
+{
+  "dictation_id": "persona-03-case-02",
+  "expected_entry_count": 3,
+  "is_junk_no_entry_expected": false,
+  "entries": [
+    {
+      "category": "professional",
+      "entry_type": "task",
+      "due_iso": "2026-06-18",
+      "acceptable_topic_tag_sets": [["slide-deck", "all-hands"], ["presentation", "all-hands"]]
+    },
+    {
+      "category": "professional",
+      "entry_type": "idea",
+      "due_iso": null,
+      "acceptable_topic_tag_sets": [["team", "morale", "standups"], ["team-culture", "meetings"]]
+    },
+    {
+      "category": "professional",
+      "entry_type": "research",
+      "due_iso": null,
+      "acceptable_topic_tag_sets": [["notion", "ai", "documentation"], ["tooling", "docs-migration"]]
+    }
+  ]
+}
