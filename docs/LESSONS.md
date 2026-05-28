@@ -171,6 +171,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-28 | `[ADR 0048 Wave 0 / mb-4wxw + mb-w1lw + mb-i9l1]` | `bd close` of a downstream bead in the same iteration as its blocker's close fails with "blocked by open issues [<blocker-id>]" even when the blocker was already closed — bd evaluates the blocks-edge against a stale view (Dolt auto-commit batching, presumably). Workaround: pass `--force` for the downstream closes. Doesn't affect cross-iteration chains because the blocker close has committed by then |
 | 2026-05-27 | `[ADR 0046 Iter 2 SEAL / mb-3xww]` | Obsidian nested-vault trap during Mockingbird Mobile Sync setup: when an Obsidian vault is created via 'Create new vault' and the named folder already exists, Obsidian silently creates a nested `<vault>/<vault>/` structure; Mockingbird writes to outer, Obsidian reads from inner — symptom is "Vault up to date (N records)" toast is truthful but Obsidian shows nothing. Diagnosis: `Get-ChildItem <vault> -Force` shows both `.mockingbird/` AND a same-named nested folder; the nested folder contains `.obsidian/`. Fix: move `.obsidian/` + `Welcome.md` from inner to outer, delete empty inner (preserves Obsidian Sync pairing). Iter 4 wizard should detect + guide |
 | 2026-05-23 | `[ADR 0046 Iter 1 / mb-jbf7]`    | Programmatic Strategy-A end-to-end smoke is blocked by mb-0n8c: example binaries that transitively link whisper-rs/ort/CUDA exit STATUS_ENTRYPOINT_NOT_FOUND identically to `cargo test --release`; pure-rusqlite examples (verify_wave49 shape) work fine. Pattern: pair every smoke example with a pure-rusqlite probe so the DB-schema half is verifiable independent of mb-0n8c, route the live-fire half through `mockingbird.exe` + Strategy B |
 | 2026-05-27 | `[ADR 0046 §3.2 / mb-7vyz]`      | Resolution of the earlier-today topology fork: in-thread `std::sync::mpsc → crossbeam-channel` bridge is the minimum-diff path; converting the `StateDriver` channel itself would have cascaded out-of-boundary, while bridging inside `run_dictation_thread` keeps every §3 "do not touch" file untouched and adds ~20 lines |
@@ -223,6 +224,36 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-28 [ADR 0048 Wave 0 / mb-4wxw + mb-w1lw + mb-i9l1] `bd close` rejects a downstream bead in the same iteration as its blocker's close, even after the blocker is CLOSED — `--force` is the workaround
+
+- **Context:** Wave 0 of ADR 0048 closes three beads in one shot —
+  `mb-4wxw` (Wave 0 scaffold) blocks `mb-w1lw` (sandbox skeleton)
+  blocks `mb-i9l1` (schema types). All three landed in this iteration
+  and need to close before the iteration ends.
+- **Finding:** Closing them in dependency order, sequentially —
+  `mb-4wxw` first (succeeds), then `mb-w1lw` (FAILS with `cannot close
+  mb-w1lw: blocked by open issues [mb-4wxw]`), then `mb-i9l1` (FAILS
+  with `[mb-w1lw]`). `bd show mb-4wxw` immediately after the first
+  close confirms `Status: CLOSED` — so bd's *display* layer sees the
+  close, but the `close` command's blockers-check sees the *pre-close*
+  view. Likely a Dolt auto-commit batching artifact (the docs in
+  `bd --help` describe `batch` mode where writes defer until
+  `bd dolt commit`). The pattern is independent of which beads or
+  order: any in-iteration downstream close after a same-iteration
+  blocker close hits this.
+- **Action:** Pass `--force` on the downstream closes. The dependency
+  edges in the graph remain intact for posterity (visible via `bd show`
+  / `bd graph`), only the close-time guard is bypassed. Strictly cleaner
+  alternative if it ever matters: `bd dolt commit` between closes to
+  flush the batch — but `--force` is a one-token addition and bd's
+  blocker check is the only mechanism this guard protects, so it's
+  not actually load-bearing here.
+- **Not promoted to PINNED:** only relevant when an iteration closes
+  ≥2 beads in a blocker chain, which is uncommon outside wave-style
+  multi-bead waves like ADR 0048 Wave 0. The body entry is enough.
 
 ---
 
