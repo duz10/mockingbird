@@ -1,0 +1,92 @@
+{
+  "calibration_set_id": "tag-equivalence-v1",
+  "version": 1,
+  "authored_iso": "2026-05-28",
+  "purpose": "Gate 1 of the ADR 0048 §G5 Judge Validation Protocol. The LLM tag-equivalence judge (src/scoring/judge.rs) must achieve ≥ 90% verdict-correct on this set before its verdicts feed the tag-correctness metric. Distribution is deliberately unambiguous: 7 obvious-equivalent pairs, 5 obvious-different pairs. Borderline cases are excluded — they would create unfair gate failures and would teach the judge to second-guess clear calls. Borderline handling is a PCRP retrospective concern (ADR 0048 §G6), not a calibration metric.",
+  "pairs": [
+    {
+      "pair_id": "cal-eq-001",
+      "tags_a": ["car-repair", "auto"],
+      "tags_b": ["car-repair", "auto-maintenance"],
+      "expected_verdict": "equivalent",
+      "rationale": "Identical primary tag (car-repair); 'auto' and 'auto-maintenance' are synonymous in the context of a personal vehicle fix-up note. A user searching either would expect the same hits."
+    },
+    {
+      "pair_id": "cal-eq-002",
+      "tags_a": ["kid", "school"],
+      "tags_b": ["school", "kid"],
+      "expected_verdict": "equivalent",
+      "rationale": "Same set, different order. Tag sets are unordered; an order-sensitive judge is broken."
+    },
+    {
+      "pair_id": "cal-eq-003",
+      "tags_a": ["reading-list"],
+      "tags_b": ["reading-list", "book"],
+      "expected_verdict": "equivalent",
+      "rationale": "The B-side adds 'book' which is the natural superset of 'reading-list'. In a personal note about saving a book to read, both tags name the same shelf and would surface the same notes under either search."
+    },
+    {
+      "pair_id": "cal-eq-004",
+      "tags_a": ["doctor-appointment"],
+      "tags_b": ["doctor", "appointment"],
+      "expected_verdict": "equivalent",
+      "rationale": "Hyphenation difference only. The compound 'doctor-appointment' decomposes losslessly into its two components for filing/search purposes."
+    },
+    {
+      "pair_id": "cal-eq-005",
+      "tags_a": ["party"],
+      "tags_b": ["parties"],
+      "expected_verdict": "equivalent",
+      "rationale": "Singular/plural variant of the same head noun. The normalize pass (passes/normalize.rs) is supposed to collapse these to 'party'; if it didn't, the judge must still recognize the equivalence so the tag metric doesn't double-penalize a normalization miss."
+    },
+    {
+      "pair_id": "cal-eq-006",
+      "tags_a": ["grocery", "shopping"],
+      "tags_b": ["grocery-shopping"],
+      "expected_verdict": "equivalent",
+      "rationale": "Two-tag decomposition versus compound — exactly the same concept ('a grocery shopping trip'). Different segmentation choice, same target."
+    },
+    {
+      "pair_id": "cal-eq-007",
+      "tags_a": ["dentist"],
+      "tags_b": ["dental-appointment"],
+      "expected_verdict": "equivalent",
+      "rationale": "Different specificity but the same target file. In a personal-note context, a search for 'dentist' or 'dental-appointment' would both legitimately surface a note about scheduling a cleaning."
+    },
+    {
+      "pair_id": "cal-diff-001",
+      "tags_a": ["taxes"],
+      "tags_b": ["vacation"],
+      "expected_verdict": "not-equivalent",
+      "rationale": "Clearly unrelated personal-finance vs. travel-planning tags. The trivial floor — a judge that flags these as equivalent is collapsed."
+    },
+    {
+      "pair_id": "cal-diff-002",
+      "tags_a": ["marcus"],
+      "tags_b": ["marketing"],
+      "expected_verdict": "not-equivalent",
+      "rationale": "Person name versus business-function domain. Surface-form similarity ('mar...') must not fool the judge into a category-vs-name conflation."
+    },
+    {
+      "pair_id": "cal-diff-003",
+      "tags_a": ["budget"],
+      "tags_b": ["budget-software"],
+      "expected_verdict": "not-equivalent",
+      "rationale": "A note about 'budget' (the household finance topic) is a category-level tag; 'budget-software' is a specific software product/tool tag. The specificity gap changes the target. A user filing 'budget' wants their finance notes; 'budget-software' wants notes about apps. Specificity-when-specificity-matters is a distinct failure mode from cal-eq-007 (where the specificity gap was decorative)."
+    },
+    {
+      "pair_id": "cal-diff-004",
+      "tags_a": ["email-marketing"],
+      "tags_b": ["social-media"],
+      "expected_verdict": "not-equivalent",
+      "rationale": "Both are marketing channels, but they are distinct marketing channels with different workflows, audiences, and metrics. A 'marketing' supertag would cover both; 'email-marketing' and 'social-media' are siblings, not synonyms."
+    },
+    {
+      "pair_id": "cal-diff-005",
+      "tags_a": ["coffee-machine"],
+      "tags_b": ["coffee-shop"],
+      "expected_verdict": "not-equivalent",
+      "rationale": "Both contain 'coffee' but name different physical objects/locations: an appliance to fix versus a place to visit. Different file targets entirely."
+    }
+  ]
+}
