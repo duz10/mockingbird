@@ -1,15 +1,15 @@
 {
-  "calibration_set_id": "tag-equivalence-v1",
-  "version": 1,
+  "calibration_set_id": "tag-equivalence-v2",
+  "version": 2,
   "authored_iso": "2026-05-28",
-  "purpose": "Gate 1 of the ADR 0048 §G5 Judge Validation Protocol. The LLM tag-equivalence judge (src/scoring/judge.rs) must achieve ≥ 90% verdict-correct on this set before its verdicts feed the tag-correctness metric. Distribution is deliberately unambiguous: 7 obvious-equivalent pairs, 5 obvious-different pairs. Borderline cases are excluded — they would create unfair gate failures and would teach the judge to second-guess clear calls. Borderline handling is a PCRP retrospective concern (ADR 0048 §G6), not a calibration metric.",
+  "purpose": "Gate 1 of the ADR 0048 §G5 Judge Validation Protocol. The LLM tag-equivalence judge (src/scoring/judge.rs) must achieve ≥ 90% verdict-correct on this set before its verdicts feed the tag-correctness metric. Distribution is deliberately unambiguous: 7 obvious-equivalent pairs, 5 obvious-different pairs. Borderline cases are excluded — they would create unfair gate failures and would teach the judge to second-guess clear calls. Borderline handling is a PCRP retrospective concern (ADR 0048 §G6), not a calibration metric. v2 (2026-05-29) replaces cal-eq-001's tokens — the original [car-repair, auto] vs [car-repair, auto-maintenance] pair was lexically identical to the judge prompt's first in-context example, which would inflate Gate 1 verdict-correct on a memorization rather than a genuine reasoning pass. v2 substitutes [birthday, gift] vs [birthday, birthday-gift] — same anchored-synonym pattern, fresh vocabulary not present in any prompt example or other calibration pair.",
   "pairs": [
     {
       "pair_id": "cal-eq-001",
-      "tags_a": ["car-repair", "auto"],
-      "tags_b": ["car-repair", "auto-maintenance"],
+      "tags_a": ["birthday", "gift"],
+      "tags_b": ["birthday", "birthday-gift"],
       "expected_verdict": "equivalent",
-      "rationale": "Identical primary tag (car-repair); 'auto' and 'auto-maintenance' are synonymous in the context of a personal vehicle fix-up note. A user searching either would expect the same hits."
+      "rationale": "Identical anchor tag (birthday). With that anchor present on both sides, 'gift' and 'birthday-gift' are co-referential — a note about getting someone a birthday gift would file/surface identically under either set. Same anchored-synonym pattern as the original v1 pair, but with vocabulary deliberately disjoint from the judge prompt's in-context examples (which use car-repair / auto / auto-maintenance / taxes / vacation / dentist / dental-appointment) and from every other calibration pair (no other pair uses birthday or gift). This keeps Gate 1's verdict-correct a measure of judge reasoning, not memorization."
     },
     {
       "pair_id": "cal-eq-002",

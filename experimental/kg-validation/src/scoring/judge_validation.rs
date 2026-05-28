@@ -906,7 +906,7 @@ mod tests {
             return; // sandbox built without calibration set
         }
         let set = load_calibration_set(&path).unwrap();
-        assert_eq!(set.calibration_set_id, "tag-equivalence-v1");
+        assert_eq!(set.calibration_set_id, "tag-equivalence-v2");
         assert!(set.pairs.len() >= 12);
         // Every pair has a parseable expected verdict.
         for p in &set.pairs {
