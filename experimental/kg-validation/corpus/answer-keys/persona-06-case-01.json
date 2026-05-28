@@ -1,0 +1,15 @@
+{
+  "dictation_id": "persona-06-case-01",
+  "expected_entry_count": 1,
+  "is_junk_no_entry_expected": false,
+  "entries": [
+    {
+      "category": "personal",
+      "entry_type": "task",
+      "due_iso": null,
+      "acceptable_topic_tag_sets": [
+        ["insurance", "renters-insurance"]
+      ]
+    }
+  ]
+}

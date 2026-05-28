@@ -1,0 +1,1 @@
+Uh okay, need to call the daycare on Monday morning, see if they have a spot in the after-school program for Tyler. Because if they don't, I gotta figure something else out before school starts in August.
