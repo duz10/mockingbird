@@ -102,7 +102,51 @@ Sandbox gate green (6/6 tests, fmt clean, clippy --all-targets clean). Q1 / Q2 /
 architectural decisions (vault subtree, positional routing, files-as-
 source-of-truth) are recorded verbatim in ADR 0048 for inheritance
 by the future v1 charter ADR (provisionally 0049, drafted post-gate).
-**Wave 2 (pipeline + harness — beads `mb-i4us`, `mb-nbel`) is now
+**Wave 2 SEALED (2026-05-28) — 4-pass pipeline + run-corpus harness
+shipped.** `mb-i4us` (pipeline) and `mb-nbel` (harness binary) both
+CLOSED. New surface area:
+
+- `src/ollama.rs` — G1 carve-out: `OllamaDispatcher` trait +
+  `OllamaClient` (reqwest blocking, POST `/api/generate`, stream=false)
+  + `MockOllama` test double (`#[cfg(test)] pub mod testing`,
+  first-substring-match-wins, records calls).
+- `src/passes/{segment,classify,extract,normalize}.rs` — the four
+  passes per spec §8.1. Temperature 0.2 pinned by caller (ADR 0048
+  §G4), seed configurable per run for §8.5 stability. `extract` enforces
+  the date hard-gate at parse time (non-null `due_iso` must be valid
+  `YYYY-MM-DD`); raw model output preserved on every parse/validation
+  failure for Wave 3 scoring. `normalize` is pure-Rust, conservative
+  singularization (`ies→y`, `xes/zes→x/z`, trailing `s` only when
+  prior char ∉ {s,x,z,u,i,o} and word doesn't end in {ss,sh,ch,us});
+  compound tags singularize only the head noun.
+- `prompts/{segment,classify,extract}.md` — first-cut prompts with
+  2-3 few-shots each (Wave 5 iterates quality).
+- `src/harness/{pipeline,runner}.rs` — orchestrator (per-segment
+  failure isolation: segment-pass failure aborts dictation, classify/
+  extract failure drops only that segment) + corpus walker. Persists
+  `raw/<id>/{segment,classify-N,extract-N}.json` + `structured/<id>.json`
+  + `SUMMARY.json`. Dry-run skips Ollama.
+- `src/bin/run-corpus.rs` — hand-rolled CLI (10 flags;
+  `--model/--seed/--run-id/--corpus-dir/--output-dir/--captured-iso/
+  --ollama-url/--temperature/--num-ctx/--dry-run/--help`). No clap dep
+  (sandbox, YAGNI).
+- `.gitignore` — `target/`, `runs/`, `smoke-corpus/`.
+
+**Sandbox gate green:** vanilla `cargo fmt --check && cargo clippy
+--all-targets -- -D warnings && cargo test` from
+`experimental/kg-validation/` → 44/44 tests pass (was 6/6 pre-Wave 2;
++38 new). Live-fire smoke on `qwen2.5:3b-instruct-q4_K_M` against a
+3-dictation subset (persona-01-case-01 clean-single, persona-02-case-01
+clean-2-item, persona-01-case-05 junk): all three succeeded with zero
+parse/validation errors. Quality observations (not graded — that's
+Wave 5): junk correctly returned `[]`; multi-item dictation split
+cleanly into task + idea with `status` omitted from the idea
+(schema discipline holds); date hard-gate worked both ways ("before
+Friday" → `2026-06-19`; ambiguous "Monday morning" → `None`, i.e.
+conservative); the clean-single dictation got over-split into 2
+entries — Wave 5 segmenter prompt-tuning concern, not structural.
+
+**Wave 3 (`mb-57a1` scorer + LLM tag-equivalence judge) is now
 unblocked and ready to start.**
 
 ---

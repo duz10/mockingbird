@@ -1,5 +1,16 @@
-//! Wave 2 home: harness binary + corpus loader + pipeline driver.
+//! Wave 2 — harness binary, corpus walker, pipeline driver.
 //!
-//! Empty stub until bead `mb-nbel` (Phase 0 KG: harness binary
-//! `run-corpus`). The binary lands at `src/bin/run-corpus.rs` and
-//! orchestrates the multi-pass run per spec §8.1.
+//! Two-layer split:
+//!
+//! - [`pipeline`] — runs the four passes for a single dictation,
+//!   persists each pass's raw + parsed output, returns the assembled
+//!   `Vec<Entry>`.
+//! - [`runner`] — walks the corpus directory, dispatches each
+//!   dictation through [`pipeline`], and writes a per-run
+//!   `SUMMARY.json`.
+//!
+//! The binary `run-corpus` (in `src/bin/`) is a thin CLI shell over
+//! [`runner::run_corpus`].
+
+pub mod pipeline;
+pub mod runner;

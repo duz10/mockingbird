@@ -22,3 +22,7 @@ thiserror = "1"
 
 [lib]
 path = "src/lib.rs"
+
+[[bin]]
+name = "run-corpus"
+path = "src/bin/run-corpus.rs"

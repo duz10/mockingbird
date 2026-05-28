@@ -227,6 +227,33 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 ---
 
+## 2026-05-28 [ADR 0048 Wave 2 / mb-i4us + mb-nbel] Mock dispatcher needle ordering: extract needles must be more specific than classify needles
+
+- **Context:** The KG sandbox `MockOllama` matches model dispatch by
+  prompt-substring needles, first-rule-wins. The four-pass pipeline
+  sends the segment text to BOTH the classify pass (`SEGMENT:\n<text>`
+  in the prompt) AND the extract pass (`SEGMENT:\n<text>\nCLASSIFICATION:
+  ...` in the prompt). A naive mock rule keyed on the segment text
+  alone (e.g. `respond_when("call the daycare", classify-json)`) wins
+  on BOTH the classify dispatch AND the extract dispatch — extract
+  then tries to deserialize classify JSON, blows up on `missing field
+  title`, and the integration test fails in a confusing way.
+- **Finding:** The end-to-end pipeline test failed exactly this way on
+  first run. The fix is to anchor needles on the unique pass-marker
+  prefix each pass writes — `"SEGMENT:\n<text>"` for classify,
+  `"<text>\nCLASSIFICATION"` for extract — and to register the
+  *more-specific* (longer / more-anchored) needles FIRST so
+  first-match-wins lands them.
+- **Action:** When extending the harness with new passes or new
+  pipeline tests, always include a per-pass marker prefix in the
+  needle. Don't rely on segment-text uniqueness alone. Pattern is
+  documented inline at the top of
+  `experimental/kg-validation/src/harness/pipeline.rs::tests::end_to_end_with_mock_dispatcher`.
+- **Not promoted to PINNED:** sandbox-internal harness concern; not
+  load-bearing for the product or future production-side work.
+
+---
+
 ## 2026-05-28 [ADR 0048 Wave 0 / mb-4wxw + mb-w1lw + mb-i9l1] `bd close` rejects a downstream bead in the same iteration as its blocker's close, even after the blocker is CLOSED — `--force` is the workaround
 
 - **Context:** Wave 0 of ADR 0048 closes three beads in one shot —

@@ -1,0 +1,10 @@
+# Build artifacts (sandbox crate; own target/ since not a workspace member).
+/target
+
+# Run output. Each invocation of `run-corpus` writes a new dated
+# subdirectory under runs/; these are LLM output we re-generate on
+# demand, not source.
+/runs
+
+# Throwaway subsets for smoke runs.
+/smoke-corpus
