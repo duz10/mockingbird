@@ -55,6 +55,26 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
+**Knowledge Graph Phase 0 epic — ADR 0048 chartered (Wave 0 complete).**
+*Lateral epic per LESSONS PINNED P5; no `phase-*-complete` tag will be cut.*
+Wave 0 (charter + scaffold) landed 2026-05-28: spec imported to
+`docs/knowledge-graph/spec.md` (immutable), ADR 0048 drafted (Proposed),
+10-bead epic with dependency graph (`mb-4wxw` → `mb-0baz`), sandbox crate
+at `experimental/kg-validation/` (standalone — its own `[workspace]`, **not**
+a member of the root Mockingbird workspace, zero CUDA / whisper-rs / ort
+deps so vanilla `cargo test` runs live and sidesteps LESSONS P2), schema
+types + serde round-trip tests (4/4 passing on vanilla `cargo test`).
+Closed in this iteration: `mb-4wxw`, `mb-w1lw`, `mb-i9l1`.
+**Wave 1 (corpus authoring, `mb-t7w5`) is ready for human-in-loop kickoff
+next iteration** — 30 dictation + answer-key pairs across 6 personas ×
+5 difficulty buckets per spec §6.2 needs Dustin's voice on persona /
+difficulty calibration. Q1 / Q2 / Q3 v1 architectural decisions (vault
+subtree, positional routing, files-as-source-of-truth) are recorded
+verbatim in ADR 0048 for inheritance by the future v1 charter ADR
+(provisionally 0049, drafted post-gate).
+
+---
+
 Live-fire Win11 smoke test for Phase 10 is still Dustin's post-seal step
 (LESSONS PINNED P7 pattern; same shape as the post-MC `mb-x1x` flow) — judges
 don't catch live-OS regressions.
