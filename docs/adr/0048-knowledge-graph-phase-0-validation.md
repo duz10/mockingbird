@@ -159,6 +159,115 @@ Layered on top of that:
   similar). Same-model judging is the failure mode spec §6.1 warns
   about — "the grader just agrees with the processor."
 
+### G5 — Judge Validation Protocol (JVP)
+
+The spec's §8.3 "judge must be spot-checked" is the right instinct but
+the wrong granularity for the load-bearing role the LLM tag-equivalence
+judge plays. The judge's verdict feeds the tag-correctness metric, which
+is one of the six §8.4 gates; rubber-stamping by the judge would silently
+produce a green threshold on a failing pipeline. We codify five
+mechanical gates that run BEFORE any judge verdict is used in scoring,
+plus a retrospective audit trail.
+
+All five gate outputs are persisted to
+`runs/<run-id>/JUDGE_VALIDATION.json` regardless of pass/fail/warn — the
+audit trail is permanent.
+
+- **Gate 1 — Calibration set ≥ 90% (STOP if fails).** A hand-authored
+  set of 12–15 gold-standard tag-equivalence pairs lives at
+  `experimental/kg-validation/judge-calibration/tag-equivalence.json`.
+  The judge must achieve ≥ 90% verdict-correct on this set before it is
+  used on real data. Distribution: ~7 unambiguous-equivalent pairs,
+  ~5 unambiguous-different pairs (borderline cases are deliberately
+  excluded — they would create unfair gate failures; borderline
+  handling is a retrospective PCRP observation, not a calibration
+  metric).
+- **Gate 2 — Per-verdict reasoning audit ≥ 95% (STOP if fails).** Every
+  judge response must (a) carry a reasoning string longer than 30
+  characters, (b) reference at least one token from BOTH candidate tag
+  sets in that reasoning, and (c) place the verdict marker AFTER the
+  reasoning, not before. Catches rubber-stamping and verdict-first
+  shortcut patterns the chain-of-thought prompt is supposed to prevent.
+- **Gate 3 — Cross-judge sample 10%, agreement ≥ 85% (STOP if <85%,
+  WARN if 85–95%).** 10% of verdicts are re-judged by a second model
+  drawn from a different family than both the primary judge AND the
+  pipeline-under-test. Concrete picks: pipeline = `qwen2.5:3b`,
+  primary judge = `llama3.1:8b`, secondary cross-check =
+  `gemma2:9b`. If `gemma2:9b` is not pulled and cannot be
+  substituted, Gate 3 demotes to WARN-only and the JVP report records
+  the demotion explicitly — we do NOT attempt to auto-pull a 4–9 GB
+  model.
+- **Gate 4 — Distribution sanity 40–80% equivalent rate (WARN).**
+  Outside that range, flag in `REPORT.md` but proceed. A judge that
+  marks 99% equivalent or 5% equivalent is almost certainly
+  collapsed; an in-band rate is a (weak) sign the judge is actually
+  reading both sides.
+- **Gate 5 — Determinism re-run of first 5 verdicts (WARN).** Re-issue
+  the first 5 judge calls with the same seed and assert byte-identical
+  output. If they differ, document the judge-stability concern; do
+  not block scoring on it (small local models drift even with seeds,
+  and the §8.5 two-run pipeline stability check is the primary
+  determinism gate).
+
+Overall verdict semantics: any STOP-class failure on Gates 1/2/3 halts
+scoring (the tag metric would be invalid). WARN-class outcomes proceed
+but land in `REPORT.md` prominently. Gate sequence is fixed; later gates
+do not run when an earlier one STOP-fails (no point re-judging the same
+verdicts with a second model if the calibration set proves the primary
+judge is broken).
+
+### G6 — Persona Cross-Reference Pass (PCRP)
+
+JVP is quantitative; PCRP is the structured qualitative audit that
+complements it. It runs AFTER scoring and writes
+`runs/<run-id>/PERSONA_REVIEW.md`. The intent is to catch the failure
+modes that the metric blindspots — "pipeline produced an entry that
+scored as correct on every metric but is, in fact, the wrong reading of
+what the user said" — exist precisely because the answer key is one
+interpretation of an ambiguous utterance, not the only one.
+
+PCRP samples ~12–15 dictations, weighted toward multi-item rambler /
+ambiguous-category / no-date cases, plus a few that scored well
+quantitatively (the confirmation-bias guardrail below).
+
+**Discipline rules — these are the load-bearing anti-rubber-stamp
+safeguards. Without them PCRP devolves into the LLM-judges-LLM-output
+failure mode spec §6.1 warns against:**
+
+- **Persona-first reading order.** Re-read the persona's voice notes
+  from `CORPUS_NOTES.md` BEFORE looking at the persona's pipeline
+  outputs. The audit anchors on the user model, not the model output.
+- **Structured failure-mode prompts.** Not "how does this look?" but
+  "look for these specific failure shapes: hallucinated dates, weird
+  tags, miscategorized obvious cases, titles misrepresenting intent,
+  over-formalization of casual speech."
+- **Bias toward finding problems.** Default assumption: at
+  `qwen2.5:3b` scale, problems exist. If the reviewer finds none,
+  look harder — especially at multi-item and ambiguous-category cases.
+- **Evidence required.** Every claim cites a specific dictation ID +
+  a quoted output line. No abstract observations.
+- **Confirmation-bias guardrail.** The review must include at least 3
+  cases where quantitative scores PASSED. If qualitative says "bad"
+  on metric-good cases, that is a metric-blindspot finding worth
+  surfacing. If qualitative says "great" unanimously on metric-bad
+  cases, that is a code-puppy rubber-stamp signal — go back and look
+  harder.
+
+PCRP output contains a per-persona summary + top-3 trust-eroding
+failures + top-3 trust-building wins + cross-cutting observations.
+
+**Cadence:** PCRP runs twice — after Wave 3 baseline scoring AND after
+Wave 5 final iteration. The two runs are comparable; degradation
+between them on the Wave-5 corpus is itself a finding.
+
+**Load-bearing on go/no-go.** If PCRP's final-run (post-Wave-5) report
+lists ≥ 5 trust-eroding failures AND the quantitative scores do not
+EXCEED all spec §8.4 thresholds by more than 5 points (i.e. the
+pipeline is barely passing on the numbers and PCRP finds the user
+wouldn't trust it in practice), Wave 6's `REPORT.md` must default to
+NO-GO, with the conjunction of those two conditions documented as the
+reasoning.
+
 ## Thresholds (copied verbatim from spec §8.4 — committed BEFORE running)
 
 | Metric | Threshold | Type |
