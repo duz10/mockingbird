@@ -26,3 +26,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "run-corpus"
 path = "src/bin/run-corpus.rs"
+
+[[bin]]
+name = "score-run"
+path = "src/bin/score-run.rs"
