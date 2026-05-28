@@ -63,15 +63,25 @@ Wave 0 (charter + scaffold) landed 2026-05-28: spec imported to
 at `experimental/kg-validation/` (standalone — its own `[workspace]`, **not**
 a member of the root Mockingbird workspace, zero CUDA / whisper-rs / ort
 deps so vanilla `cargo test` runs live and sidesteps LESSONS P2), schema
-types + serde round-trip tests (4/4 passing on vanilla `cargo test`).
-Closed in this iteration: `mb-4wxw`, `mb-w1lw`, `mb-i9l1`.
-**Wave 1 (corpus authoring, `mb-t7w5`) is ready for human-in-loop kickoff
-next iteration** — 30 dictation + answer-key pairs across 6 personas ×
-5 difficulty buckets per spec §6.2 needs Dustin's voice on persona /
-difficulty calibration. Q1 / Q2 / Q3 v1 architectural decisions (vault
-subtree, positional routing, files-as-source-of-truth) are recorded
-verbatim in ADR 0048 for inheritance by the future v1 charter ADR
-(provisionally 0049, drafted post-gate).
+types + serde round-trip tests (now 5/5 passing on vanilla `cargo test`
+including the corpus-files safety net).
+Closed in Wave 0: `mb-4wxw`, `mb-w1lw`, `mb-i9l1`.
+**Wave 1 Batch 1 landed (5/30 pairs)** — `mb-t7w5` in_progress.
+Corpus notes + capture anchor (`2026-06-14T08:00:00Z`) + persona index
+at `experimental/kg-validation/corpus/CORPUS_NOTES.md`. Personas 01
+(working-class), 02 (tradesperson), 03 (salaried professional), 05
+(caregiver), 06 (recent grad) each have a case-01 (dictation +
+answer-key) pair on disk. Batch 2 (multi-item ramblers + ambiguous-
+category, side-hustler debut) and Batch 3 (no-date + junk + under-
+represented personas) still pending Dustin's pair-by-pair review.
+New durable safety-net test `corpus_files_parse_as_answer_keys`
+(`src/schema.rs`) globs `corpus/answer-keys/*.json` and deserializes
+each as `AnswerKey` + spot-checks `expected_entry_count` vs.
+`entries.len()` and the junk-bucket invariant — catches future
+schema/corpus drift. Sandbox gate green (5/5 tests). Q1 / Q2 / Q3 v1
+architectural decisions (vault subtree, positional routing, files-as-
+source-of-truth) are recorded verbatim in ADR 0048 for inheritance
+by the future v1 charter ADR (provisionally 0049, drafted post-gate).
 
 ---
 

@@ -284,4 +284,70 @@ mod tests {
             "YAML must not contain a `due_iso:` key when due_iso is None.\nGot:\n{yaml}"
         );
     }
+
+    /// Durable safety net for the hand-authored corpus: every JSON file
+    /// under `corpus/answer-keys/` must deserialize cleanly as an
+    /// `AnswerKey`. Catches accidental schema/corpus drift the moment
+    /// someone (human or LLM) hand-edits a key into an invalid shape.
+    /// Cheap — at most a few dozen tiny JSON files for the full Phase 0
+    /// run.
+    #[test]
+    fn corpus_files_parse_as_answer_keys() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("corpus")
+            .join("answer-keys");
+
+        // Skip cleanly if the corpus directory hasn't been authored yet —
+        // the schema crate must not require a populated corpus to compile
+        // its own tests.
+        if !dir.exists() {
+            return;
+        }
+
+        let mut checked = 0usize;
+        for entry in std::fs::read_dir(&dir).expect("read corpus/answer-keys dir") {
+            let entry = entry.expect("read dir entry");
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {}: {}", path.display(), e));
+            let parsed: Result<AnswerKey, _> = serde_json::from_str(&text);
+            let key = parsed.unwrap_or_else(|e| {
+                panic!(
+                    "answer-key file {} failed to deserialize as AnswerKey: {}",
+                    path.display(),
+                    e
+                )
+            });
+
+            // Light internal-consistency check: `expected_entry_count`
+            // must agree with `entries.len()` UNLESS this is the
+            // junk/no-entry bucket (where count == 0 and entries == []).
+            assert_eq!(
+                key.expected_entry_count,
+                key.entries.len(),
+                "expected_entry_count disagrees with entries.len() in {}",
+                path.display()
+            );
+            if key.is_junk_no_entry_expected {
+                assert_eq!(
+                    key.expected_entry_count,
+                    0,
+                    "junk-bucket key must have expected_entry_count=0 in {}",
+                    path.display()
+                );
+            }
+            checked += 1;
+        }
+
+        // If the directory exists, it should hold at least one file —
+        // otherwise something has gone wrong (empty dir is a stronger
+        // smell than a missing dir).
+        assert!(
+            checked > 0,
+            "corpus/answer-keys/ exists but contains no .json files"
+        );
+    }
 }
