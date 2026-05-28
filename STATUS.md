@@ -66,27 +66,42 @@ deps so vanilla `cargo test` runs live and sidesteps LESSONS P2), schema
 types + serde round-trip tests (now 5/5 passing on vanilla `cargo test`
 including the corpus-files safety net).
 Closed in Wave 0: `mb-4wxw`, `mb-w1lw`, `mb-i9l1`.
-**Wave 1 Batches 1-2 landed (15/30 pairs). Batch 3 next.** —
-`mb-t7w5` in_progress. Corpus notes + capture anchor
-(`2026-06-14T08:00:00Z`) + persona index at
-`experimental/kg-validation/corpus/CORPUS_NOTES.md`. Persona coverage
-so far: 01 (working-class) x3, 02 (tradesperson) x2, 03 (salaried
-professional) x3, 04 (side-hustler) x3, 05 (caregiver) x2, 06 (recent
-grad) x2. Batch 2 added the side-hustler debut (persona 04) plus
-multi-item ramblers and ambiguous-category cases (calibration locks
-applied: side-hustle/Etsy/freelance = `professional`; task-due tracks
+**Wave 1 SEALED — corpus complete (30/30 pairs).** `mb-t7w5` CLOSED.
+Corpus notes + capture anchor (`2026-06-14T08:00:00Z`) + persona
+index + final batch ledger + distribution + taxonomy-coverage note at
+`experimental/kg-validation/corpus/CORPUS_NOTES.md`. Final persona
+coverage: 01 (working-class) x5, 02 (tradesperson) x4, 03 (salaried
+professional) x6, 04 (side-hustler) x5, 05 (caregiver) x5, 06 (recent
+grad) x5. Difficulty: 13 clean single-item, 13 multi-item rambler
+(incl. 1 five-item peak-hard at persona-05-case-03), 2 junk
+(persona-01-case-05, persona-05-case-05), 4 dedicated no-date
+hard-gate, 8+ ambiguous-category (incl. 3 `objective` tests), 1
+`reference` type test. Calibration locks (cumulative across all 3
+batches): side-hustle/Etsy/freelance = `professional`; task-due tracks
 the action's deadline not the underlying event-date; softened
-"I was thinking I should..." = `idea` not `task`). Batch 3 (no-date
-+ junk + underrepresented difficulty buckets) still pending Dustin's
-pair-by-pair review.
-New durable safety-net test `corpus_files_parse_as_answer_keys`
-(`src/schema.rs`) globs `corpus/answer-keys/*.json` and deserializes
-each as `AnswerKey` + spot-checks `expected_entry_count` vs.
-`entries.len()` and the junk-bucket invariant — catches future
-schema/corpus drift. Sandbox gate green (5/5 tests). Q1 / Q2 / Q3 v1
+"I was thinking I should..." = `idea` not `task`; `objective` =
+long-term identity/direction (not day-to-day logistics);
+`reference` = save-info-for-later (not action);
+work-adjacent personal finance (e.g. 401k rollover) = `personal`;
+junk = zero entries. **Note on taxonomy:** `EntryType::Note` is
+intentionally absent from the Phase 0 corpus — every fixture either
+commits to an action, hedges as an idea, or saves a reference /
+research target. Tracked as P3 follow-up `mb-901u` ("decide if Note
+belongs in v2 fixture batch"); not a Phase 0 blocker. Schema-level
+unknown-variant protection is provided by serde deserialization.
+Durable safety-net tests in `src/schema.rs`:
+`corpus_files_parse_as_answer_keys` (globs `corpus/answer-keys/*.json`,
+deserializes each as `AnswerKey`, asserts `expected_entry_count ==
+entries.len()` AND the junk-bucket invariant `is_junk → count=0 &&
+entries.is_empty()`) plus the new
+`corpus_exercises_full_category_taxonomy` (asserts Personal /
+Professional / Objective all appear once the corpus is ≥20 keys).
+Sandbox gate green (6/6 tests). Q1 / Q2 / Q3 v1
 architectural decisions (vault subtree, positional routing, files-as-
 source-of-truth) are recorded verbatim in ADR 0048 for inheritance
 by the future v1 charter ADR (provisionally 0049, drafted post-gate).
+**Wave 2 (pipeline + harness — beads `mb-i4us`, `mb-nbel`) is now
+unblocked and ready to start.**
 
 ---
 

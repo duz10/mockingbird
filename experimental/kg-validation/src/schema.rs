@@ -291,6 +291,13 @@ mod tests {
     /// someone (human or LLM) hand-edits a key into an invalid shape.
     /// Cheap — at most a few dozen tiny JSON files for the full Phase 0
     /// run.
+    ///
+    /// Also pins the junk-bucket invariant: when
+    /// `is_junk_no_entry_expected` is true, both `expected_entry_count`
+    /// and `entries.len()` MUST be zero. The pipeline contract for the
+    /// junk bucket is "emit nothing"; an answer key claiming to be junk
+    /// but listing expected entries is a self-contradiction the scorer
+    /// could not honour.
     #[test]
     fn corpus_files_parse_as_answer_keys() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -338,6 +345,11 @@ mod tests {
                     "junk-bucket key must have expected_entry_count=0 in {}",
                     path.display()
                 );
+                assert!(
+                    key.entries.is_empty(),
+                    "junk-bucket key must have empty entries in {}",
+                    path.display()
+                );
             }
             checked += 1;
         }
@@ -349,5 +361,65 @@ mod tests {
             checked > 0,
             "corpus/answer-keys/ exists but contains no .json files"
         );
+    }
+
+    /// Coarse coverage check: once the corpus is substantial (≥20 keys),
+    /// every [`Category`] variant should be exercised at least once. We
+    /// don't extend this to [`EntryType`] yet — the Phase 0 30-pair
+    /// corpus deliberately omits `EntryType::Note` (every captured
+    /// thought in the fixtures either commits to an action, hedges as
+    /// an idea, or saves a reference / research target). The honest
+    /// posture is to document the gap as a follow-up rather than force
+    /// a synthetic Note fixture solely to satisfy a coverage assertion.
+    /// Schema-level "unknown variant" protection is already provided by
+    /// the serde-deserialization step in `corpus_files_parse_as_answer_keys`.
+    #[test]
+    fn corpus_exercises_full_category_taxonomy() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("corpus")
+            .join("answer-keys");
+        if !dir.exists() {
+            return;
+        }
+
+        // `Vec` instead of `HashSet` keeps the schema enums free of an
+        // otherwise-unjustified `Hash` derive purely for test purposes.
+        // The dataset is tiny (≤ 30 keys × a handful of entries each),
+        // so O(n) `contains` is fine.
+        let mut categories_seen: Vec<Category> = Vec::new();
+        let mut keys_loaded = 0usize;
+
+        for entry in std::fs::read_dir(&dir).expect("read corpus/answer-keys dir") {
+            let entry = entry.expect("read dir entry");
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {}: {}", path.display(), e));
+            let key: AnswerKey = serde_json::from_str(&text)
+                .unwrap_or_else(|e| panic!("parse {}: {}", path.display(), e));
+            keys_loaded += 1;
+            for expected in &key.entries {
+                if !categories_seen.contains(&expected.category) {
+                    categories_seen.push(expected.category);
+                }
+            }
+        }
+
+        if keys_loaded < 20 {
+            return;
+        }
+
+        for c in [
+            Category::Personal,
+            Category::Professional,
+            Category::Objective,
+        ] {
+            assert!(
+                categories_seen.contains(&c),
+                "corpus does not exercise Category::{c:?} (seen: {categories_seen:?})"
+            );
+        }
     }
 }
