@@ -146,8 +146,49 @@ Friday" → `2026-06-19`; ambiguous "Monday morning" → `None`, i.e.
 conservative); the clean-single dictation got over-split into 2
 entries — Wave 5 segmenter prompt-tuning concern, not structural.
 
-**Wave 3 (`mb-57a1` scorer + LLM tag-equivalence judge) is now
-unblocked and ready to start.**
+**Wave 3 (`mb-57a1` scorer + LLM tag-equivalence judge) — PARTIAL,
+blocked on judge-model pull.** Shipped this iteration:
+
+- ADR 0048 amended with §G5 (Judge Validation Protocol — 5 mechanical
+  gates) + §G6 (Persona Cross-Reference Pass — discipline rules + go/no-go
+  interaction) — commit `be5fc79`.
+- 12-pair hand-authored calibration set at
+  `experimental/kg-validation/judge-calibration/tag-equivalence.json`
+  (Gate 1 fixture) — commit `0e9eeb0`.
+- `src/scoring/{metrics,judge,judge_validation,persona_review}.rs` +
+  `src/bin/score-run.rs` + `prompts/judge-tag-equivalence.md`. Sandbox
+  gate green; 81/81 tests (was 44/44 pre-Wave-3, +37 new). Commit
+  `b890d2a`.
+- Both pipeline runs executed: `run-a-baseline` (seed 42, 172 s, 32/32) +
+  `run-b-stability` (seed 137, 168 s, 32/32). 0 parse errors.
+- Partial scoring on both runs with `--skip-jvp --skip-pcrp` (judge model
+  not on disk). Results in `docs/knowledge-graph/wave-3-results.md`.
+
+Headline metrics (run-a-baseline / run-b-stability):
+- ✅ Invented dates: **0 / 0** (hard gate holds both runs)
+- ✅ Junk handling: 100% / 100%
+- ✅ Segmentation (multi-item): 86.7% / 86.7% (> 85% threshold)
+- ❌ Category correct: 67.3% / 70.9% (< 90% threshold)
+- ❌ Entry-type correct: 78.2% / 76.4% (< 85% threshold)
+- ❌ Clean single-item correct: 6.7% / 13.3% — dominant cause is
+  **over-segmentation of single-item dictations** (9/15 single-item cases
+  got split into 2 entries on run-a).
+- ⏸ Tag metric: skipped (no judge model)
+
+Stability run-a vs. run-b: 100% date agreement, 96-98% categorical-field
+agreement, 83% open-vocab tag-set agreement — pipeline is highly
+deterministic; metric variance reflects ~2 entries' verdicts changing
+between seeds.
+
+**`mb-57a1` left OPEN.** Wave 4 is **blocked** by Wave-3 dispatch
+standing-rule #6 (JVP green + PCRP complete + stability on disk — only
+the stability prereq is satisfied). To unblock, a user-initiated
+`ollama pull llama3.1:8b-instruct-q4_K_M` (~5 GB; primary judge per ADR
+0048 §G4 different-family discipline) is required. Optional pull of
+`gemma2:9b` (~5 GB) would let JVP Gate 3 attempt PASS; without it Gate 3
+gracefully demotes to WARN-only per §G5. Resume protocol: `.\target\
+release\score-run.exe --run-dir runs\run-a-baseline` (5–10 min) then the
+same on run-b with `--stability-vs run-a-baseline`.
 
 ---
 
