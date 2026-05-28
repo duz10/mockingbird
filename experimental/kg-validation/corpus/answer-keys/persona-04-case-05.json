@@ -1,0 +1,19 @@
+{
+  "dictation_id": "persona-04-case-05",
+  "expected_entry_count": 2,
+  "is_junk_no_entry_expected": false,
+  "entries": [
+    {
+      "category": "professional",
+      "entry_type": "idea",
+      "due_iso": null,
+      "acceptable_topic_tag_sets": [["pricing", "wholesale", "business"], ["pricing-strategy", "wholesale"]]
+    },
+    {
+      "category": "professional",
+      "entry_type": "idea",
+      "due_iso": null,
+      "acceptable_topic_tag_sets": [["website", "design", "conversion"], ["etsy", "website-redesign"]]
+    }
+  ]
+}

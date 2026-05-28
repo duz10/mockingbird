@@ -1,0 +1,13 @@
+{
+  "dictation_id": "persona-05-case-04",
+  "expected_entry_count": 1,
+  "is_junk_no_entry_expected": false,
+  "entries": [
+    {
+      "category": "personal",
+      "entry_type": "task",
+      "due_iso": "2026-07-01",
+      "acceptable_topic_tag_sets": [["school", "volunteer", "auction"], ["volunteering", "school-auction"]]
+    }
+  ]
+}

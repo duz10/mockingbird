@@ -1,0 +1,13 @@
+{
+  "dictation_id": "persona-02-case-04",
+  "expected_entry_count": 1,
+  "is_junk_no_entry_expected": false,
+  "entries": [
+    {
+      "category": "professional",
+      "entry_type": "task",
+      "due_iso": null,
+      "acceptable_topic_tag_sets": [["truck", "brake-pads", "maintenance"], ["vehicle-repair", "truck"]]
+    }
+  ]
+}

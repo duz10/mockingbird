@@ -1,0 +1,19 @@
+{
+  "dictation_id": "persona-01-case-04",
+  "expected_entry_count": 2,
+  "is_junk_no_entry_expected": false,
+  "entries": [
+    {
+      "category": "personal",
+      "entry_type": "task",
+      "due_iso": null,
+      "acceptable_topic_tag_sets": [["vet", "dog", "shots"], ["pet-care", "vet"]]
+    },
+    {
+      "category": "personal",
+      "entry_type": "task",
+      "due_iso": "2026-06-20",
+      "acceptable_topic_tag_sets": [["garage", "cleaning", "home"], ["home-maintenance", "garage"]]
+    }
+  ]
+}

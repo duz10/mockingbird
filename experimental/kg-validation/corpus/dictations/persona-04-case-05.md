@@ -1,0 +1,1 @@
+Two ideas floating around. Should I raise prices on the wholesale orders, the cost of materials keeps going up. And maybe time to redo the website, the templates I'm using are kind of dated and I think conversion is suffering.

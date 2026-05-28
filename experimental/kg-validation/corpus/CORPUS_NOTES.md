@@ -66,6 +66,31 @@ which stays strictly typed).
 
 | Batch | Pairs | Status |
 |---|---|---|
-| 1 | persona-01-case-01, 02-case-01, 03-case-01, 05-case-01, 06-case-01 | Approved 2026-MM-DD (update on landing) |
-| 2 | TBD (heavier on multi-item ramblers + ambiguous-category; side-hustler debuts) | Pending |
-| 3 | TBD (fills no-date + junk + underrepresented personas) | Pending |
+| 1 | 5 pairs: persona-{01,02,03,05,06}-case-01 | Landed (Wave 1 Batch 1). |
+| 2 | 10 pairs: persona-01-case-{02,03}, persona-02-case-02, persona-03-case-{02,03}, persona-04-case-{01,02,03}, persona-05-case-02, persona-06-case-02 | Landed (Wave 1 Batch 2). Adds side-hustler (persona 04) debut + multi-item ramblers + ambiguous-category cases. |
+| 3 | 15 pairs: persona-01-case-{04,05}, persona-02-case-{03,04}, persona-03-case-{04,05,06}, persona-04-case-{04,05}, persona-05-case-{03,04,05}, persona-06-case-{03,04,05} | Landed (Wave 1 Batch 3). Adds 2 junk cases, 4 no-date hard-gate, 3 `objective` category, 1 `reference` type, and the 5-item peak-hard segmentation case (persona-05-case-03). |
+
+## Final distribution (30 pairs)
+
+| Persona | Cases |
+|---|---|
+| 01 (working-class)        | 5 |
+| 02 (tradesperson)         | 4 |
+| 03 (salaried professional)| 6 |
+| 04 (side-hustler)         | 5 |
+| 05 (caregiver)            | 5 |
+| 06 (recent grad)          | 5 |
+
+Difficulty rough breakdown: 13 clean single-item · 13 multi-item rambler
+(incl. 1 five-item peak-hard) · 2 junk · 4 dedicated no-date hard-gate ·
+8+ ambiguous-category (incl. 3 `objective` tests) · 1 `reference` type.
+
+Taxonomy coverage: `Category` Personal / Professional / Objective all
+exercised; `EntryType` Task / Idea / Research / Reference all exercised.
+`EntryType::Note` is **not** authored in the Phase 0 corpus — every
+captured thought in the fixtures either commits to an action, hedges
+as an idea, or saves a reference / research target. The pipeline may
+still emit Note in production; coverage of the Note variant in fixtures
+is a future-batch consideration tracked separately, not a Phase 0
+blocker. (Schema-level "unknown variant" protection is provided by
+serde deserialization in `corpus_files_parse_as_answer_keys`.)

@@ -1,0 +1,19 @@
+{
+  "dictation_id": "persona-03-case-04",
+  "expected_entry_count": 2,
+  "is_junk_no_entry_expected": false,
+  "entries": [
+    {
+      "category": "professional",
+      "entry_type": "task",
+      "due_iso": "2026-06-19",
+      "acceptable_topic_tag_sets": [["q3-planning", "work"], ["planning-doc", "q3"]]
+    },
+    {
+      "category": "personal",
+      "entry_type": "task",
+      "due_iso": null,
+      "acceptable_topic_tag_sets": [["401k", "retirement", "finance"], ["rollover", "retirement"]]
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+Quick note. The Q3 planning doc needs my section input by Friday, can't push that. And I keep meaning to set up a 401k rollover from my old job — I left Acme over a year ago and the money's still sitting there.

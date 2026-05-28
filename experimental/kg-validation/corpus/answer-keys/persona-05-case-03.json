@@ -1,0 +1,37 @@
+{
+  "dictation_id": "persona-05-case-03",
+  "expected_entry_count": 5,
+  "is_junk_no_entry_expected": false,
+  "entries": [
+    {
+      "category": "personal",
+      "entry_type": "task",
+      "due_iso": "2026-06-20",
+      "acceptable_topic_tag_sets": [["madison", "soccer", "cleats"], ["kids-sports", "cleats"]]
+    },
+    {
+      "category": "personal",
+      "entry_type": "task",
+      "due_iso": null,
+      "acceptable_topic_tag_sets": [["brunch", "lisa", "social"], ["smiths", "rsvp"]]
+    },
+    {
+      "category": "personal",
+      "entry_type": "task",
+      "due_iso": "2026-06-20",
+      "acceptable_topic_tag_sets": [["taxes", "receipts", "home-office"], ["tax-prep", "home-office-deduction"]]
+    },
+    {
+      "category": "personal",
+      "entry_type": "task",
+      "due_iso": null,
+      "acceptable_topic_tag_sets": [["bakery", "dad", "birthday"], ["birthday-cake", "dad"]]
+    },
+    {
+      "category": "personal",
+      "entry_type": "task",
+      "due_iso": "2026-07-15",
+      "acceptable_topic_tag_sets": [["school", "summer-reading", "kids"], ["reading-log", "school"]]
+    }
+  ]
+}
