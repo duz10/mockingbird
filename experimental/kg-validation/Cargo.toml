@@ -1,0 +1,24 @@
+[package]
+name = "kg-validation"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Mockingbird Knowledge Graph Phase 0 validation harness. Sandboxed per ADR 0048 §5.1. NOT a member of the root Mockingbird workspace."
+
+# Own workspace table so this crate is NOT a member of the root Mockingbird
+# workspace. Deleting `experimental/kg-validation/` must leave production
+# untouched (ADR 0048 / spec §5.1).
+[workspace]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
+anyhow = "1"
+thiserror = "1"
+
+[lib]
+path = "src/lib.rs"

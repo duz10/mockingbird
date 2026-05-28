@@ -53,3 +53,7 @@ __pycache__/
 
 # User-local reference docs (kept on disk but not in source control)
 Code-Puppy-Capabilities-Insight.docx
+
+# Knowledge Graph Phase 0 sandbox: code + corpus IS tracked; only per-run
+# harness outputs are ignored. See ADR 0048.
+experimental/kg-validation/runs/
