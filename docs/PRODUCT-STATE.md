@@ -531,6 +531,48 @@ machine-fingerprint mismatch handling, oversized silent-skip with
 sidecar marker, app-offline catch-up retry policy. The implementation
 slate (Waves 3.1-3.3) is the happy-path baseline; Iter 4 hardens it.
 
+### 3.18 `experimental/kg-validation/` — Knowledge Graph validation sandbox (Phase 0 + 0.5)
+
+**Status:** R&D sandbox. **Nothing in this directory ships to users.** The
+live Mockingbird app has no knowledge-graph surface as of this writing.
+
+**Charter ADRs:**
+[ADR 0048](adr/0048-kg-phase-0-validation-methodology.md) (Phase 0
+methodology, Accepted) and
+[ADR 0049](adr/0049-knowledge-graph-phase-0-5-and-v1-architectural-pivot.md)
+(Phase 0.5 architectural pivot + v1 charter, Accepted). Reports at
+[`docs/knowledge-graph/REPORT.md`](knowledge-graph/REPORT.md) (Phase 0)
+and [`docs/knowledge-graph/PHASE-0-5-REPORT.md`](knowledge-graph/PHASE-0-5-REPORT.md)
+(Phase 0.5 SEAL).
+
+**Structure:** standalone Cargo workspace (its own `[workspace]`; **NOT** a
+member of the root Mockingbird workspace) so vanilla `cargo test` runs
+live and sidesteps LESSONS PINNED P2 (test-runner launch bug on this box).
+No whisper-rs / ort / CUDA deps. Drives Ollama over HTTP for LLM passes
+(`qwen2.5:3b-instruct-q4_K_M`, `qwen2.5:7b-instruct-q4_K_M`,
+`nomic-embed-text`, `llama3.1:8b-instruct` for PCRP).
+
+**Pipeline (Phase 0.5 sealed shape):** segment → classify → extract →
+`extract_entities` → normalize. Driven by `SCHEMA.md` (portable Markdown
+contract) with per-model-class calibration profiles (`small-conservative`,
+`mid-confident`). Deterministic scorer with versioned synonym map
+(`judge-calibration/synonym-map.json`, v1.1).
+
+**v1 architecture commitments (binding, NOT YET in production):** see
+[PHASE-0-5-REPORT.md §6](knowledge-graph/PHASE-0-5-REPORT.md). Two-field
+structured entry schema (`tags:` + `entities:`); qwen2.5:7b pinned for
+entity-aware operation (3b = tags-only degraded mode); embeddings
+infrastructure preserved for entity disambiguation (NOT classification);
+closed-vocab Move 3 deferred to v1.1 awaiting two-field corpus re-labeling;
+opt-in graph layer (existing dictation users see zero regression); ~1 min
+intake latency budget.
+
+**Production graduation path:** Phase 1A — schema-driven pipeline moves
+from `experimental/kg-validation/` to `src-tauri/src/kg/`. Awaits Dustin
+kickoff. Until then, sandbox-isolation discipline holds: production
+files (`src-tauri/**`, `ui/**`, `migrations/**`) are read-only to KG
+work per ADR 0049 §"Sandbox isolation".
+
 ---
 
 ## 4. UI surface (React)

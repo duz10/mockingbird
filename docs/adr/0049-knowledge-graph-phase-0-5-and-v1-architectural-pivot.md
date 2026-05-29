@@ -1,7 +1,9 @@
 # ADR-0049: Knowledge Graph — Phase 0.5 architectural pivot + v1 charter
 
-- **Status:** Proposed (Accepted upon Wave 0.5.6 REPORT landing + Dustin sign-off)
+- **Status:** **Accepted**
 - **Date:** 2026-05-29
+- **Accepted:** 2026-05-29 (Wave 0.5.6 REPORT landed; Dustin sign-off received via planning-agent dispatch)
+- **Summary:** Phase 0.5 sealed clean per Wave 0.5.6 REPORT; v1 architecture commitments binding (see Amendments A1/A2/A3).
 - **Deciders:** Dustin (project lead), Bernard / code-puppy (chartering + implementor)
 - **Charter for:** ADR-lateral epic — Knowledge Graph Phase 0.5 (architectural
   pivot) + Phase 1 (v1 production wiring). Sealed via ADR Accepted + STATUS
@@ -544,3 +546,110 @@ classification tool.
 
 Bead closures referenced by this amendment: `mb-hnb4` (escalation),
 `mb-yfzy` (Wave 0.5.2 task).
+
+### A2 (Wave 0.5.3 + 0.5.4) — Two-field structured entry schema commitment
+
+**Original (charter):** structured entry has a single `tags:` field;
+closed-vocab Move 3 covers all tagging. Move 4 entity-extraction (if
+accepted) adds an `entities` slot but tags remain the primary tagging
+surface.
+
+**Empirical evidence (Wave 0.5.3, `mb-rzpd` + `mb-e10v`):** the
+closed-vocab wiring fix (synonym-map applied in-band at validate-time,
+commit `8fdc7fb`) was architecturally correct and lifted ~2pp on the
+primary Jaccard-1.0 metric (3.8% → 5.7% seed 42), but left a 9.1pp
+residual gap vs the open-vocab `iter-1-7b-fix` baseline (14.8%).
+Diagnostic: top 9 of 10 near-misses (`becca`, `dad`, `costco`,
+`brake-pad`, `bakery`, `app`, `business`, `business-tool`, `design`)
+are **open-class entity references**, NOT semantic category tags. The
+Phase 0 corpus `tags:` answer keys conflate two distinct object types
+in a single field — semantic categories (curatable, closed-world) and
+open-class entity references (uncuratable infinite tail). Closed
+vocabulary cannot recover entities the model correctly recognises as
+out-of-vocabulary and omits. (LESSONS PINNED P11.)
+
+**Empirical evidence (Wave 0.5.4, `mb-o4ni`):** entity extraction at
+qwen2.5:7b mid-confident reaches **54.83% / 53.40% strict Jaccard at
+seeds 42 / 137**, with **97.08% stability** — clears the ADR 0049 ≥ 50%
+bar for v1 inclusion. 9 of the 10 Wave 0.5.3 closed-vocab near-misses
+(Mrs Chen, Home Depot, brake-pads, Karen, launch, Costco, etc.) are
+recovered cleanly as entities, empirically validating P11's diagnosis.
+
+**Revised commitment (v1 binding):** the structured entry schema has
+**two fields**:
+
+- `tags: [...]` — closed-vocab semantic categories (handled by Move 3 in
+  v1.1; mechanism unchanged from this ADR's original Move 3 design).
+- `entities: [{name, type}]` — open-class typed references with the
+  5-bucket entity taxonomy from SCHEMA.md rev `phase-0.5-wave-4` (handled
+  by the `extract_entities` pass; ships in v1).
+
+**Closed-vocab Move 3 is deferred to v1.1** after the corpus is re-labeled
+to the two-field schema. The Wave 0.5.3 wiring (`synonyms.rs` lift +
+`tag_validator.rs`, commit `8fdc7fb`) remains on `main` and is the v1.1
+starting point — architecturally correct in isolation; just blocked on
+the two-field corpus.
+
+**v1 fallback for `tags:`:** open-vocabulary extraction with synonym-map
+canonicalization + new-tag-request log — the Phase 0 architecture,
+validated working. The two-field schema lets `entities:` ship in v1
+without gating on the `tags:`-half closed-vocab work.
+
+**Impact on later waves:**
+
+- Wave 0.5.4 ACCEPT verdict stands; the v1 entity layer ships per A3 below.
+- Wave 0.5.6 (this REPORT) elevates A2 to a first-class v1 binding
+  commitment, not a footnote.
+
+Bead closures referenced by this amendment: `mb-rzpd` (Wave 0.5.3),
+`mb-e10v` (wiring fix), `mb-o4ni` (Wave 0.5.4 ACCEPT).
+
+### A3 (Wave 0.5.5) — qwen2.5:7b model pin for entity-aware operation
+
+**Original (charter):** qwen2.5:7b default for Phase 0.5 with a
+qwen2.5:3b cross-test probe in Wave 0.5.5; per-pass model routing
+(Clark's Nemotron pattern) deferred to v1.1+; v1 model choice was an
+open question pending Wave 0.5.5 evidence.
+
+**Empirical evidence (Wave 0.5.5, `mb-5r1b`):** on the same SCHEMA,
+same `extract_entities` pass, same 21-dictation ground truth, same
+scorer, same source-run-per-seed, the qwen2.5:3b `small-conservative`
+profile drops entity-quality 54.83% / 53.40% (7b mid-confident) →
+**33.21% / 35.48%** at seeds 42 / 137 — a **21.62pp / 17.92pp cliff**.
+Stability across 3b seeds is 96.85% — the under-extraction is
+structural and consistent, not stochastic noise. Per-dictation
+diagnostic on the entity-richest fixture (`persona-05-case-03`,
+11-entity rich): 7b@42 scored 69%, 3b@42 scored 17% — the 3b dropped
+Mom, Dad, Lisa, Smiths, birthday-cake, soccer-cleats, summer-reading-log,
+school, receipts. (LESSONS PINNED P12.) Schema portability is a 2-D
+problem (pass-type × model-class), not a 1-D problem.
+
+**Revised commitment (v1 binding):**
+
+- **v1 pins to `qwen2.5:7b-instruct-q4_K_M` for entity-aware operation.**
+  The Phase 0.5 default becomes the v1 default; the open question is
+  closed.
+- **qwen2.5:3b is documented as a tags-only degraded mode** — classification
+  remains functional with the `small-conservative` profile (Wave 0.5.1
+  evidence carries forward), but the entity layer is disabled. Users on
+  3b see a clear "tags-only mode (entity layer requires qwen2.5:7b)"
+  surface in Settings → Knowledge Graph.
+- **Hardware-floor disclosure required in v1 install docs:** 16GB+ RAM,
+  GPU recommended (~5 GB VRAM working set, ~4.7 GB on disk for the
+  7b-q4 GGUF) for full entity-aware operation. Dictation users are
+  unaffected by the floor (graph layer is opt-in per the charter's
+  binding mission-cohesion commitment).
+- **Per-pass model routing (Clark's Nemotron pattern) confirmed deferred
+  to v1.1.** The SCHEMA.md per-pass-model-selection slot exists today
+  (Move 1); v1 defaults all passes to 7b for readability. v1.1 starts
+  assigning smaller specialists per-pass based on Phase 0.5 + v1
+  production data.
+
+**Impact on later waves:**
+
+- Wave 0.5.6 (this REPORT) records A3 in §5 alongside A1 and A2, and
+  surfaces the v1 hardware-floor disclosure in §6 v1 commitments + §8
+  v1 ship criteria.
+
+Bead closure referenced by this amendment: `mb-5r1b` (Wave 0.5.5
+methodology probe).

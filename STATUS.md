@@ -10,7 +10,7 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-05-25 (ADR 0047 Cleanup pipeline refinement SEALED — 3 waves across 13 commits; lateral epic, no `phase-*-complete` tag). Prior anchor: 2026-05-24 (ADR 0046 Mobile Extension via Vault sealed).
+**Last consolidated:** 2026-05-29 (ADR 0049 KG Phase 0.5 + v1 architectural pivot SEALED — six waves 0.5.1–0.5.6; PHASE-0-5-REPORT.md landed; v1 architecture binding; lateral epic, no `phase-*-complete` tag per LESSONS P5). Prior anchor: 2026-05-25 (ADR 0047 Cleanup pipeline refinement).
 
 ## ✅ Sealed (do not re-execute)
 
@@ -45,6 +45,7 @@
 - ADR 0042 — Activity Capture retention cascade (Accepted, sealed in `phase-10-complete`)
 - ADR 0043 — Activity Capture exclusion list + built-in rules (Accepted, sealed in `phase-10-complete`)
 - ADR 0044 — Activity Capture PDF export via `printpdf` (Accepted, sealed in `phase-10-complete`)
+- ADR 0049 — Knowledge Graph Phase 0.5 + v1 architectural pivot (Accepted 2026-05-29). Phase 0.5 sealed across six waves on the `experimental/kg-validation/` sandbox. Two architectural keepers: SCHEMA.md as portable contract with per-model-class calibration profiles (Move 1; LESSONS P10) and entity extraction as a 5th pipeline pass (Move 4; Wave 0.5.4 ACCEPT at 54.83% / 53.40% strict Jaccard, 97.08% stability, ≥ 50% bar). Two architectural falsifications: embeddings nearest-neighbour classification (Move 2; amendment A1 — preserved as a similarity tool for entity disambiguation, retired as a classifier) and closed-vocab Move 3 (DEFERRED to v1.1 — wiring on `main` commit `8fdc7fb` is architecturally correct but blocked on two-field corpus re-labeling per LESSONS P11 "tags ≠ entities"). v1 architecture binding (amendments A1/A2/A3): pipeline segment → classify → extract → **extract_entities** → normalize, two-field entry schema (`tags:` open-vocab in v1 + `entities:` typed references), SCHEMA.md drives all passes, qwen2.5:7b-instruct-q4_K_M pinned for entity-aware operation (3b = documented tags-only degraded mode), opt-in graph guarantee, ~1 min intake latency budget. REPORT at `docs/knowledge-graph/PHASE-0-5-REPORT.md`. Beads sealed: `mb-symi` (epic), `mb-xmgs`, `mb-4xtd`, `mb-yfzy`, `mb-hnb4`, `mb-rzpd`, `mb-e10v`, `mb-o4ni`, `mb-5r1b`, `mb-qogz`. **No `phase-*-complete` tag** — lateral epic. Phase 1A (schema-driven pipeline graduates to production) awaits Dustin kickoff.
 - ADR 0048 — Knowledge Graph Phase 0 validation methodology (Accepted — sealed 2026-05-29 with `docs/knowledge-graph/REPORT.md`). Seven waves shipped: Wave 0 charter + scaffold; Wave 1 corpus (32 fixtures, full taxonomy coverage); Wave 2 4-pass pipeline + run-corpus harness; Wave 3 scorer (3 sub-iterations sealing on §G7 deterministic synonym-map metric per Option E); Wave 4 6 invariant judges + run-judges rig (`phase-0-kg-start` anchor at `aad06a6`); Wave 5 IAP Wiggum loop (cap 5; 0 accepted; documented the structural ceiling); Wave 6 REPORT.md + go/no-go (§G6 strict NO-GO; defensible GO-WITH-LIMITATIONS for an assisted-filing v1 UX). Final scorecard: hard-gate `invented_dates_count=0` PASS, junk-bucket 100% PASS, segmentation 86.7% PASS, category 67.3% FAIL, entry-type 78.2% FAIL, clean-single 6.7% FAIL, tag-collapse 9.1% FAIL. Synonym map v1.1. Stability ≥95% structural agreement. v1 recommendation: lighter spec scope PART B §9 with per-entry user confirmation; draft-review pane converting filling-quality errors into 1-tap corrections; raw transcript preserved per spec §10 dual-write. **No `phase-*-complete` tag** — lateral epic. Future v1 charter ADR (provisionally 0049) inherits Q1/Q2/Q3 decisions from ADR 0048 §3 + assisted-filing-UX contract from REPORT §8. Beads sealed: `mb-4wxw`, `mb-w1lw`, `mb-i9l1`, `mb-t7w5`, `mb-901u`, `mb-i4us`, `mb-nbel`, `mb-57a1`, `mb-jz5r`, `mb-he98`, `mb-ojm5`, `mb-0baz`.
 - ADR 0046 — Mobile extension via synced Obsidian vault (Accepted — sealed 2026-05-24). Four iterations shipped (desktop file ingest → outbound vault projection → inbound mobile courier → polish). User-facing surface: `+ Audio file` desktop import button, deterministic Markdown projection of dictation + meeting history to `<vault>/history/`, inbox courier auto-processing iOS-Shortcut-delivered voice memos from `<vault>/inbox/`, full Mobile Sync settings tab (8 keys + connection-health card), nested-vault detection wizard, import progress overlay, iOS Shortcut recipe (`docs/mobile/ios-shortcut.md`, 3 actions per Wave 0 Finding 5). Channel boundary preserved across 3 reuse sites: `dictation/ingest.rs` (Iter 1 ADR §3.2 amendment) consumed by IPC handler, inbox courier, and import progress overlay event-tap with zero further sealed-surface modifications. Two `sealed-phases-untouched` judges PASS (Iter 1 @ 95%, Iter 3 @ 99%); Iter 2 + Iter 4 didn't need them (greenfield + UI-side). 19 beads closed. Seal commit: HEAD of `main` at consolidation time (this STATUS update was committed in the seal commit itself; see `git log --grep='ADR 0046 SEALED'`). Wave 5 hardening matrix (`mb-qxrm`) remains open as live-corpus catch-up; not gating epic seal. **No new `phase-*-complete` tag** (lateral epic per LESSONS PINNED P5).
 - ADR 0047 — Cleanup pipeline refinement (Accepted 2026-05-25). Per-pass system headers in `meetings/llm_pass.rs` (`cleaner_punctuation` no longer carries the global "Be concise" instruction — the load-bearing fix); length-ratio shrink fallback (`SettingKey::LlmShrinkFallbackThreshold`, default 0.65); Whisper `initial_prompt` wired from the user's dictionary at both dictation call sites; temperature standardized to 0.2 across casual / normal / formal / meetings (migration 019); new `DictationCleanupLevel` dial (`None` / `Light` / `Medium` / `High`; default `High` preserves prior behaviour; `Medium` uses the new `normal_v6_additive` prompt); LLM-skip-on-short-utterance (`SettingKey::LlmSkipWordThreshold`, default 12 words; gated on `!looks_listy()`; consumed `mb-cjc` / ADR 0022 Wave 3); casual mode repointed to `qwen2.5:7b-instruct-q4_K_M` (migration 021; one-liners absorbed by the skip path); opt-in Q5_K_M via `SettingKey::PreferQ5Models` with VRAM-gated runtime substitution (migration 022; defaults off); Compress Transform on `LlmPassCard` as on-demand pull-only affordance (`dictation/prompts/compress.md`); `sessions.edit_free_within_5min` instrumentation as the empirical quality signal (surfaced in Insights "Your usage"). UI surface for the dial + Q5 toggle deferred to `mb-h0nn`. Empirically validated by `docs/cleanup/eval-adr0047-cleaner-punctuation.md` (18/20 fixtures preserve all expected phrases on `qwen2.5:3b-instruct-q4_K_M`; zero over-consolidation regressions). Sealed via 13 commits `c7af486..` + this seal commit; **no `phase-*-complete` tag** per LESSONS PINNED P5.
@@ -56,222 +57,77 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**KG Phase 0.5 + v1 architectural pivot — ADR 0049 Proposed (A1 amendment Accepted in-doc; A2 amendment deferred to Wave 0.5.6 REPORT). Wave 0.5.1 SEALED, Wave 0.5.2 falsified + closed (ADR 0049 A1), Wave 0.5.3 SEALED as useful negative result (LESSONS P11), Wave 0.5.4 ACCEPT (entity layer empirically validated at 7b), Wave 0.5.5 METHODOLOGY FINDING (schema portability cliffs at 3b — LESSONS P12). HALTED at Wave 0.5.6 boundary per kickoff — Bernard surfaces to Dustin for v1 GO/NO-GO review.**
+**Nothing in flight.** Phase 0.5 KG sealed on Wave 0.5.6 (this iteration);
+ADR 0049 → Accepted. **Next up:** Phase 1A — schema-driven pipeline
+graduates from `experimental/kg-validation/` sandbox to production
+(`src-tauri/src/kg/`). Awaits Dustin kickoff. Per ADR 0049 §"Sandbox
+isolation", production files (`src-tauri/**`, `ui/**`, `migrations/**`)
+remain read-only to KG work until Phase 1A wave brief opens that window.
 
-Epic `mb-symi` (P1). Charter at `docs/adr/0049-knowledge-graph-phase-0-5-and-v1-architectural-pivot.md`.
+**KG Phase 0.5 narrative archived:** the full wave-by-wave in-flight
+state that lived here through 0.5.1–0.5.5 is now in
+`docs/knowledge-graph/PHASE-0-5-REPORT.md` §3 (scorecard journey) + §4
+(load-bearing findings) + §5 (amendments). One-line summary block
+below.
 
-### 🛑 Halted at Wave 0.5.6 boundary — `mb-qogz` blocked on Bernard handoff
+### Previous in-flight summary (now sealed) — KG Phase 0.5 (ADR 0049)
 
-Per the planning-agent kickoff: "HALT before 0.5.6 REPORT.md authoring.
-Bernard surfaces to Dustin for review of all 0.5.1-0.5.5 evidence
-before the v1 GO/NO-GO REPORT is finalized." All evidence on disk;
-Wave 0.5.6 awaits Dustin's review.
+**Knowledge Graph Phase 0.5 + v1 architectural pivot — ADR 0049 Accepted
+2026-05-29; PHASE-0-5-REPORT.md landed.** *Lateral epic per LESSONS
+PINNED P5; no `phase-*-complete` tag cut.* Six waves on the
+`experimental/kg-validation/` sandbox:
 
-### ✅ Wave 0.5.4 ACCEPT — entity layer empirically validated at 7b (`mb-o4ni` CLOSED)
+- **Wave 0.5.1 (`mb-xmgs` + `mb-4xtd`)** — SCHEMA.md refactor + 3b parity
+  + 7b hard-gate breach + model-class calibration profiles restore the
+  gate. LESSONS P10 (per-model-class calibration is necessary for
+  schema-driven pipelines).
+- **Wave 0.5.2 (`mb-yfzy` + `mb-hnb4`)** — embeddings classifier (Move 2)
+  falsified at 32-pair corpus scale on both nearest-neighbour and
+  centroid methods (-11 to -20pp across category / entry-type /
+  clean-single). ADR 0049 amendment A1: embeddings infrastructure
+  preserved for entity disambiguation in Move 4, retired as a
+  classifier.
+- **Wave 0.5.3 (`mb-rzpd` + `mb-e10v`)** — closed canonical tag
+  vocabulary (Move 3) sealed as useful negative result. Wiring fix
+  (`synonyms.rs` lift + `tag_validator.rs` in-band canonicalization,
+  commit `8fdc7fb`) is architecturally correct and remains on `main`,
+  but residual 9.1pp gap traces to corpus tag/entity conflation, not
+  Move 3 architecture. LESSONS P11 ("tags ≠ entities"). Move 3 DEFERRED
+  to v1.1 after two-field corpus re-labeling.
+- **Wave 0.5.4 (`mb-o4ni`)** — entity extraction probe (Move 4) ACCEPT
+  at qwen2.5:7b mid-confident: 54.83% / 53.40% strict Jaccard at seeds
+  42 / 137 (bar 50%), 97.08% stability. 9 of 10 Wave 0.5.3 closed-vocab
+  near-misses (Mrs Chen, Home Depot, brake-pads, Karen, launch, Costco)
+  recover as entities — empirically validates P11. Entity layer ships in v1.
+- **Wave 0.5.5 (`mb-5r1b`)** — qwen2.5:3b cross-test on pivoted
+  architecture. Same SCHEMA, pass, scorer, labels → 33.21% / 35.48%
+  Jaccard with 96.85% stability. 21pp cliff is structural under-extraction
+  at 3b. LESSONS P12 (schema portability is 2-D: pass-type × model-class).
+  v1 pins to qwen2.5:7b for entity-aware operation; 3b = documented
+  tags-only degraded mode. ADR 0049 amendment A3.
+- **Wave 0.5.6 (`mb-qogz`)** — this iteration. PHASE-0-5-REPORT.md
+  landed at `docs/knowledge-graph/PHASE-0-5-REPORT.md`; ADR 0049
+  amendments A2 (two-field schema) + A3 (7b model pin) authored; ADR
+  0049 Status → Accepted. Epic `mb-symi` closed.
 
-Full scaffolding shipped this session: SCHEMA.md (rev `phase-0.5-wave-4`)
-gains 5-bucket entity taxonomy + `extract_entities` pass routing with
-both `small-conservative` and `mid-confident` prompt variants;
-`passes/extract_entities.rs` (11 tests); `scoring/entity_quality.rs`
-(14 tests, Jaccard + fuzzy Levenshtein-≤2 sidecar + stability);
-`corpus/entity-labels.jsonl` (21 entity-rich dictations, every borderline
-call documented with `note:` fields); `bin/score-entities.rs` driver
-(decoupled from production pipeline for probe phase per ADR 0049 Move 4).
+**v1 architecture binding (full table in PHASE-0-5-REPORT.md §6):**
+pipeline segment → classify → extract → **extract_entities** → normalize;
+two-field structured entry schema (`tags:` open-vocab in v1 + `entities:`
+typed references with 5-bucket taxonomy); SCHEMA.md drives all passes
+with per-model-class calibration profiles; qwen2.5:7b-instruct-q4_K_M
+pinned for entity-aware operation; opt-in graph guarantee (existing
+dictation users see zero regression); ~1 min intake latency budget;
+closed-vocab Move 3 deferred to v1.1.
 
-**Head-to-head result vs ≥ 50% bar (qwen2.5:7b mid-confident):**
+**Phase 1 wave plan (PHASE-0-5-REPORT.md §7):** 1A schema-driven
+pipeline graduates to production → 1B SQLite entity/tag/edge tables
+→ 1C retrieval UX (6 axes) → 1D migration backfill → 1E v1 beta tag.
+All five waves are reference only; each gets its own brief at kickoff.
 
-| Metric | Seed 42 | Seed 137 | Bar | Verdict |
-|---|---:|---:|---:|---|
-| corpus_average_jaccard (strict) | **54.83%** | **53.40%** | ≥ 50% | ✅ PASS (+4.83 / +3.40pp margin) |
-| corpus_average_fuzzy_jaccard | 54.83% | 53.40% | (sidecar) | identical → composite-name drift, not surface-form drift |
-| stability_jaccard (42 vs 137) | — | 97.08% | ≥ 75% | ✅ PASS (+22pp margin) |
-
-9 of 10 Wave 0.5.3 closed-vocab near-misses (Mrs-Chen, Home Depot,
-brake-pads, Karen, launch, Costco, etc.) recover cleanly as entities —
-LESSONS P11 empirically validated. Weak-case cluster (5 dictations at
-20-25%) traces to composite-name drift (`freelance-website-redesign`
-vs label `website-redesign`) and type-judgment calls (`tokio:project`
-vs model's `tokio:organization`) — both reportable in Wave 0.5.6
-REPORT, neither a v1 blocker.
-
-On-disk artifacts: `runs/run-7b-entities-seed42/` + `-seed137/`
-(gitignored). Each contains `entities/<persona-case>.json`,
-`ENTITY_SCORE.json`, `ENTITY_SUMMARY.md`.
-
-### 📊 Wave 0.5.5 METHODOLOGY FINDING — schema portability cliffs at 3b (`mb-5r1b` CLOSED)
-
-Cross-test on qwen2.5:3b small-conservative (same SCHEMA, same pass,
-same scorer, same labels, same source-run-per-seed):
-
-| Metric | Seed 42 | Seed 137 | vs 7b seed 42 |
-|---|---:|---:|---:|
-| corpus_average_jaccard (strict) | 33.21% | 35.48% | **-21.62 / -17.92pp** |
-| stability_jaccard | — | 96.85% | — |
-
-21-point cliff is **structural under-extraction** at 3b, not stochastic
-noise (96.85% stability across seeds = consistent failure). Per-
-dictation diagnostic on `persona-05-case-03` (11-entity rich): 7b@42 =
-69%; 3b@42 = 17%, missing Mom, Dad, Lisa, Smiths, birthday-cake,
-soccer-cleats, summer-reading-log, school, receipts.
-
-**Promoted to LESSONS PINNED P12:** schema portability has a floor for
-some pass types (entity extraction in particular); per-class
-calibration profiles are necessary but not always sufficient. P12 is
-the symmetric counterpart to P10 (prompts tuned on small models don't
-transfer up); together they bound the SCHEMA portability axis in both
-directions.
-
-**v1 architectural implication (Wave 0.5.6 REPORT will frame the
-formal choice):** if v1 includes the entity layer, v1 must either
-(a) pin entity-extraction to a 7b+ model class, or (b) route per-pass
-to a model class (cheap 3b for `segment`/`classify`, capable 7b for
-`extract` + `extract_entities`). Option (b) is the Clark Nemotron
-pattern ADR 0049 already names as v1.1 capability.
-
-On-disk artifacts: `runs/run-3b-entities-seed42/` + `-seed137/`.
-
-### ✅ Wave 0.5.3 SEALED — useful negative result (Bernard Option B, Dustin approved 2026-05-30)
-
-Three IAP iterations head-to-head against `iter-1-7b-fix` open-vocab
-baseline (tag-collapse 14.8% on seed 42). Final scorecard:
-
-All three iterations REJECTED at the kickoff's +10pp tag-collapse bar.
-Iter 1 (verbose prompt) and iter 2 (tight prompt) regressed in opposite
-directions (over- vs under-tagging) due to a missing canonicalization
-step in the validator. Iter 3 shipped the wiring fix (`SynonymMap`
-lifted to `src/synonyms.rs` and applied in-band at validate-time —
-commit `8fdc7fb`) which lifted seed-42 tag-collapse 3.8% → 5.7% (+1.9pp)
-but left a 9.1pp gap vs the open-vocab baseline.
-
-| Metric | iter-1-7b-fix (open vocab, baseline) | closed-vocab iter 1 | closed-vocab iter 2 | **closed-vocab iter 3 (wiring fix)** |
-|---|---|---|---|---|
-| **Tag-collapse ≥ 1.0 seed 42 (PRIMARY)** | **14.8%** | 5.7% (-9.1) | 3.8% (-11.0) | **5.7% (-9.1)** |
-| **Tag-collapse ≥ 1.0 seed 137** | 14.8% | n/a | n/a | **3.8% (-11.0)** |
-| Tag-collapse ≥ 0.50 (observational) | 61.1% | 56.6% | 30.2% | 30.2% / 28.3% |
-| Clean single-item | 33.3% | 33.3% | 33.3% | 33.3% / 33.3% |
-| Segmentation | 93.3% | 86.7% (-6.7) | 86.7% (-6.7) | 86.7% / 80.0% (-6.7 / -13.3) |
-| Category | 81.5% | 81.1% (-0.4) | 81.1% (-0.4) | 81.1% / 81.1% (-0.4) |
-| Entry-type | 88.9% | 90.6% (+1.7) | 90.6% (+1.7) | 90.6% / 88.7% (+1.7 / -0.2) |
-| Invented dates (HARD GATE) | 0 | 0 | 0 | **0 / 0 ✓** |
-| Junk | 100% | 100% | 100% | 100% / 100% |
-| New-tag-requests / 32 dictations | n/a | 35 (15 expl + 20 impl) | 19 (1 expl + 18 impl) | 17 (1 expl + 16 impl) / 21 (1 + 20) |
-
-Stability iter 3 (seed 42 vs seed 137): segmentation 96.9%, category
-98.4%, type 98.4%, date 100%, tag-set exact 85.5%. Well above ADR 0049's
-80% bar. PCRP iter 3 seed 42: 10 trust-eroding failures, 6 wins (no
-iter-1 PCRP baseline exists, so PCRP regression is not computable).
-
-**Verdict (Bernard Option B; LESSONS P11):** the wiring fix is
-architecturally correct and stays on `main` for any future v1.1
-closed-vocab work to inherit. The residual ~9pp gap is **corpus
-tag/entity conflation**, not Move 3 architecture: 9 of 10 top
-near-misses (`becca`, `dad`, `costco`, `brake-pad`, `bakery`, `app`,
-`business`, `business-tool`, `design`) are open-class entity references,
-not semantic category tags. The Phase 0 single-field `tags:` answer-key
-schema conflates two distinct object types; v1 commits to a two-field
-schema with closed-vocab applied to `tags:` and entity-extraction (Move
-4 / Wave 0.5.4) applied to `entities:`. ADR 0049 amendment A2 deferred
-to Wave 0.5.6 REPORT framing.
-
-**Bead state:** `mb-rzpd` CLOSED (sealed as useful negative result;
-ADR 0049 amendment A2 in Wave 0.5.6). `mb-e10v` CLOSED (wiring fix
-on `main` architecturally correct on its own merits; Move 4 picks up
-the residual root cause).", 
-
-Stability: closed-vocab iter 1 seed-42 vs seed-137 — 96.9%
-segmentation, 98.4% category/type/date, 82.3% tag-set exact.
-Follows ADR 0049 IAP stability ≥ 80% bar (just barely on tag-sets).
-
-**Root cause (diagnosed; both directions confirmed):**
-
-- **Verbose prompt + permissive vocab → over-tagging.** Iter 1 model
-  picked extras like `home-maintenance` and `client` on entries where
-  the answer key wanted only the specific (`henderson` for the
-  person, just the action tags). Jaccard ≥ 1.0 punishes any extras.
-- **Tighter prompt + same vocab → under-tagging.** Iter 2 model
-  conservatively emitted 1-2 tags per entry and missed answer-key
-  tags entirely — top near-misses are now mostly `(missing)` against
-  expected tags that ARE in vocabulary (`meeting`, `app`, `bakery`,
-  `costco`, `dad`).
-- **The deeper bug: the validator's normalize-step does NOT apply
-  the synonym map.** Open-vocab baseline lets `automobile-repair`
-  flow through pipeline → scorer's synonym map collapses to
-  `car-repair` (in answer key) → match. Closed-vocab validator
-  drops `automobile-repair` before the scorer ever sees it. The
-  closed-vocab architecture as shipped LOSES the synonym map's
-  collapse contribution.
-
-**On-disk artifacts (Wave 0.5.3, preserved for v1.1 / Wave 0.5.6 REPORT):**
-
-- `experimental/kg-validation/src/synonyms.rs` (lifted from `scoring::tag_collapse`; consumed by both validator and scorer; **architecturally correct, on `main`**)
-- `experimental/kg-validation/src/passes/tag_validator.rs` (228-entry closed-vocab validator + synonym-map in-band; 18 unit tests green; preserved for v1.1 closed-vocab work on the `tags:` field of the two-field v1 schema)
-- `experimental/kg-validation/prompts/extract.closed-vocab.mid-confident.md` (228-vocab prompt; preserved as v1.1 starting point)
-- SCHEMA.md `## Canonical tag vocabulary (closed; Wave 0.5.3 seed)` section (228 tags; 188 corpus-derived + 40 domain pads; preserved)
-- Per-iter run artifacts at `experimental/kg-validation/runs/run-7b-closed-vocab-{seed42,seed137,iter2-*,iter3-*}/` (gitignored; iter 3 has the wiring-fix run)
-
-### ✅ Wave 0.5.1 SEALED — hard-gate restored via model-class calibration profiles (`mb-xmgs` + `mb-4xtd` closed)
-
-**The qwen2.5:7b date hard-gate breach was resolved architecturally by
-encoding model-aware prompt calibration directly in SCHEMA.md** — not by
-bolting a one-off prompt edit onto Move 1. New schema sections:
-`## Model-class calibration profiles` (with `small-conservative` /
-`mid-confident` profiles + assignment table, unknown-model default =
-`mid-confident` on trust-gate-safe grounds) and `### Profile-specific
-prompt overrides` (`(pass, profile) → prompt-file` rows layered on top
-of the per-pass default table). `prompts/extract.mid-confident.md`
-shipped as the only Phase 0.5 override row, hardened with front-loaded
-null-bias, three-condition hard-gate, four rules (duration phrases /
-vague-future / past-tense anchors / segment-isolation) and 7 fictional-
-vocabulary worked examples (distinct from the four mb-4xtd failure cases,
-which stay an eval set). Loader resolves `prompt_body(pass, model)` =
-`overrides[(pass, profile_for(model))] ∥ default[pass]`. LESSONS PINNED
-P10 captures the architectural finding.
-
-**Empirical result vs 7b pre-fix baseline (iter-1, both seeds):**
-
-| Metric | Phase 0 (3b) | 7b pre-fix | iter-1-7b-fix (seed 42 / 137) | Bar | Verdict |
-|---|---|---|---|---|---|
-| **Invented dates (HARD GATE)** | 0 | 4 / 5 | **0 / 0** | 0 | ✅ **RESTORED** |
-| Category correct | 67.3% | 81.5% | 81.5% / 83.3% | +10 | ✅ +14.2 / +16.0 |
-| Entry-type correct | 78.2% | 88.9% | 88.9% / 90.7% | +10 | ✅ +10.7 / +12.5 |
-| Clean single-item correct | 6.7% | 33.3% | 33.3% / 33.3% | +10 | ✅ +26.6 |
-| Segmentation correct | 86.7% | 93.3% | 93.3% / 93.3% | — | ✅ holds |
-| Tag-collapse correct (G7) | 9.1% | 11.1% | 14.8% / 14.8% | +10 | ⚠️ +5.7 (Move 3 still relevant) |
-| Junk handled correctly | 100% | 100% | 100% / 100% | 100% | ✅ holds |
-
-Clean Pareto-frontier acceptance on iter-1: hard-gate restored 4→0
-and 5→0, ZERO regressions on any other metric across both seeds, one
-improvement (tag-collapse +3.7pp on the same data). One iteration to
-resolution well inside the 5-attempt cap. Per-seed run artifacts at
-`runs/iter-1-7b-fix/` (seed 42) and `runs/iter-1-7b-fix-stab/` (seed 137).
-Minor over-correction observed (3 legitimate dates dropped in
-persona-05-case-03: "Saturday's game", "this weekend", "by July
-fifteenth") but didn't move a top-line scorecard metric and is parked
-as a Wave 0.5.3+ refinement after closed-tag-vocab work creates a
-natural place for per-segment date-eligibility.
-
-### Wave structure (sub-beads, ADR 0049 dependency graph in `bd`)
-
-- `mb-xmgs` ✓ — Wave 0.5.1: SCHEMA.md refactor + 7b baseline + parity gate + calibration profiles + 7b hard-gate restoration. **SEALED.**
-- `mb-4xtd` ✓ — 7b hard-gate breach. **CLOSED** by iter-1-7b-fix (both seeds clean).
-- `mb-yfzy` ✓ — Wave 0.5.2: embeddings classifier (nomic-embed-text). **CLOSED** per ADR 0049 A1 (Move 2 mechanism falsified; infrastructure preserved for Move 4 disambiguation).
-- `mb-hnb4` ✓ — Wave 0.5.2 HALT escalation. **CLOSED** per Bernard Option B; ADR 0049 A1 amendment authored.
-- `mb-rzpd` ✓ — Wave 0.5.3: closed canonical tag vocab + new-tag-request flow. **CLOSED 2026-05-30 as useful negative result (Bernard Option B; Dustin approved).** Three IAP iterations exhausted; LESSONS P11 promoted (tags ≠ entities; v1 commits to two-field schema). Wiring fix on `main` (commit `8fdc7fb`).
-- `mb-e10v` ✓ — Wave 0.5.3 iter 3: integrate `SynonymMap` into `tag_validator`. **CLOSED 2026-05-30** with wiring on `main`; the residual ~9pp gap traces to corpus tag/entity conflation, which Move 4 (entity extraction) addresses.
-- `mb-o4ni` ✓ — Wave 0.5.4: entity extraction probe + entity-quality metric. **CLOSED 2026-05-30 ACCEPT** at 54.83%/53.40% seed-42/137 Jaccard (bar 50%) + 97.08% stability. Entity layer empirically validated for v1 inclusion (conditional on Wave 0.5.6 review).
-- `mb-5r1b` ✓ — Wave 0.5.5: qwen2.5:3b cross-test on pivoted architecture. **CLOSED 2026-05-30** as methodology finding (LESSONS P12). Same SCHEMA + same pass + same labels collapses to 33.21%/35.48% on 3b vs 54.83%/53.40% on 7b — schema portability cliffs at 3b/7b for entity extraction. v1 must pin entity pass to 7b+ class OR route per-pass to model classes (ADR 0049 v1.1 Nemotron pattern).
-- `mb-qogz` — Wave 0.5.6: REPORT.md + GO/NO-GO + ADR 0049 Accepted. **HALT BEFORE THIS** — Dustin reviews 0.5.1–0.5.5 evidence on disk first.
-
-Success criteria (ADR 0049): ≥ 3 of {category, entry-type, tag-collapse,
-clean-single} lift ≥ 10 pts from Phase 0 baseline on 7b pivoted architecture
-AND hard-gate intact AND PCRP trust_eroding ≤ Phase 0 baseline AND stability
-≥ 80%. IAP per LESSONS PINNED P9: strict no-regression on trust gates;
-Pareto-frontier on quality metrics.
-
-Standing work (not gating Phase 0.5):
+Standing work (not gating Phase 1A):
 - Phase 10 live-fire Win11 smoke test (LESSONS P7 — still Dustin's post-seal step).
 - Standing P1 `mb-ez9` (empirical mode-prompt iteration; picks up when fixtures land).
-- Standing P2s `mb-xwi` / `mb-nc9u` / `mb-e2t8`.
+- Standing P2s `mb-xwi` / `mb-nc9u` / `mb-e2t8` / `mb-0n8c` / `mb-jmup`.
 - Standing P3s (see below).
 
 ---
