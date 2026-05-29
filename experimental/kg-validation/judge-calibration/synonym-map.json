@@ -1,5 +1,5 @@
-{
-    "version":  "v1",
+﻿{
+    "version":  "v1.1",
     "schema_version":  "synonym-map-v1",
     "generated_from":  [
                            "corpus/answer-keys/*.json (auto-seed)",
@@ -51,7 +51,7 @@
                      {
                          "canonical":  "apartment",
                          "variants":  [
-
+                                          "apartment-complex"
                                       ],
                          "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
                          "source":  "auto-seed-answer-key"
@@ -697,7 +697,9 @@
                          "variants":  [
                                           "chore",
                                           "house-chore",
-                                          "household"
+                                          "household",
+                                          "cleanup",
+                                          "home-cleanup"
                                       ],
                          "rationale":  "Household maintenance domain. Bernard seed. Canonical chosen as home-maintenance since answer-key uses home-maintenance.",
                          "source":  "bernard-seed"
@@ -810,7 +812,8 @@
                      {
                          "canonical":  "kid",
                          "variants":  [
-
+                                          "kids",
+                                          "children"
                                       ],
                          "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
                          "source":  "auto-seed-answer-key"
@@ -1542,5 +1545,28 @@
                          "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
                          "source":  "auto-seed-answer-key"
                      }
-                 ]
+                 ],
+    "wave_5_sweep":  {
+                         "skipped_note":  "after-school/cake/brake/401k/budget held per ADR 0048 G7 discipline",
+                         "additions":  [
+                                           {
+                                               "canonical":  "kid",
+                                               "added":  "kids,children",
+                                               "rationale":  "plural/collective collapse; person names not affected per discipline"
+                                           },
+                                           {
+                                               "canonical":  "apartment",
+                                               "added":  "apartment-complex",
+                                               "rationale":  "over-specification collapse; -complex is decorative"
+                                           },
+                                           {
+                                               "canonical":  "home-maintenance",
+                                               "added":  "cleanup,home-cleanup",
+                                               "rationale":  "action-noun collapses into containing domain; corpus context is residential"
+                                           }
+                                       ],
+                         "skipped_count":  5,
+                         "sweep_date":  "2026-05-29",
+                         "bead":  "mb-ojm5"
+                     }
 }
