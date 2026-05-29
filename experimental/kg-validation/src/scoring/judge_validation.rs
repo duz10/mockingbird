@@ -68,11 +68,53 @@ pub struct JvpReport {
     pub cross_judge_model: Option<String>,
     pub calibration_set_id: String,
     pub gate1_calibration: GateResult,
+    /// Observational companion to Gate 1: borderline-case verdicts on
+    /// the calibration set's `borderline` section (v3+). Never halts
+    /// scoring; surfaces per-dimension judgment quality for the
+    /// audit trail. See [`ObservationalResult`] and ADR 0048 §G5
+    /// (Wave 3.3 amendment).
+    pub gate1_borderline: ObservationalResult,
     pub gate2_reasoning_audit: GateResult,
     pub gate3_cross_judge: GateResult,
     pub gate4_distribution: GateResult,
     pub gate5_determinism: GateResult,
     pub overall: JvpOverall,
+}
+
+/// Observational (non-gating) probe result. Same numerator/denominator
+/// shape as [`GateResult`] but with NO `outcome` field — the caller
+/// must not branch on this. Used by `gate1_borderline` so the report
+/// surface includes borderline-case behavior without giving anything
+/// downstream a knob to halt on it.
+#[derive(Debug, Clone, Serialize)]
+pub struct ObservationalResult {
+    pub name: &'static str,
+    pub numerator: usize,
+    pub denominator: usize,
+    pub percentage: f64,
+    pub detail: String,
+    /// Per-pair record so judgment quality per dimension is auditable.
+    pub per_pair: Vec<BorderlineVerdictRecord>,
+    /// Aggregate per-dimension scores so the audit trail surfaces
+    /// e.g. "tokenization: 1/1, specificity: 0/1" at a glance.
+    pub per_dimension: Vec<DimensionScore>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BorderlineVerdictRecord {
+    pub pair_id: String,
+    pub dimension: String,
+    pub documented_verdict: String,
+    pub judge_verdict: String,
+    pub matches_documented: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DimensionScore {
+    pub dimension: String,
+    pub numerator: usize,
+    pub denominator: usize,
+    pub percentage: f64,
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -83,6 +125,11 @@ pub struct JvpReport {
 pub struct CalibrationSet {
     pub calibration_set_id: String,
     pub pairs: Vec<CalibrationPair>,
+    /// Observational borderline pairs (v3+). Optional for backward
+    /// compatibility with v2 fixtures used in unit tests; defaults to
+    /// empty when absent.
+    #[serde(default)]
+    pub borderline: Vec<BorderlinePair>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -95,11 +142,42 @@ pub struct CalibrationPair {
 
 impl CalibrationPair {
     fn expected(&self) -> Option<TagEquivalence> {
-        match self.expected_verdict.as_str() {
-            "equivalent" => Some(TagEquivalence::Equivalent),
-            "not-equivalent" => Some(TagEquivalence::NotEquivalent),
-            _ => None,
-        }
+        parse_verdict(&self.expected_verdict)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BorderlinePair {
+    pub pair_id: String,
+    pub tags_a: Vec<String>,
+    pub tags_b: Vec<String>,
+    pub documented_verdict: String, // "equivalent" | "not-equivalent"
+    /// Short slug for the judgment dimension this pair probes
+    /// (e.g. "tokenization", "specificity", "coreference",
+    /// "domain-overlap", "abstraction-level", "person-specific").
+    pub dimension: String,
+    #[serde(default)]
+    pub rationale: String,
+}
+
+impl BorderlinePair {
+    fn documented(&self) -> Option<TagEquivalence> {
+        parse_verdict(&self.documented_verdict)
+    }
+}
+
+fn parse_verdict(s: &str) -> Option<TagEquivalence> {
+    match s {
+        "equivalent" => Some(TagEquivalence::Equivalent),
+        "not-equivalent" => Some(TagEquivalence::NotEquivalent),
+        _ => None,
+    }
+}
+
+fn verdict_label(v: TagEquivalence) -> &'static str {
+    match v {
+        TagEquivalence::Equivalent => "equivalent",
+        TagEquivalence::NotEquivalent => "not-equivalent",
     }
 }
 
@@ -130,6 +208,12 @@ pub struct JvpConfig<'a, D: OllamaDispatcher> {
 /// gates still run so the report is informative.
 pub fn run_jvp<D: OllamaDispatcher>(config: JvpConfig<'_, D>) -> JvpReport {
     let g1 = gate1_calibration(
+        config.primary_judge,
+        &config.primary_judge_model,
+        &config.calibration,
+        &config.judge_options,
+    );
+    let g1_borderline = evaluate_borderline(
         config.primary_judge,
         &config.primary_judge_model,
         &config.calibration,
@@ -172,6 +256,7 @@ pub fn run_jvp<D: OllamaDispatcher>(config: JvpConfig<'_, D>) -> JvpReport {
         cross_judge_model: config.cross_judge_model,
         calibration_set_id: config.calibration.calibration_set_id,
         gate1_calibration: g1,
+        gate1_borderline: g1_borderline,
         gate2_reasoning_audit: g2,
         gate3_cross_judge: g3,
         gate4_distribution: g4,
@@ -245,6 +330,123 @@ fn gate1_calibration<D: OllamaDispatcher>(
         denominator: total,
         percentage: pct,
         samples,
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Gate 1 (companion) — borderline observational pass
+// ────────────────────────────────────────────────────────────────────
+//
+// Walks `calibration.borderline` with the SAME judge + options as
+// gate1 and records per-pair + per-dimension match-vs-documented.
+// This is intentionally separate from gate1_calibration so:
+//   - its outcome can NEVER feed `JvpOverall` (no GateOutcome at all)
+//   - the gated 90% threshold stays anchored on unambiguous pairs
+//   - per-dimension aggregates surface regression across judge swaps
+//     without us inventing a borderline threshold that would be
+//     arbitrary either way.
+
+fn evaluate_borderline<D: OllamaDispatcher>(
+    judge: &D,
+    model: &str,
+    set: &CalibrationSet,
+    options: &GenerateOptions,
+) -> ObservationalResult {
+    let total = set.borderline.len();
+    if total == 0 {
+        return ObservationalResult {
+            name: "gate1_borderline",
+            numerator: 0,
+            denominator: 0,
+            percentage: 0.0,
+            detail: "no borderline section in calibration set (pre-v3 fixture)".into(),
+            per_pair: Vec::new(),
+            per_dimension: Vec::new(),
+        };
+    }
+    let mut per_pair: Vec<BorderlineVerdictRecord> = Vec::with_capacity(total);
+    let mut matches = 0usize;
+    // Stable insertion-order map: small N (~6), Vec-of-pairs beats a
+    // HashMap for both determinism and YAGNI.
+    let mut dim_buckets: Vec<(String, usize, usize)> = Vec::new();
+    for pair in &set.borderline {
+        let documented = match pair.documented() {
+            Some(v) => v,
+            None => {
+                per_pair.push(BorderlineVerdictRecord {
+                    pair_id: pair.pair_id.clone(),
+                    dimension: pair.dimension.clone(),
+                    documented_verdict: pair.documented_verdict.clone(),
+                    judge_verdict: "<bad fixture: unparseable documented_verdict>".into(),
+                    matches_documented: false,
+                });
+                bump_dim(&mut dim_buckets, &pair.dimension, false);
+                continue;
+            }
+        };
+        let req = TagJudgeRequest {
+            tags_a: pair.tags_a.clone(),
+            tags_b: pair.tags_b.clone(),
+        };
+        let (judge_label, matched) = match judge_tag_equivalence(judge, model, &req, options) {
+            Ok(v) => {
+                let m = v.verdict == documented;
+                if m {
+                    matches += 1;
+                }
+                (verdict_label(v.verdict).to_string(), m)
+            }
+            Err(e) => (format!("<judge error: {e}>"), false),
+        };
+        per_pair.push(BorderlineVerdictRecord {
+            pair_id: pair.pair_id.clone(),
+            dimension: pair.dimension.clone(),
+            documented_verdict: pair.documented_verdict.clone(),
+            judge_verdict: judge_label,
+            matches_documented: matched,
+        });
+        bump_dim(&mut dim_buckets, &pair.dimension, matched);
+    }
+    let pct = 100.0 * matches as f64 / total as f64;
+    let per_dimension: Vec<DimensionScore> = dim_buckets
+        .into_iter()
+        .map(|(dim, num, denom)| DimensionScore {
+            dimension: dim,
+            numerator: num,
+            denominator: denom,
+            percentage: if denom == 0 {
+                0.0
+            } else {
+                100.0 * num as f64 / denom as f64
+            },
+        })
+        .collect();
+    let dim_summary = per_dimension
+        .iter()
+        .map(|d| format!("{}={}/{}", d.dimension, d.numerator, d.denominator))
+        .collect::<Vec<_>>()
+        .join(", ");
+    ObservationalResult {
+        name: "gate1_borderline",
+        numerator: matches,
+        denominator: total,
+        percentage: pct,
+        detail: format!(
+            "observational: judge matched documented_verdict on {matches}/{total} ({pct:.1}%) of borderline pairs (per dim: {dim_summary})"
+        ),
+        per_pair,
+        per_dimension,
+    }
+}
+
+fn bump_dim(buckets: &mut Vec<(String, usize, usize)>, dim: &str, matched: bool) {
+    if let Some(slot) = buckets.iter_mut().find(|(d, _, _)| d == dim) {
+        slot.2 += 1;
+        if matched {
+            slot.1 += 1;
+        }
+    } else {
+        buckets.push((dim.to_string(), usize::from(matched), 1));
     }
 }
 
@@ -601,7 +803,31 @@ mod tests {
                     expected_verdict: exp.into(),
                 })
                 .collect(),
+            borderline: Vec::new(),
         }
+    }
+
+    /// Build a calibration set with both gated and borderline pairs.
+    /// Tuple shape: (id, tags_a, tags_b, documented_verdict, dimension).
+    type BorderlineFixture<'a> = (&'a str, &'a [&'a str], &'a [&'a str], &'a str, &'a str);
+
+    fn cal_with_borderline(
+        gated: Vec<(&str, &[&str], &[&str], &str)>,
+        bd: Vec<BorderlineFixture<'_>>,
+    ) -> CalibrationSet {
+        let mut set = cal(gated);
+        set.borderline = bd
+            .into_iter()
+            .map(|(id, a, b, doc, dim)| BorderlinePair {
+                pair_id: id.into(),
+                tags_a: a.iter().map(|s| s.to_string()).collect(),
+                tags_b: b.iter().map(|s| s.to_string()).collect(),
+                documented_verdict: doc.into(),
+                dimension: dim.into(),
+                rationale: String::new(),
+            })
+            .collect();
+        set
     }
 
     fn rec(
@@ -906,9 +1132,13 @@ mod tests {
             return; // sandbox built without calibration set
         }
         let set = load_calibration_set(&path).unwrap();
-        assert_eq!(set.calibration_set_id, "tag-equivalence-v2");
-        assert!(set.pairs.len() >= 12);
-        // Every pair has a parseable expected verdict.
+        assert_eq!(set.calibration_set_id, "tag-equivalence-v3");
+        assert!(
+            set.pairs.len() >= 12,
+            "gated section must keep the v2 floor (got {})",
+            set.pairs.len()
+        );
+        // Every gated pair has a parseable expected verdict.
         for p in &set.pairs {
             assert!(
                 p.expected().is_some(),
@@ -917,5 +1147,159 @@ mod tests {
                 p.expected_verdict
             );
         }
+        // v3 adds the borderline section; every entry parses and
+        // carries a non-empty dimension slug.
+        assert!(
+            set.borderline.len() >= 5,
+            "v3 borderline section must have >= 5 pairs (got {})",
+            set.borderline.len()
+        );
+        for p in &set.borderline {
+            assert!(
+                p.documented().is_some(),
+                "borderline {} has bad documented_verdict={:?}",
+                p.pair_id,
+                p.documented_verdict
+            );
+            assert!(
+                !p.dimension.trim().is_empty(),
+                "borderline {} has empty dimension",
+                p.pair_id
+            );
+        }
+    }
+
+    #[test]
+    fn borderline_observational_passes_when_judge_matches_documented() {
+        // Two borderline pairs, one tokenization (eq) and one
+        // specificity (not-eq). Judge plays both correctly.
+        let mock = MockOllama::new()
+            .respond_when(
+                "\"hyph-token-a\"",
+                "REASONING: hyphenation only; hyph-token-a vs hyph and token-a refer to the same file\nVERDICT: equivalent",
+            )
+            .respond_when(
+                "\"specific-x\"",
+                "REASONING: specific-x is more informative than generic-y; different file target\nVERDICT: not-equivalent",
+            );
+        let set = cal_with_borderline(
+            vec![("cal-eq-001", &["a"], &["a"], "equivalent")],
+            vec![
+                (
+                    "cal-bd-001",
+                    &["hyph-token-a"],
+                    &["hyph", "token-a"],
+                    "equivalent",
+                    "tokenization",
+                ),
+                (
+                    "cal-bd-002",
+                    &["specific-x", "thing"],
+                    &["generic-y", "thing"],
+                    "not-equivalent",
+                    "specificity",
+                ),
+            ],
+        );
+        let r = evaluate_borderline(&mock, "judge", &set, &opts());
+        assert_eq!(r.numerator, 2);
+        assert_eq!(r.denominator, 2);
+        assert!((r.percentage - 100.0).abs() < 1e-9);
+        assert_eq!(r.per_pair.len(), 2);
+        assert!(r.per_pair.iter().all(|p| p.matches_documented));
+        // Per-dimension surface: 2 distinct dimensions, each 1/1.
+        assert_eq!(r.per_dimension.len(), 2);
+        assert!(r
+            .per_dimension
+            .iter()
+            .all(|d| d.numerator == 1 && d.denominator == 1));
+    }
+
+    #[test]
+    fn borderline_observational_does_not_halt_overall() {
+        // Judge gets BOTH borderline pairs wrong, but the gated pair
+        // is correct AND every other gate is green ⇒ overall must be
+        // Proceed (or ProceedWithWarnings from non-borderline causes).
+        // The borderline failure must NOT flip overall to Halt.
+        let mock = MockOllama::new().default_response(
+            "REASONING: borderline pair, calling equivalent in all cases here\nVERDICT: equivalent",
+        );
+        let set = cal_with_borderline(
+            vec![("cal-eq-001", &["x"], &["x"], "equivalent")],
+            vec![
+                (
+                    "cal-bd-001",
+                    &["alpha"],
+                    &["beta"],
+                    "not-equivalent",
+                    "domain-overlap",
+                ),
+                (
+                    "cal-bd-002",
+                    &["gamma"],
+                    &["delta"],
+                    "not-equivalent",
+                    "specificity",
+                ),
+            ],
+        );
+        // Feed gates 2/3/4/5 with verdicts that look healthy so the
+        // ONLY observable failure path is borderline (which must be
+        // ignored by overall).
+        let v: Vec<RecordedJudgeCall> = (0..10)
+            .map(|i| {
+                let verdict = if i < 5 {
+                    TagEquivalence::Equivalent
+                } else {
+                    TagEquivalence::NotEquivalent
+                };
+                rec(
+                    "d",
+                    i,
+                    &["a"],
+                    &["b"],
+                    verdict,
+                    "long enough reasoning that names both sides a and b for the audit",
+                )
+            })
+            .collect();
+        let report = run_jvp(JvpConfig {
+            run_id: "test".into(),
+            primary_judge: &mock,
+            primary_judge_model: "p".into(),
+            cross_judge: None::<&MockOllama>,
+            cross_judge_model: None,
+            calibration: set,
+            judge_options: opts(),
+            recorded_verdicts: v,
+        });
+        // Borderline observational says 0/2 matched documented.
+        assert_eq!(report.gate1_borderline.numerator, 0);
+        assert_eq!(report.gate1_borderline.denominator, 2);
+        // But overall must NOT be Halt for that reason — only Gate 3
+        // WARN-only demotion (no cross-judge) contributes here.
+        assert_ne!(
+            report.overall,
+            JvpOverall::Halt,
+            "borderline observational failure must not cascade into Halt"
+        );
+    }
+
+    #[test]
+    fn borderline_empty_when_fixture_predates_v3() {
+        // A v2-shape fixture (no borderline field) loads via
+        // #[serde(default)] and the observational result is empty.
+        let json = r#"{
+            "calibration_set_id": "tag-equivalence-v2",
+            "pairs": [
+                {"pair_id":"cal-eq-001","tags_a":["a"],"tags_b":["a"],"expected_verdict":"equivalent"}
+            ]
+        }"#;
+        let set: CalibrationSet = serde_json::from_str(json).unwrap();
+        assert!(set.borderline.is_empty());
+        let mock = MockOllama::new();
+        let r = evaluate_borderline(&mock, "judge", &set, &opts());
+        assert_eq!(r.denominator, 0);
+        assert!(r.detail.contains("no borderline section"));
     }
 }

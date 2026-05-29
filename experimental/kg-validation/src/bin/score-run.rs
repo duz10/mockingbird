@@ -455,6 +455,23 @@ fn render_score_summary(score: &ScoreReport, jvp: Option<&JvpReport>) -> String 
             "- Gate 1 (calibration): {:?} — {}\n",
             jvp.gate1_calibration.outcome, jvp.gate1_calibration.detail
         ));
+        // Observational companion — never gates, always reports.
+        s.push_str(&format!(
+            "- Gate 1 borderline (observational): {} ({}/{}) — {}\n",
+            format_args!("{:.1}%", jvp.gate1_borderline.percentage),
+            jvp.gate1_borderline.numerator,
+            jvp.gate1_borderline.denominator,
+            jvp.gate1_borderline.detail
+        ));
+        if !jvp.gate1_borderline.per_dimension.is_empty() {
+            s.push_str("  - per dimension:\n");
+            for d in &jvp.gate1_borderline.per_dimension {
+                s.push_str(&format!(
+                    "    - `{}`: {}/{} ({:.1}%)\n",
+                    d.dimension, d.numerator, d.denominator, d.percentage
+                ));
+            }
+        }
         s.push_str(&format!(
             "- Gate 2 (reasoning audit): {:?} — {}\n",
             jvp.gate2_reasoning_audit.outcome, jvp.gate2_reasoning_audit.detail

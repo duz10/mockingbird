@@ -1,15 +1,15 @@
 {
-  "calibration_set_id": "tag-equivalence-v2",
-  "version": 2,
-  "authored_iso": "2026-05-28",
-  "purpose": "Gate 1 of the ADR 0048 §G5 Judge Validation Protocol. The LLM tag-equivalence judge (src/scoring/judge.rs) must achieve ≥ 90% verdict-correct on this set before its verdicts feed the tag-correctness metric. Distribution is deliberately unambiguous: 7 obvious-equivalent pairs, 5 obvious-different pairs. Borderline cases are excluded — they would create unfair gate failures and would teach the judge to second-guess clear calls. Borderline handling is a PCRP retrospective concern (ADR 0048 §G6), not a calibration metric. v2 (2026-05-29) replaces cal-eq-001's tokens — the original [car-repair, auto] vs [car-repair, auto-maintenance] pair was lexically identical to the judge prompt's first in-context example, which would inflate Gate 1 verdict-correct on a memorization rather than a genuine reasoning pass. v2 substitutes [birthday, gift] vs [birthday, birthday-gift] — same anchored-synonym pattern, fresh vocabulary not present in any prompt example or other calibration pair.",
+  "calibration_set_id": "tag-equivalence-v3",
+  "version": 3,
+  "authored_iso": "2026-05-29",
+  "purpose": "Gate 1 of the ADR 0048 §G5 Judge Validation Protocol. The `pairs` section is the GATED set (must hit ≥ 90% verdict-correct before the judge feeds the tag metric); deliberately unambiguous so the threshold is fair. The `borderline` section (new in v3) is OBSERVATIONAL — every JVP run reports per-dimension borderline-correct% but does NOT halt on it. Its purpose: (a) see whether the judge handles ambiguity reasonably, (b) detect regression in fuzzy-case handling across judge swaps (the immediate motivator — Wave 3.2 swapped llama3.1:8b → gemma2:9b as primary on the back of a Gate 3 STOP, and we need to track how the new judge handles the borderline patterns that the prior judge mishandled), (c) auditable record of judgment quality on the hard cases. The v2 fix of cal-eq-001 (replacing the car-repair pair that overlapped the judge prompt's in-context examples) is preserved.",
   "pairs": [
     {
       "pair_id": "cal-eq-001",
       "tags_a": ["birthday", "gift"],
       "tags_b": ["birthday", "birthday-gift"],
       "expected_verdict": "equivalent",
-      "rationale": "Identical anchor tag (birthday). With that anchor present on both sides, 'gift' and 'birthday-gift' are co-referential — a note about getting someone a birthday gift would file/surface identically under either set. Same anchored-synonym pattern as the original v1 pair, but with vocabulary deliberately disjoint from the judge prompt's in-context examples (which use car-repair / auto / auto-maintenance / taxes / vacation / dentist / dental-appointment) and from every other calibration pair (no other pair uses birthday or gift). This keeps Gate 1's verdict-correct a measure of judge reasoning, not memorization."
+      "rationale": "Identical anchor tag (birthday). With that anchor present on both sides, 'gift' and 'birthday-gift' are co-referential — a note about getting someone a birthday gift would file/surface identically under either set. Vocabulary deliberately disjoint from the judge prompt's in-context examples (which use car-repair / auto / auto-maintenance / taxes / vacation / dentist / dental-appointment) and from every other calibration pair (no other pair uses birthday or gift). This keeps Gate 1's verdict-correct a measure of judge reasoning, not memorization."
     },
     {
       "pair_id": "cal-eq-002",
@@ -87,6 +87,56 @@
       "tags_b": ["coffee-shop"],
       "expected_verdict": "not-equivalent",
       "rationale": "Both contain 'coffee' but name different physical objects/locations: an appliance to fix versus a place to visit. Different file targets entirely."
+    }
+  ],
+  "borderline": [
+    {
+      "pair_id": "cal-bd-001",
+      "tags_a": ["doctor-appointment"],
+      "tags_b": ["doctor", "appointment"],
+      "documented_verdict": "equivalent",
+      "dimension": "tokenization",
+      "rationale": "Hyphenation vs. multi-tag of the same compound concept. Intentionally identical surface to cal-eq-004 in the gated set, included here as the canonical tokenization-dimension probe: it's exactly the pattern Wave 3.2's primary judge mishandled (cal-eq-004 was its sole Gate 1 miss at 11/12 = 91.7%), and the dominant tag-collapse case in real-corpus output. If the new primary judge handles cal-eq-004 cleanly, this borderline entry should also flip to documented_verdict — and the parity is the signal."
+    },
+    {
+      "pair_id": "cal-bd-002",
+      "tags_a": ["brake-pads", "truck"],
+      "tags_b": ["maintenance", "truck"],
+      "documented_verdict": "not-equivalent",
+      "dimension": "specificity",
+      "rationale": "Both name a truck-maintenance note, BUT 'brake-pads' is materially more informative than the generic 'maintenance'. A user filing 'brake-pads' wants brake-job notes specifically; a user searching 'maintenance' would get every truck-service entry. The specificity gap changes the file target. Differs from cal-eq-003 (reading-list ⊂ book): there the superset adds zero noise; here the superset (maintenance) buries the specific signal."
+    },
+    {
+      "pair_id": "cal-bd-003",
+      "tags_a": ["gift", "madison"],
+      "tags_b": ["birthday-gift", "kids"],
+      "documented_verdict": "equivalent",
+      "dimension": "coreference",
+      "rationale": "Madison is a kid (per persona context), so 'kids' and 'madison' co-refer; 'gift' + parent-context implies 'birthday-gift'. The judge needs to see through surface tokens to the underlying referent. Where context makes coref clear, these tag sets index the same file. Note this requires the judge to accept context-aware coref; a literal-token judge will mark NotEquivalent on Madison ≠ kids, which is a known judgment style we want surfaced (not punished)."
+    },
+    {
+      "pair_id": "cal-bd-004",
+      "tags_a": ["etsy", "marketing"],
+      "tags_b": ["social-media", "marketing"],
+      "documented_verdict": "not-equivalent",
+      "dimension": "domain-overlap",
+      "rationale": "Both are marketing-channel tag-pairs, both sit in the side-hustle space, but Etsy (marketplace listings, SEO, photography) and social-media (audience-building, content cadence, platform algorithms) are distinct execution channels. A note about Etsy listing optimization would not surface on a 'social-media' filter and vice-versa. Sibling to cal-diff-004; this borderline variant exists because the two channels share the side-hustle parent in a way taxes/vacation do not."
+    },
+    {
+      "pair_id": "cal-bd-005",
+      "tags_a": ["q3-planning", "work"],
+      "tags_b": ["planning", "professional"],
+      "documented_verdict": "equivalent",
+      "dimension": "abstraction-level",
+      "rationale": "Same underlying note (work-context planning activity), expressed at different abstraction levels: specific quarter + 'work' vs. generic 'planning' + 'professional'. Where abstraction-level is the only difference and both sets correctly file the note in the work/professional bucket, they index the same shelf. Contrast cal-bd-002: here the specific tag (q3-planning) adds temporal precision that doesn't change the file target; in cal-bd-002 the specific tag (brake-pads) names a distinct subtopic within the broader category."
+    },
+    {
+      "pair_id": "cal-bd-006",
+      "tags_a": ["budget", "karen"],
+      "tags_b": ["budget", "finance"],
+      "documented_verdict": "not-equivalent",
+      "dimension": "person-specific",
+      "rationale": "Person-name tags carry distinct routing information that domain tags don't. 'budget + karen' files under Karen (spouse/partner shared-finance context — joint decisions, conversations to have); 'budget + finance' files under generic household finance (one-shot reference info, no person context). A user filtering by 'karen' to prep for a money conversation would not be served by generic finance notes, and vice-versa. Person-specific tagging is a real filing dimension."
     }
   ]
 }
