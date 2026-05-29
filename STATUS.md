@@ -56,18 +56,35 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-*Nothing in-flight at iteration boundary.* The KG Phase 0 epic (ADR 0048) sealed
-2026-05-29 with Wave 6 REPORT.md landing — moved into the sealed lateral-epics
-list above. The Wave 0–6 history that used to live in this block is preserved
-below for one-iteration grace (the next consolidation can prune it).
+**KG Phase 0.5 + v1 architectural pivot — ADR 0049 Proposed, Wave 0.5.0 sealed.**
 
-Next likely work fronts (pick per `bd ready` / Dustin direction):
-- v1 charter ADR (provisionally ADR 0049) inheriting KG Phase 0 REPORT §8
-  assisted-filing-UX recommendation.
+Epic `mb-symi` (P1). Charter at `docs/adr/0049-knowledge-graph-phase-0-5-and-v1-architectural-pivot.md`.
+Phase 0 (ADR 0048) measured a structural ceiling on qwen2.5:3b prompt-only;
+ADR 0049 charters four architectural moves on the sandbox (SCHEMA.md portable
+contract, embeddings classifier, closed canonical tag vocabulary, entity
+extraction probe) on default `qwen2.5:7b-instruct-q4_K_M`. Six waves
+0.5.1–0.5.6. v1 GO/NO-GO at 0.5.6 with mandatory Dustin sign-off gate.
+
+Wave structure (sub-beads, ADR 0049 dependency graph in `bd`):
+
+- `mb-xmgs` — Wave 0.5.1: SCHEMA.md refactor + 7b baseline + parity gate.
+- `mb-yfzy` — Wave 0.5.2: embeddings classifier (nomic-embed-text). Blocked on 0.5.1.
+- `mb-rzpd` — Wave 0.5.3: closed canonical tag vocab + new-tag-request flow. Blocked on 0.5.1.
+- `mb-o4ni` — Wave 0.5.4: entity extraction probe + entity-quality metric. Blocked on 0.5.1, 0.5.3.
+- `mb-5r1b` — Wave 0.5.5: qwen2.5:3b cross-test on pivoted architecture. Blocked on 0.5.2, 0.5.3, 0.5.4.
+- `mb-qogz` — Wave 0.5.6: REPORT.md + GO/NO-GO + ADR 0049 Accepted. **HALT BEFORE THIS** — Dustin reviews 0.5.1–0.5.5 evidence on disk first.
+
+Success criteria (ADR 0049): ≥ 3 of {category, entry-type, tag-collapse,
+clean-single} lift ≥ 10 pts from Phase 0 baseline on 7b pivoted architecture
+AND hard-gate intact AND PCRP trust_eroding ≤ Phase 0 baseline AND stability
+≥ 80%. IAP per LESSONS PINNED P9: strict no-regression on trust gates;
+Pareto-frontier on quality metrics.
+
+Standing work (not gating Phase 0.5):
 - Phase 10 live-fire Win11 smoke test (LESSONS P7 — still Dustin's post-seal step).
 - Standing P1 `mb-ez9` (empirical mode-prompt iteration; picks up when fixtures land).
 - Standing P2s `mb-xwi` / `mb-nc9u` / `mb-e2t8`.
-- Standing P3s (see below) and the open KG Phase 0 follow-up beads still in `bd ready`.
+- Standing P3s (see below).
 
 ---
 
