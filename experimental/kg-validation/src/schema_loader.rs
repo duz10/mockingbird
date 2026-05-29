@@ -41,7 +41,7 @@
 //! etc.) would more than triple the sandbox dep footprint for a file
 //! we control. YAGNI.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// The schema_version this loader speaks. Bump in lockstep with
@@ -101,6 +101,12 @@ pub struct Schema {
     default_prompt_bodies: HashMap<String, String>,
     /// Cached override prompt bodies — read once at load.
     override_prompt_bodies: HashMap<(String, String), String>,
+    /// Closed canonical tag vocabulary (Wave 0.5.3 / `mb-rzpd`).
+    /// Empty when the schema declares `status: open` for the
+    /// vocabulary; populated when status is `closed`.
+    canonical_tag_vocabulary: HashSet<String>,
+    /// Ordered form for human-readable export (e.g. test reporting).
+    canonical_tag_vocabulary_ordered: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -137,6 +143,18 @@ impl Schema {
 
         let categories = parse_bullet_list(&text, "### Categories (closed enum)")?;
         let entry_types = parse_bullet_list(&text, "### Entry types (closed enum)")?;
+
+        // Wave 0.5.3: closed canonical tag vocabulary. The vocab
+        // section header is a level-4 `#### Vocabulary list` so it
+        // sits cleanly inside the level-3 `### Canonical tag
+        // vocabulary (...)` section. Missing-and-empty is OK (older
+        // schema revisions don't carry it); missing-with-status-closed
+        // would be a malformed schema, but we don't enforce that
+        // here — the loader treats absence as "open vocab".
+        let canonical_tag_vocabulary_ordered =
+            parse_bullet_list(&text, "#### Vocabulary list").unwrap_or_default();
+        let canonical_tag_vocabulary: HashSet<String> =
+            canonical_tag_vocabulary_ordered.iter().cloned().collect();
 
         let model_defaults = ModelDefaults {
             segment: parse_model_default(&text, "segment")?,
@@ -178,7 +196,28 @@ impl Schema {
             override_prompt_paths,
             default_prompt_bodies,
             override_prompt_bodies,
+            canonical_tag_vocabulary,
+            canonical_tag_vocabulary_ordered,
         })
+    }
+
+    /// Closed canonical tag vocabulary as a fast-lookup set. Empty
+    /// when the schema revision predates Wave 0.5.3 (open vocab).
+    pub fn canonical_tag_vocabulary(&self) -> &HashSet<String> {
+        &self.canonical_tag_vocabulary
+    }
+
+    /// Closed canonical tag vocabulary as the ordered list it
+    /// appears in SCHEMA.md. For reporting / debugging only — the
+    /// validator uses [`Self::canonical_tag_vocabulary`].
+    pub fn canonical_tag_vocabulary_ordered(&self) -> &[String] {
+        &self.canonical_tag_vocabulary_ordered
+    }
+
+    /// True when this schema declares a closed canonical tag
+    /// vocabulary (Wave 0.5.3+). False for open-vocab schemas.
+    pub fn has_closed_tag_vocabulary(&self) -> bool {
+        !self.canonical_tag_vocabulary.is_empty()
     }
 
     /// Convenience loader for the canonical sandbox location. The
@@ -567,8 +606,9 @@ mod tests {
         assert_eq!(body, expected);
     }
 
-    /// 7b-class model gets the mid-confident hardened extract prompt
-    /// — byte-identical to `prompts/extract.mid-confident.md`.
+    /// 7b-class model gets the closed-vocab mid-confident extract
+    /// prompt (Wave 0.5.3 override) — byte-identical to
+    /// `prompts/extract.closed-vocab.mid-confident.md`.
     #[test]
     fn mid_confident_extract_uses_override_prompt() {
         let s = Schema::load_default().unwrap();
@@ -576,10 +616,75 @@ mod tests {
             .prompt_body("extract", "qwen2.5:7b-instruct-q4_K_M")
             .unwrap();
         let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let expected =
-            std::fs::read_to_string(crate_root.join("prompts").join("extract.mid-confident.md"))
-                .expect("read prompts/extract.mid-confident.md");
+        let expected = std::fs::read_to_string(
+            crate_root
+                .join("prompts")
+                .join("extract.closed-vocab.mid-confident.md"),
+        )
+        .expect("read prompts/extract.closed-vocab.mid-confident.md");
         assert_eq!(body, expected);
+    }
+
+    /// Wave 0.5.3: SCHEMA.md ships a 228-entry closed canonical tag
+    /// vocabulary. The set is exposed for the validator and a
+    /// representative spot-check of corpus-grounded canonicals +
+    /// domain pads is intact.
+    #[test]
+    fn canonical_tag_vocabulary_loads() {
+        let s = Schema::load_default().unwrap();
+        assert!(s.has_closed_tag_vocabulary());
+        let vocab = s.canonical_tag_vocabulary();
+        assert_eq!(
+            vocab.len(),
+            228,
+            "vocab size drift; bullets in SCHEMA.md changed?"
+        );
+
+        // Corpus-grounded canonicals from synonym-map v1.1.
+        for tag in [
+            "daycare",
+            "kid",
+            "car-repair",
+            "olivia",
+            "permission-slip",
+            "q3",
+            "venmo",
+        ] {
+            assert!(
+                vocab.contains(tag),
+                "missing corpus canonical `{tag}` from closed vocab"
+            );
+        }
+
+        // Domain pads added in Wave 0.5.3.
+        for tag in [
+            "call",
+            "follow-up",
+            "medication",
+            "dmv",
+            "flight",
+            "deadline",
+            "subscription",
+        ] {
+            assert!(
+                vocab.contains(tag),
+                "missing domain pad `{tag}` from closed vocab"
+            );
+        }
+
+        // Ordered form has the same length as the set + zero
+        // duplicates after collection. We do NOT pin Rust-ordinal
+        // sort here because the schema list is authored against
+        // culture-aware (en-US) sort — which orders `budgeting`
+        // before `budget-revision`, whereas Rust ordinal sort would
+        // order `budget-revision` first because `-`(45) < `e`(101).
+        // Both orderings are "alphabetical" by reasonable
+        // definitions; we accept either and just verify there are
+        // no dupes.
+        let ordered = s.canonical_tag_vocabulary_ordered();
+        assert_eq!(ordered.len(), 228);
+        let unique: HashSet<&String> = ordered.iter().collect();
+        assert_eq!(unique.len(), 228, "vocab list contains duplicates");
     }
 
     /// Passes WITHOUT a profile override fall back to the default

@@ -14,7 +14,7 @@ use std::path::Path;
 use serde::Serialize;
 
 use crate::ollama::{GenerateOptions, OllamaDispatcher};
-use crate::passes::{self, Classification, Extraction, PassError};
+use crate::passes::{self, Classification, Extraction, NewTagRequest, PassError};
 use crate::schema::{Entry, EntryType, Status};
 use crate::schema_loader::Schema;
 
@@ -24,6 +24,11 @@ pub struct PipelineResult {
     /// `"classify[2]"` to pin which segment a per-segment failure
     /// belongs to.
     pub per_pass_errors: Vec<(String, PassError)>,
+    /// Wave 0.5.3 / `mb-rzpd`: out-of-vocab tags the model wanted to
+    /// apply. Paired with `segment_idx` so the run-end aggregator
+    /// can attribute them back to a dictation + segment. Empty when
+    /// the active schema is open-vocab.
+    pub new_tag_requests: Vec<(usize, NewTagRequest)>,
 }
 
 #[derive(Serialize)]
@@ -69,6 +74,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
     std::fs::create_dir_all(artifact_dir).ok();
 
     let mut errors: Vec<(String, PassError)> = Vec::new();
+    let mut new_tag_requests: Vec<(usize, NewTagRequest)> = Vec::new();
 
     // Resolve per-pass prompt bodies up front via the model-class
     // calibration profile (`mb-4xtd` / ADR 0049 Move 1). The dispatch
@@ -91,6 +97,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
             return PipelineResult {
                 entries: Vec::new(),
                 per_pass_errors: errors,
+                new_tag_requests,
             };
         }
     };
@@ -108,6 +115,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
             return PipelineResult {
                 entries: Vec::new(),
                 per_pass_errors: errors,
+                new_tag_requests,
             };
         }
     };
@@ -125,6 +133,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
             return PipelineResult {
                 entries: Vec::new(),
                 per_pass_errors: errors,
+                new_tag_requests,
             };
         }
     };
@@ -144,6 +153,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
             return PipelineResult {
                 entries: Vec::new(),
                 per_pass_errors: errors,
+                new_tag_requests,
             };
         }
     };
@@ -221,15 +231,34 @@ pub fn run_pipeline<D: OllamaDispatcher>(
             }
         };
 
-        // ── Pass 4: normalize (pure Rust) ─────────────────────────
-        let normalized = passes::normalize_tags(&extraction.raw_topic_tags);
+        // ── Pass 4: normalize + (Wave 0.5.3) closed-vocab validate ─
+        //
+        // Two-mode behaviour by schema state:
+        //  - open vocab (no canonical list in SCHEMA.md): legacy
+        //    behaviour — normalize and use as-is. No new-tag-requests.
+        //  - closed vocab (Wave 0.5.3+): normalize, then split into
+        //    in-vocab (→ Entry.topic_tags) and out-of-vocab (→
+        //    new_tag_requests, surfaced to the runner).
+        let (final_tags, new_requests_for_segment) = if schema.has_closed_tag_vocabulary() {
+            let validation = passes::validate_tags(&extraction, schema.canonical_tag_vocabulary());
+            (validation.validated_tags, validation.new_tag_requests)
+        } else {
+            (
+                passes::normalize_tags(&extraction.raw_topic_tags),
+                Vec::new(),
+            )
+        };
+
+        for req in &new_requests_for_segment {
+            new_tag_requests.push((idx, req.clone()));
+        }
 
         let _ = write_json(
             &artifact_dir.join(format!("extract-{idx}.json")),
             &ExtractArtifact {
                 raw_model_output: "<captured only on parse failure>",
                 parsed: Some(&extraction),
-                normalized_tags: Some(&normalized),
+                normalized_tags: Some(&final_tags),
                 error: None,
                 segment_text: seg_text,
             },
@@ -246,7 +275,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
             category: classification.category,
             entry_type: classification.entry_type,
             status,
-            topic_tags: normalized,
+            topic_tags: final_tags,
             due_iso: extraction.due_iso,
             captured_iso: captured_iso.to_string(),
             body: seg_text.clone(),
@@ -256,6 +285,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
     PipelineResult {
         entries,
         per_pass_errors: errors,
+        new_tag_requests,
     }
 }
 

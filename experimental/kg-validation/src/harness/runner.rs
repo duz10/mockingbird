@@ -5,6 +5,7 @@
 //! Dry-run mode skips the LLM entirely — useful for verifying
 //! corpus pairing + file structure without spinning up Ollama.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -13,6 +14,7 @@ use serde::Serialize;
 
 use crate::harness::pipeline::run_pipeline;
 use crate::ollama::{GenerateOptions, OllamaDispatcher};
+use crate::passes::NewTagRequest;
 use crate::schema::Entry;
 use crate::schema_loader::Schema;
 
@@ -42,6 +44,13 @@ pub struct RunSummary {
     pub failed: usize,
     pub dry_run: bool,
     pub errors: Vec<RunError>,
+    /// Wave 0.5.3 / `mb-rzpd`: count of new-tag-requests collected
+    /// across the corpus, split by source. Useful both as a quick
+    /// sanity check at the end of the run and as a rough "is the
+    /// closed vocab too narrow" signal. Zero on open-vocab schemas.
+    pub new_tag_requests_total: usize,
+    pub new_tag_requests_explicit: usize,
+    pub new_tag_requests_implicit: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -49,6 +58,16 @@ pub struct RunError {
     pub dictation_id: String,
     pub stage: String,
     pub message: String,
+}
+
+/// One line of `runs/<run-id>/new-tag-requests.jsonl`. Wave 0.5.3.
+#[derive(Debug, Serialize)]
+struct NewTagRequestLine<'a> {
+    dictation_id: &'a str,
+    segment_idx: usize,
+    tag: &'a str,
+    rationale: &'a str,
+    source: crate::passes::NewTagRequestSource,
 }
 
 pub fn run_corpus<D: OllamaDispatcher>(
@@ -90,6 +109,15 @@ pub fn run_corpus<D: OllamaDispatcher>(
     let mut successful = 0usize;
     let mut failed = 0usize;
     let mut errors: Vec<RunError> = Vec::new();
+
+    // Wave 0.5.3: collect new-tag-requests across the corpus. Written
+    // to `runs/<run-id>/new-tag-requests.jsonl` (one JSON object per
+    // line). Opened lazily so open-vocab schema runs don't litter the
+    // run dir with an empty file. Counter pair is the source split.
+    let new_tag_jsonl_path = run_dir.join("new-tag-requests.jsonl");
+    let mut new_tag_jsonl: Option<std::fs::File> = None;
+    let mut new_tag_explicit = 0usize;
+    let mut new_tag_implicit = 0usize;
 
     for (i, id) in dictation_ids.iter().enumerate() {
         let pair_ok = answer_keys_dir.join(format!("{id}.json")).exists();
@@ -169,12 +197,39 @@ pub fn run_corpus<D: OllamaDispatcher>(
 
         let n_entries = result.entries.len();
         let n_errors = result.per_pass_errors.len();
+        let n_new_tags = result.new_tag_requests.len();
         if n_errors > 0 {
             for (stage, err) in &result.per_pass_errors {
                 errors.push(RunError {
                     dictation_id: id.clone(),
                     stage: stage.clone(),
                     message: err.to_string(),
+                });
+            }
+        }
+
+        // Append this dictation's new-tag-requests to the run-level
+        // JSONL file. Open-on-first-write keeps the artifact absent
+        // when the schema is open-vocab. Per-line write failures are
+        // logged as `io` errors but do NOT fail the dictation — the
+        // structured output already landed and a missing jsonl entry
+        // is a reporting gap, not a data corruption.
+        for (segment_idx, req) in &result.new_tag_requests {
+            match &req.source {
+                crate::passes::NewTagRequestSource::Explicit => new_tag_explicit += 1,
+                crate::passes::NewTagRequestSource::Implicit => new_tag_implicit += 1,
+            }
+            if let Err(e) = append_new_tag_request(
+                &mut new_tag_jsonl,
+                &new_tag_jsonl_path,
+                id,
+                *segment_idx,
+                req,
+            ) {
+                errors.push(RunError {
+                    dictation_id: id.clone(),
+                    stage: "new-tag-requests.jsonl".into(),
+                    message: format!("append: {e}"),
                 });
             }
         }
@@ -188,7 +243,7 @@ pub fn run_corpus<D: OllamaDispatcher>(
             failed += 1;
         }
         println!(
-            "[{:>2}/{:>2}] {id} ... {n_entries} entries, {n_errors} errors, {:.2}s",
+            "[{:>2}/{:>2}] {id} ... {n_entries} entries, {n_errors} errors, {n_new_tags} new-tag-reqs, {:.2}s",
             i + 1,
             total,
             t0.elapsed().as_secs_f64()
@@ -208,6 +263,9 @@ pub fn run_corpus<D: OllamaDispatcher>(
         failed,
         dry_run: config.dry_run,
         errors,
+        new_tag_requests_total: new_tag_explicit + new_tag_implicit,
+        new_tag_requests_explicit: new_tag_explicit,
+        new_tag_requests_implicit: new_tag_implicit,
     };
     let _ = write_summary(&run_dir.join("SUMMARY.json"), &summary);
     summary
@@ -223,6 +281,40 @@ fn write_summary(path: &Path, summary: &RunSummary) -> std::io::Result<()> {
     let json = serde_json::to_string_pretty(summary)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     std::fs::write(path, json)
+}
+
+/// Append one new-tag-request line to the run-level JSONL file,
+/// opening it on first write. Caller-managed `Option<File>` so we
+/// don't reopen-and-append on every line (slow + fragile on Windows).
+fn append_new_tag_request(
+    file: &mut Option<std::fs::File>,
+    path: &Path,
+    dictation_id: &str,
+    segment_idx: usize,
+    req: &NewTagRequest,
+) -> std::io::Result<()> {
+    if file.is_none() {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        *file = Some(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)?,
+        );
+    }
+    let f = file.as_mut().expect("file opened above");
+    let line = NewTagRequestLine {
+        dictation_id,
+        segment_idx,
+        tag: req.tag.as_str(),
+        rationale: req.rationale.as_str(),
+        source: req.source,
+    };
+    let json = serde_json::to_string(&line)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    writeln!(f, "{json}")
 }
 
 #[cfg(test)]

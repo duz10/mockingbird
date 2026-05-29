@@ -2,7 +2,7 @@
 
 ```yaml
 schema_version: 1
-schema_revision: phase-0.5-wave-1
+schema_revision: phase-0.5-wave-3
 ```
 
 > A portable Markdown contract for the Knowledge Graph pipeline,
@@ -44,18 +44,285 @@ per entry. Drives downstream behaviour (a `task` gets a status, a
 - `note`
 - `reference`
 
-### Canonical tag vocabulary
+### Canonical tag vocabulary (closed; Wave 0.5.3 seed)
 
 ```yaml
-status: open
+status: closed
 closed_in: phase-0.5-wave-3
+seed_size: 228
+seed_composition:
+  corpus_derived: 188   # canonical RHS of synonym-map v1.1
+  domain_pad: 40        # broad-coverage tags for clusters the 32-pair corpus undersamples
+new_tag_request_channel: extract.proposed_new_tags  # JSON field; collected at runs/<run-id>/new-tag-requests.jsonl
 ```
 
-Phase 0.5 Wave 0.5.1 ships open-vocabulary tags via `extract` →
-`normalize`. Wave 0.5.3 (Move 3 / `mb-rzpd`) closes the vocabulary,
-seeded from corpus + synonym-map v1.1, with a new-tag-request flow.
-The schema slot exists now so consumers can adopt the contract once
-the vocabulary lands.
+Move 3 / `mb-rzpd`. The extract pass selects topic tags ONLY from
+this list. Tags the model wants to apply that are NOT in the list
+go through the new-tag-request channel (the `proposed_new_tags`
+JSON field on the extract output) and are collected per-run at
+`runs/<run-id>/new-tag-requests.jsonl` for batch review.
+
+The post-LLM `tag_validator` pass is forgiving:
+
+- A tag in `raw_topic_tags` that **is** in the vocabulary survives
+  normalization and lands on the entry.
+- A tag in `raw_topic_tags` that **is not** in the vocabulary is
+  dropped from the entry AND logged as an *implicit* new-tag-request
+  (the model forgot the protocol but proposed a tag).
+- A `{tag, rationale}` row in `proposed_new_tags` is dropped from
+  the entry AND logged as an *explicit* new-tag-request.
+
+Composition rationale: the 188 corpus-derived canonicals preserve
+scoring continuity against existing answer keys (Wave 0.5.1
+baseline + scored runs). The 40 domain pads cover clusters a real
+user would plausibly hit but the 32-pair corpus undersamples
+(communication — `call` / `voicemail` / `follow-up`; work rituals
+— `standup` / `one-on-one`; health — `medication` / `prescription`
+/ `sleep`; errands — `pickup` / `delivery` / `dmv`; travel —
+`flight` / `hotel` / `passport`).
+
+ADR 0048 G7 (person names NEVER collapse to domain tags) is
+preserved: corpus persons (`becca`, `brandon`, `chen`, `dad`,
+`henderson`, `jamie`, `joe`, `karen`, `lisa`, `madison`, `mom`,
+`olivia`, `sarah`, `smith`) stay in the vocabulary as identity
+entries.
+
+#### Vocabulary list
+
+<!-- This is THE closed vocabulary. 228 entries, alphabetical, ASCII.
+     The schema loader reads this list verbatim; the prompt template
+     inlines it (grouped into clusters for readability) at runtime.
+     ANY edit here is a schema change — keep the bullet list flat,
+     one tag per line, in backticks. -->
+
+- `401k`
+- `access-code`
+- `accounting`
+- `accounts-receivable`
+- `ai`
+- `apartment`
+- `app`
+- `appliance`
+- `application`
+- `appointment`
+- `async`
+- `auction`
+- `bakery`
+- `becca`
+- `bill`
+- `birthday`
+- `birthday-cake`
+- `book`
+- `booth-fee`
+- `brake-pad`
+- `brandon`
+- `brunch`
+- `budget`
+- `budgeting`
+- `budget-revision`
+- `business`
+- `business-expense`
+- `business-tool`
+- `call`
+- `car`
+- `career`
+- `career-conversation`
+- `career-direction`
+- `car-repair`
+- `certificate`
+- `chat`
+- `chen`
+- `cleaning`
+- `cleat`
+- `client`
+- `client-visit`
+- `code-review`
+- `content`
+- `conversion`
+- `cooking`
+- `costco`
+- `cover-letter`
+- `cpa`
+- `craft-tutorial`
+- `craft-vinyl`
+- `dad`
+- `daycare`
+- `deadline`
+- `debt`
+- `delivery`
+- `dentist`
+- `design`
+- `dinner`
+- `dishwasher`
+- `dmv`
+- `docs-migration`
+- `doctor-appointment`
+- `documentation`
+- `dog`
+- `dog-food`
+- `drill-bit`
+- `dry-cleaning`
+- `electricity`
+- `email`
+- `etsy`
+- `exercise`
+- `expense`
+- `family`
+- `farmers-market`
+- `field-trip`
+- `finance`
+- `financial-goal`
+- `fitness`
+- `flight`
+- `follow-up`
+- `food`
+- `freelance`
+- `friend`
+- `fyi`
+- `garage`
+- `gate-code`
+- `gift`
+- `gift-bundle`
+- `gift-idea`
+- `grocery`
+- `growth`
+- `habit`
+- `henderson`
+- `hobby`
+- `holiday`
+- `home`
+- `home-maintenance`
+- `home-office`
+- `home-office-deduction`
+- `hotel`
+- `ic-vs-management`
+- `insurance`
+- `insurance-renewal`
+- `internet`
+- `interview`
+- `inventory`
+- `investment`
+- `invoice`
+- `jamie`
+- `job-application`
+- `job-search`
+- `job-tracking`
+- `joe`
+- `karen`
+- `kid`
+- `kids-sport`
+- `launch-date`
+- `launch-slip`
+- `lawn`
+- `lead`
+- `lisa`
+- `listing`
+- `madison`
+- `maintenance`
+- `manager`
+- `marketing`
+- `meal-planning`
+- `mechanic`
+- `medication`
+- `meeting`
+- `mockup`
+- `mom`
+- `morale`
+- `mortgage`
+- `notion`
+- `nutrition`
+- `olivia`
+- `one-on-one`
+- `parent-teacher`
+- `passport`
+- `paycheck`
+- `payment`
+- `payment-plan`
+- `pediatrician`
+- `performance-review`
+- `permission-slip`
+- `pet-care`
+- `photos`
+- `pickup`
+- `planning`
+- `planning-doc`
+- `plumbing-supply`
+- `portfolio`
+- `post-office`
+- `prescription`
+- `presentation`
+- `pricing`
+- `pricing-strategy`
+- `product-idea`
+- `project-status`
+- `q2`
+- `q3`
+- `q4-holiday`
+- `reading`
+- `reading-log`
+- `receipt`
+- `refund`
+- `reminder`
+- `rent`
+- `renters-insurance`
+- `repair`
+- `resume`
+- `resume-update`
+- `retirement`
+- `return`
+- `rollover`
+- `roth`
+- `rsvp`
+- `rust`
+- `rust-async`
+- `sarah`
+- `saving`
+- `school`
+- `school-auction`
+- `self-improvement`
+- `shirt`
+- `shot`
+- `side-business`
+- `sleep`
+- `slide-deck`
+- `small-business`
+- `smith`
+- `soccer`
+- `social`
+- `software`
+- `sprint-planning`
+- `standup`
+- `stripe`
+- `subscription`
+- `summer-reading`
+- `tax`
+- `tax-prep`
+- `team`
+- `team-culture`
+- `technical-reference`
+- `text-message`
+- `therapy`
+- `thermostat`
+- `tokio`
+- `tool`
+- `tooling`
+- `truck`
+- `utility`
+- `venmo`
+- `vet`
+- `video-call`
+- `voicemail`
+- `volunteer`
+- `volunteering`
+- `water`
+- `water-bill`
+- `water-heater`
+- `website`
+- `website-redesign`
+- `wedding`
+- `wholesale`
+- `work`
+- `youtube`
 
 ---
 
@@ -167,7 +434,7 @@ below.
 
 | Pass | Profile | Prompt file |
 |---|---|---|
-| `extract` | `mid-confident` | `prompts/extract.mid-confident.md` |
+| `extract` | `mid-confident` | `prompts/extract.closed-vocab.mid-confident.md` |
 
 Resolution rule: `prompt_body(pass, model)` =
 `overrides[(pass, profile_for(model))]` if present, else
@@ -233,9 +500,9 @@ loop (ADR 0049 v1.1 deferrals).
 
 | Wave | Adds to schema | Sub-bead |
 |---|---|---|
-| 0.5.1 (this) | Portable contract; passes load from here at runtime. Model-class calibration profiles + per-profile prompt overrides (`mb-4xtd` hard-gate fix). | `mb-xmgs`, `mb-4xtd` |
-| 0.5.2        | Embeddings-classifier model + exemplar source paths. | `mb-yfzy` |
-| 0.5.3        | Closed canonical tag vocabulary + new-tag-request validator. | `mb-rzpd` |
+| 0.5.1        | Portable contract; passes load from here at runtime. Model-class calibration profiles + per-profile prompt overrides (`mb-4xtd` hard-gate fix). | `mb-xmgs`, `mb-4xtd` |
+| 0.5.2        | (Falsified, no schema change; embeddings infra preserved for Move 4 entity disambiguation — ADR 0049 A1 amendment.) | `mb-yfzy`, `mb-hnb4` |
+| 0.5.3 (this) | Closed canonical tag vocabulary (228 seed entries) + new-tag-request validator + closed-vocab extract prompt override. | `mb-rzpd` |
 | 0.5.4        | Entity types + entity-disambiguation thresholds. | `mb-o4ni` |
 | 0.5.5        | (No schema change — cross-test on 3b.) | `mb-5r1b` |
 

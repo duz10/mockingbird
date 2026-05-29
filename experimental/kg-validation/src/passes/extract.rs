@@ -22,6 +22,20 @@ pub struct Extraction {
     pub title: String,
     pub due_iso: Option<String>,
     pub raw_topic_tags: Vec<String>,
+    /// Wave 0.5.3 (Move 3 / `mb-rzpd`): the closed-vocab prompt asks
+    /// the model to surface concepts it wants to tag but cannot find
+    /// in the vocabulary, here. Optional + `default` so the
+    /// small-conservative (open-vocab) prompt remains JSON-compatible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposed_new_tags: Option<Vec<ProposedNewTag>>,
+}
+
+/// One model-suggested out-of-vocabulary tag. Wave 0.5.3 / `mb-rzpd`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ProposedNewTag {
+    pub tag: String,
+    #[serde(default)]
+    pub rationale: String,
 }
 
 /// `prompt_body` is the verbatim contents of `prompts/extract.md`

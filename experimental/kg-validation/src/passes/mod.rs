@@ -12,11 +12,13 @@ pub mod classify;
 pub mod extract;
 pub mod normalize;
 pub mod segment;
+pub mod tag_validator;
 
 pub use classify::{classify, Classification};
-pub use extract::{extract, Extraction};
+pub use extract::{extract, Extraction, ProposedNewTag};
 pub use normalize::normalize_tags;
 pub use segment::segment;
+pub use tag_validator::{validate_tags, NewTagRequest, NewTagRequestSource, TagValidationResult};
 
 /// Error type shared by all passes. The raw model output is captured
 /// on `Parse` / `Validation` so the harness can write it to disk for
