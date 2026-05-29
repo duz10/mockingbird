@@ -4,47 +4,45 @@
 //! `inbox::`. Chartered by **ADR 0049** (Phase 0.5 + v1 architectural
 //! pivot) and the **PHASE-0-5-REPORT.md** §6 commitments + §7 wave plan.
 //!
-//! ## Where we are right now
+//! ## Status
 //!
-//! **Phase 1A Wave 1 (this commit, mb-2mc9 / mb-ep3c) is scaffold only.**
-//! The module body is intentionally empty. Chunk 2 graduates the library
-//! subset from `experimental/kg-validation/src/` into this tree; Chunk 3
-//! lands the `kg_parity` probe consuming `docs/knowledge-graph/parity/`.
+//! **Phase 1A Wave 2 (this commit, epic `mb-2mc9`).** The graduated
+//! subset from `experimental/kg-validation/src/` now lives here. The
+//! sandbox stays alive as the v1.1+ regression rig (binding parameter D5);
+//! it is the source of the parity fixture Chunk 3 will probe against.
 //!
-//! See `docs/knowledge-graph/phase-1a-brief.md` for the full graduation
-//! scope, binding decisions (D1–D6), parity gate procedure, and seal
-//! criteria.
+//! ## Public surface (binding parameter D6)
 //!
-//! ## What graduates (Chunks 2 + 3 — DO NOT add here yet)
+//! Only two functions + the schema types are `pub` from this module:
+//! every consumer outside `kg::` should reach for these and nothing
+//! else.
 //!
-//! - `schema` — `Entry` / `Category` / `EntryType` / `EntityType` / `Status` / `AnswerKey` types.
-//! - `schema_loader` — SCHEMA.md + per-pass prompt parser (`include_str!` bundled
-//!   with `MOCKINGBIRD_KG_SCHEMA_DIR` env override per D2).
-//! - `passes::{segment, classify, extract, extract_entities, normalize, validate_tags}`.
-//! - `ollama` — `OllamaDispatcher` trait + `ureq::Agent`-based impl (D1) plus a
-//!   test-only `MockOllama`.
-//! - `synonyms` — shared `SynonymMap`.
-//! - `embeddings` — local-only embedding helpers (currently unused by `run_pipeline`
-//!   but graduating per binding parameter 5).
-//! - `pipeline` — `run_pipeline(&D, ...) -> PipelineResult`. The public surface of
-//!   `kg::` exports `pipeline::{run_pipeline, PipelineResult}` and the schema types (D6).
+//! ```ignore
+//! use mockingbird_lib::kg::{run_pipeline, PipelineResult};
+//! use mockingbird_lib::kg::{Entry, Category, EntryType, EntityType, Status, AnswerKey};
+//! ```
 //!
-//! ## What stays in the sandbox (binding parameter 5)
+//! The orchestrator, the pass internals, the dispatcher trait, the
+//! schema loader, the synonym map, and the embeddings dispatcher are
+//! all `pub(crate)` so we can land follow-up wiring in this crate
+//! without re-litigating the public boundary.
+//!
+//! ## Asset bundling (binding parameter D2)
+//!
+//! `SCHEMA.md` + per-pass prompt bodies are baked into the binary via
+//! `include_str!` at compile time. At runtime the `MOCKINGBIRD_KG_SCHEMA_DIR`
+//! env var overrides the bundled set — useful for prompt tuning without
+//! rebuilds. Source-of-truth selection is **either / or, never merge**;
+//! the loader emits a `tracing::info!` line at startup naming which
+//! source won (see `schema_loader::Schema::load_default`).
+//!
+//! ## What stays in the sandbox (binding parameter D5)
 //!
 //! `experimental/kg-validation/` remains the v1.1+ regression rig and
 //! parity-fixture source. Per ADR 0049 §"Sandbox isolation" the sandbox
 //! is **not** deleted on graduation. Specifically NOT graduating:
 //! `judges/`, `scoring/`, `wiggum/`, exemplars, `harness/runner.rs`, the
 //! six standalone binaries, `corpus/`, `runs/`, `judge-calibration/`.
-//!
-//! ## Public surface (D6)
-//!
-//! Once Chunk 2 lands:
-//! ```ignore
-//! pub use pipeline::{run_pipeline, PipelineResult};
-//! pub use schema::{Entry, Category, EntryType, EntityType, Status, AnswerKey};
-//! // everything else: pub(crate)
-//! ```
 //!
 //! ## NOT in scope (Phase 1B+ and beyond)
 //!
@@ -56,9 +54,28 @@
 //! Phase 1A produces a **callable library that nobody calls yet**.
 //! Wiring into the dictation loop is a downstream consumer concern.
 
-// Intentionally empty — children graduate in Chunk 2 (mb-2mc9).
-//
-// Placeholder declarations are NOT added here ahead of Chunk 2; rustc
-// would complain about missing files and the diff would have to bounce
-// twice. The single source of truth for the to-be-graduated children
-// is the docstring above + phase-1a-brief.md §"Scope: what graduates".
+pub(crate) mod ollama;
+pub(crate) mod passes;
+pub(crate) mod pipeline;
+pub(crate) mod schema;
+pub(crate) mod schema_loader;
+pub(crate) mod synonyms;
+
+// Embeddings dispatcher graduated per binding parameter A1 — preserved
+// for entity disambiguation (NOT classification). Wired but not consumed
+// in 1A; the `dead_code` allow is the honest signal that the trait is
+// here intentionally without a current caller (a follow-up wave wires
+// it into the entity-extraction path).
+#[allow(dead_code)]
+pub(crate) mod embeddings;
+
+// D6 public surface — orchestrator entry point + schema types.
+pub use passes::EntityType;
+pub use pipeline::{run_pipeline, PipelineResult};
+pub use schema::{AnswerKey, Category, Entry, EntryType, Status};
+
+// Smoke test for the public surface — confirms the wiring compiles
+// and `run_pipeline` is callable via a `MockOllama`. This is NOT the
+// parity probe (that lands in Chunk 3).
+#[cfg(test)]
+mod smoke;
