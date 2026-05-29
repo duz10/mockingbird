@@ -179,7 +179,7 @@ fn real_main() -> anyhow::Result<()> {
         );
         let m = SynonymMap::load(&args.synonym_map_path)?;
         println!(
-            "        loaded synonym-map v{} ({} variant->canonical entries)",
+            "        loaded synonym-map {} ({} variant->canonical entries)",
             m.version,
             m.variant_to_canonical.len()
         );
