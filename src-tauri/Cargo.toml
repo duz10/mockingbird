@@ -118,6 +118,19 @@ path = "examples/verify_wave49.rs"
 name = "smoke_iter1_ingest"
 path = "examples/smoke_iter1_ingest.rs"
 
+# Phase 1A Wave 3 / mb-2mc9 / mb-qdgn — bit-identical KG pipeline
+# parity gate. Consumes the Wave 0.5.4 seed-42 fixture under
+# docs/knowledge-graph/parity/ and asserts the graduated
+# src-tauri/src/kg/ module reproduces it via a fixture-scripted
+# OllamaDispatcher. Bin (not test / not example) for the LESSONS P2
+# reason — `cargo test --release` is blocked on this box, and the
+# probe needs to actually launch end-to-end. Auto-discovered by
+# Cargo at src/bin/kg_parity.rs, but declared here for visibility
+# alongside the other workspace one-shots.
+[[bin]]
+name = "kg_parity"
+path = "src/bin/kg_parity.rs"
+
 # Feature flags.
 #
 # `custom-protocol` is the Tauri 2 toggle that switches release builds

@@ -61,6 +61,14 @@ pub(crate) mod schema;
 pub(crate) mod schema_loader;
 pub(crate) mod synonyms;
 
+// Phase 1A Wave 3 (`mb-qdgn`) — bit-identical re-run gate against the
+// Wave 0.5.4 seed-42 fixture. Lives inside the kg module so it can
+// drive `OllamaDispatcher` + `Schema` + `run_pipeline` without
+// widening the D6 public surface beyond one new function
+// (`run_parity_probe`, re-exported below). Consumed by the
+// `[[bin]] kg_parity` shim at `src/bin/kg_parity.rs`.
+pub(crate) mod parity;
+
 // Embeddings dispatcher graduated per binding parameter A1 — preserved
 // for entity disambiguation (NOT classification). Wired but not consumed
 // in 1A; the `dead_code` allow is the honest signal that the trait is
@@ -73,6 +81,12 @@ pub(crate) mod embeddings;
 pub use passes::EntityType;
 pub use pipeline::{run_pipeline, PipelineResult};
 pub use schema::{AnswerKey, Category, Entry, EntryType, Status};
+
+// Wave 3 (`mb-qdgn`) — narrow public re-export for the `kg_parity`
+// binary shim. Returns a process exit code; everything else (the
+// FixtureDispatcher, fixture types, schema-driven prompt resolution)
+// stays `pub(crate)` per D6.
+pub use parity::run_parity_probe;
 
 // Smoke test for the public surface — confirms the wiring compiles
 // and `run_pipeline` is callable via a `MockOllama`. This is NOT the
