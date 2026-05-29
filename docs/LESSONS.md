@@ -200,6 +200,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-29 | `[ADR 0049 Wave 0.5.1 / mb-xmgs + mb-4xtd]` | Date hard-gate prompt empirically tuned for qwen2.5:3b does NOT transfer to qwen2.5:7b; same SCHEMA, same prompts, same corpus produces 4 + 5 invented dates on 7b at two seeds (vs 0 on 3b). 7b is more confident-by-default and the prompt's null-bias is empirically insufficient to overcome its prior on borderline temporal anchors (vague future, past-tense, multi-segment misassignment, pure fabrication). Operational lesson: parity-gate on the OLD model before changing the model — it cleanly isolates refactor-regression from model-regression. v1 implication: any model substitution in a schema-driven pipeline needs empirical re-baselining of trust gates; SCHEMA portability is necessary-but-not-sufficient because prompts are model-tuned even when they look universal. Move 1 still delivered 3/4 architectural-lift success-criteria simultaneously (+14.2 / +10.7 / +26.6 on category/type/clean-single) — quality lift and trust regression coexist on the same Pareto frontier |
 | 2026-05-29 | `[ADR 0048 Wave 3.3 / mb-57a1]` | Swapping the primary judge from `llama3.1:8b` to `gemma2:9b` inverts the disagreement direction on Gate 3 without closing the gap (Wave 3.2 4/7 → Wave 3.3 5/9; same three personas, primary=Equivalent/cross=NotEquivalent → primary=NotEquivalent/cross=Equivalent). Tag-collapse metric moves 81.8% → 38.2% on the SAME data — a 43-pt judge-dependent gap. Borderline observational set (added this wave) shows the pattern crisply: judges agree on `tokenization`/`specificity`/`domain-overlap`/`person-specific` (the clear dimensions, 4/4 perfect for gemma2) and disagree on `coreference` + `abstraction-level` (the genuinely-fuzzy dimensions, 0/2 for gemma2). The structural finding: LLM-judge tag-equivalence on a corpus with this much surface-token variation is more ambiguous than the inter-rater reliability of different judge families supports. Two consecutive Gate 3 STOPs with inverted direction is the signal that the failing gate is correctly identifying a methodology problem the patches under consideration (judge swap, prompt tune, threshold loosen) can't reach. Path forward: replace LLM-judge tag metric with deterministic exact-match + Jaccard (option E in wave-3-results.md) — honors AGENTS.md §6 "if something is hard to verify, that's the bug." Requires ADR 0048 §G5 amendment; not Bernard's call autonomously |
 | 2026-05-29 | `[ADR 0048 Wave 3.2 / mb-57a1]` | JVP Gate 3 STOP: llama3.1:8b is more permissive than gemma2:9b on tag-equivalence on the real corpus, while passing Gate 1 (unambiguous calibration) cleanly at 91.7%. Calibration sets of unambiguous pairs can't surface this skew — Gate 3 (cross-judge on real-corpus 10% sample) is the gate that catches it; the 5-gate JVP design is load-bearing because each gate covers a different failure mode. Calibration-fairness sub-finding: every cal pair's vocabulary must be disjoint from the judge prompt's in-context examples (cal-eq-001 v1 violated this; v2 fix in commit 7f8ff1c). PCRP-mislabel sub-finding: PCRP prose's literal claims ("hallucinated dates") must be cross-walked vs. structured output before being treated as fact; the themes are the durable signal, surface words are not |
 | 2026-05-28 | `[phase-0-kg-wave-5 / mb-ojm5]`  | Strict IAP rejects every iteration on small local models — see PINNED P9 |
@@ -256,6 +257,55 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-29 [ADR 0049 Wave 0.5.1 / mb-xmgs + mb-4xtd] Prompt hard-gates empirically tuned on a small model do NOT transfer to a larger model in the same family
+
+- **Context:** ADR 0048 Phase 0 spent Wave 5 (5 IAP iterations) empirically
+  tuning the `extract` prompt against `qwen2.5:3b-instruct-q4_K_M`. Final
+  Phase 0 scorecard: `invented_dates_count = 0` (hard-gate PASS) on the
+  32-fixture corpus across two seeds.
+- **Finding:** the same SCHEMA.md / same prompts / same corpus on
+  `qwen2.5:7b-instruct-q4_K_M` at seed 42 produced **4** invented dates,
+  and at seed 137 produced **5** — a consistent, reproducible hard-gate
+  breach on the larger sibling model. Failure modes were not random;
+  they clustered on four specific dictation pathologies the 3b prompt
+  was implicitly tuned around: vague future references ("next
+  one-on-one" → next Monday), past-tense temporal anchors ("dinner
+  Friday" → next Friday), multi-segment date misassignment, and pure
+  fabrication with no anchor.
+- **Why it happened:** the date hard-gate prompt language tells the
+  model "emit null when the date is ambiguous, future-vague, or
+  past-tense". A 3B model is conservative-by-default and over-emits
+  null — the prompt's null-bias works WITH the model's natural prior.
+  A 7B model is more confident-by-default and the prompt's null-bias
+  is empirically insufficient to overcome its prior on the same
+  borderline cases. The prompt was never "correct"; it was *calibrated*
+  for one specific model's prior.
+- **Implication for the v1 charter (ADR 0049):** ANY model substitution
+  in a schema-driven pipeline must include an empirical re-baselining of
+  the trust gates against the new model. SCHEMA.md being portable is
+  necessary-but-not-sufficient; the prompts themselves are *model-tuned*
+  artifacts even when they look universal. Treat per-model trust-gate
+  empirical proof as a release-blocking artifact, not a courtesy run.
+- **Operational lesson:** the parity gate (byte-identical structured
+  outputs on the OLD model) successfully isolates "is this a refactor
+  regression" from "is this a model regression" — without it the 7b
+  breach could have been blamed on the SCHEMA refactor and a couple
+  iterations burned chasing a phantom bug. Always parity-gate on the
+  *original* model before changing the model.
+- **Numbers worth pinning:** Move 1 alone (SCHEMA refactor + 3b→7b)
+  delivered 3/4 success-criteria architectural lifts simultaneously
+  with the hard-gate regression. Category +14.2pts, entry-type +10.7pts,
+  clean-single +26.6pts (all clearing the +10pt bar from ADR 0049). The
+  quality lift is REAL; the trust regression is also REAL. They live on
+  the same Pareto frontier — Bernard's recommendation to Dustin in
+  `mb-4xtd` is option A (prompt-tune the hard-gate against 7b's prior),
+  but option B (revert to 3b for v1) remains defensible if the
+  prompt-tuning sub-iterations don't land within 3 attempts.
+- **Beads:** `mb-xmgs` (0.5.1 in_progress), `mb-4xtd` (HALT escalation,
+  blocks 0.5.2-0.5.6).
 
 ---
 

@@ -56,22 +56,52 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**KG Phase 0.5 + v1 architectural pivot — ADR 0049 Proposed, Wave 0.5.0 sealed.**
+**KG Phase 0.5 + v1 architectural pivot — ADR 0049 Proposed, Wave 0.5.1 HALTED on hard-gate breach.**
 
 Epic `mb-symi` (P1). Charter at `docs/adr/0049-knowledge-graph-phase-0-5-and-v1-architectural-pivot.md`.
-Phase 0 (ADR 0048) measured a structural ceiling on qwen2.5:3b prompt-only;
-ADR 0049 charters four architectural moves on the sandbox (SCHEMA.md portable
-contract, embeddings classifier, closed canonical tag vocabulary, entity
-extraction probe) on default `qwen2.5:7b-instruct-q4_K_M`. Six waves
-0.5.1–0.5.6. v1 GO/NO-GO at 0.5.6 with mandatory Dustin sign-off gate.
 
-Wave structure (sub-beads, ADR 0049 dependency graph in `bd`):
+### 🛑 Blocked / human input needed — `mb-4xtd` (P1 escalation)
 
-- `mb-xmgs` — Wave 0.5.1: SCHEMA.md refactor + 7b baseline + parity gate.
-- `mb-yfzy` — Wave 0.5.2: embeddings classifier (nomic-embed-text). Blocked on 0.5.1.
-- `mb-rzpd` — Wave 0.5.3: closed canonical tag vocab + new-tag-request flow. Blocked on 0.5.1.
-- `mb-o4ni` — Wave 0.5.4: entity extraction probe + entity-quality metric. Blocked on 0.5.1, 0.5.3.
-- `mb-5r1b` — Wave 0.5.5: qwen2.5:3b cross-test on pivoted architecture. Blocked on 0.5.2, 0.5.3, 0.5.4.
+**Wave 0.5.1 sealed Move 1 (SCHEMA.md refactor) with a clean parity gate,
+but the qwen2.5:7b-instruct-q4_K_M baseline breaches ADR 0048 §G3 hard
+gate: `invented_dates_count > 0` on BOTH seeds (4 at seed 42, 5 at
+seed 137; Phase 0 3b produced 0 on the same corpus + same prompts).**
+Per the Wave 0.5 autonomy contract, a hard-gate breach is an unconditional
+halt. All downstream waves (0.5.2 → 0.5.6) blocked on `mb-4xtd`. Bernard
+is not auto-proceeding; needs Dustin's pick from the three options in
+`mb-4xtd` (recommended: option A — prompt-tune the extract date hard-gate
+against 7b's higher-confidence default before resuming).
+
+**Key empirical numbers from `runs/run-7b-baseline/SCORE_SUMMARY.md`** (seed 42; sibling stability at seed 137 in `runs/run-7b-stability/`):
+
+| Metric | Phase 0 (3b) | Wave 0.5.1 (7b, SCHEMA refactor) | Δ | Bar | Verdict |
+|---|---|---|---|---|---|
+| **Invented dates (HARD GATE)** | 0 | **4** (seed 42) / **5** (seed 137) | +4 / +5 | 0 | **🛑 BREACH** |
+| Category correct | 67.3% | 81.5% | +14.2 | +10 | ✅ MEETS LIFT |
+| Entry-type correct | 78.2% | 88.9% | +10.7 | +10 | ✅ MEETS LIFT |
+| Clean single-item correct | 6.7% | 33.3% | +26.6 | +10 | ✅ MEETS LIFT |
+| Segmentation correct | 86.7% | 93.3% | +6.6 | — | ✅ holds |
+| Tag-collapse correct (G7) | 9.1% | 11.1% | +2.0 | +10 | ⚠️ Move 3 territory |
+| Junk handled correctly | 100% | 100% | 0 | 100% | ✅ holds |
+
+Stability (baseline vs stability sibling on 7b): 100% segmentation,
+98.4% category, 98.4% entry-type, 96.8% date, 84.1% tag-set exact.
+
+**Net read for Dustin:** Move 1 alone delivers 3-of-4 architectural-lift
+success-criteria metrics already — substantial validation of the pivot.
+The regression is narrowly localized to the date hard-gate prompt, which
+was empirically tuned in Phase 0 specifically for 3b and is insufficient
+for 7b's higher-confidence default on vague/past-tense temporal anchors
+(see four failure cases enumerated in `bd show mb-4xtd`).
+
+### Wave structure (sub-beads, ADR 0049 dependency graph in `bd`)
+
+- `mb-xmgs` ◐ — Wave 0.5.1: SCHEMA.md refactor + 7b baseline + parity gate. **Move 1 SHIPPED + parity PASS + 7b baseline scored; bead remains in_progress pending resolution of `mb-4xtd`.**
+- `mb-4xtd` ○ — **HALT escalation**: 7b hard-gate breach. Blocks 0.5.2-0.5.6.
+- `mb-yfzy` — Wave 0.5.2: embeddings classifier (nomic-embed-text). Blocked on `mb-4xtd` + 0.5.1.
+- `mb-rzpd` — Wave 0.5.3: closed canonical tag vocab + new-tag-request flow. Blocked on `mb-4xtd` + 0.5.1.
+- `mb-o4ni` — Wave 0.5.4: entity extraction probe + entity-quality metric. Blocked on `mb-4xtd` + 0.5.1, 0.5.3.
+- `mb-5r1b` — Wave 0.5.5: qwen2.5:3b cross-test on pivoted architecture. Blocked on `mb-4xtd` + 0.5.2, 0.5.3, 0.5.4.
 - `mb-qogz` — Wave 0.5.6: REPORT.md + GO/NO-GO + ADR 0049 Accepted. **HALT BEFORE THIS** — Dustin reviews 0.5.1–0.5.5 evidence on disk first.
 
 Success criteria (ADR 0049): ≥ 3 of {category, entry-type, tag-collapse,
