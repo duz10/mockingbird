@@ -564,6 +564,7 @@ mod tests {
             per_dictation,
             stability_vs: None,
             stability: None,
+            tag_collapse: None,
         }
     }
 

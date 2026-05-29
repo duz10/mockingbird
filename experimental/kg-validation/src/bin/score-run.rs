@@ -1,15 +1,20 @@
 //! `score-run` — Phase 0 scoring CLI.
 //!
 //! Reads a `runs/<run-id>/` directory (produced by `run-corpus`),
-//! scores it against the corpus answer keys, runs the Judge
-//! Validation Protocol, runs the Persona Cross-Reference Pass, and
-//! writes:
+//! scores it against the corpus answer keys per ADR 0048 §G7
+//! (deterministic tag-collapse via synonym map; no LLM judge),
+//! runs the Persona Cross-Reference Pass, and writes:
 //!
 //! - `runs/<run-id>/SCORE.json` — full [`ScoreReport`]
-//! - `runs/<run-id>/JUDGE_VALIDATION.json` — [`JvpReport`]
 //! - `runs/<run-id>/PERSONA_REVIEW.md` — PCRP output
 //! - `runs/<run-id>/SCORE_SUMMARY.md` — human-readable per-metric
-//!   table with pass/fail vs. spec §8.4
+//!   table with pass/fail vs. spec §8.4 + top-10 tag near-misses
+//!
+//! The Judge Validation Protocol (`JUDGE_VALIDATION.json`) is NOT
+//! produced — tag-collapse no longer goes through an LLM judge, so
+//! there is nothing to validate. The JVP machinery in
+//! `src/scoring/judge_validation.rs` is preserved for any future
+//! LLM-judged metric.
 //!
 //! Hand-rolled flag parsing, same YAGNI logic as `run-corpus`.
 
@@ -19,18 +24,14 @@ use std::process::ExitCode;
 
 use kg_validation::ollama::{GenerateOptions, OllamaClient};
 use kg_validation::schema::AnswerKey;
-use kg_validation::scoring::judge_validation::{
-    load_calibration_set, run_jvp, JvpConfig, JvpOverall, JvpReport,
-};
-use kg_validation::scoring::metrics::{
-    compute_stability, score_run, RecordedJudgeCall, ScoreReport, TagJudgeContext,
-};
+use kg_validation::scoring::metrics::{compute_stability, score_run, ScoreReport};
 use kg_validation::scoring::persona_review::{
     load_persona_notes, render_markdown, run_pcrp, select_samples, PcrpConfig,
 };
+use kg_validation::scoring::tag_collapse::{SynonymMap, TagCollapseScore};
 
 const HELP: &str = "\
-score-run — Phase 0 scoring CLI for the Mockingbird Knowledge Graph.
+score-run - Phase 0 scoring CLI for the Mockingbird Knowledge Graph.
 
 USAGE:
   score-run --run-dir <path> [FLAGS]
@@ -40,16 +41,21 @@ REQUIRED:
 
 OPTIONAL:
   --corpus-dir <path>              default ./corpus
-  --calibration-set <path>         default judge-calibration/tag-equivalence.json
-  --judge-model <name>             default gemma2:9b (swapped from llama3.1:8b on 2026-05-29 per Wave 3.2 Gate 3 finding; ADR 0048 G5)
-  --cross-judge-model <name>       default llama3.1:8b-instruct-q4_K_M (rotated to cross-check role; Gate 3 demotes to WARN if unpulled)
-  --persona-review-model <name>    default llama3.1:8b-instruct-q4_K_M (PCRP reviewer keeps llama3.1; it judges the structured output, not tag equivalence)
-  --judge-seed <int>               default 42
+  --synonym-map <path>             default judge-calibration/synonym-map.json
+                                   (ADR 0048 G7; deterministic tag-collapse)
+  --persona-review-model <name>    default llama3.1:8b-instruct-q4_K_M
+  --seed <int>                     default 42 (PCRP determinism)
   --ollama-url <url>               default http://localhost:11434
-  --stability-vs <run-id>          optional sibling run for §8.5 comparison
-  --skip-jvp                       dev only — production runs MUST NOT use
-  --skip-pcrp                      dev only — production runs MUST NOT use
+  --stability-vs <run-id>          optional sibling run for spec 8.5 comparison
+  --skip-pcrp                      dev only - production runs MUST NOT use
+  --skip-tag-collapse              dev only - skip synonym-map scoring
+                                   (e.g. when iterating structural metrics only)
   --help                           print this and exit
+
+NOTE: Pre-G7 flags --judge-model, --cross-judge-model, --judge-seed,
+--calibration-set, --skip-jvp are no longer accepted. Tag-collapse is
+deterministic; JVP architecture is preserved in source for future
+LLM-judged metrics but is not invoked.
 ";
 
 fn main() -> ExitCode {
@@ -65,36 +71,26 @@ fn main() -> ExitCode {
 struct Args {
     run_dir: PathBuf,
     corpus_dir: PathBuf,
-    calibration_path: PathBuf,
-    judge_model: String,
-    cross_judge_model: Option<String>,
+    synonym_map_path: PathBuf,
     persona_review_model: String,
-    judge_seed: i64,
+    seed: i64,
     ollama_url: String,
     stability_vs: Option<String>,
-    skip_jvp: bool,
     skip_pcrp: bool,
+    skip_tag_collapse: bool,
 }
 
 fn parse_args() -> anyhow::Result<Args> {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let mut run_dir: Option<PathBuf> = None;
     let mut corpus_dir = PathBuf::from("corpus");
-    let mut calibration_path = PathBuf::from("judge-calibration").join("tag-equivalence.json");
-    // Wave 3.3 (2026-05-29): primary swapped to gemma2:9b on the back
-    // of Wave 3.2's Gate 3 STOP (llama3.1:8b proved more permissive on
-    // equivalence than gemma2:9b on the real corpus; gemma2:9b is the
-    // more discriminating judge). llama3.1 rotated to the cross-check
-    // slot. PCRP reviewer stays on llama3.1 — that role grades
-    // structured-output quality vs. persona notes, not tag equivalence.
-    let mut judge_model = "gemma2:9b".to_string();
-    let mut cross_judge_model: Option<String> = Some("llama3.1:8b-instruct-q4_K_M".to_string());
+    let mut synonym_map_path = PathBuf::from("judge-calibration").join("synonym-map.json");
     let mut persona_review_model = "llama3.1:8b-instruct-q4_K_M".to_string();
-    let mut judge_seed: i64 = 42;
+    let mut seed: i64 = 42;
     let mut ollama_url = "http://localhost:11434".to_string();
     let mut stability_vs: Option<String> = None;
-    let mut skip_jvp = false;
     let mut skip_pcrp = false;
+    let mut skip_tag_collapse = false;
 
     let mut i = 0;
     while i < argv.len() {
@@ -104,24 +100,30 @@ fn parse_args() -> anyhow::Result<Args> {
                 println!("{HELP}");
                 std::process::exit(0);
             }
-            "--skip-jvp" => skip_jvp = true,
             "--skip-pcrp" => skip_pcrp = true,
+            "--skip-tag-collapse" => skip_tag_collapse = true,
             "--run-dir" => run_dir = Some(PathBuf::from(take(&argv, &mut i, arg)?)),
             "--corpus-dir" => corpus_dir = PathBuf::from(take(&argv, &mut i, arg)?),
-            "--calibration-set" => calibration_path = PathBuf::from(take(&argv, &mut i, arg)?),
-            "--judge-model" => judge_model = take(&argv, &mut i, arg)?,
-            "--cross-judge-model" => {
-                let v = take(&argv, &mut i, arg)?;
-                cross_judge_model = if v == "none" { None } else { Some(v) };
-            }
+            "--synonym-map" => synonym_map_path = PathBuf::from(take(&argv, &mut i, arg)?),
             "--persona-review-model" => persona_review_model = take(&argv, &mut i, arg)?,
-            "--judge-seed" => {
-                judge_seed = take(&argv, &mut i, arg)?
+            "--seed" => {
+                seed = take(&argv, &mut i, arg)?
                     .parse()
-                    .map_err(|e| anyhow::anyhow!("--judge-seed must be int: {e}"))?;
+                    .map_err(|e| anyhow::anyhow!("--seed must be int: {e}"))?;
             }
             "--ollama-url" => ollama_url = take(&argv, &mut i, arg)?,
             "--stability-vs" => stability_vs = Some(take(&argv, &mut i, arg)?),
+            // Pre-G7 flag deprecation: hard-fail with guidance so old
+            // scripts don't silently get the wrong code path.
+            "--judge-model"
+            | "--cross-judge-model"
+            | "--judge-seed"
+            | "--calibration-set"
+            | "--skip-jvp" => {
+                anyhow::bail!(
+                    "flag {arg} was removed in ADR 0048 G7. Tag-collapse is now deterministic via --synonym-map. See HELP."
+                );
+            }
             unknown => anyhow::bail!("unknown flag: {unknown}\n\n{HELP}"),
         }
         i += 1;
@@ -131,15 +133,13 @@ fn parse_args() -> anyhow::Result<Args> {
     Ok(Args {
         run_dir,
         corpus_dir,
-        calibration_path,
-        judge_model,
-        cross_judge_model,
+        synonym_map_path,
         persona_review_model,
-        judge_seed,
+        seed,
         ollama_url,
         stability_vs,
-        skip_jvp,
         skip_pcrp,
+        skip_tag_collapse,
     })
 }
 
@@ -160,42 +160,33 @@ fn real_main() -> anyhow::Result<()> {
     println!("run_dir              : {}", args.run_dir.display());
     println!("structured_dir       : {}", structured_dir.display());
     println!("answer_keys_dir      : {}", answer_keys_dir.display());
-    println!("calibration_set      : {}", args.calibration_path.display());
-    println!("judge_model          : {}", args.judge_model);
-    println!(
-        "cross_judge_model    : {}",
-        args.cross_judge_model.as_deref().unwrap_or("(none)")
-    );
+    println!("synonym_map          : {}", args.synonym_map_path.display());
     println!("persona_review_model : {}", args.persona_review_model);
-    println!("judge_seed           : {}", args.judge_seed);
+    println!("seed                 : {}", args.seed);
     println!("ollama_url           : {}", args.ollama_url);
-    println!("skip_jvp             : {}", args.skip_jvp);
     println!("skip_pcrp            : {}", args.skip_pcrp);
+    println!("skip_tag_collapse    : {}", args.skip_tag_collapse);
     println!();
 
-    let judge_options = GenerateOptions {
-        temperature: 0.2,
-        seed: Some(args.judge_seed),
-        num_ctx: 4096,
-    };
-
-    let primary_judge = OllamaClient::with_base_url(args.ollama_url.clone());
-    let cross_judge = OllamaClient::with_base_url(args.ollama_url.clone());
-
-    // ── 1. Score the run ──────────────────────────────────────────
-    let verdict_sink: std::cell::RefCell<Vec<RecordedJudgeCall>> =
-        std::cell::RefCell::new(Vec::new());
-    let tag_ctx = if args.skip_jvp {
+    // ── 1. Load synonym map (unless --skip-tag-collapse) ─────────
+    let synonym_map = if args.skip_tag_collapse {
+        println!("[1/3] tag-collapse skipped (--skip-tag-collapse).");
         None
     } else {
-        Some(TagJudgeContext {
-            dispatcher: &primary_judge,
-            model: &args.judge_model,
-            options: &judge_options,
-            verdict_sink: Some(&verdict_sink),
-        })
+        println!(
+            "[1/3] loading synonym map from {} ...",
+            args.synonym_map_path.display()
+        );
+        let m = SynonymMap::load(&args.synonym_map_path)?;
+        println!(
+            "        loaded synonym-map v{} ({} variant->canonical entries)",
+            m.version,
+            m.variant_to_canonical.len()
+        );
+        Some(m)
     };
 
+    // ── 2. Score the run ─────────────────────────────────────────
     let run_id = args
         .run_dir
         .file_name()
@@ -203,10 +194,15 @@ fn real_main() -> anyhow::Result<()> {
         .unwrap_or("run")
         .to_string();
 
-    println!("[1/4] scoring run ...");
-    let mut score = score_run(&run_id, &structured_dir, &answer_keys_dir, tag_ctx)?;
+    println!("[2/3] scoring run ...");
+    let mut score = score_run(
+        &run_id,
+        &structured_dir,
+        &answer_keys_dir,
+        synonym_map.as_ref(),
+    )?;
 
-    // ── 2. Stability (optional) ───────────────────────────────────
+    // ── Stability (optional) ──────────────────────────────────────
     if let Some(other) = args.stability_vs.as_deref() {
         let other_structured = args
             .run_dir
@@ -215,7 +211,7 @@ fn real_main() -> anyhow::Result<()> {
             .join(other)
             .join("structured");
         println!(
-            "[1.5/4] stability vs {other} ({}) ...",
+            "        stability vs {other} ({}) ...",
             other_structured.display()
         );
         let s = compute_stability(&structured_dir, &other_structured, other)?;
@@ -228,35 +224,15 @@ fn real_main() -> anyhow::Result<()> {
     std::fs::write(&score_path, serde_json::to_string_pretty(&score)?)?;
     println!("        wrote {}", score_path.display());
 
-    // ── 3. JVP ────────────────────────────────────────────────────
-    let jvp_report = if args.skip_jvp {
-        println!("[2/4] JVP skipped (--skip-jvp). Tag metric and JUDGE_VALIDATION omitted.");
-        None
-    } else {
-        println!("[2/4] running JVP (5 gates) ...");
-        let calibration = load_calibration_set(&args.calibration_path)?;
-        let cross_judge_opt = args.cross_judge_model.as_ref().map(|_| &cross_judge);
-        let recorded = verdict_sink.borrow().clone();
-        let cfg = JvpConfig {
-            run_id: run_id.clone(),
-            primary_judge: &primary_judge,
-            primary_judge_model: args.judge_model.clone(),
-            cross_judge: cross_judge_opt,
-            cross_judge_model: args.cross_judge_model.clone(),
-            calibration,
-            judge_options: judge_options.clone(),
-            recorded_verdicts: recorded,
-        };
-        let report = run_jvp(cfg);
-        let jvp_path = args.run_dir.join("JUDGE_VALIDATION.json");
-        std::fs::write(&jvp_path, serde_json::to_string_pretty(&report)?)?;
-        println!("        wrote {}", jvp_path.display());
-        Some(report)
-    };
-
-    // ── 4. PCRP ───────────────────────────────────────────────────
+    // ── 3. PCRP ──────────────────────────────────────────────────
     if !args.skip_pcrp {
-        println!("[3/4] running PCRP ...");
+        println!("[3/3] running PCRP ...");
+        let primary = OllamaClient::with_base_url(args.ollama_url.clone());
+        let pcrp_options = GenerateOptions {
+            temperature: 0.2,
+            seed: Some(args.seed),
+            num_ctx: 4096,
+        };
         let answer_keys = load_answer_keys(&answer_keys_dir)?;
         let raw_dictations = load_raw_dictations(&dictations_dir)?;
         let pipeline_outputs = load_pipeline_output_strings(&structured_dir)?;
@@ -275,11 +251,11 @@ fn real_main() -> anyhow::Result<()> {
         let cfg = PcrpConfig {
             run_id: run_id.clone(),
             reviewer_model: args.persona_review_model.clone(),
-            options: judge_options.clone(),
+            options: pcrp_options,
             persona_notes,
             samples,
         };
-        let pcrp_report = run_pcrp(&primary_judge, cfg)?;
+        let pcrp_report = run_pcrp(&primary, cfg)?;
         let md = render_markdown(&pcrp_report);
         let pcrp_path = args.run_dir.join("PERSONA_REVIEW.md");
         std::fs::write(&pcrp_path, md)?;
@@ -290,26 +266,18 @@ fn real_main() -> anyhow::Result<()> {
             pcrp_report.trust_building_wins_count
         );
     } else {
-        println!("[3/4] PCRP skipped (--skip-pcrp).");
+        println!("[3/3] PCRP skipped (--skip-pcrp).");
     }
 
-    // ── 5. SCORE_SUMMARY.md ───────────────────────────────────────
-    println!("[4/4] writing SCORE_SUMMARY.md ...");
-    let summary_md = render_score_summary(&score, jvp_report.as_ref());
+    // ── 4. SCORE_SUMMARY.md ──────────────────────────────────────
+    println!("writing SCORE_SUMMARY.md ...");
+    let summary_md = render_score_summary(&score);
     let summary_path = args.run_dir.join("SCORE_SUMMARY.md");
     std::fs::write(&summary_path, &summary_md)?;
     println!("        wrote {}", summary_path.display());
     println!();
     println!("{summary_md}");
 
-    if let Some(report) = jvp_report.as_ref() {
-        if report.overall == JvpOverall::Halt {
-            eprintln!(
-                "JVP HALT: judge validation failed. Tag metric is INVALID. See JUDGE_VALIDATION.json."
-            );
-            return Err(anyhow::anyhow!("JVP halt"));
-        }
-    }
     Ok(())
 }
 
@@ -373,9 +341,9 @@ fn count_personas(samples: &[kg_validation::scoring::persona_review::PcrpSample]
     s.len()
 }
 
-fn render_score_summary(score: &ScoreReport, jvp: Option<&JvpReport>) -> String {
+fn render_score_summary(score: &ScoreReport) -> String {
     let mut s = String::new();
-    s.push_str(&format!("# SCORE_SUMMARY — `{}`\n\n", score.run_id));
+    s.push_str(&format!("# SCORE_SUMMARY - `{}`\n\n", score.run_id));
     s.push_str(&format!(
         "- total dictations: **{}**\n",
         score.total_dictations
@@ -393,7 +361,7 @@ fn render_score_summary(score: &ScoreReport, jvp: Option<&JvpReport>) -> String 
         score.match_algorithm
     ));
 
-    s.push_str("## Per-metric vs. spec §8.4 thresholds\n\n");
+    s.push_str("## Per-metric vs. spec 8.4 thresholds\n\n");
     s.push_str("| Metric | Result | Threshold | Verdict |\n|---|---|---|---|\n");
     let m = &score.per_metric;
     s.push_str(&row(
@@ -432,13 +400,13 @@ fn render_score_summary(score: &ScoreReport, jvp: Option<&JvpReport>) -> String 
         "| **Invented dates count (HARD GATE)** | {} | **0** | {} |\n",
         m.invented_dates_count,
         if m.invented_dates_count == 0 {
-            "✅ PASS"
+            "PASS"
         } else {
-            "❌ FAIL"
+            "FAIL"
         }
     ));
     s.push_str(&row(
-        "Tag-variant collapse correct",
+        "Tag-variant collapse correct (G7)",
         &m.tag_variant_collapse_correct.percentage,
         m.tag_variant_collapse_correct.numerator,
         m.tag_variant_collapse_correct.denominator,
@@ -454,51 +422,13 @@ fn render_score_summary(score: &ScoreReport, jvp: Option<&JvpReport>) -> String 
         false,
     ));
 
-    if let Some(jvp) = jvp {
-        s.push_str("\n## JVP gates (ADR 0048 §G5)\n\n");
-        s.push_str(&format!("- overall: **{:?}**\n", jvp.overall));
-        s.push_str(&format!(
-            "- Gate 1 (calibration): {:?} — {}\n",
-            jvp.gate1_calibration.outcome, jvp.gate1_calibration.detail
-        ));
-        // Observational companion — never gates, always reports.
-        s.push_str(&format!(
-            "- Gate 1 borderline (observational): {} ({}/{}) — {}\n",
-            format_args!("{:.1}%", jvp.gate1_borderline.percentage),
-            jvp.gate1_borderline.numerator,
-            jvp.gate1_borderline.denominator,
-            jvp.gate1_borderline.detail
-        ));
-        if !jvp.gate1_borderline.per_dimension.is_empty() {
-            s.push_str("  - per dimension:\n");
-            for d in &jvp.gate1_borderline.per_dimension {
-                s.push_str(&format!(
-                    "    - `{}`: {}/{} ({:.1}%)\n",
-                    d.dimension, d.numerator, d.denominator, d.percentage
-                ));
-            }
-        }
-        s.push_str(&format!(
-            "- Gate 2 (reasoning audit): {:?} — {}\n",
-            jvp.gate2_reasoning_audit.outcome, jvp.gate2_reasoning_audit.detail
-        ));
-        s.push_str(&format!(
-            "- Gate 3 (cross-judge): {:?} — {}\n",
-            jvp.gate3_cross_judge.outcome, jvp.gate3_cross_judge.detail
-        ));
-        s.push_str(&format!(
-            "- Gate 4 (distribution): {:?} — {}\n",
-            jvp.gate4_distribution.outcome, jvp.gate4_distribution.detail
-        ));
-        s.push_str(&format!(
-            "- Gate 5 (determinism): {:?} — {}\n",
-            jvp.gate5_determinism.outcome, jvp.gate5_determinism.detail
-        ));
+    if let Some(tc) = score.tag_collapse.as_ref() {
+        s.push_str(&render_tag_collapse_section(tc));
     }
 
     if let Some(stab) = score.stability.as_ref() {
         s.push_str("\n## Stability vs. ");
-        s.push_str(&format!("`{}` (spec §8.5)\n\n", stab.vs_run_id));
+        s.push_str(&format!("`{}` (spec 8.5)\n\n", stab.vs_run_id));
         s.push_str(&format!(
             "- compared dictations: {} ({} entries)\n",
             stab.total_compared_dictations, stab.total_compared_entries
@@ -537,13 +467,68 @@ fn render_score_summary(score: &ScoreReport, jvp: Option<&JvpReport>) -> String 
     s
 }
 
+fn render_tag_collapse_section(tc: &TagCollapseScore) -> String {
+    let mut s = String::new();
+    s.push_str("\n## Tag-collapse detail (ADR 0048 G7)\n\n");
+    s.push_str(&format!(
+        "- synonym-map version: `{}`\n",
+        tc.synonym_map_version
+    ));
+    s.push_str(&format!("- total entries scored: {}\n", tc.total_entries));
+    s.push_str("- per-threshold pass counts (observational; only 1.0 gates):\n");
+    s.push_str(&format!(
+        "  - Jaccard >= 1.00 (PRIMARY): {} ({:.1}%)\n",
+        tc.correct_at_exact,
+        tc.exact_percentage()
+    ));
+    s.push_str(&format!(
+        "  - Jaccard >= 0.80         : {} ({:.1}%)\n",
+        tc.correct_at_0_8,
+        pct(tc.correct_at_0_8, tc.total_entries)
+    ));
+    s.push_str(&format!(
+        "  - Jaccard >= 0.67         : {} ({:.1}%)\n",
+        tc.correct_at_0_67,
+        pct(tc.correct_at_0_67, tc.total_entries)
+    ));
+    s.push_str(&format!(
+        "  - Jaccard >= 0.50         : {} ({:.1}%)\n",
+        tc.correct_at_0_5,
+        pct(tc.correct_at_0_5, tc.total_entries)
+    ));
+
+    if !tc.near_miss_top.is_empty() {
+        s.push_str("\n### Top near-misses (Wave 5 iteration candidates)\n\n");
+        s.push_str("| # | Actual canonical | Expected canonical | Freq | Examples |\n|---|---|---|---|---|\n");
+        for (i, nm) in tc.near_miss_top.iter().enumerate() {
+            s.push_str(&format!(
+                "| {} | `{}` | `{}` | {} | {} |\n",
+                i + 1,
+                nm.actual_tag,
+                nm.expected_tag,
+                nm.frequency,
+                nm.example_dictation_ids.join(", ")
+            ));
+        }
+    }
+    s
+}
+
+fn pct(n: usize, d: usize) -> f64 {
+    if d == 0 {
+        0.0
+    } else {
+        100.0 * n as f64 / d as f64
+    }
+}
+
 fn row(name: &str, pct: &f64, n: usize, d: usize, threshold: f64, floor: bool) -> String {
     let verdict = if d == 0 {
-        "—"
+        "-"
     } else if *pct + 1e-9 >= threshold {
-        "✅ PASS"
+        "PASS"
     } else {
-        "❌ FAIL"
+        "FAIL"
     };
     let label = if floor {
         format!(">= {threshold:.0}%")

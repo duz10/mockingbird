@@ -1,11 +1,11 @@
-//! Per-dictation, per-metric scorer (spec §8.2).
+//! Per-dictation, per-metric scorer (spec Â§8.2).
 //!
 //! Inputs:
 //! - A directory of structured pipeline outputs (`runs/<id>/structured/*.json`)
 //! - The matching corpus answer keys (`corpus/answer-keys/*.json`)
 //! - An optional tag-equivalence judge (the LLM-mediated metric)
 //!
-//! Output: a [`ScoreReport`] that maps cleanly to spec §8.4
+//! Output: a [`ScoreReport`] that maps cleanly to spec Â§8.4
 //! thresholds and gets persisted to `runs/<run-id>/SCORE.json` plus
 //! a human-readable `SCORE_SUMMARY.md`.
 //!
@@ -13,13 +13,13 @@
 //!
 //! For each dictation we compute the per-metric ratios by walking
 //! the answer-key entries and matching them to pipeline entries
-//! **sequentially** (entry-0 ↔ entry-0, etc.). This is the simplest
+//! **sequentially** (entry-0 â†” entry-0, etc.). This is the simplest
 //! choice and is documented in `ScoreReport::match_algorithm`: a
 //! bipartite-by-similarity match would be marginally better when
 //! segment ordering disagrees, but Wave-3 baseline scoring is more
 //! valuable than scoring sophistication, and the segmenter does
 //! preserve dictation order in practice. If this becomes a
-//! systematic blindspot, swap to bipartite later — the report
+//! systematic blindspot, swap to bipartite later â€” the report
 //! field makes the choice auditable.
 //!
 //! ## Junk handling
@@ -34,10 +34,10 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use crate::ollama::{GenerateOptions, OllamaDispatcher};
 use crate::schema::{AnswerKey, Category, Entry, EntryType, ExpectedEntry};
-use crate::scoring::judge::{
-    judge_tag_equivalence, TagEquivalence, TagJudgeRequest, TagJudgeVerdict,
+use crate::scoring::judge::TagJudgeVerdict;
+use crate::scoring::tag_collapse::{
+    build_inputs_from_pairs, score_tag_collapse, SynonymMap, TagCollapseScore,
 };
 
 /// Numerator / denominator + cached percentage. Percentage is `0.0`
@@ -98,7 +98,7 @@ pub struct PerEntryScore {
     pub category_correct: bool,
     pub entry_type_correct: bool,
     /// `Some(true)` matched, `Some(false)` mismatched, `None` when both
-    /// sides absent (no opportunity to grade — does not feed the date
+    /// sides absent (no opportunity to grade â€” does not feed the date
     /// ratio).
     pub date_match: Option<bool>,
     pub date_invented: bool,
@@ -126,7 +126,7 @@ pub struct ActualEntrySnapshot {
     pub topic_tags: Vec<String>,
 }
 
-/// Optional run-pair stability data per spec §8.5.
+/// Optional run-pair stability data per spec Â§8.5.
 #[derive(Debug, Clone, Serialize)]
 pub struct StabilityReport {
     pub vs_run_id: String,
@@ -150,19 +150,29 @@ pub struct ScoreReport {
     pub per_dictation: Vec<DictationScore>,
     pub stability_vs: Option<String>,
     pub stability: Option<StabilityReport>,
+    /// Full deterministic tag-collapse detail per ADR 0048 Â§G7
+    /// (per-entry Jaccard, observational thresholds, top-10
+    /// near-miss aggregator). `None` when the synonym map was not
+    /// supplied to [`score_run`].
+    pub tag_collapse: Option<TagCollapseScore>,
 }
 
 /// Compute the score for a single run.
 ///
-/// `tag_judge` is optional: when `None`, the tag metric is not
-/// populated (its `denominator` is 0 and `percentage` is 0.0). This
-/// supports the `--skip-jvp`-style dev path where the JVP has
-/// already halted and we still want the structural scoring numbers.
-pub fn score_run<D: OllamaDispatcher>(
+/// `synonym_map` is optional: when `None`, the tag-collapse metric
+/// is not populated (its denominator is 0; the deterministic
+/// per-entry detail is `None`). When `Some`, ADR 0048 Â§G7 applies:
+/// pipeline tags are canonicalized via the map and compared against
+/// every `acceptable_topic_tag_sets[i]` via Jaccard; the entry passes
+/// iff some acceptable set reaches Jaccard 1.0 after canonicalization.
+///
+/// No `OllamaDispatcher` is required for the tag metric â€” it's a pure
+/// deterministic function of the synonym map + pipeline output.
+pub fn score_run(
     run_id: &str,
     structured_dir: &Path,
     answer_keys_dir: &Path,
-    tag_judge: Option<TagJudgeContext<'_, D>>,
+    synonym_map: Option<&SynonymMap>,
 ) -> anyhow::Result<ScoreReport> {
     let pipeline_entries = load_pipeline_entries(structured_dir)?;
     let answer_keys = load_answer_keys(answer_keys_dir)?;
@@ -189,8 +199,6 @@ pub fn score_run<D: OllamaDispatcher>(
     let mut type_n = 0usize;
     let mut type_d = 0usize;
     let mut invented_dates = 0usize;
-    let mut tag_n = 0usize;
-    let mut tag_d = 0usize;
     let mut junk_n = 0usize;
     let mut junk_d = 0usize;
 
@@ -200,7 +208,7 @@ pub fn score_run<D: OllamaDispatcher>(
         let n_expected = key.entries.len();
         let n_actual = actual.len();
 
-        // ── Junk bucket: scored independently. ────────────────────
+        // â”€â”€ Junk bucket: scored independently. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if key.is_junk_no_entry_expected {
             junk_d += 1;
             let ok = n_actual == 0;
@@ -220,17 +228,17 @@ pub fn score_run<D: OllamaDispatcher>(
             continue;
         }
 
-        // ── Clean single-item floor (~100% target). ───────────────
+        // â”€â”€ Clean single-item floor (~100% target). â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         let is_clean_single = n_expected == 1;
         let seg_ok = n_expected == n_actual;
         if is_clean_single {
             clean_single_d += 1;
-            if seg_ok && all_entry_metrics_match(&key.entries, actual, tag_judge.as_ref()) {
+            if seg_ok && all_entry_metrics_match(&key.entries, actual) {
                 clean_single_n += 1;
             }
         }
 
-        // ── Segmentation metric: only multi-item cases count. ─────
+        // â”€â”€ Segmentation metric: only multi-item cases count. â”€â”€â”€â”€â”€
         if n_expected >= 2 {
             seg_d += 1;
             if seg_ok {
@@ -238,7 +246,7 @@ pub fn score_run<D: OllamaDispatcher>(
             }
         }
 
-        // ── Per-entry: walk min(expected, actual) sequentially. ───
+        // â”€â”€ Per-entry: walk min(expected, actual) sequentially. â”€â”€â”€
         let pairs = key.entries.iter().zip(actual.iter());
         let mut per_entry: Vec<PerEntryScore> = Vec::new();
         let mut dictation_invented = 0usize;
@@ -254,7 +262,7 @@ pub fn score_run<D: OllamaDispatcher>(
                 type_n += 1;
             }
 
-            // Date: invented date is the spec §8.4 hard gate — answer
+            // Date: invented date is the spec Â§8.4 hard gate â€” answer
             // key says None but pipeline emitted Some.
             let date_invented = expected.due_iso.is_none() && actual_entry.due_iso.is_some();
             if date_invented {
@@ -267,50 +275,16 @@ pub fn score_run<D: OllamaDispatcher>(
                 _ => Some(false),
             };
 
-            // Tag metric — judge-mediated. Only counted when the
-            // judge is wired AND the answer key offers at least one
-            // acceptable set.
-            let tag_equivalent = if let Some(ref ctx) = tag_judge {
-                if expected.acceptable_topic_tag_sets.is_empty() {
-                    None
-                } else {
-                    tag_d += 1;
-                    let any_match = expected.acceptable_topic_tag_sets.iter().any(|candidate| {
-                        let req = TagJudgeRequest {
-                            tags_a: actual_entry.topic_tags.clone(),
-                            tags_b: candidate.clone(),
-                        };
-                        match judge_tag_equivalence(ctx.dispatcher, ctx.model, &req, ctx.options) {
-                            Ok(v) => {
-                                if let Some(sink) = ctx.verdict_sink {
-                                    sink.borrow_mut().push(RecordedJudgeCall {
-                                        dictation_id: id.clone(),
-                                        entry_index: per_entry.len(),
-                                        tags_a: req.tags_a.clone(),
-                                        tags_b: req.tags_b.clone(),
-                                        verdict: v.clone(),
-                                    });
-                                }
-                                v.verdict == TagEquivalence::Equivalent
-                            }
-                            Err(_) => false,
-                        }
-                    });
-                    if any_match {
-                        tag_n += 1;
-                    }
-                    Some(any_match)
-                }
-            } else {
-                None
-            };
-
+            // Tag-collapse is computed in a deterministic post-pass
+            // (see below â€” `score_tag_collapse` over all gradable
+            // pairs). Per-entry placeholder stays None here; the
+            // back-fill loop fills it in.
             per_entry.push(PerEntryScore {
                 category_correct,
                 entry_type_correct,
                 date_match,
                 date_invented,
-                tag_equivalent,
+                tag_equivalent: None,
                 expected: snapshot_expected(expected),
                 actual: snapshot_actual(actual_entry),
             });
@@ -328,6 +302,37 @@ pub fn score_run<D: OllamaDispatcher>(
         });
     }
 
+    // â”€â”€ Deterministic tag-collapse post-pass (ADR 0048 Â§G7) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Walk every (gradable, non-junk) (answer, actual) pair once,
+    // canonicalize via the synonym map, score with Jaccard, and
+    // back-fill `tag_equivalent` on the per-entry rows so downstream
+    // consumers see the per-entry pass/fail without a second walk.
+    let (tag_collapse, tag_n, tag_d) = if let Some(map) = synonym_map {
+        let inputs = build_inputs_from_pairs(&graded);
+        let score = score_tag_collapse(map, &inputs);
+        // Back-fill per_entry.tag_equivalent. Match by (id, idx).
+        let mut idx_map: HashMap<(String, usize), bool> =
+            HashMap::with_capacity(score.per_entry.len());
+        for e in &score.per_entry {
+            idx_map.insert((e.dictation_id.clone(), e.entry_idx), e.passed_at_exact);
+        }
+        for d in &mut per_dictation {
+            if d.is_junk {
+                continue;
+            }
+            for (idx, pe) in d.per_entry.iter_mut().enumerate() {
+                if let Some(p) = idx_map.get(&(d.dictation_id.clone(), idx)) {
+                    pe.tag_equivalent = Some(*p);
+                }
+            }
+        }
+        let n = score.correct_at_exact;
+        let d = score.total_entries;
+        (Some(score), n, d)
+    } else {
+        (None, 0usize, 0usize)
+    };
+
     let per_metric = PerMetric {
         clean_single_item_correct: Ratio::new(clean_single_n, clean_single_d),
         segmentation_correct: Ratio::new(seg_n, seg_d),
@@ -343,15 +348,16 @@ pub fn score_run<D: OllamaDispatcher>(
         total_dictations: answer_keys.len(),
         graded_dictations: graded.len(),
         ungradable_dictations: ungradable,
-        match_algorithm: "sequential (answer-key index ↔ pipeline index)",
+        match_algorithm: "sequential (answer-key index â†” pipeline index)",
         per_metric,
         per_dictation,
         stability_vs: None,
         stability: None,
+        tag_collapse,
     })
 }
 
-/// Compute spec §8.5 stability findings: same corpus, two runs,
+/// Compute spec Â§8.5 stability findings: same corpus, two runs,
 /// agree on each metric? Match is by `dictation_id`. Per-entry
 /// comparisons are sequential, same convention as the within-run
 /// scorer.
@@ -418,20 +424,15 @@ pub fn compute_stability(
     })
 }
 
-// ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Helpers
-// ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-/// Carries the LLM judge dispatcher + model + options into the scorer.
-/// The optional `verdict_sink` records every judge call so the JVP
-/// gates can audit the run after-the-fact without re-issuing calls.
-pub struct TagJudgeContext<'a, D: OllamaDispatcher> {
-    pub dispatcher: &'a D,
-    pub model: &'a str,
-    pub options: &'a GenerateOptions,
-    pub verdict_sink: Option<&'a std::cell::RefCell<Vec<RecordedJudgeCall>>>,
-}
-
+/// Recorded judge call â€” produced when an LLM judge IS used (e.g.
+/// the preserved JVP infrastructure for future metrics). Not
+/// populated by the deterministic tag-collapse path under ADR 0048
+/// Â§G7, but the type stays here so [`crate::scoring::judge_validation`]
+/// retains its existing import.
 #[derive(Debug, Clone, Serialize)]
 pub struct RecordedJudgeCall {
     pub dictation_id: String,
@@ -459,13 +460,12 @@ fn snapshot_actual(e: &Entry) -> ActualEntrySnapshot {
     }
 }
 
-/// Used by the clean-single-item floor — a clean single is "correct"
-/// only when segmentation, category, type, and date all match.
-fn all_entry_metrics_match<D: OllamaDispatcher>(
-    expected: &[ExpectedEntry],
-    actual: &[Entry],
-    _judge: Option<&TagJudgeContext<'_, D>>,
-) -> bool {
+/// Used by the clean-single-item floor â€” a clean single is "correct"
+/// only when segmentation, category, type, and date all match. Tag
+/// equivalence is intentionally NOT part of the clean-single floor
+/// (matches Wave-3.1+ behaviour; tag-collapse has its own gate at
+/// spec Â§8.4 â‰¥ 80%).
+fn all_entry_metrics_match(expected: &[ExpectedEntry], actual: &[Entry]) -> bool {
     if expected.len() != actual.len() {
         return false;
     }
@@ -541,8 +541,30 @@ fn load_answer_keys(dir: &Path) -> anyhow::Result<HashMap<String, AnswerKey>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ollama::testing::MockOllama;
     use crate::schema::Status;
+
+    fn map_with_car_repair() -> SynonymMap {
+        let p = std::env::temp_dir().join(format!(
+            "kg-metrics-synmap-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::write(
+            &p,
+            r#"{
+              "version": "test-v0",
+              "schema_version": "synonym-map-v1",
+              "synonyms": [
+                {"canonical": "car-repair", "variants": ["auto", "auto-maintenance"], "rationale": "", "source": "test"}
+              ]
+            }"#,
+        )
+        .unwrap();
+        SynonymMap::load(&p).unwrap()
+    }
 
     fn tmp() -> std::path::PathBuf {
         let p = std::env::temp_dir().join(format!(
@@ -604,7 +626,7 @@ mod tests {
     }
 
     #[test]
-    fn clean_single_all_correct_no_judge() {
+    fn clean_single_all_correct_no_synonym_map() {
         let root = tmp();
         let s = root.join("structured");
         let k = root.join("keys");
@@ -634,17 +656,16 @@ mod tests {
             },
         );
 
-        let report =
-            score_run::<MockOllama>("test", &s, &k, None::<TagJudgeContext<'_, MockOllama>>)
-                .unwrap();
+        let report = score_run("test", &s, &k, None).unwrap();
         assert_eq!(report.per_metric.clean_single_item_correct.numerator, 1);
         assert_eq!(report.per_metric.clean_single_item_correct.denominator, 1);
         assert_eq!(report.per_metric.invented_dates_count, 0);
-        // No judge -> tag metric inert.
+        // No synonym map -> tag metric inert.
         assert_eq!(
             report.per_metric.tag_variant_collapse_correct.denominator,
             0
         );
+        assert!(report.tag_collapse.is_none());
     }
 
     #[test]
@@ -677,9 +698,7 @@ mod tests {
                 is_junk_no_entry_expected: false,
             },
         );
-        let report =
-            score_run::<MockOllama>("test", &s, &k, None::<TagJudgeContext<'_, MockOllama>>)
-                .unwrap();
+        let report = score_run("test", &s, &k, None).unwrap();
         assert_eq!(report.per_metric.invented_dates_count, 1);
         assert_eq!(report.per_dictation[0].invented_dates, 1);
     }
@@ -700,9 +719,7 @@ mod tests {
                 is_junk_no_entry_expected: true,
             },
         );
-        let report =
-            score_run::<MockOllama>("test", &s, &k, None::<TagJudgeContext<'_, MockOllama>>)
-                .unwrap();
+        let report = score_run("test", &s, &k, None).unwrap();
         assert_eq!(report.per_metric.junk_correct.numerator, 1);
         assert_eq!(report.per_metric.junk_correct.denominator, 1);
         // Junk does NOT contribute to clean_single or segmentation.
@@ -730,9 +747,7 @@ mod tests {
                 is_junk_no_entry_expected: true,
             },
         );
-        let report =
-            score_run::<MockOllama>("test", &s, &k, None::<TagJudgeContext<'_, MockOllama>>)
-                .unwrap();
+        let report = score_run("test", &s, &k, None).unwrap();
         assert_eq!(report.per_metric.junk_correct.numerator, 0);
         assert_eq!(report.per_metric.junk_correct.denominator, 1);
     }
@@ -742,7 +757,7 @@ mod tests {
         let root = tmp();
         let s = root.join("structured");
         let k = root.join("keys");
-        // Multi-item key — counts.
+        // Multi-item key â€” counts.
         write_structured(
             &s,
             "m1",
@@ -764,7 +779,7 @@ mod tests {
                 is_junk_no_entry_expected: false,
             },
         );
-        // Single-item key — does NOT count toward segmentation_correct.
+        // Single-item key â€” does NOT count toward segmentation_correct.
         write_structured(
             &s,
             "s1",
@@ -786,9 +801,7 @@ mod tests {
             },
         );
 
-        let report =
-            score_run::<MockOllama>("test", &s, &k, None::<TagJudgeContext<'_, MockOllama>>)
-                .unwrap();
+        let report = score_run("test", &s, &k, None).unwrap();
         assert_eq!(report.per_metric.segmentation_correct.denominator, 1);
         assert_eq!(report.per_metric.segmentation_correct.numerator, 1);
     }
@@ -824,26 +837,28 @@ mod tests {
             },
         );
 
-        let mock = MockOllama::new().default_response(
-            "REASONING: both name the same car repair note for filing purposes\nVERDICT: equivalent",
-        );
-        let opts = GenerateOptions::default();
-        let sink = std::cell::RefCell::new(Vec::new());
-        let ctx = TagJudgeContext {
-            dispatcher: &mock,
-            model: "judge",
-            options: &opts,
-            verdict_sink: Some(&sink),
-        };
-        let report = score_run("test", &s, &k, Some(ctx)).unwrap();
+        // ADR 0048 §G7: deterministic synonym-map metric. `auto`
+        // and `auto-maintenance` both collapse to `car-repair`, so
+        // the actual canonical set `{car-repair}` matches the
+        // acceptable canonical set `{car-repair}` at Jaccard 1.0.
+        let map = map_with_car_repair();
+        let report = score_run("test", &s, &k, Some(&map)).unwrap();
 
         assert_eq!(report.per_metric.tag_variant_collapse_correct.numerator, 1);
         assert_eq!(
             report.per_metric.tag_variant_collapse_correct.denominator,
             1
         );
-        // Sink recorded the call.
-        assert_eq!(sink.borrow().len(), 1);
+        // The full tag-collapse detail is attached.
+        let tc = report
+            .tag_collapse
+            .as_ref()
+            .expect("tag_collapse populated when map supplied");
+        assert_eq!(tc.correct_at_exact, 1);
+        assert_eq!(tc.synonym_map_version, "test-v0");
+        // The per-entry tag_equivalent was back-filled.
+        let pe = &report.per_dictation[0].per_entry[0];
+        assert_eq!(pe.tag_equivalent, Some(true));
     }
 
     #[test]
