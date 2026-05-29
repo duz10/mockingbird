@@ -163,6 +163,35 @@ That way nothing in the prompt body looks like stale charter work to
 the session-start triage. Long embedded specs invite false-positive
 stale-prompt detections even in fresh sessions.
 
+### P9. Strict-no-regression IAP cannot ratchet on small local models
+
+Wave 5 Phase 0 KG (`mb-ojm5`): 0 of 5 prompt iterations accepted under a
+strict no-per-metric-regression Iteration Acceptance Protocol. Every
+prompt change — including iter 5's extract-only date-handling tweak
+with zero tag/category/type language in the diff — caused global
+joint-distribution shift in pipeline output. Iter 5 dropped tag-collapse
+1.54pp + entry-type 0.82pp + lifted PCRP +2 despite the diff touching
+none of those passes. The small-model output distribution is more
+entangled across passes than a "edit one thing, observe one effect"
+mental model assumes.
+
+**Implication for any future Wiggum-style work on local models:**
+
+- **Strict IAP** (no-per-metric-regression) is RIGHT for **trust-critical
+  autonomous gates** — date hallucination, secure-input detection,
+  raw-data immutability, clipboard save/restore, anything where one
+  regression silently breaks user trust.
+- **Strict IAP is WRONG for quality-tuning loops** — the joint
+  distribution makes regression on SOME metric nearly inevitable on
+  ANY prompt change. The loop rejects every iteration; nothing lands.
+- **Use Pareto-frontier acceptance** for quality tuning: accept if no
+  metric is meaningfully worse (define per-metric tolerance bands) AND
+  aggregate improves. Allows cross-metric trade-offs.
+
+Default for mixed loops: strict IAP on the trust-critical gates,
+Pareto-frontier on the quality metrics, in the same iteration loop.
+Pick discipline per metric by cost-of-regression on that metric.
+
 ---
 
 ## 📚 Table of Contents (chronological, newest first)
@@ -173,6 +202,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 |------------|----------------------------------|--------------------------------------------------------------------------|
 | 2026-05-29 | `[ADR 0048 Wave 3.3 / mb-57a1]` | Swapping the primary judge from `llama3.1:8b` to `gemma2:9b` inverts the disagreement direction on Gate 3 without closing the gap (Wave 3.2 4/7 → Wave 3.3 5/9; same three personas, primary=Equivalent/cross=NotEquivalent → primary=NotEquivalent/cross=Equivalent). Tag-collapse metric moves 81.8% → 38.2% on the SAME data — a 43-pt judge-dependent gap. Borderline observational set (added this wave) shows the pattern crisply: judges agree on `tokenization`/`specificity`/`domain-overlap`/`person-specific` (the clear dimensions, 4/4 perfect for gemma2) and disagree on `coreference` + `abstraction-level` (the genuinely-fuzzy dimensions, 0/2 for gemma2). The structural finding: LLM-judge tag-equivalence on a corpus with this much surface-token variation is more ambiguous than the inter-rater reliability of different judge families supports. Two consecutive Gate 3 STOPs with inverted direction is the signal that the failing gate is correctly identifying a methodology problem the patches under consideration (judge swap, prompt tune, threshold loosen) can't reach. Path forward: replace LLM-judge tag metric with deterministic exact-match + Jaccard (option E in wave-3-results.md) — honors AGENTS.md §6 "if something is hard to verify, that's the bug." Requires ADR 0048 §G5 amendment; not Bernard's call autonomously |
 | 2026-05-29 | `[ADR 0048 Wave 3.2 / mb-57a1]` | JVP Gate 3 STOP: llama3.1:8b is more permissive than gemma2:9b on tag-equivalence on the real corpus, while passing Gate 1 (unambiguous calibration) cleanly at 91.7%. Calibration sets of unambiguous pairs can't surface this skew — Gate 3 (cross-judge on real-corpus 10% sample) is the gate that catches it; the 5-gate JVP design is load-bearing because each gate covers a different failure mode. Calibration-fairness sub-finding: every cal pair's vocabulary must be disjoint from the judge prompt's in-context examples (cal-eq-001 v1 violated this; v2 fix in commit 7f8ff1c). PCRP-mislabel sub-finding: PCRP prose's literal claims ("hallucinated dates") must be cross-walked vs. structured output before being treated as fact; the themes are the durable signal, surface words are not |
+| 2026-05-28 | `[phase-0-kg-wave-5 / mb-ojm5]`  | Strict IAP rejects every iteration on small local models — see PINNED P9 |
 | 2026-05-28 | `[ADR 0048 Wave 0 / mb-4wxw + mb-w1lw + mb-i9l1]` | `bd close` of a downstream bead in the same iteration as its blocker's close fails with "blocked by open issues [<blocker-id>]" even when the blocker was already closed — bd evaluates the blocks-edge against a stale view (Dolt auto-commit batching, presumably). Workaround: pass `--force` for the downstream closes. Doesn't affect cross-iteration chains because the blocker close has committed by then |
 | 2026-05-27 | `[ADR 0046 Iter 2 SEAL / mb-3xww]` | Obsidian nested-vault trap during Mockingbird Mobile Sync setup: when an Obsidian vault is created via 'Create new vault' and the named folder already exists, Obsidian silently creates a nested `<vault>/<vault>/` structure; Mockingbird writes to outer, Obsidian reads from inner — symptom is "Vault up to date (N records)" toast is truthful but Obsidian shows nothing. Diagnosis: `Get-ChildItem <vault> -Force` shows both `.mockingbird/` AND a same-named nested folder; the nested folder contains `.obsidian/`. Fix: move `.obsidian/` + `Welcome.md` from inner to outer, delete empty inner (preserves Obsidian Sync pairing). Iter 4 wizard should detect + guide |
 | 2026-05-23 | `[ADR 0046 Iter 1 / mb-jbf7]`    | Programmatic Strategy-A end-to-end smoke is blocked by mb-0n8c: example binaries that transitively link whisper-rs/ort/CUDA exit STATUS_ENTRYPOINT_NOT_FOUND identically to `cargo test --release`; pure-rusqlite examples (verify_wave49 shape) work fine. Pattern: pair every smoke example with a pure-rusqlite probe so the DB-schema half is verifiable independent of mb-0n8c, route the live-fire half through `mockingbird.exe` + Strategy B |
@@ -343,6 +373,13 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
   measures fuzzy-case behavior, pairs with A or B;
   (D) loosen Gate 3 thresholds — NOT recommended, this is documentation
   change masquerading as a fix.
+
+---
+
+## 2026-05-28 [phase-0-kg-wave-5 / mb-ojm5] Strict IAP rejects every iteration on small local models — see PINNED P9
+- Context: Wave 5 Wiggum loop, 5 prompt iterations, cap from AGENTS.md
+- Finding: 0/5 accepted; even iter 5's minimal extract-only change moved tag-collapse, entry-type, and PCRP via downstream cascade
+- Action: promoted to PINNED P9. Future quality loops on local models use Pareto-frontier acceptance, not strict no-regression
 
 ---
 
