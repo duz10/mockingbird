@@ -468,3 +468,79 @@ NO-GO is an acceptable terminal state — the ADR still moves Accepted
 because the architectural pivot was honestly attempted and measured.
 The Phase 0 assisted-filing UX (REPORT.md §8) becomes the v1 surface
 in that case.
+
+---
+
+## Amendments
+
+### A1 (Wave 0.5.2 empirical update) — Move 1 mechanism revised
+
+**Original Move 1 (as proposed):** Local embeddings (`nomic-embed-text`)
+with nearest-neighbor classification over a labeled exemplar pool
+replaces LLM category/type reasoning. Hypothesis: deterministic,
+cheap, continuously learning from new exemplars.
+
+**Empirical finding (Wave 0.5.2, `runs/iter-2-embed-classify/` (nearest)
+vs `runs/iter-2-embed-centroid/` (centroid) vs `runs/iter-1-7b-fix/`
+(7b LLM + SCHEMA.md baseline) on the 32-pair corpus, seed 42):**
+
+| Metric | 7b LLM + SCHEMA.md | embed-NN | embed-centroid |
+|---|---|---|---|
+| Category | 81.5% | 70.4% (-11.1) | 66.7% (-14.8) |
+| Entry-type | 88.9% | 68.5% (-20.4) | 75.9% (-13.0) |
+| Clean single-item | 33.3% | 13.3% (-20.0) | 13.3% (-20.0) |
+
+Both prototype methods named in the original Move 1 design regressed
+materially. The dual-method failure pattern points at architecture, not
+hyperparameter — at this corpus scale (46 exemplars across ~25
+category×type buckets ≈ 2 exemplars/bucket), pretrained general-purpose
+embeddings under-resolve the semantic distinctions the 7b LLM with
+calibrated SCHEMA.md handles cleanly.
+
+**Revised Move 1:**
+
+- The Move 1 *outcome* (close Gaps 2 + 3, lift category and entry-type
+  above their bars) is achieved by **SCHEMA.md + 7b LLM classification**
+  (Wave 0.5.1 delivered +14.2 / +10.7 / +26.6 on category / type /
+  clean-single respectively from Phase 0 baseline; both seeds clean on
+  the hard gate).
+- The embeddings infrastructure built in Wave 0.5.2
+  (`experimental/kg-validation/src/embeddings.rs`,
+  `experimental/kg-validation/src/exemplars.rs`,
+  `experimental/kg-validation/src/bin/embed-reclassify.rs`) is
+  **preserved for entity disambiguation in Move 4** (Wave 0.5.4),
+  where similarity over a small number of candidate aliases is the
+  actual problem shape embeddings solve well.
+- Speculative embedding-based classification for v1 is dropped. Future
+  reconsideration only if: (a) corpus ≥ 500 entries/user routinely AND
+  (b) per-class exemplar count ≥ 100 AND (c) measured LLM-only baseline
+  shows ceiling on category/type metrics.
+
+**Architectural meta-finding (v1 commitment, not just a Phase 0.5 tactic):**
+at 7b scale with a calibrated SCHEMA.md (LESSONS P10), the LLM is itself
+a sufficient structural component for classification at this corpus
+size. The "deterministic code layer over LLM" pattern (Asthana) wins at
+small-model scale where the LLM ceiling is low; the "schema-driven LLM
+as the structural piece" pattern (Clark) wins at mid-model scale where
+the LLM ceiling is high enough that additional deterministic layers add
+complexity without quality gain. v1 commits to the latter for
+classification; entity disambiguation in Move 4 keeps the embeddings
+layer as a *similarity* tool (its natural problem shape), not a
+classification tool.
+
+**Impact on later waves:**
+
+- Wave 0.5.3 (`mb-rzpd`) — unchanged. Closed canonical tag vocabulary +
+  new-tag-request flow is mechanism-independent of classifier choice;
+  proceeds as scheduled.
+- Wave 0.5.4 (`mb-o4ni`) — embeddings reused for entity disambiguation
+  (lexical-candidate-set → embedding similarity tie-break), not for
+  category/type classification.
+- Wave 0.5.5 (`mb-5r1b`) — 3b cross-test runs on the pivoted architecture
+  (SCHEMA.md `small-conservative` profile + closed vocab + entity probe),
+  NOT on an embeddings-classify variant.
+- Wave 0.5.6 (`mb-qogz`) — REPORT.md includes A1 as a first-class
+  finding ("Move 2 falsified at 32-pair scale"), not a footnote.
+
+Bead closures referenced by this amendment: `mb-hnb4` (escalation),
+`mb-yfzy` (Wave 0.5.2 task).
