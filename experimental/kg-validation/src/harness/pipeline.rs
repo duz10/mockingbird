@@ -17,6 +17,7 @@ use crate::ollama::{GenerateOptions, OllamaDispatcher};
 use crate::passes::{self, Classification, Extraction, NewTagRequest, PassError};
 use crate::schema::{Entry, EntryType, Status};
 use crate::schema_loader::Schema;
+use crate::synonyms::SynonymMap;
 
 pub struct PipelineResult {
     pub entries: Vec<Entry>,
@@ -54,16 +55,17 @@ struct ExtractArtifact<'a> {
     segment_text: &'a str,
 }
 
-// Eight args is one over clippy's default cap. Every argument here
-// is a distinct runtime concern (dispatcher, schema, model id,
-// dictation identity, content, captured timestamp, sampling options,
-// artifact destination) and bundling them into a config struct
-// would just be visual shuffling. The function is an orchestrator;
-// its signature is the contract.
+// Nine args is two over clippy's default cap. Every argument here
+// is a distinct runtime concern (dispatcher, schema, optional
+// synonym map, model id, dictation identity, content, captured
+// timestamp, sampling options, artifact destination) and bundling
+// them into a config struct would just be visual shuffling. The
+// function is an orchestrator; its signature is the contract.
 #[allow(clippy::too_many_arguments)]
 pub fn run_pipeline<D: OllamaDispatcher>(
     dispatcher: &D,
     schema: &Schema,
+    synonym_map: Option<&SynonymMap>,
     model: &str,
     dictation_id: &str,
     dictation: &str,
@@ -240,7 +242,14 @@ pub fn run_pipeline<D: OllamaDispatcher>(
         //    in-vocab (→ Entry.topic_tags) and out-of-vocab (→
         //    new_tag_requests, surfaced to the runner).
         let (final_tags, new_requests_for_segment) = if schema.has_closed_tag_vocabulary() {
-            let validation = passes::validate_tags(&extraction, schema.canonical_tag_vocabulary());
+            // Wave 0.5.3 iter 3 (`mb-e10v`): synonym map is applied
+            // IN-BAND at validate-time so variants like
+            // `automobile-repair` collapse to in-vocab canonicals
+            // (e.g. `car-repair`) BEFORE the vocab membership check.
+            // `None` falls back to the iter-1/iter-2 pure-normalize
+            // path, kept for legacy callers and tests.
+            let validation =
+                passes::validate_tags(&extraction, schema.canonical_tag_vocabulary(), synonym_map);
             (validation.validated_tags, validation.new_tag_requests)
         } else {
             (
@@ -350,6 +359,7 @@ mod tests {
         let result = run_pipeline(
             &mock,
             &schema,
+            None,
             "test-model",
             "dict-1",
             "Two things. Call the daycare on Monday. Ship the order before Friday.",
@@ -393,6 +403,7 @@ mod tests {
         let result = run_pipeline(
             &mock,
             &schema,
+            None,
             "m",
             "junk-1",
             "Uh hold on, never mind.",
@@ -413,6 +424,7 @@ mod tests {
         let result = run_pipeline(
             &mock,
             &schema,
+            None,
             "m",
             "bad-1",
             "anything",
@@ -454,6 +466,7 @@ mod tests {
         let result = run_pipeline(
             &mock,
             &schema,
+            None,
             "m",
             "mixed-1",
             "two segments",

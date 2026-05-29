@@ -14,4 +14,5 @@ pub mod passes;
 pub mod schema;
 pub mod schema_loader;
 pub mod scoring;
+pub mod synonyms;
 pub mod wiggum;

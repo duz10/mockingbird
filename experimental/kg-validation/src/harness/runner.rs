@@ -17,6 +17,7 @@ use crate::ollama::{GenerateOptions, OllamaDispatcher};
 use crate::passes::NewTagRequest;
 use crate::schema::Entry;
 use crate::schema_loader::Schema;
+use crate::synonyms::SynonymMap;
 
 #[derive(Debug, Clone)]
 pub struct RunConfig {
@@ -73,6 +74,7 @@ struct NewTagRequestLine<'a> {
 pub fn run_corpus<D: OllamaDispatcher>(
     dispatcher: &D,
     schema: &Schema,
+    synonym_map: Option<&SynonymMap>,
     config: &RunConfig,
 ) -> RunSummary {
     let started_iso = Utc::now().to_rfc3339();
@@ -177,6 +179,7 @@ pub fn run_corpus<D: OllamaDispatcher>(
         let result = run_pipeline(
             dispatcher,
             schema,
+            synonym_map,
             &config.model,
             id,
             &dictation,
@@ -362,7 +365,7 @@ mod tests {
             num_ctx: 4096,
             dry_run: true,
         };
-        let summary = run_corpus(&mock, &schema, &cfg);
+        let summary = run_corpus(&mock, &schema, None, &cfg);
 
         assert_eq!(summary.failed, 0, "{:?}", summary.errors);
         assert!(summary.total_dictations >= 32);

@@ -1,12 +1,13 @@
-//! Closed-vocabulary tag validator — Wave 0.5.3 / `mb-rzpd`.
+//! Closed-vocabulary tag validator — Wave 0.5.3 / `mb-rzpd` / `mb-e10v`.
 //!
 //! Takes raw extract output (`raw_topic_tags` + `proposed_new_tags`)
 //! and splits it into two channels:
 //!
-//! 1. `validated_tags` — normalized tags from `raw_topic_tags` that
-//!    survive vocabulary membership. These land on the Entry.
+//! 1. `validated_tags` — canonicalized tags from `raw_topic_tags`
+//!    that survive vocabulary membership. These land on the Entry.
 //! 2. `new_tag_requests` — every tag the model wanted but the
-//!    vocabulary did not contain. Two sources, both logged:
+//!    vocabulary did not contain (after canonicalization). Two sources,
+//!    both logged:
 //!    - **explicit**: the model used the `proposed_new_tags` JSON
 //!      field as instructed.
 //!    - **implicit**: the model emitted an out-of-vocab tag inside
@@ -19,15 +20,26 @@
 //! `SCHEMA.md` § "Canonical tag vocabulary"; the loader exposes it
 //! via [`crate::schema_loader::Schema::canonical_tag_vocabulary`].
 //!
-//! The validator is pure Rust, no LLM, deterministic. Unit tests
-//! cover the four cases that matter:
-//! - Pure in-vocab → all pass through.
-//! - Out-of-vocab in `raw_topic_tags` → dropped, logged implicit.
-//! - Out-of-vocab in `proposed_new_tags` → never on entry, logged
-//!   explicit.
-//! - Normalization-first: `Kids` and `kids` normalize to `kid`, then
-//!   match against `kid` in the vocab (the vocab is the
-//!   post-normalization canonical form).
+//! ## Pipeline order (iter 3 fix, `mb-e10v`)
+//!
+//! ```text
+//! model output → normalize → synonym-collapse (if map provided) → vocab check → keep/drop → emit
+//! ```
+//!
+//! Wave 0.5.3 iter 1 + iter 2 BOTH regressed against the open-vocab
+//! baseline (-9.1pp / -11.0pp on tag-collapse ≥ 1.0). Diagnosis: the
+//! validator used to drop `automobile-repair` BEFORE the scorer's
+//! `SynonymMap` could collapse it to `car-repair`. With the synonym
+//! map applied in-band at validate-time, the canonical form
+//! (e.g. `car-repair`) is recognised regardless of which variant the
+//! model emitted, restoring the collapse contribution the open-vocab
+//! baseline got for free via the scorer.
+//!
+//! When `synonym_map = None` (legacy callers / open-vocab schemas),
+//! the validator falls back to pure normalization — the iter-1+iter-2
+//! behaviour. This keeps the existing test surface honest.
+//!
+//! The validator is pure Rust, no LLM, deterministic.
 
 use std::collections::HashSet;
 
@@ -35,6 +47,7 @@ use serde::Serialize;
 
 use crate::passes::extract::{Extraction, ProposedNewTag};
 use crate::passes::normalize_tags;
+use crate::synonyms::SynonymMap;
 
 /// Source of a new-tag-request. The distinction matters for the
 /// run-end report: explicit requests are higher-signal (the model
@@ -50,9 +63,9 @@ pub enum NewTagRequestSource {
     Implicit,
 }
 
-/// One new-tag-request, post-normalization. The `tag` is the
-/// post-normalize form so the run-end aggregator can dedupe by
-/// canonical form even if the model emitted varying surface forms.
+/// One new-tag-request, post-canonicalization. The `tag` is the
+/// canonical form so the run-end aggregator can dedupe even if the
+/// model emitted varying surface forms.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NewTagRequest {
     pub tag: String,
@@ -64,30 +77,59 @@ pub struct NewTagRequest {
 /// closed vocabulary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TagValidationResult {
-    /// Normalized + in-vocab tags. Order preserved from the original
-    /// raw_topic_tags (first-seen-wins after normalization, just like
-    /// [`normalize_tags`]).
+    /// Canonical + in-vocab tags. Order preserved from the original
+    /// `raw_topic_tags` (first-seen-wins after canonicalization).
     pub validated_tags: Vec<String>,
     /// New-tag-requests, in the order they appeared (implicit ones
-    /// from raw_topic_tags first, then explicit ones from
-    /// proposed_new_tags).
+    /// from `raw_topic_tags` first, then explicit ones from
+    /// `proposed_new_tags`).
     pub new_tag_requests: Vec<NewTagRequest>,
+}
+
+/// Canonicalize an ordered list of raw tags, preserving first-seen
+/// order and dropping duplicates after canonicalization. Uses the
+/// synonym map when provided; otherwise falls back to plain
+/// normalization. Empty tags are dropped.
+fn canonicalize_ordered(tags: &[String], synonym_map: Option<&SynonymMap>) -> Vec<String> {
+    match synonym_map {
+        Some(map) => map.canonicalize_ordered(tags),
+        None => normalize_tags(tags),
+    }
+}
+
+/// Canonicalize one tag in isolation (for `proposed_new_tags`).
+/// Returns an empty string when the input normalizes to empty.
+fn canonicalize_one(tag: &str, synonym_map: Option<&SynonymMap>) -> String {
+    match synonym_map {
+        Some(map) => map.canonicalize(tag),
+        None => normalize_tags(std::slice::from_ref(&tag.to_string()))
+            .into_iter()
+            .next()
+            .unwrap_or_default(),
+    }
 }
 
 /// Validate one extract output against the closed vocabulary.
 ///
-/// The vocabulary is taken as a slice of canonical strings (already
-/// in post-normalize form per SCHEMA.md). The validator normalizes
-/// raw_topic_tags via [`normalize_tags`] first, then checks
-/// vocabulary membership — so `Kids` and `kid` both round-trip to
-/// `kid` and match if the vocabulary contains `kid`.
-pub fn validate_tags(extraction: &Extraction, vocabulary: &HashSet<String>) -> TagValidationResult {
-    let normalized = normalize_tags(&extraction.raw_topic_tags);
+/// The vocabulary is taken as a set of canonical strings (already in
+/// post-canonicalize form per SCHEMA.md). The validator canonicalizes
+/// `raw_topic_tags` first (normalize → synonym-collapse), then checks
+/// vocabulary membership — so `automobile-repair` → `car-repair`
+/// (assuming the map links them) → matches `car-repair` in vocab.
+///
+/// When `synonym_map = None` the validator falls back to plain
+/// normalization (legacy open-vocab callers; tests).
+pub fn validate_tags(
+    extraction: &Extraction,
+    vocabulary: &HashSet<String>,
+    synonym_map: Option<&SynonymMap>,
+) -> TagValidationResult {
+    let canonical_raw = canonicalize_ordered(&extraction.raw_topic_tags, synonym_map);
 
-    let mut validated_tags: Vec<String> = Vec::with_capacity(normalized.len());
+    let mut validated_tags: Vec<String> = Vec::with_capacity(canonical_raw.len());
     let mut new_tag_requests: Vec<NewTagRequest> = Vec::new();
 
-    for tag in &normalized {
+    for tag in &canonical_raw {
         if vocabulary.contains(tag) {
             validated_tags.push(tag.clone());
         } else {
@@ -100,20 +142,23 @@ pub fn validate_tags(extraction: &Extraction, vocabulary: &HashSet<String>) -> T
     }
 
     if let Some(proposed) = extraction.proposed_new_tags.as_ref() {
-        // Normalize each proposed tag too — the model emits them in
-        // free form (could be capitalized, plural, etc.) but we want
-        // the run-end aggregator to dedupe by canonical form.
+        // Canonicalize each proposed tag too — the model emits them
+        // in free form (could be capitalized, plural, a synonym)
+        // but we want vocab membership + run-end aggregation to
+        // operate on canonical form.
         for ProposedNewTag { tag, rationale } in proposed {
-            let normalized_tag = normalize_tags(std::slice::from_ref(tag));
-            // normalize_tags drops empty strings; skip if the model
-            // emitted whitespace-only or empty.
-            let Some(canonical) = normalized_tag.into_iter().next() else {
+            let canonical = canonicalize_one(tag, synonym_map);
+            if canonical.is_empty() {
                 continue;
-            };
+            }
             // If the proposed tag IS actually in vocab (model was
-            // overcautious), promote it to validated rather than
-            // logging a bogus request. This matches the kickoff's
-            // "forgiving the model" disposition.
+            // overcautious OR submitted a synonym that maps to an
+            // in-vocab canonical), promote it to validated rather
+            // than logging a bogus request. This matches the
+            // kickoff's "forgiving the model" disposition AND
+            // downgrades spurious requests when the model proposes
+            // a variant that the synonym map already collapses to
+            // an in-vocab canonical (iter 3 acceptance test).
             if vocabulary.contains(&canonical) {
                 if !validated_tags.iter().any(|t| t == &canonical) {
                     validated_tags.push(canonical);
@@ -137,6 +182,7 @@ pub fn validate_tags(extraction: &Extraction, vocabulary: &HashSet<String>) -> T
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::synonyms::SynonymMap;
 
     fn vocab(entries: &[&str]) -> HashSet<String> {
         entries.iter().map(|s| (*s).to_string()).collect()
@@ -158,18 +204,53 @@ mod tests {
         }
     }
 
+    fn map_from_json(s: &str) -> SynonymMap {
+        let p = std::env::temp_dir().join(format!(
+            "tag-validator-syn-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::write(&p, s).unwrap();
+        let m = SynonymMap::load(&p).unwrap();
+        let _ = std::fs::remove_file(&p);
+        m
+    }
+
+    /// Tiny synonym map for validator tests. Crucially, links
+    /// `automobile-repair` and `auto-maintenance` to `car-repair`
+    /// (the exact iter-1/iter-2 failure case from the run reports).
+    fn tiny_map() -> SynonymMap {
+        map_from_json(
+            r#"{
+              "version": "test-validator-v0",
+              "schema_version": "synonym-map-v1",
+              "synonyms": [
+                {"canonical": "car-repair", "variants": ["automobile-repair", "auto-maintenance", "vehicle-repair"], "rationale": "", "source": "test"},
+                {"canonical": "meeting",    "variants": ["standup", "1on1"], "rationale": "", "source": "test"},
+                {"canonical": "kid",        "variants": [], "rationale": "", "source": "test"},
+                {"canonical": "budget",     "variants": ["budgeting"], "rationale": "", "source": "test"}
+              ]
+            }"#,
+        )
+    }
+
+    // ── Legacy (no synonym map) cases — preserve iter-1/iter-2 behaviour ──
+
     #[test]
-    fn pure_in_vocab_passes_through() {
+    fn pure_in_vocab_passes_through_no_map() {
         let v = vocab(&["work", "budget"]);
-        let r = validate_tags(&extraction(&["work", "budget"], None), &v);
+        let r = validate_tags(&extraction(&["work", "budget"], None), &v, None);
         assert_eq!(r.validated_tags, vec!["work", "budget"]);
         assert!(r.new_tag_requests.is_empty());
     }
 
     #[test]
-    fn out_of_vocab_raw_tag_is_dropped_and_logged_implicit() {
+    fn out_of_vocab_raw_tag_is_dropped_and_logged_implicit_no_map() {
         let v = vocab(&["work"]);
-        let r = validate_tags(&extraction(&["work", "q3-roadmap"], None), &v);
+        let r = validate_tags(&extraction(&["work", "q3-roadmap"], None), &v, None);
         assert_eq!(r.validated_tags, vec!["work"]);
         assert_eq!(r.new_tag_requests.len(), 1);
         assert_eq!(r.new_tag_requests[0].tag, "q3-roadmap");
@@ -178,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_proposed_tag_never_lands_on_entry() {
+    fn explicit_proposed_tag_never_lands_on_entry_no_map() {
         let v = vocab(&["work"]);
         let r = validate_tags(
             &extraction(
@@ -186,6 +267,7 @@ mod tests {
                 Some(vec![("q3-roadmap", "recurring planning concept")]),
             ),
             &v,
+            None,
         );
         assert_eq!(r.validated_tags, vec!["work"]);
         assert_eq!(r.new_tag_requests.len(), 1);
@@ -198,42 +280,39 @@ mod tests {
     }
 
     #[test]
-    fn normalization_runs_before_vocab_check() {
-        // Vocabulary holds the post-normalize form `kid`. Model emits
-        // `Kids` (capitalized, plural). Normalization → `kid`, then
-        // vocab match → keep.
+    fn normalization_runs_before_vocab_check_no_map() {
         let v = vocab(&["kid"]);
-        let r = validate_tags(&extraction(&["Kids"], None), &v);
+        let r = validate_tags(&extraction(&["Kids"], None), &v, None);
         assert_eq!(r.validated_tags, vec!["kid"]);
         assert!(r.new_tag_requests.is_empty());
     }
 
     #[test]
-    fn overcautious_proposed_tag_already_in_vocab_is_promoted() {
-        // Model puts `budget` in proposed_new_tags even though
-        // `budget` is in vocab. Validator promotes it to validated
-        // rather than logging a bogus new-tag-request.
+    fn overcautious_proposed_tag_already_in_vocab_is_promoted_no_map() {
         let v = vocab(&["budget"]);
         let r = validate_tags(
             &extraction(&[], Some(vec![("budget", "central topic")])),
             &v,
+            None,
         );
         assert_eq!(r.validated_tags, vec!["budget"]);
         assert!(r.new_tag_requests.is_empty());
     }
 
     #[test]
-    fn promoted_proposed_tag_does_not_duplicate_already_validated_tag() {
-        // Model emits `budget` in BOTH raw_topic_tags AND
-        // proposed_new_tags. Validator must not double-add.
+    fn promoted_proposed_tag_does_not_duplicate_already_validated_tag_no_map() {
         let v = vocab(&["budget"]);
-        let r = validate_tags(&extraction(&["budget"], Some(vec![("budget", "huh")])), &v);
+        let r = validate_tags(
+            &extraction(&["budget"], Some(vec![("budget", "huh")])),
+            &v,
+            None,
+        );
         assert_eq!(r.validated_tags, vec!["budget"]);
         assert!(r.new_tag_requests.is_empty());
     }
 
     #[test]
-    fn mixed_case_implicit_and_explicit_preserves_order() {
+    fn mixed_case_implicit_and_explicit_preserves_order_no_map() {
         let v = vocab(&["a"]);
         let r = validate_tags(
             &extraction(
@@ -241,9 +320,9 @@ mod tests {
                 Some(vec![("d", "rationale-d"), ("e", "rationale-e")]),
             ),
             &v,
+            None,
         );
         assert_eq!(r.validated_tags, vec!["a"]);
-        // Order: implicit (b, c) first, then explicit (d, e).
         assert_eq!(r.new_tag_requests.len(), 4);
         let tags: Vec<&str> = r.new_tag_requests.iter().map(|n| n.tag.as_str()).collect();
         assert_eq!(tags, vec!["b", "c", "d", "e"]);
@@ -254,20 +333,150 @@ mod tests {
     }
 
     #[test]
-    fn empty_proposed_new_tags_field_is_treated_as_none() {
-        // Model emits `"proposed_new_tags": []` — explicitly empty.
-        // Should behave identically to `proposed_new_tags = None`.
+    fn empty_proposed_new_tags_field_is_treated_as_none_no_map() {
         let v = vocab(&["work"]);
-        let r = validate_tags(&extraction(&["work"], Some(vec![])), &v);
+        let r = validate_tags(&extraction(&["work"], Some(vec![])), &v, None);
         assert_eq!(r.validated_tags, vec!["work"]);
         assert!(r.new_tag_requests.is_empty());
     }
 
     #[test]
-    fn whitespace_only_proposed_tag_is_skipped() {
+    fn whitespace_only_proposed_tag_is_skipped_no_map() {
         let v = vocab(&["work"]);
-        let r = validate_tags(&extraction(&["work"], Some(vec![("   ", "rationale")])), &v);
+        let r = validate_tags(
+            &extraction(&["work"], Some(vec![("   ", "rationale")])),
+            &v,
+            None,
+        );
         assert_eq!(r.validated_tags, vec!["work"]);
+        assert!(r.new_tag_requests.is_empty());
+    }
+
+    // ── Wave 0.5.3 iter 3 / `mb-e10v` cases — synonym-map in-band ──
+
+    /// The headline iter-3 acceptance test: the iter-1/iter-2
+    /// failure mode that motivated this whole refactor.
+    /// `automobile-repair` (raw form, model output) is canonicalized
+    /// to `car-repair` (which IS in vocab) and kept silently — no
+    /// new-tag-request emitted.
+    #[test]
+    fn synonym_variant_in_raw_canonicalizes_into_vocab_kept_silently() {
+        let m = tiny_map();
+        let v = vocab(&["car-repair"]);
+        let r = validate_tags(&extraction(&["automobile-repair"], None), &v, Some(&m));
+        assert_eq!(r.validated_tags, vec!["car-repair"]);
+        assert!(
+            r.new_tag_requests.is_empty(),
+            "synonym-collapsed in-vocab variant must not produce a new-tag-request"
+        );
+    }
+
+    /// Mirror case: model uses the protocol and proposes
+    /// `automobile-repair` explicitly. After canonicalization it's
+    /// in vocab → promote to validated, drop the spurious request.
+    /// This downgrades the new-tag-request rate that contributed to
+    /// the iter-2 regression scorecard.
+    #[test]
+    fn synonym_variant_in_proposed_canonicalizes_into_vocab_downgrades_request() {
+        let m = tiny_map();
+        let v = vocab(&["car-repair"]);
+        let r = validate_tags(
+            &extraction(&[], Some(vec![("automobile-repair", "model proposed it")])),
+            &v,
+            Some(&m),
+        );
+        assert_eq!(r.validated_tags, vec!["car-repair"]);
+        assert!(r.new_tag_requests.is_empty());
+    }
+
+    /// Genuinely novel tag: no synonym entry, not in vocab → logged
+    /// as an implicit new-tag-request. This is the path that should
+    /// surface real vocab gaps for v1.1 vocabulary growth.
+    #[test]
+    fn genuinely_novel_tag_with_no_synonym_logged_as_implicit_request() {
+        let m = tiny_map();
+        let v = vocab(&["car-repair"]);
+        let r = validate_tags(&extraction(&["bicycle-tune-up"], None), &v, Some(&m));
+        assert!(r.validated_tags.is_empty());
+        assert_eq!(r.new_tag_requests.len(), 1);
+        assert_eq!(r.new_tag_requests[0].tag, "bicycle-tune-up");
+        assert_eq!(r.new_tag_requests[0].source, NewTagRequestSource::Implicit);
+    }
+
+    /// Canonicalization-then-dedup: two distinct variants that
+    /// collapse to the same canonical land as ONE validated tag.
+    #[test]
+    fn two_variants_collapsing_to_same_canonical_dedupe_to_one_tag() {
+        let m = tiny_map();
+        let v = vocab(&["car-repair"]);
+        let r = validate_tags(
+            &extraction(&["automobile-repair", "vehicle-repair"], None),
+            &v,
+            Some(&m),
+        );
+        assert_eq!(r.validated_tags, vec!["car-repair"]);
+        assert!(r.new_tag_requests.is_empty());
+    }
+
+    /// Canonicalization preserves first-seen order across mixed
+    /// variants + canonicals + unknowns. Mixed: `standup` → meeting,
+    /// `kid` already canonical, `bicycle-tune-up` unknown → request.
+    #[test]
+    fn mixed_synonyms_canonicals_and_unknowns_preserves_order() {
+        let m = tiny_map();
+        let v = vocab(&["meeting", "kid"]);
+        let r = validate_tags(
+            &extraction(&["standup", "kid", "bicycle-tune-up"], None),
+            &v,
+            Some(&m),
+        );
+        assert_eq!(r.validated_tags, vec!["meeting", "kid"]);
+        assert_eq!(r.new_tag_requests.len(), 1);
+        assert_eq!(r.new_tag_requests[0].tag, "bicycle-tune-up");
+        assert_eq!(r.new_tag_requests[0].source, NewTagRequestSource::Implicit);
+    }
+
+    /// Explicit proposed-tag whose canonical is genuinely
+    /// out-of-vocab keeps its rationale on the request — this is
+    /// the high-signal path the run-end aggregator wants.
+    #[test]
+    fn out_of_vocab_explicit_request_with_rationale_survives() {
+        let m = tiny_map();
+        let v = vocab(&["car-repair"]);
+        let r = validate_tags(
+            &extraction(
+                &["car-repair"],
+                Some(vec![(
+                    "bicycle-tune-up",
+                    "recurring across last 4 dictations",
+                )]),
+            ),
+            &v,
+            Some(&m),
+        );
+        assert_eq!(r.validated_tags, vec!["car-repair"]);
+        assert_eq!(r.new_tag_requests.len(), 1);
+        assert_eq!(r.new_tag_requests[0].tag, "bicycle-tune-up");
+        assert_eq!(r.new_tag_requests[0].source, NewTagRequestSource::Explicit);
+        assert_eq!(
+            r.new_tag_requests[0].rationale,
+            "recurring across last 4 dictations"
+        );
+    }
+
+    /// Synonym variant in raw, canonical also explicitly in raw —
+    /// must not double-add (first-seen order is `automobile-repair`
+    /// → canonicalizes to `car-repair`; then `car-repair` is a dup).
+    #[test]
+    fn variant_followed_by_canonical_in_raw_dedupes() {
+        let m = tiny_map();
+        let v = vocab(&["car-repair"]);
+        let r = validate_tags(
+            &extraction(&["automobile-repair", "car-repair"], None),
+            &v,
+            Some(&m),
+        );
+        assert_eq!(r.validated_tags, vec!["car-repair"]);
         assert!(r.new_tag_requests.is_empty());
     }
 }
