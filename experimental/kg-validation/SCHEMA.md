@@ -2,7 +2,7 @@
 
 ```yaml
 schema_version: 1
-schema_revision: phase-0.5-wave-3
+schema_revision: phase-0.5-wave-4
 ```
 
 > A portable Markdown contract for the Knowledge Graph pipeline,
@@ -43,6 +43,70 @@ per entry. Drives downstream behaviour (a `task` gets a status, a
 - `idea`
 - `note`
 - `reference`
+
+### Entity types (closed enum, Wave 0.5.4)
+
+The v1 entity layer per ADR 0049 Move 4 / LESSONS PINNED P11. Wave
+0.5.3 surfaced that the Phase 0 single-field `tags:` answer-key
+schema conflated two distinct object types: bounded semantic
+categories (handled by closed-vocab Move 3) and an unbounded long
+tail of open-class first-class references (handled by entity
+extraction, this layer). The v1 structured entry schema separates
+these into distinct fields; Wave 0.5.4 probes whether a 7b LLM
+with calibrated prompting can populate the entity field with
+sufficient quality (≥50% Jaccard) to ship.
+
+Kept deliberately minimal — five buckets is sufficient for the
+32-pair corpus, and YAGNI says we add finer types only when an
+empirical case fails to fit.
+
+- `person` — any specific human referent. Includes proper names
+  (`Becca`, `Karen`, `Mrs. Chen`), family-collective names
+  (`the Hendersons`, `the Smiths`), referent-as-name (`Dad`,
+  `Mom`), and named functional roles when the speaker references
+  THEIR specific instance (`the CPA`, `my manager`).
+- `organization` — any specific business, brand, employer,
+  product-as-brand, or community/forum. Includes generic-but-
+  specific (`the bakery`, `the daycare`) when the speaker has
+  one specific instance in mind. Examples: `Costco`, `Etsy`,
+  `Notion`, `Stripe`, `Venmo`, `YouTube`, `Acme`, `Hacker News`.
+- `object` — any specific concrete thing, document, artifact, or
+  product instance. Examples: `the Q3 deck`, `the slide deck`,
+  `brake pads`, `the truck`, `the dog food`, `the permission slip`,
+  `the cover letter`, `the budget revision`.
+- `place` — any specific physical location or destination.
+  Examples: `the airport`, `the DMV`, `the office`, `the supply
+  house`, `the farmers market`, `school` (when referenced as a
+  destination).
+- `project` — any named, ongoing, or recurring work / endeavor /
+  event-with-deliverables. Examples: `Q3 planning`, `the website
+  redesign`, `the docs migration`, `the launch`, `the school
+  auction`. Distinct from `object` because a project is the
+  endeavor (ongoing scope) not an artifact.
+
+**Discipline rules (binding):**
+
+1. **Specific or specific-to-speaker only.** Abstract concepts
+   (`work`, `health`, `car-repair`, `business`, `design`) MUST NOT
+   be extracted as entities — those are tags. Entity extraction is
+   for first-class referents.
+2. **Past-tense + vague-future entities are treated the same way
+   as the date hard-gate.** Don't fabricate. If the speaker says
+   "I should call someone" with no specific referent, no entity.
+   Borderline: "the next one-on-one" — there's a project context
+   but no concrete named scope ⇒ skip.
+3. **Lowercase the name.** Hyphenate multi-word names
+   (`mrs-chen`, `supply-house`, `q3-planning-doc`).
+4. **One entity row per referent.** If the speaker mentions
+   `Becca` and `Becca's wedding`, that's one `person` entity
+   (`becca`) — the wedding is not a separate `project` unless
+   the speaker references it as ongoing planning work.
+5. **Empty aliases for the probe phase.** Future capability
+   (v1) uses Wave 0.5.2's nomic-embed-text infrastructure for
+   embedding-based entity disambiguation across surface forms.
+   For Wave 0.5.4 the probe ships with exact-match-after-
+   lowercase aliasing only; the `aliases: []` field is the
+   reserved slot.
 
 ### Canonical tag vocabulary (closed; Wave 0.5.3 seed)
 
@@ -330,9 +394,10 @@ entries.
 
 | Pass | Default model | CLI override | Notes |
 |---|---|---|---|
-| `segment`  | `qwen2.5:7b-instruct-q4_K_M` | `--model` (global) | Per-pass overrides reserved for v1.1 (Clark Nemotron pattern). |
-| `classify` | `qwen2.5:7b-instruct-q4_K_M` | `--model` (global) | Replaced by embeddings in Wave 0.5.2 (`mb-yfzy`); LLM path retained for the head-to-head. |
-| `extract`  | `qwen2.5:7b-instruct-q4_K_M` | `--model` (global) | |
+| `segment`          | `qwen2.5:7b-instruct-q4_K_M` | `--model` (global) | Per-pass overrides reserved for v1.1 (Clark Nemotron pattern). |
+| `classify`         | `qwen2.5:7b-instruct-q4_K_M` | `--model` (global) | Replaced by embeddings in Wave 0.5.2 (`mb-yfzy`); LLM path retained for the head-to-head. |
+| `extract`          | `qwen2.5:7b-instruct-q4_K_M` | `--model` (global) | |
+| `extract_entities` | `qwen2.5:7b-instruct-q4_K_M` | `--model` (global) | Wave 0.5.4 / `mb-o4ni`. Runs per segment after `extract`. Decoupled from production pipeline for probe phase. |
 
 The `--model` CLI flag is the global override for all LLM passes in
 Phase 0.5. Per-pass overrides are reserved for v1.1+ once empirical
@@ -345,7 +410,8 @@ evidence justifies specialist routing.
 1. **`segment`** (LLM) — 1 dictation → 0..N candidate entry strings.
 2. **`classify`** (LLM, per segment) — `{category, entry_type}`.
 3. **`extract`** (LLM, per segment) — `{title, due_iso, raw_topic_tags}`.
-4. **`normalize`** (pure Rust, per segment) — tag canonicalization.
+4. **`extract_entities`** (LLM, per segment, Wave 0.5.4 probe — DECOUPLED) — `{entities: [{name, type, aliases}]}`. Runs as a standalone probe over the artifacts produced by step 3; not yet wired into per-dictation orchestration. Promotion to in-band pipeline pass conditional on Wave 0.5.4 ≥50% bar + Wave 0.5.6 REPORT acceptance.
+5. **`normalize`** (pure Rust, per segment) — tag canonicalization.
 
 ### Failure policy
 
@@ -422,9 +488,10 @@ prompt sent to Ollama is `{prompt_body}{per_pass_context_suffix}`.
 
 | Pass | Prompt file |
 |---|---|
-| `segment`  | `prompts/segment.md` |
-| `classify` | `prompts/classify.md` |
-| `extract`  | `prompts/extract.md` |
+| `segment`          | `prompts/segment.md` |
+| `classify`         | `prompts/classify.md` |
+| `extract`          | `prompts/extract.md` |
+| `extract_entities` | `prompts/extract_entities.md` |
 
 These are the **small-conservative** variants and the implicit
 fallback for any `(pass, profile)` not listed in the override table
@@ -434,7 +501,8 @@ below.
 
 | Pass | Profile | Prompt file |
 |---|---|---|
-| `extract` | `mid-confident` | `prompts/extract.closed-vocab.mid-confident.md` |
+| `extract`          | `mid-confident` | `prompts/extract.closed-vocab.mid-confident.md` |
+| `extract_entities` | `mid-confident` | `prompts/extract_entities.mid-confident.md` |
 
 Resolution rule: `prompt_body(pass, model)` =
 `overrides[(pass, profile_for(model))]` if present, else
@@ -446,9 +514,10 @@ evidence (a hard-gate breach, a per-metric regression) demands them.
 
 The per-pass context suffix appended at runtime by the pass module:
 
-- `segment`:  `\n\nCONTEXT: captured at {captured_iso}.\nDICTATION:\n{dictation}\n`
-- `classify`: `\n\nSEGMENT:\n{segment}\n`
-- `extract`:  `\n\nCONTEXT: {calendar_context}\nSEGMENT:\n{segment}\nCLASSIFICATION: {classification_json}\n`
+- `segment`:          `\n\nCONTEXT: captured at {captured_iso}.\nDICTATION:\n{dictation}\n`
+- `classify`:         `\n\nSEGMENT:\n{segment}\n`
+- `extract`:          `\n\nCONTEXT: {calendar_context}\nSEGMENT:\n{segment}\nCLASSIFICATION: {classification_json}\n`
+- `extract_entities`: `\n\nSEGMENT:\n{segment}\n`
 
 This split keeps SCHEMA.md a stable contract; only the prompt body
 files iterate during prompt tuning, and the calendar / classification
@@ -503,7 +572,7 @@ loop (ADR 0049 v1.1 deferrals).
 | 0.5.1        | Portable contract; passes load from here at runtime. Model-class calibration profiles + per-profile prompt overrides (`mb-4xtd` hard-gate fix). | `mb-xmgs`, `mb-4xtd` |
 | 0.5.2        | (Falsified, no schema change; embeddings infra preserved for Move 4 entity disambiguation — ADR 0049 A1 amendment.) | `mb-yfzy`, `mb-hnb4` |
 | 0.5.3 (this) | Closed canonical tag vocabulary (228 seed entries) + new-tag-request validator + closed-vocab extract prompt override. | `mb-rzpd` |
-| 0.5.4        | Entity types + entity-disambiguation thresholds. | `mb-o4ni` |
+| 0.5.4 (this) | Entity types (closed 5-bucket enum). New `extract_entities` pass + per-profile prompts + hand-labeled entity ground truth on 21 entity-rich dictations + Jaccard scorer. Decoupled from production pipeline for probe phase. | `mb-o4ni` |
 | 0.5.5        | (No schema change — cross-test on 3b.) | `mb-5r1b` |
 
 Each later wave's PR amends this file additively. `schema_version`

@@ -56,7 +56,7 @@ pub const EXPECTED_SCHEMA_VERSION: u32 = 1;
 /// model invents dates (silent trust erosion).
 const DEFAULT_UNKNOWN_MODEL_PROFILE: &str = "mid-confident";
 
-const SUPPORTED_PASSES: &[&str] = &["segment", "classify", "extract"];
+const SUPPORTED_PASSES: &[&str] = &["segment", "classify", "extract", "extract_entities"];
 
 #[derive(Debug, thiserror::Error)]
 pub enum SchemaError {
@@ -114,6 +114,12 @@ pub struct ModelDefaults {
     pub segment: String,
     pub classify: String,
     pub extract: String,
+    /// Wave 0.5.4 / `mb-o4ni`. New entity-extraction pass; runs as a
+    /// standalone probe over per-segment artifacts (decoupled from the
+    /// production pipeline orchestrator for the probe phase). Promotion
+    /// to in-band depends on the Wave 0.5.4 ≥50% bar + Wave 0.5.6
+    /// REPORT acceptance.
+    pub extract_entities: String,
 }
 
 impl Schema {
@@ -160,6 +166,7 @@ impl Schema {
             segment: parse_model_default(&text, "segment")?,
             classify: parse_model_default(&text, "classify")?,
             extract: parse_model_default(&text, "extract")?,
+            extract_entities: parse_model_default(&text, "extract_entities")?,
         };
 
         let profile_assignments = parse_profile_assignments(&text)?;

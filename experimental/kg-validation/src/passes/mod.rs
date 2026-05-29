@@ -10,12 +10,14 @@
 
 pub mod classify;
 pub mod extract;
+pub mod extract_entities;
 pub mod normalize;
 pub mod segment;
 pub mod tag_validator;
 
 pub use classify::{classify, Classification};
 pub use extract::{extract, Extraction, ProposedNewTag};
+pub use extract_entities::{extract_entities, EntityExtraction, EntityType, ExtractedEntity};
 pub use normalize::normalize_tags;
 pub use segment::segment;
 pub use tag_validator::{validate_tags, NewTagRequest, NewTagRequestSource, TagValidationResult};

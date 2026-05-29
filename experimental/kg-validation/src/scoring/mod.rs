@@ -22,6 +22,7 @@
 //! - [`persona_review`] — PCRP: structured qualitative audit
 //!   composed as a single bounded LLM call per persona.
 
+pub mod entity_quality;
 pub mod judge;
 pub mod judge_validation;
 pub mod metrics;
