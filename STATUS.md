@@ -268,6 +268,89 @@ Wave 3.3 shipped:
 
 `mb-57a1` stays OPEN. Wave 4 (`mb-he98`) stays blocked.
 
+**Wave 3.4 (2026-05-29) — Option E shipped. Wave 3 SEALED.**
+
+Dustin authorized Option E (deterministic exact-match-after-canonicalization
+with versioned synonym map) per AGENTS.md §6 ("if something is hard to
+verify, that's the bug"). ADR 0048 §G7 amendment (commit `5e8583c`).
+
+Shipped this iteration:
+
+- **Synonym map v1** (commit `829091a`) — `experimental/kg-validation/
+  judge-calibration/synonym-map.json`, 188 canonicals / 240 variant→canonical
+  entries. Sourcing: 166 auto-seed-answer-key (every answer-key tag is
+  at minimum its own canonical) + 16 bernard-seed (household /
+  professional / tradesperson / caregiver domain coverage) + 6
+  diff-driven-codepuppy (conservative pipeline-vs-answer-key gap closure;
+  `farmers-market`/`farmer's-market`, `chen`/`mrs-chen`, `roth`/`roth-ira`,
+  `side-business`/`side-work`, `smith`/`the-smith`, `wholesale`/`wholesaler`).
+  Discipline rules from ADR 0048 §G7 enforced: person-names NEVER collapse
+  into domain tags, specificity preserved when irreducible, domain-overlap
+  is NOT equivalence. Regenerator script at `scripts/generate-synonym-map.ps1`.
+- **Deterministic tag-collapse metric** (commit `1b7d656`) — new module
+  `src/scoring/tag_collapse.rs` with 17 unit tests covering all discipline
+  rules. `score_run` signature changed from
+  `<D: OllamaDispatcher>(..., Option<TagJudgeContext<'_, D>>)` →
+  `(..., Option<&SynonymMap>)`. SCORE_SUMMARY.md now surfaces top-10 near-miss
+  `(actual_canonical, expected_canonical)` pairs ranked by frequency — these
+  are the empirical Wave 5 prompt-iteration + synonym-map-iteration
+  candidates. `score-run` CLI gains `--synonym-map`; pre-G7 flags
+  (`--judge-model`/`--cross-judge-model`/`--judge-seed`/`--skip-jvp`)
+  hard-fail with a deprecation note. JVP architecture preserved in source
+  (`src/scoring/judge_validation.rs`) for future LLM-judged metrics but
+  not invoked under §G7. 99/99 sandbox tests pass; clippy clean.
+
+**Wave 3 final scorecard (deterministic; reproducible):**
+
+| Metric | run-a-baseline | run-b-stability | Threshold | Verdict |
+|---|---|---|---|---|
+| Invented dates count (HARD GATE) | **0** | **0** | 0 | ✅ PASS |
+| Junk-bucket | 100% (2/2) | 100% (2/2) | ~100% | ✅ PASS |
+| Segmentation (multi-item) | 86.7% (13/15) | 86.7% (13/15) | ≥85% | ✅ PASS |
+| Category correct | 67.3% (37/55) | 70.9% (39/55) | ≥90% | ❌ FAIL |
+| Entry-type correct | 78.2% (43/55) | 76.4% (42/55) | ≥85% | ❌ FAIL |
+| Clean single-item | 6.7% (1/15) | 13.3% (2/15) | ~100% | ❌ FAIL |
+| **Tag-variant collapse (G7)** | **9.1% (5/55)** | **10.9% (6/55)** | ≥80% | ❌ FAIL |
+
+**Stability (run-a vs run-b, §8.5):** segmentation 96.9%, category 96.9%,
+entry-type 98.5%, date 100%, tag-set exact 83.1%. All ≥80% (date metric
+perfect); the structural pipeline is reproducible at the spec threshold.
+
+**Headline finding on tag-collapse:** the 9.1%/10.9% number is honest
+and reproducible (1.8% drift, within sampling noise). It is far lower
+than the prior judge-dependent 81.8% (Wave 3.2) and 38.2% (Wave 3.3)
+because Jaccard-1.0-after-canonicalization is a strict gate AND the
+pipeline systematically over-emits tags relative to the answer-key
+expected sets (e.g. pipeline emits `{chen, inspection, water-heater}`
+vs expected `{chen, water-heater}` → J=2/3=0.67, fails 1.0 gate).
+This IS the metric working as designed — misses are now mechanically
+attributable to specific synonym-map gaps OR specific pipeline
+over-emission patterns, not to judge-model variance. Top-10 near-miss
+categories (run-a): `after-school`/`kid`, `apartment-complex`/`apartment`,
+`brake`/`car-repair`, `brunch`/`rsvp`, `budget`/`meeting`,
+`cake`/`bakery`, `check`/`olivia` — mix of synonym-map candidates
+(apartment-complex/apartment is a clear gap) and genuine
+pipeline-vs-answer-key tag-vocabulary divergence (brake/car-repair is
+correctly distinct per the specificity discipline rule).
+
+**Wave 5 inputs queued from this run:**
+1. Synonym-map v2 candidates (clear gaps surfaced as near-misses).
+2. Pipeline prompt iteration: extractor over-emits 3-tag sets when
+   answer keys want 2-tag sets; tightening the extract prompt's
+   tag-budget guidance should lift the metric materially.
+3. Category prompt iteration (67% → 90% is the biggest structural
+   gap; PCRP Wave 3.2 already attributed most of this to
+   side-hustle-as-personal miscategorization).
+
+**PCRP not re-run this iteration** — `PERSONA_REVIEW.md` on disk
+from Wave 3.2 remains valid (PCRP reviews structured outputs which
+are unchanged; the only thing that changed is the tag metric).
+If Wave 5 prompt iteration changes structural outputs, PCRP re-runs
+at that point.
+
+**Wave 3 SEALED.** `mb-57a1` closeable. `mb-jz5r` (Option E task)
+closeable. Wave 4 (`mb-he98`) unblocked.
+
 ---
 
 Live-fire Win11 smoke test for Phase 10 is still Dustin's post-seal step
