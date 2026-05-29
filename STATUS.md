@@ -60,26 +60,45 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 Epic `mb-symi` (P1). Charter at `docs/adr/0049-knowledge-graph-phase-0-5-and-v1-architectural-pivot.md`.
 
-### 🛑 Blocked / human input needed — `mb-rzpd` (P1, Wave 0.5.3 IAP rejection cascade)
+### 🛑 Blocked / human input needed — `mb-rzpd` + `mb-e10v` (P1, Wave 0.5.3 IAP rejection cascade — 3 iterations exhausted)
 
-**Wave 0.5.3 (closed canonical tag vocabulary) ran two head-to-head
-iterations on seed 42 vs the `iter-1-7b-fix` open-vocab baseline.
-Both REJECTED — tag-collapse regressed -9.1pp (iter 1) then -11.0pp
-(iter 2) against the +10pp lift the kickoff required.** Diagnosed
-root cause makes a third prompt-only iter unlikely to clear; the fix
-requires a small architectural change.
+**Wave 0.5.3 (closed canonical tag vocabulary) ran THREE head-to-head
+iterations on seed 42/137 vs the `iter-1-7b-fix` open-vocab baseline.
+All three REJECTED. Iter 3 implemented the wiring fix Bernard's Option A
+diagnosed (synonym-map applied IN-BAND at validate-time, before the
+vocab membership check). The fix WORKS in the narrow sense — tag-collapse
+lifted from 3.8% (iter 2) to 5.7% (iter 3 seed 42), recovering ~2pp of
+the regression. But it falls 9.1pp short of the iter-1 open-vocab
+baseline (14.8%) and 19.1pp short of the kickoff's +10pp lift bar (≥24.8%).**
 
-| Metric | iter-1-7b-fix (open vocab, baseline) | closed-vocab iter 1 (verbose prompt) | closed-vocab iter 2 (tight prompt) |
-|---|---|---|---|
-| **Tag-collapse ≥ 1.0 (PRIMARY)** | **14.8%** | **5.7% (-9.1)** | **3.8% (-11.0)** |
-| Tag-collapse ≥ 0.50 (observational) | 61.1% | 56.6% | 30.2% |
-| Clean single-item | 33.3% | 33.3% | 33.3% |
-| Segmentation | 93.3% | 86.7% (-6.7) | 86.7% (-6.7) |
-| Category | 81.5% | 81.1% (-0.4) | 81.1% (-0.4) |
-| Entry-type | 88.9% | 90.6% (+1.7) | 90.6% (+1.7) |
-| Invented dates (HARD GATE) | 0 | 0 | 0 |
-| Junk | 100% | 100% | 100% |
-| New-tag-requests / 32 dictations | n/a | 35 (15 explicit + 20 implicit) | 19 (1 explicit + 18 implicit) |
+| Metric | iter-1-7b-fix (open vocab, baseline) | closed-vocab iter 1 | closed-vocab iter 2 | **closed-vocab iter 3 (wiring fix)** |
+|---|---|---|---|---|
+| **Tag-collapse ≥ 1.0 seed 42 (PRIMARY)** | **14.8%** | 5.7% (-9.1) | 3.8% (-11.0) | **5.7% (-9.1)** |
+| **Tag-collapse ≥ 1.0 seed 137** | 14.8% | n/a | n/a | **3.8% (-11.0)** |
+| Tag-collapse ≥ 0.50 (observational) | 61.1% | 56.6% | 30.2% | 30.2% / 28.3% |
+| Clean single-item | 33.3% | 33.3% | 33.3% | 33.3% / 33.3% |
+| Segmentation | 93.3% | 86.7% (-6.7) | 86.7% (-6.7) | 86.7% / 80.0% (-6.7 / -13.3) |
+| Category | 81.5% | 81.1% (-0.4) | 81.1% (-0.4) | 81.1% / 81.1% (-0.4) |
+| Entry-type | 88.9% | 90.6% (+1.7) | 90.6% (+1.7) | 90.6% / 88.7% (+1.7 / -0.2) |
+| Invented dates (HARD GATE) | 0 | 0 | 0 | **0 / 0 ✓** |
+| Junk | 100% | 100% | 100% | 100% / 100% |
+| New-tag-requests / 32 dictations | n/a | 35 (15 expl + 20 impl) | 19 (1 expl + 18 impl) | 17 (1 expl + 16 impl) / 21 (1 + 20) |
+
+Stability iter 3 (seed 42 vs seed 137): segmentation 96.9%, category
+98.4%, type 98.4%, date 100%, tag-set exact 85.5%. Well above ADR 0049's
+80% bar. PCRP iter 3 seed 42: 10 trust-eroding failures, 6 wins (no
+iter-1 PCRP baseline exists, so PCRP regression is not computable).
+
+**Iter 3 verdict: Case C (kickoff decision tree).** The wiring fix is
+necessary but not sufficient. The dominant pathology has shifted from
+the scorer-side bug to the model-side: top near-misses are 9-of-10
+`(missing)` against expected `app`, `bakery`, `becca`, `brake-pad`,
+`costco`, `dad`, `henderson`, `documentation`, `design`, `business-tool` —
+specific concepts (person names, brand names, concrete objects) the
+model correctly recognises as out-of-vocab and omits entirely rather
+than emit. The synonym map can only canonicalize tags the model emits;
+it cannot recover tags the model never emitted. **This is a vocab-coverage
+problem, not a wiring problem.**",
 
 Stability: closed-vocab iter 1 seed-42 vs seed-137 — 96.9%
 segmentation, 98.4% category/type/date, 82.3% tag-set exact.
@@ -104,35 +123,39 @@ Follows ADR 0049 IAP stability ≥ 80% bar (just barely on tag-sets).
   closed-vocab architecture as shipped LOSES the synonym map's
   collapse contribution.
 
-**Bernard's options for Dustin (in `mb-rzpd`):**
+**Bernard's options for Dustin (post-iter-3, narrowed):**
 
-- **A (recommended) — iter 3 with synonym-map integrated into the
-  validator.** Order becomes normalize → synonym-collapse → vocab
-  check. Small architectural fix in `tag_validator.rs` + runner
-  plumbing to load `judge-calibration/synonym-map.json`. Hypothesis:
-  closed-vocab acceptance gap was masked by missing synonym-collapse;
-  with the synonym map in-band, the validator should match the
-  open-vocab baseline AND add the closed-vocab benefit of dropping
-  truly out-of-vocabulary noise. ~1 session.
-- **B — halt Move 3; document closed-vocab as falsified at this
-  corpus + model scale.** Same shape as Move 2 (ADR 0049 A1):
-  preserve the validator infrastructure for future v1.1 reconsideration,
-  ship v1 with open-vocab + synonym-map and an empirical learning loop
+Option A (iter 3 wiring fix) has now been tested and lifted only ~2pp —
+not enough. The remaining options are:
+
+- **B (recommended after iter 3) — halt Move 3; document closed-vocab
+  as falsified at this corpus + vocab-coverage scale.** Same shape as
+  Move 2 (ADR 0049 A1): mark the wave as a useful negative result
+  (the wiring fix is architecturally correct and now committed to
+  `main`; future v1.1 work inherits a properly-wired validator),
+  ship v1 with open-vocab + synonym-map + empirical learning loop
   for vocabulary growth (the v1.1 deferral already named in ADR 0049).
   Advance to Wave 0.5.4 (entity probe) which is independent of
-  classifier OR vocab choice.
-- **C — trim the vocab to ~80-120 (drop catch-all generics like
-  `home-maintenance`, `business`, `work` that the model over-applies)
-  and re-run.** Cheap test of the "vocab is too granular" hypothesis
-  in the kickoff. Risk: drops corpus-coverage; may shift the failure
-  from over-tagging to vocab-misses on legitimate concepts.
+  vocab choice. The new-tag-request stream from iter 3 (16-20 implicit
+  requests per run) is a free vocab-growth fixture for v1.1.
+- **D — expand the seed vocab with person-name/brand/object tags
+  observed in the iter-3 new-tag-request stream and re-run iter 4.**
+  Top missing categories (person names, brand names, concrete objects)
+  are exactly the open-class entity tags closed-vocab is least suited
+  to. Risk: vocab grows toward open-vocab anyway, defeating the
+  closed-vocab thesis; high churn for diminishing returns.
+- **C from prior options (trim to ~80-120 catch-all-free)** is still
+  on the table but iter-3 evidence weakens it: the failures are *missing
+  specifics*, not over-applied generics. Trimming would worsen coverage.",
 
 **On-disk artifacts (not committed; gitignored by convention):**
 
 - `experimental/kg-validation/runs/run-7b-closed-vocab-seed42/` + `-seed137/` (iter 1, REJECT)
 - `experimental/kg-validation/runs/run-7b-closed-vocab-iter2-seed42/` + `-iter2-seed137/` (iter 2, REJECT)
-- `experimental/kg-validation/src/passes/tag_validator.rs` (228-entry closed-vocab validator; 9 unit tests green; preserved for iter 3 or v1.1)
-- `experimental/kg-validation/prompts/extract.closed-vocab.mid-confident.md` (iter 2 prompt; iter 1 is in git history one commit back)
+- `experimental/kg-validation/runs/run-7b-closed-vocab-iter3-seed42/` + `-iter3-seed137/` (iter 3, REJECT — wiring fix landed but vocab-coverage gap dominates)
+- `experimental/kg-validation/src/synonyms.rs` (NEW — extracted from `scoring::tag_collapse`; consumed by both validator and scorer; **architecturally correct, on `main`**)
+- `experimental/kg-validation/src/passes/tag_validator.rs` (228-entry closed-vocab validator + synonym-map in-band; 18 unit tests green; preserved for v1.1)
+- `experimental/kg-validation/prompts/extract.closed-vocab.mid-confident.md` (unchanged from iter 2; iter 3 isolated the wiring variable)
 - SCHEMA.md `## Canonical tag vocabulary (closed; Wave 0.5.3 seed)` section (228 tags; 188 corpus-derived + 40 domain pads)
 
 ### ✅ Wave 0.5.1 SEALED — hard-gate restored via model-class calibration profiles (`mb-xmgs` + `mb-4xtd` closed)
@@ -182,7 +205,8 @@ natural place for per-segment date-eligibility.
 - `mb-4xtd` ✓ — 7b hard-gate breach. **CLOSED** by iter-1-7b-fix (both seeds clean).
 - `mb-yfzy` ✓ — Wave 0.5.2: embeddings classifier (nomic-embed-text). **CLOSED** per ADR 0049 A1 (Move 2 mechanism falsified; infrastructure preserved for Move 4 disambiguation).
 - `mb-hnb4` ✓ — Wave 0.5.2 HALT escalation. **CLOSED** per Bernard Option B; ADR 0049 A1 amendment authored.
-- `mb-rzpd` ● — Wave 0.5.3: closed canonical tag vocab + new-tag-request flow. **HALTED after 2-iter rejection cascade**; root cause diagnosed (missing synonym-map step in validator); Bernard recommends Option A (iter 3 with synonym-map in-band).
+- `mb-rzpd` ● — Wave 0.5.3: closed canonical tag vocab + new-tag-request flow. **HALTED after 3-iter rejection cascade** (iter 3 = Bernard's Option A wiring fix; lifted ~2pp but vocab-coverage gap dominates remaining regression; Case C verdict per kickoff). Bernard now recommends Option B (close as useful negative result; keep the wiring fix on `main` for future v1.1).
+- `mb-e10v` ● — Wave 0.5.3 iter 3: integrate `SynonymMap` into `tag_validator`. **WIRING DELIVERED** (commit `8fdc7fb`); IAP REJECT (Case C). Bead held open with iter-3 scorecard pending Dustin's Option B vs Option D decision.
 - `mb-o4ni` — Wave 0.5.4: entity extraction probe + entity-quality metric. Blocked on `mb-rzpd` + 0.5.1, 0.5.3.
 - `mb-5r1b` — Wave 0.5.5: qwen2.5:3b cross-test on pivoted architecture. Blocked on `mb-rzpd` + 0.5.2-0.5.4.
 - `mb-qogz` — Wave 0.5.6: REPORT.md + GO/NO-GO + ADR 0049 Accepted. **HALT BEFORE THIS** — Dustin reviews 0.5.1–0.5.5 evidence on disk first.

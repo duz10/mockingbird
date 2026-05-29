@@ -313,6 +313,45 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 ---
 
+## 2026-05-29 [ADR 0049 Wave 0.5.3 / mb-e10v iter 3 REJECT] Wiring the synonym map into the closed-vocab validator is necessary but not sufficient — vocab-coverage gap dominates the remaining regression
+
+- **Context:** Follow-up to the 2026-05-29 mb-rzpd HALT entry (immediately
+  below). That entry diagnosed iter-1/iter-2 closed-vocab regression
+  as a missing-canonicalization-step in the validator. Iter 3 (`mb-e10v`)
+  shipped the architectural fix: `SynonymMap` lifted out of
+  `scoring::tag_collapse` into a shared `src/synonyms.rs` and applied
+  IN-BAND at validate-time (`normalize → synonym-collapse → vocab
+  membership check`). Same prompt, same vocab, same seeds — the
+  wiring was the only changed variable.
+- **Finding:** The wiring fix lifted seed-42 tag-collapse from 3.8%
+  (iter 2) → 5.7% (iter 3), confirming the diagnosis was directionally
+  right. But that's ~2pp; the gap to iter-1 open-vocab baseline (14.8%)
+  is 9.1pp. **The dominant pathology shifted from scorer-side to
+  model-side**: iter-2 top near-misses were `(missing)` tags that
+  *would* canonicalize had they been emitted; iter-3 top near-misses
+  are STILL `(missing)` tags — the model recognises them as out-of-
+  vocabulary and omits them entirely rather than emit. Specifically:
+  person names (`becca`, `dad`, `henderson`), brand names (`costco`),
+  concrete objects (`brake-pad`, `app`, `business-tool`). The synonym
+  map can only canonicalize tags the model emits; it cannot recover
+  tags the model never emitted in the first place. Closed-vocab
+  failure mode is therefore **two-dimensional**: (1) scorer wiring
+  (now fixed, ~2pp recovery) and (2) seed-vocab coverage of the long
+  tail of open-class entities (responsible for the remaining ~9pp gap
+  and unfixable without either expanding the vocab toward open-class
+  — defeating the closed-vocab thesis — or shipping a closed-class
+  taxonomy + open-class entity layer as separate concerns).
+- **Action:** When a wiring fix lifts a metric in the diagnosed direction
+  but only partway, don't assume more wiring will close the gap — check
+  whether the remaining gap has a different root cause. Two-by-two decision
+  table: (wiring fix lifts? × matches predicted magnitude?). Only (yes × yes)
+  is a clean accept. (yes × partial) means there's a second variable in
+  play; treat the wiring fix as a useful but separate intervention and
+  surface the second variable before another iter. The iter-3 wiring fix
+  is now on `main` (commit `8fdc7fb`) regardless of Wave 0.5.3's overall
+  verdict — it's architecturally correct on its own merits, and any future
+  v1.1 closed-vocab work inherits it for free.
+
 ## 2026-05-29 [ADR 0049 Wave 0.5.3 / mb-rzpd HALT] Closed-vocab tag validator regresses tag-collapse in BOTH prompt directions because the validator's normalize step doesn't apply the synonym map
 
 - **Context:** Wave 0.5.3 (Move 3 of ADR 0049) shipped a 228-entry
