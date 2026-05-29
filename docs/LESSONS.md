@@ -243,6 +243,52 @@ the 3b→7b model swap, cleanly isolating refactor-regression from
 model-regression. Skipping the parity step would have entangled
 the two questions.
 
+### P11. "Tags" and "entities" are different objects; conflating them in one field defeats both closed-vocab AND entity-extraction layers
+
+Wave 0.5.3 (`mb-rzpd` + `mb-e10v`) closed as a useful negative result.
+The wiring fix (synonym-map applied in-band at validate-time) was
+architecturally correct and lifted tag-collapse ~2pp (3.8% → 5.7% on
+seed 42) — but it left a 9.1pp gap vs the iter-1-7b-fix open-vocab
+baseline (14.8%). Diagnostic: top 9 of 10 near-misses (`becca`, `dad`,
+`costco`, `brake-pad`, `bakery`, `app`, `business`, `business-tool`,
+`design`) are **open-class entity references**, NOT semantic category
+tags.
+
+The Phase 0 corpus answer keys conflate two distinct object types in
+a single `tags:` field:
+
+- **Semantic categories** (`work`, `car-repair`, `finance`, `health`)
+  — bounded, closed-world, curatable. Closed vocabulary works here.
+- **Open-class entities** (person names, brand names, specific
+  objects, project names) — unbounded long tail. You cannot curate
+  an infinite tail globally; closed-vocab fails by design.
+
+Closed vocabulary is the right mechanism for the first; **entity
+extraction is the right mechanism for the second** — but only if the
+structured output schema separates the two fields. The closed-vocab
+layer cannot recover open-class entities the model correctly
+recognises as out-of-vocabulary and omits.
+
+**v1 architectural implication (binding):** the structured entry
+schema MUST have a separate `tags:` field (closed-vocab semantic
+categories — Move 3 applies) AND a separate `entities:` field
+(open-class first-class references — Move 4 entity extraction
+applies). The Phase 0 single-field `tags:` is retroactively
+understood as a v0 simplification; v1 carries the split forward.
+Future corpus authoring (Phase 1+) splits answer keys into the
+two-field schema from the start. ADR 0049 receives amendment A2
+in the Wave 0.5.6 REPORT framing.
+
+**Defense in depth for diagnosing similar layered systems:** when a
+mechanism lifts a metric in the predicted direction but only partway,
+don't assume more of the same mechanism closes the gap — check
+whether the residual has a different root cause. Two-by-two decision
+table: (wiring/fix lifts? × matches predicted magnitude?). Only
+(yes × yes) is a clean accept; (yes × partial) means there's a
+second variable in play. Iter 3 (Wave 0.5.3) was (yes × partial);
+the second variable was vocab-coverage of open-class entities, which
+a closed-vocab layer can't address by definition.
+
 ---
 
 ## 📚 Table of Contents (chronological, newest first)
@@ -251,6 +297,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-30 | `[ADR 0049 Wave 0.5.3 CLOSE / mb-rzpd + mb-e10v]` | Wave 0.5.3 sealed as useful negative result per Bernard Option B. Iter 3 wiring fix (synonym-map in-band at validate-time) lifted ~2pp (3.8% -> 5.7% seed 42) but fell 9.1pp short of open-vocab baseline (14.8%). Diagnostic on near-miss top 10: 9 of 10 are open-class entity references (person names, brand names, concrete objects, project names), not semantic category tags. Phase 0 corpus conflates two distinct object types in a single tags: field. Closed-vocab is the right mechanism for semantic categories (bounded, closed-world, curatable); entity extraction is the right mechanism for open-class references (unbounded long tail). v1 commits to two-field schema (tags + entities) with closed-vocab on tags and Move 4 entity-extraction on entities. ADR 0049 amendment A2 deferred to Wave 0.5.6 REPORT. Promotes to PINNED P11. Wiring fix stays on main (commit 8fdc7fb) for any future closed-vocab work to inherit |
 | 2026-05-29 | `[ADR 0049 Wave 0.5.3 / mb-rzpd HALT]` | Closed-vocab tag validator (228-entry seed) regressed tag-collapse -9.1pp (iter 1, verbose prompt, model over-tagged with valid generics) then -11.0pp (iter 2, tight prompt, model under-tagged conservatively). 2-iter rejection cascade. Diagnosed root cause: the closed-vocab validator's normalize step does NOT apply the synonym map, so model emissions like `automobile-repair` are DROPPED instead of being collapsed to `car-repair` (which IS in vocab). Open-vocab baseline let these flow through to the scorer, which collapsed them via synonym map. Closed-vocab as shipped loses the synonym-collapse contribution entirely. The deeper architectural pattern: small-LLM + 228-item closed list cannot be reliably navigated by the model — both directions (verbose vs tight prompt) fail Jaccard 1.0, just in opposite ways (over- vs under-tagging). Path forward (Bernard's Option A in STATUS `mb-rzpd`): integrate synonym-map into validator (normalize → synonym-collapse → vocab check), single architectural fix in `tag_validator.rs`. Halt rather than burn iters 3-5 on prompt-only tweaks |
 | 2026-05-29 | `[ADR 0049 Wave 0.5.1 / mb-4xtd CLOSED]` | Hard-gate restored on qwen2.5:7b via SCHEMA.md model-class calibration profiles. Iter-1 result vs 7b-pre-fix baseline: invented_dates 4→0 (HARD GATE PASS); zero regressions on category (81.5%), entry-type (88.9%), segmentation (93.3%), clean-single (33.3%), junk (100%); tag-collapse +3.7pp (11.1%→14.8%). Stability at seed 137 also clean. Architectural shape: SCHEMA.md gains `## Model-class calibration profiles` (small-conservative / mid-confident with assignment table + unknown-model default = mid-confident on trust-gate-safe grounds) and `### Profile-specific prompt overrides` (`(pass, profile) → file` rows, layered on top of the default-per-pass table). Loader resolves `prompt_body(pass, model)` = `overrides[(pass, profile_for(model))]` ∥ `default[pass]`. New `prompts/extract.mid-confident.md` hardened with: front-loaded null-bias framing, three-condition hard-gate, four explicit rules (duration phrases ≠ dates, vague-future ≠ dates, past-tense anchors stay past, segment-isolation prevents event-date bleed), 7 in-context examples on fictional vocab (Caldwell/Priya/Bergstroms — distinct from mb-4xtd failure set so those stay eval not training). PINNED P10 captures the architectural lesson. **Pin counterpart to P9 (Wave 5 strict-IAP rejection cascade) — P9 is "strict no-regression cannot ratchet quality on small models"; P10 is "prompts calibrate to a specific model's prior; portable schemas need per-class calibration"** |
 | 2026-05-29 | `[ADR 0049 Wave 0.5.1 / mb-xmgs + mb-4xtd]` | Date hard-gate prompt empirically tuned for qwen2.5:3b does NOT transfer to qwen2.5:7b; same SCHEMA, same prompts, same corpus produces 4 + 5 invented dates on 7b at two seeds (vs 0 on 3b). 7b is more confident-by-default and the prompt's null-bias is empirically insufficient to overcome its prior on borderline temporal anchors (vague future, past-tense, multi-segment misassignment, pure fabrication). Operational lesson: parity-gate on the OLD model before changing the model — it cleanly isolates refactor-regression from model-regression. v1 implication: any model substitution in a schema-driven pipeline needs empirical re-baselining of trust gates; SCHEMA portability is necessary-but-not-sufficient because prompts are model-tuned even when they look universal. Move 1 still delivered 3/4 architectural-lift success-criteria simultaneously (+14.2 / +10.7 / +26.6 on category/type/clean-single) — quality lift and trust regression coexist on the same Pareto frontier |
@@ -310,6 +357,52 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-30 [ADR 0049 Wave 0.5.3 CLOSE / mb-rzpd + mb-e10v] Closed-vocab Move 3 sealed as useful negative result; the residual gap is corpus tag/entity conflation, not Move 3 architecture (PINNED P11)
+
+- **Context:** Wave 0.5.3 ran three iterations head-to-head against
+  the iter-1-7b-fix open-vocab baseline. Iter 1 (verbose prompt) and
+  iter 2 (tight prompt) regressed in opposite directions (over-tagging
+  vs under-tagging); the 2026-05-29 mb-rzpd HALT entry diagnosed the
+  scorer-side wiring bug. Iter 3 (`mb-e10v`, commit `8fdc7fb`) shipped
+  the wiring fix — `SynonymMap` lifted to `src/synonyms.rs` and applied
+  in-band at validate-time. Bernard surfaced the iter-3 IAP REJECT on
+  2026-05-29 (commit `af2b0e1`) with three options for Dustin (A/B/D),
+  framed as: the wiring fix is necessary but not sufficient because
+  the residual ~9pp gap traces to a different root cause from the
+  scorer-side bug the fix addressed.
+- **Decision (Dustin via planning-agent kickoff, 2026-05-30):**
+  Option B — close Wave 0.5.3 as useful negative result. The wiring
+  fix stays on `main` (architecturally correct for any future closed-
+  vocab work to inherit). Architectural insight promotes to LESSONS
+  PINNED P11. Advance to Wave 0.5.4 entity-extraction probe (`mb-o4ni`)
+  which addresses the actual residual root cause.
+- **Finding (promoted to PINNED P11):** The Phase 0 corpus answer
+  keys conflate two distinct object types in a single `tags:` field:
+  semantic categories (bounded, closed-world, curatable — closed-vocab
+  works) and open-class entities (unbounded long tail — closed-vocab
+  fails by design). 9 of 10 top near-misses on iter 3 are open-class
+  entity references (`becca`, `dad`, `costco`, `brake-pad`, `bakery`,
+  `app`, `business`, `business-tool`, `design`). Closed-vocab Move 3
+  is the right mechanism for the first object type; entity extraction
+  is the right mechanism for the second. v1 architectural commit:
+  the structured entry schema separates `tags:` (closed-vocab) and
+  `entities:` (Move 4 entity extraction) into distinct fields.
+  Phase 0 corpus single-field `tags:` is retroactively understood as
+  v0 simplification; v1+ corpus authoring splits answer keys from
+  the start. ADR 0049 amendment A2 deferred to Wave 0.5.6 REPORT.
+- **Action:** No more closed-vocab prompt tuning on the current corpus
+  schema. The kickoff's Option D (expand seed vocab toward open-class)
+  is rejected — it defeats the closed-vocab thesis and grows toward
+  open-vocab while accumulating curation churn. Wave 0.5.4 probes
+  whether the 7b model can extract open-class entities with sufficient
+  quality (≥50% entity-quality on the labeled subset) to be the
+  canonical handler. If yes, v1 includes the entity layer; if no, v1
+  falls back to open-vocab tags + synonym-map + new-tag-request growth
+  loop (the v1.1 deferral named in ADR 0049). Either outcome is a
+  defensible v1 ship gate.
 
 ---
 

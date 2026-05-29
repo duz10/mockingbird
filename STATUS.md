@@ -56,20 +56,47 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**KG Phase 0.5 + v1 architectural pivot — ADR 0049 Proposed (A1 amendment Accepted in-doc), Wave 0.5.1 SEALED, Wave 0.5.2 falsified + closed (ADR 0049 A1), Wave 0.5.3 HALTED after 2-iter rejection cascade with diagnosed root cause.**
+**KG Phase 0.5 + v1 architectural pivot — ADR 0049 Proposed (A1 amendment Accepted in-doc; A2 amendment deferred to Wave 0.5.6 REPORT). Wave 0.5.1 SEALED, Wave 0.5.2 falsified + closed (ADR 0049 A1), Wave 0.5.3 SEALED as useful negative result (LESSONS P11), Wave 0.5.4 entity-extraction probe SCAFFOLDING in-flight.**
 
 Epic `mb-symi` (P1). Charter at `docs/adr/0049-knowledge-graph-phase-0-5-and-v1-architectural-pivot.md`.
 
-### 🛑 Blocked / human input needed — `mb-rzpd` + `mb-e10v` (P1, Wave 0.5.3 IAP rejection cascade — 3 iterations exhausted)
+### 🟢 In-flight — `mb-o4ni` Wave 0.5.4 entity-extraction probe
 
-**Wave 0.5.3 (closed canonical tag vocabulary) ran THREE head-to-head
-iterations on seed 42/137 vs the `iter-1-7b-fix` open-vocab baseline.
-All three REJECTED. Iter 3 implemented the wiring fix Bernard's Option A
-diagnosed (synonym-map applied IN-BAND at validate-time, before the
-vocab membership check). The fix WORKS in the narrow sense — tag-collapse
-lifted from 3.8% (iter 2) to 5.7% (iter 3 seed 42), recovering ~2pp of
-the regression. But it falls 9.1pp short of the iter-1 open-vocab
-baseline (14.8%) and 19.1pp short of the kickoff's +10pp lift bar (≥24.8%).**
+Scaffolding landing this session (2026-05-30): 5-bucket entity taxonomy
+(`person` / `organization` / `object` / `place` / `project`) in SCHEMA.md,
+both `small-conservative` and `mid-confident` prompt variants, new
+`passes/extract_entities.rs` pass module, new `scoring/entity_quality.rs`
+Jaccard scorer, hand-labeled entity ground truth at
+`corpus/entity-labels.jsonl` (~15-20 entity-rich dictations), and
+`extract_entities` added to `SUPPORTED_PASSES` in `schema_loader.rs`.
+
+**Decoupled from production pipeline for probe phase** — runs as a
+standalone harness against per-segment text. Keeps the freshly-landed
+closed-vocab work on `main` (commit `8fdc7fb`) undisturbed and gives
+the probe clean failure isolation. Pipeline wiring + actual head-to-head
+LLM runs (seed 42 + 137 at 7b mid-confident) ship in the next iteration.
+
+**Quality bar (from ADR 0049 charter + Bernard red-flag mitigation):**
+entity-quality ≥ 50% Jaccard on the labeled subset on seed 42; stability
+≥ 75% Jaccard across seeds; hard-gate `invented_dates_count == 0`
+preserved; no regression > 2pp on category/type/clean-single/segmentation/
+PCRP trust-eroding from iter-1-7b-fix baseline. ≥50% → v1 includes
+entity layer (conditional on 0.5.6 review); <50% → v1 falls back to
+tags-only (open-vocab + synonym-map + new-tag-request growth loop, the
+v1.1 deferral already named in ADR 0049).
+
+### ✅ Wave 0.5.3 SEALED — useful negative result (Bernard Option B, Dustin approved 2026-05-30)
+
+Three IAP iterations head-to-head against `iter-1-7b-fix` open-vocab
+baseline (tag-collapse 14.8% on seed 42). Final scorecard:
+
+All three iterations REJECTED at the kickoff's +10pp tag-collapse bar.
+Iter 1 (verbose prompt) and iter 2 (tight prompt) regressed in opposite
+directions (over- vs under-tagging) due to a missing canonicalization
+step in the validator. Iter 3 shipped the wiring fix (`SynonymMap`
+lifted to `src/synonyms.rs` and applied in-band at validate-time —
+commit `8fdc7fb`) which lifted seed-42 tag-collapse 3.8% → 5.7% (+1.9pp)
+but left a 9.1pp gap vs the open-vocab baseline.
 
 | Metric | iter-1-7b-fix (open vocab, baseline) | closed-vocab iter 1 | closed-vocab iter 2 | **closed-vocab iter 3 (wiring fix)** |
 |---|---|---|---|---|
@@ -89,16 +116,22 @@ Stability iter 3 (seed 42 vs seed 137): segmentation 96.9%, category
 80% bar. PCRP iter 3 seed 42: 10 trust-eroding failures, 6 wins (no
 iter-1 PCRP baseline exists, so PCRP regression is not computable).
 
-**Iter 3 verdict: Case C (kickoff decision tree).** The wiring fix is
-necessary but not sufficient. The dominant pathology has shifted from
-the scorer-side bug to the model-side: top near-misses are 9-of-10
-`(missing)` against expected `app`, `bakery`, `becca`, `brake-pad`,
-`costco`, `dad`, `henderson`, `documentation`, `design`, `business-tool` —
-specific concepts (person names, brand names, concrete objects) the
-model correctly recognises as out-of-vocab and omits entirely rather
-than emit. The synonym map can only canonicalize tags the model emits;
-it cannot recover tags the model never emitted. **This is a vocab-coverage
-problem, not a wiring problem.**",
+**Verdict (Bernard Option B; LESSONS P11):** the wiring fix is
+architecturally correct and stays on `main` for any future v1.1
+closed-vocab work to inherit. The residual ~9pp gap is **corpus
+tag/entity conflation**, not Move 3 architecture: 9 of 10 top
+near-misses (`becca`, `dad`, `costco`, `brake-pad`, `bakery`, `app`,
+`business`, `business-tool`, `design`) are open-class entity references,
+not semantic category tags. The Phase 0 single-field `tags:` answer-key
+schema conflates two distinct object types; v1 commits to a two-field
+schema with closed-vocab applied to `tags:` and entity-extraction (Move
+4 / Wave 0.5.4) applied to `entities:`. ADR 0049 amendment A2 deferred
+to Wave 0.5.6 REPORT framing.
+
+**Bead state:** `mb-rzpd` CLOSED (sealed as useful negative result;
+ADR 0049 amendment A2 in Wave 0.5.6). `mb-e10v` CLOSED (wiring fix
+on `main` architecturally correct on its own merits; Move 4 picks up
+the residual root cause).", 
 
 Stability: closed-vocab iter 1 seed-42 vs seed-137 — 96.9%
 segmentation, 98.4% category/type/date, 82.3% tag-set exact.
@@ -123,40 +156,13 @@ Follows ADR 0049 IAP stability ≥ 80% bar (just barely on tag-sets).
   closed-vocab architecture as shipped LOSES the synonym map's
   collapse contribution.
 
-**Bernard's options for Dustin (post-iter-3, narrowed):**
+**On-disk artifacts (Wave 0.5.3, preserved for v1.1 / Wave 0.5.6 REPORT):**
 
-Option A (iter 3 wiring fix) has now been tested and lifted only ~2pp —
-not enough. The remaining options are:
-
-- **B (recommended after iter 3) — halt Move 3; document closed-vocab
-  as falsified at this corpus + vocab-coverage scale.** Same shape as
-  Move 2 (ADR 0049 A1): mark the wave as a useful negative result
-  (the wiring fix is architecturally correct and now committed to
-  `main`; future v1.1 work inherits a properly-wired validator),
-  ship v1 with open-vocab + synonym-map + empirical learning loop
-  for vocabulary growth (the v1.1 deferral already named in ADR 0049).
-  Advance to Wave 0.5.4 (entity probe) which is independent of
-  vocab choice. The new-tag-request stream from iter 3 (16-20 implicit
-  requests per run) is a free vocab-growth fixture for v1.1.
-- **D — expand the seed vocab with person-name/brand/object tags
-  observed in the iter-3 new-tag-request stream and re-run iter 4.**
-  Top missing categories (person names, brand names, concrete objects)
-  are exactly the open-class entity tags closed-vocab is least suited
-  to. Risk: vocab grows toward open-vocab anyway, defeating the
-  closed-vocab thesis; high churn for diminishing returns.
-- **C from prior options (trim to ~80-120 catch-all-free)** is still
-  on the table but iter-3 evidence weakens it: the failures are *missing
-  specifics*, not over-applied generics. Trimming would worsen coverage.",
-
-**On-disk artifacts (not committed; gitignored by convention):**
-
-- `experimental/kg-validation/runs/run-7b-closed-vocab-seed42/` + `-seed137/` (iter 1, REJECT)
-- `experimental/kg-validation/runs/run-7b-closed-vocab-iter2-seed42/` + `-iter2-seed137/` (iter 2, REJECT)
-- `experimental/kg-validation/runs/run-7b-closed-vocab-iter3-seed42/` + `-iter3-seed137/` (iter 3, REJECT — wiring fix landed but vocab-coverage gap dominates)
-- `experimental/kg-validation/src/synonyms.rs` (NEW — extracted from `scoring::tag_collapse`; consumed by both validator and scorer; **architecturally correct, on `main`**)
-- `experimental/kg-validation/src/passes/tag_validator.rs` (228-entry closed-vocab validator + synonym-map in-band; 18 unit tests green; preserved for v1.1)
-- `experimental/kg-validation/prompts/extract.closed-vocab.mid-confident.md` (unchanged from iter 2; iter 3 isolated the wiring variable)
-- SCHEMA.md `## Canonical tag vocabulary (closed; Wave 0.5.3 seed)` section (228 tags; 188 corpus-derived + 40 domain pads)
+- `experimental/kg-validation/src/synonyms.rs` (lifted from `scoring::tag_collapse`; consumed by both validator and scorer; **architecturally correct, on `main`**)
+- `experimental/kg-validation/src/passes/tag_validator.rs` (228-entry closed-vocab validator + synonym-map in-band; 18 unit tests green; preserved for v1.1 closed-vocab work on the `tags:` field of the two-field v1 schema)
+- `experimental/kg-validation/prompts/extract.closed-vocab.mid-confident.md` (228-vocab prompt; preserved as v1.1 starting point)
+- SCHEMA.md `## Canonical tag vocabulary (closed; Wave 0.5.3 seed)` section (228 tags; 188 corpus-derived + 40 domain pads; preserved)
+- Per-iter run artifacts at `experimental/kg-validation/runs/run-7b-closed-vocab-{seed42,seed137,iter2-*,iter3-*}/` (gitignored; iter 3 has the wiring-fix run)
 
 ### ✅ Wave 0.5.1 SEALED — hard-gate restored via model-class calibration profiles (`mb-xmgs` + `mb-4xtd` closed)
 
@@ -205,10 +211,10 @@ natural place for per-segment date-eligibility.
 - `mb-4xtd` ✓ — 7b hard-gate breach. **CLOSED** by iter-1-7b-fix (both seeds clean).
 - `mb-yfzy` ✓ — Wave 0.5.2: embeddings classifier (nomic-embed-text). **CLOSED** per ADR 0049 A1 (Move 2 mechanism falsified; infrastructure preserved for Move 4 disambiguation).
 - `mb-hnb4` ✓ — Wave 0.5.2 HALT escalation. **CLOSED** per Bernard Option B; ADR 0049 A1 amendment authored.
-- `mb-rzpd` ● — Wave 0.5.3: closed canonical tag vocab + new-tag-request flow. **HALTED after 3-iter rejection cascade** (iter 3 = Bernard's Option A wiring fix; lifted ~2pp but vocab-coverage gap dominates remaining regression; Case C verdict per kickoff). Bernard now recommends Option B (close as useful negative result; keep the wiring fix on `main` for future v1.1).
-- `mb-e10v` ● — Wave 0.5.3 iter 3: integrate `SynonymMap` into `tag_validator`. **WIRING DELIVERED** (commit `8fdc7fb`); IAP REJECT (Case C). Bead held open with iter-3 scorecard pending Dustin's Option B vs Option D decision.
-- `mb-o4ni` — Wave 0.5.4: entity extraction probe + entity-quality metric. Blocked on `mb-rzpd` + 0.5.1, 0.5.3.
-- `mb-5r1b` — Wave 0.5.5: qwen2.5:3b cross-test on pivoted architecture. Blocked on `mb-rzpd` + 0.5.2-0.5.4.
+- `mb-rzpd` ✓ — Wave 0.5.3: closed canonical tag vocab + new-tag-request flow. **CLOSED 2026-05-30 as useful negative result (Bernard Option B; Dustin approved).** Three IAP iterations exhausted; LESSONS P11 promoted (tags ≠ entities; v1 commits to two-field schema). Wiring fix on `main` (commit `8fdc7fb`).
+- `mb-e10v` ✓ — Wave 0.5.3 iter 3: integrate `SynonymMap` into `tag_validator`. **CLOSED 2026-05-30** with wiring on `main`; the residual ~9pp gap traces to corpus tag/entity conflation, which Move 4 (entity extraction) addresses.
+- `mb-o4ni` ◐ — Wave 0.5.4: entity extraction probe + entity-quality metric. **SCAFFOLDING in-flight (this session).** Pipeline wiring + LLM runs in next iteration.
+- `mb-5r1b` — Wave 0.5.5: qwen2.5:3b cross-test on pivoted architecture. Blocked on `mb-o4ni` only now.
 - `mb-qogz` — Wave 0.5.6: REPORT.md + GO/NO-GO + ADR 0049 Accepted. **HALT BEFORE THIS** — Dustin reviews 0.5.1–0.5.5 evidence on disk first.
 
 Success criteria (ADR 0049): ≥ 3 of {category, entry-type, tag-collapse,
