@@ -41,9 +41,9 @@ REQUIRED:
 OPTIONAL:
   --corpus-dir <path>              default ./corpus
   --calibration-set <path>         default judge-calibration/tag-equivalence.json
-  --judge-model <name>             default llama3.1:8b-instruct-q4_K_M
-  --cross-judge-model <name>       default gemma2:9b (Gate 3 demotes to WARN if unpulled)
-  --persona-review-model <name>    default llama3.1:8b-instruct-q4_K_M
+  --judge-model <name>             default gemma2:9b (swapped from llama3.1:8b on 2026-05-29 per Wave 3.2 Gate 3 finding; ADR 0048 G5)
+  --cross-judge-model <name>       default llama3.1:8b-instruct-q4_K_M (rotated to cross-check role; Gate 3 demotes to WARN if unpulled)
+  --persona-review-model <name>    default llama3.1:8b-instruct-q4_K_M (PCRP reviewer keeps llama3.1; it judges the structured output, not tag equivalence)
   --judge-seed <int>               default 42
   --ollama-url <url>               default http://localhost:11434
   --stability-vs <run-id>          optional sibling run for §8.5 comparison
@@ -81,8 +81,14 @@ fn parse_args() -> anyhow::Result<Args> {
     let mut run_dir: Option<PathBuf> = None;
     let mut corpus_dir = PathBuf::from("corpus");
     let mut calibration_path = PathBuf::from("judge-calibration").join("tag-equivalence.json");
-    let mut judge_model = "llama3.1:8b-instruct-q4_K_M".to_string();
-    let mut cross_judge_model: Option<String> = Some("gemma2:9b".to_string());
+    // Wave 3.3 (2026-05-29): primary swapped to gemma2:9b on the back
+    // of Wave 3.2's Gate 3 STOP (llama3.1:8b proved more permissive on
+    // equivalence than gemma2:9b on the real corpus; gemma2:9b is the
+    // more discriminating judge). llama3.1 rotated to the cross-check
+    // slot. PCRP reviewer stays on llama3.1 — that role grades
+    // structured-output quality vs. persona notes, not tag equivalence.
+    let mut judge_model = "gemma2:9b".to_string();
+    let mut cross_judge_model: Option<String> = Some("llama3.1:8b-instruct-q4_K_M".to_string());
     let mut persona_review_model = "llama3.1:8b-instruct-q4_K_M".to_string();
     let mut judge_seed: i64 = 42;
     let mut ollama_url = "http://localhost:11434".to_string();

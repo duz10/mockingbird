@@ -154,10 +154,19 @@ Layered on top of that:
   use, so the two-run stability comparison sees genuine sampling
   variance and not a no-op.
 - **The LLM judge for tag semantic equivalence (spec §8.3) uses a
-  different model family than the pipeline-under-test.** If the
-  pipeline runs on `qwen2.5:3b`, the judge runs on `llama3.1:8b` (or
-  similar). Same-model judging is the failure mode spec §6.1 warns
-  about — "the grader just agrees with the processor."
+  different model family than the pipeline-under-test.** Pipeline =
+  `qwen2.5:3b` ⇒ primary judge = `gemma2:9b`, cross-check =
+  `llama3.1:8b-instruct-q4_K_M`. Same-model judging is the failure
+  mode spec §6.1 warns about — "the grader just agrees with the
+  processor."
+
+  **Wave 3.3 amendment (2026-05-29).** This ADR originally pinned
+  primary = `llama3.1:8b`, secondary = `gemma2:9b`. The swap is
+  data-driven: Wave 3.2's full JVP run on `runs/run-a-baseline`
+  cleared Gate 1 (`llama3.1:8b` at 11/12 = 91.7%) but STOPped on
+  Gate 3 cross-judge (4/7 = 57.1% with `gemma2:9b`), with two of the
+  three disagreements in the same direction — `llama3.1:8b`
+  Equivalent
 
 ### G5 — Judge Validation Protocol (JVP)
 
@@ -178,10 +187,25 @@ audit trail is permanent.
   `experimental/kg-validation/judge-calibration/tag-equivalence.json`.
   The judge must achieve ≥ 90% verdict-correct on this set before it is
   used on real data. Distribution: ~7 unambiguous-equivalent pairs,
-  ~5 unambiguous-different pairs (borderline cases are deliberately
-  excluded — they would create unfair gate failures; borderline
-  handling is a retrospective PCRP observation, not a calibration
-  metric).
+  ~5 unambiguous-different pairs (borderline cases are excluded from
+  the GATED set — they would create unfair gate failures).
+
+  **Wave 3.3 amendment (2026-05-29) — Gate 1 borderline (observational
+  companion).** Calibration v3 adds a `borderline` section (5–6 pairs,
+  each tagged with a `dimension` slug — tokenization, specificity,
+  coreference, domain-overlap, abstraction-level, person-specific).
+  Every JVP run scores the judge against the documented_verdict on
+  each borderline pair and persists a `gate1_borderline` block in
+  `JUDGE_VALIDATION.json` with per-pair + per-dimension match rates.
+  This is OBSERVATIONAL ONLY — `gate1_borderline` has no
+  `GateOutcome` and CANNOT contribute to a Halt. Its purpose:
+  (a) detect regression in fuzzy-case handling across judge swaps
+  (the immediate motivator — the Wave 3.2 → 3.3 swap left the
+  doctor-appointment tokenization pair as a known unknown for the
+  new judge), (b) auditable record of judgment quality on the hard
+  cases, (c) post-hoc cross-walk with PCRP themes. Borderline
+  handling remains a PCRP-territory concern; the borderline section
+  is the cheap mechanical complement.
 - **Gate 2 — Per-verdict reasoning audit ≥ 95% (STOP if fails).** Every
   judge response must (a) carry a reasoning string longer than 30
   characters, (b) reference at least one token from BOTH candidate tag
@@ -191,12 +215,12 @@ audit trail is permanent.
 - **Gate 3 — Cross-judge sample 10%, agreement ≥ 85% (STOP if <85%,
   WARN if 85–95%).** 10% of verdicts are re-judged by a second model
   drawn from a different family than both the primary judge AND the
-  pipeline-under-test. Concrete picks: pipeline = `qwen2.5:3b`,
-  primary judge = `llama3.1:8b`, secondary cross-check =
-  `gemma2:9b`. If `gemma2:9b` is not pulled and cannot be
-  substituted, Gate 3 demotes to WARN-only and the JVP report records
-  the demotion explicitly — we do NOT attempt to auto-pull a 4–9 GB
-  model.
+  pipeline-under-test. Concrete picks (Wave 3.3, see §G4 amendment
+  above): pipeline = `qwen2.5:3b`, primary judge = `gemma2:9b`,
+  secondary cross-check = `llama3.1:8b-instruct-q4_K_M`. If the
+  cross-judge model is not pulled and cannot be substituted, Gate 3
+  demotes to WARN-only and the JVP report records the demotion
+  explicitly — we do NOT attempt to auto-pull a 4–9 GB model.
 - **Gate 4 — Distribution sanity 40–80% equivalent rate (WARN).**
   Outside that range, flag in `REPORT.md` but proceed. A judge that
   marks 99% equivalent or 5% equivalent is almost certainly
