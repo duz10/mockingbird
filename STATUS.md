@@ -56,52 +56,59 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**KG Phase 0.5 + v1 architectural pivot — ADR 0049 Proposed, Wave 0.5.1 HALTED on hard-gate breach.**
+**KG Phase 0.5 + v1 architectural pivot — ADR 0049 Proposed, Wave 0.5.1 SEALED, Wave 0.5.2 next.**
 
 Epic `mb-symi` (P1). Charter at `docs/adr/0049-knowledge-graph-phase-0-5-and-v1-architectural-pivot.md`.
 
-### 🛑 Blocked / human input needed — `mb-4xtd` (P1 escalation)
+### ✅ Wave 0.5.1 SEALED — hard-gate restored via model-class calibration profiles (`mb-xmgs` + `mb-4xtd` closed)
 
-**Wave 0.5.1 sealed Move 1 (SCHEMA.md refactor) with a clean parity gate,
-but the qwen2.5:7b-instruct-q4_K_M baseline breaches ADR 0048 §G3 hard
-gate: `invented_dates_count > 0` on BOTH seeds (4 at seed 42, 5 at
-seed 137; Phase 0 3b produced 0 on the same corpus + same prompts).**
-Per the Wave 0.5 autonomy contract, a hard-gate breach is an unconditional
-halt. All downstream waves (0.5.2 → 0.5.6) blocked on `mb-4xtd`. Bernard
-is not auto-proceeding; needs Dustin's pick from the three options in
-`mb-4xtd` (recommended: option A — prompt-tune the extract date hard-gate
-against 7b's higher-confidence default before resuming).
+**The qwen2.5:7b date hard-gate breach was resolved architecturally by
+encoding model-aware prompt calibration directly in SCHEMA.md** — not by
+bolting a one-off prompt edit onto Move 1. New schema sections:
+`## Model-class calibration profiles` (with `small-conservative` /
+`mid-confident` profiles + assignment table, unknown-model default =
+`mid-confident` on trust-gate-safe grounds) and `### Profile-specific
+prompt overrides` (`(pass, profile) → prompt-file` rows layered on top
+of the per-pass default table). `prompts/extract.mid-confident.md`
+shipped as the only Phase 0.5 override row, hardened with front-loaded
+null-bias, three-condition hard-gate, four rules (duration phrases /
+vague-future / past-tense anchors / segment-isolation) and 7 fictional-
+vocabulary worked examples (distinct from the four mb-4xtd failure cases,
+which stay an eval set). Loader resolves `prompt_body(pass, model)` =
+`overrides[(pass, profile_for(model))] ∥ default[pass]`. LESSONS PINNED
+P10 captures the architectural finding.
 
-**Key empirical numbers from `runs/run-7b-baseline/SCORE_SUMMARY.md`** (seed 42; sibling stability at seed 137 in `runs/run-7b-stability/`):
+**Empirical result vs 7b pre-fix baseline (iter-1, both seeds):**
 
-| Metric | Phase 0 (3b) | Wave 0.5.1 (7b, SCHEMA refactor) | Δ | Bar | Verdict |
+| Metric | Phase 0 (3b) | 7b pre-fix | iter-1-7b-fix (seed 42 / 137) | Bar | Verdict |
 |---|---|---|---|---|---|
-| **Invented dates (HARD GATE)** | 0 | **4** (seed 42) / **5** (seed 137) | +4 / +5 | 0 | **🛑 BREACH** |
-| Category correct | 67.3% | 81.5% | +14.2 | +10 | ✅ MEETS LIFT |
-| Entry-type correct | 78.2% | 88.9% | +10.7 | +10 | ✅ MEETS LIFT |
-| Clean single-item correct | 6.7% | 33.3% | +26.6 | +10 | ✅ MEETS LIFT |
-| Segmentation correct | 86.7% | 93.3% | +6.6 | — | ✅ holds |
-| Tag-collapse correct (G7) | 9.1% | 11.1% | +2.0 | +10 | ⚠️ Move 3 territory |
-| Junk handled correctly | 100% | 100% | 0 | 100% | ✅ holds |
+| **Invented dates (HARD GATE)** | 0 | 4 / 5 | **0 / 0** | 0 | ✅ **RESTORED** |
+| Category correct | 67.3% | 81.5% | 81.5% / 83.3% | +10 | ✅ +14.2 / +16.0 |
+| Entry-type correct | 78.2% | 88.9% | 88.9% / 90.7% | +10 | ✅ +10.7 / +12.5 |
+| Clean single-item correct | 6.7% | 33.3% | 33.3% / 33.3% | +10 | ✅ +26.6 |
+| Segmentation correct | 86.7% | 93.3% | 93.3% / 93.3% | — | ✅ holds |
+| Tag-collapse correct (G7) | 9.1% | 11.1% | 14.8% / 14.8% | +10 | ⚠️ +5.7 (Move 3 still relevant) |
+| Junk handled correctly | 100% | 100% | 100% / 100% | 100% | ✅ holds |
 
-Stability (baseline vs stability sibling on 7b): 100% segmentation,
-98.4% category, 98.4% entry-type, 96.8% date, 84.1% tag-set exact.
-
-**Net read for Dustin:** Move 1 alone delivers 3-of-4 architectural-lift
-success-criteria metrics already — substantial validation of the pivot.
-The regression is narrowly localized to the date hard-gate prompt, which
-was empirically tuned in Phase 0 specifically for 3b and is insufficient
-for 7b's higher-confidence default on vague/past-tense temporal anchors
-(see four failure cases enumerated in `bd show mb-4xtd`).
+Clean Pareto-frontier acceptance on iter-1: hard-gate restored 4→0
+and 5→0, ZERO regressions on any other metric across both seeds, one
+improvement (tag-collapse +3.7pp on the same data). One iteration to
+resolution well inside the 5-attempt cap. Per-seed run artifacts at
+`runs/iter-1-7b-fix/` (seed 42) and `runs/iter-1-7b-fix-stab/` (seed 137).
+Minor over-correction observed (3 legitimate dates dropped in
+persona-05-case-03: "Saturday's game", "this weekend", "by July
+fifteenth") but didn't move a top-line scorecard metric and is parked
+as a Wave 0.5.3+ refinement after closed-tag-vocab work creates a
+natural place for per-segment date-eligibility.
 
 ### Wave structure (sub-beads, ADR 0049 dependency graph in `bd`)
 
-- `mb-xmgs` ◐ — Wave 0.5.1: SCHEMA.md refactor + 7b baseline + parity gate. **Move 1 SHIPPED + parity PASS + 7b baseline scored; bead remains in_progress pending resolution of `mb-4xtd`.**
-- `mb-4xtd` ○ — **HALT escalation**: 7b hard-gate breach. Blocks 0.5.2-0.5.6.
-- `mb-yfzy` — Wave 0.5.2: embeddings classifier (nomic-embed-text). Blocked on `mb-4xtd` + 0.5.1.
-- `mb-rzpd` — Wave 0.5.3: closed canonical tag vocab + new-tag-request flow. Blocked on `mb-4xtd` + 0.5.1.
-- `mb-o4ni` — Wave 0.5.4: entity extraction probe + entity-quality metric. Blocked on `mb-4xtd` + 0.5.1, 0.5.3.
-- `mb-5r1b` — Wave 0.5.5: qwen2.5:3b cross-test on pivoted architecture. Blocked on `mb-4xtd` + 0.5.2, 0.5.3, 0.5.4.
+- `mb-xmgs` ✓ — Wave 0.5.1: SCHEMA.md refactor + 7b baseline + parity gate + calibration profiles + 7b hard-gate restoration. **SEALED.**
+- `mb-4xtd` ✓ — 7b hard-gate breach. **CLOSED** by iter-1-7b-fix (both seeds clean).
+- `mb-yfzy` ◐ — Wave 0.5.2: embeddings classifier (nomic-embed-text). **NOW UNBLOCKED.**
+- `mb-rzpd` — Wave 0.5.3: closed canonical tag vocab + new-tag-request flow.
+- `mb-o4ni` — Wave 0.5.4: entity extraction probe + entity-quality metric.
+- `mb-5r1b` — Wave 0.5.5: qwen2.5:3b cross-test on pivoted architecture.
 - `mb-qogz` — Wave 0.5.6: REPORT.md + GO/NO-GO + ADR 0049 Accepted. **HALT BEFORE THIS** — Dustin reviews 0.5.1–0.5.5 evidence on disk first.
 
 Success criteria (ADR 0049): ≥ 3 of {category, entry-type, tag-collapse,

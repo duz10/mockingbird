@@ -192,6 +192,57 @@ Default for mixed loops: strict IAP on the trust-critical gates,
 Pareto-frontier on the quality metrics, in the same iteration loop.
 Pick discipline per metric by cost-of-regression on that metric.
 
+### P10. Schema portability requires per-model-class calibration profiles, not one prompt for all models
+
+Wave 0.5.1 (`mb-4xtd`): `qwen2.5:7b-instruct-q4_K_M` breached the
+Phase 0 date hard-gate (4 invented dates at seed 42, 5 at seed 137)
+despite using the identical extract prompt that ran clean on
+`qwen2.5:3b-instruct-q4_K_M` (0 invented dates across the same
+32-fixture corpus + same two seeds). Root cause: the prompt's
+null-bias was empirically tuned through Phase 0 Wave 5 IAP iterations
+against the 3b's cautious-by-default prior. The 7b has a
+confident-by-default prior; the same instructions don't push hard
+enough to overcome the larger model's disposition. Failure modes
+clustered on four specific pathologies: duration phrases ("thirty
+days"), vague-future references ("the next one-on-one"), past-tense
+temporal anchors ("dinner Friday" said on a Sunday), and multi-segment
+date bleed (event-date attached to action task).
+
+**Implication for schema-driven systems (Clark / ADR 0049):**
+
+The honest version of "the schema travels across models" is *the
+schema travels across models WHEN the schema encodes model-aware
+calibrations*. Not "one prompt rules them all" — instead "the schema
+encodes the per-class calibration once, the system handles model
+swap transparently."
+
+Concretely: `SCHEMA.md` has a `## Model-class calibration profiles`
+section mapping each known model to a profile
+(`small-conservative`, `mid-confident`), plus a
+`### Profile-specific prompt overrides` table
+adding `(pass, profile) → prompt-file` rows. The default-prompt
+table still exists; overrides layer on top. Adding a new model =
+add its row in the assignment table (or author a new profile if its
+natural prior is genuinely new). The loader resolves
+`prompt_body(pass, model)` = `overrides[(pass, profile_for(model))]`
+if present, else `default[pass]`. Unknown models default to
+`mid-confident` (safer-on-trust-gate — over-cautious-prompt-on-
+confident-model just adds nulls; under-cautious-prompt-on-confident-
+model invents dates).
+
+**This makes SCHEMA.md MORE useful, not less.** The work of taming
+a specific model gets captured in the schema and persists across
+the system's lifetime. Wave 0.5.1 fix shipped a clean Pareto
+acceptance on iter-1: 4→0 invented dates, zero regressions on
+category/type/segmentation/clean-single, +3.7pp on tag-collapse.
+
+**Operational sub-finding:** parity-gate against the OLD model
+FIRST when swapping models. The Wave 0.5.1 SCHEMA refactor parity
+gate ran 3b→3b and was identical; the regression surfaced only on
+the 3b→7b model swap, cleanly isolating refactor-regression from
+model-regression. Skipping the parity step would have entangled
+the two questions.
+
 ---
 
 ## 📚 Table of Contents (chronological, newest first)
@@ -200,6 +251,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-29 | `[ADR 0049 Wave 0.5.1 / mb-4xtd CLOSED]` | Hard-gate restored on qwen2.5:7b via SCHEMA.md model-class calibration profiles. Iter-1 result vs 7b-pre-fix baseline: invented_dates 4→0 (HARD GATE PASS); zero regressions on category (81.5%), entry-type (88.9%), segmentation (93.3%), clean-single (33.3%), junk (100%); tag-collapse +3.7pp (11.1%→14.8%). Stability at seed 137 also clean. Architectural shape: SCHEMA.md gains `## Model-class calibration profiles` (small-conservative / mid-confident with assignment table + unknown-model default = mid-confident on trust-gate-safe grounds) and `### Profile-specific prompt overrides` (`(pass, profile) → file` rows, layered on top of the default-per-pass table). Loader resolves `prompt_body(pass, model)` = `overrides[(pass, profile_for(model))]` ∥ `default[pass]`. New `prompts/extract.mid-confident.md` hardened with: front-loaded null-bias framing, three-condition hard-gate, four explicit rules (duration phrases ≠ dates, vague-future ≠ dates, past-tense anchors stay past, segment-isolation prevents event-date bleed), 7 in-context examples on fictional vocab (Caldwell/Priya/Bergstroms — distinct from mb-4xtd failure set so those stay eval not training). PINNED P10 captures the architectural lesson. **Pin counterpart to P9 (Wave 5 strict-IAP rejection cascade) — P9 is "strict no-regression cannot ratchet quality on small models"; P10 is "prompts calibrate to a specific model's prior; portable schemas need per-class calibration"** |
 | 2026-05-29 | `[ADR 0049 Wave 0.5.1 / mb-xmgs + mb-4xtd]` | Date hard-gate prompt empirically tuned for qwen2.5:3b does NOT transfer to qwen2.5:7b; same SCHEMA, same prompts, same corpus produces 4 + 5 invented dates on 7b at two seeds (vs 0 on 3b). 7b is more confident-by-default and the prompt's null-bias is empirically insufficient to overcome its prior on borderline temporal anchors (vague future, past-tense, multi-segment misassignment, pure fabrication). Operational lesson: parity-gate on the OLD model before changing the model — it cleanly isolates refactor-regression from model-regression. v1 implication: any model substitution in a schema-driven pipeline needs empirical re-baselining of trust gates; SCHEMA portability is necessary-but-not-sufficient because prompts are model-tuned even when they look universal. Move 1 still delivered 3/4 architectural-lift success-criteria simultaneously (+14.2 / +10.7 / +26.6 on category/type/clean-single) — quality lift and trust regression coexist on the same Pareto frontier |
 | 2026-05-29 | `[ADR 0048 Wave 3.3 / mb-57a1]` | Swapping the primary judge from `llama3.1:8b` to `gemma2:9b` inverts the disagreement direction on Gate 3 without closing the gap (Wave 3.2 4/7 → Wave 3.3 5/9; same three personas, primary=Equivalent/cross=NotEquivalent → primary=NotEquivalent/cross=Equivalent). Tag-collapse metric moves 81.8% → 38.2% on the SAME data — a 43-pt judge-dependent gap. Borderline observational set (added this wave) shows the pattern crisply: judges agree on `tokenization`/`specificity`/`domain-overlap`/`person-specific` (the clear dimensions, 4/4 perfect for gemma2) and disagree on `coreference` + `abstraction-level` (the genuinely-fuzzy dimensions, 0/2 for gemma2). The structural finding: LLM-judge tag-equivalence on a corpus with this much surface-token variation is more ambiguous than the inter-rater reliability of different judge families supports. Two consecutive Gate 3 STOPs with inverted direction is the signal that the failing gate is correctly identifying a methodology problem the patches under consideration (judge swap, prompt tune, threshold loosen) can't reach. Path forward: replace LLM-judge tag metric with deterministic exact-match + Jaccard (option E in wave-3-results.md) — honors AGENTS.md §6 "if something is hard to verify, that's the bug." Requires ADR 0048 §G5 amendment; not Bernard's call autonomously |
 | 2026-05-29 | `[ADR 0048 Wave 3.2 / mb-57a1]` | JVP Gate 3 STOP: llama3.1:8b is more permissive than gemma2:9b on tag-equivalence on the real corpus, while passing Gate 1 (unambiguous calibration) cleanly at 91.7%. Calibration sets of unambiguous pairs can't surface this skew — Gate 3 (cross-judge on real-corpus 10% sample) is the gate that catches it; the 5-gate JVP design is load-bearing because each gate covers a different failure mode. Calibration-fairness sub-finding: every cal pair's vocabulary must be disjoint from the judge prompt's in-context examples (cal-eq-001 v1 violated this; v2 fix in commit 7f8ff1c). PCRP-mislabel sub-finding: PCRP prose's literal claims ("hallucinated dates") must be cross-walked vs. structured output before being treated as fact; the themes are the durable signal, surface words are not |
@@ -257,6 +309,107 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-29 [ADR 0049 Wave 0.5.1 / mb-4xtd CLOSED] Hard-gate restored on qwen2.5:7b via SCHEMA.md model-class calibration profiles
+
+- **Context:** Wave 0.5.1 SCHEMA.md refactor (Move 1 of ADR 0049)
+  passed its parity gate on `qwen2.5:3b` but the 7b baseline
+  produced 4 invented dates at seed 42, 5 at seed 137 — a clean
+  hard-gate breach against the Phase 0 zero-invented-dates anchor.
+  The four failures clustered on duration phrases ("thirty days"),
+  vague-future ("the next one-on-one"), past-tense temporal anchors
+  ("dinner Friday" on a Sunday), and multi-segment date bleed.
+- **Finding:** the regression is real and architectural, not a
+  prompt typo — the 3b's cautious-by-default prior was carrying
+  some of the null-bias work that the prompt language alone didn't
+  encode. Swapping to the 7b's confident-by-default prior with the
+  same prompt let the assertive disposition reach borderline temporal
+  anchors the 3b would have abstained on.
+- **Fix:** model-class calibration profiles in SCHEMA.md (`mb-4xtd`).
+  Two sections added to the schema:
+
+  1. `## Model-class calibration profiles` — declares
+     `small-conservative` (qwen2.5:3b-class, gemma2:2b-class) and
+     `mid-confident` (qwen2.5:7b-class, gemma2:9b, llama3.1:8b-class)
+     with an explicit `### Profile assignment` table. Unknown models
+     default to `mid-confident` (loud failure mode: extra nulls;
+     vs silent failure mode: invented dates on the trust gate).
+  2. `### Profile-specific prompt overrides` — layered on top of
+     the existing default-per-pass table. Resolution rule:
+     `prompt_body(pass, model)` = `overrides[(pass, profile_for(model))]`
+     if present, else `default[pass]`. YAGNI: we add override rows
+     only where empirical evidence demands them.
+
+  New `prompts/extract.mid-confident.md` (the only override row for
+  Phase 0.5) is hardened with:
+  - Front-loaded null-bias framing ("Most dictations do NOT contain
+    a specific date.").
+  - Three-condition hard-gate (anchor present ∧ unambiguously future
+    ∧ IS the action's deadline). "When in doubt, output null."
+  - Rule A: duration phrases ("thirty days", "in a few weeks",
+    "soon", "down the road") explicitly enumerated as NOT dates.
+  - Rule B: vague future ("next one-on-one", "next time", "when I
+    have time") explicitly enumerated as NOT dates; "`next` alone
+    is NOT a calendar anchor".
+  - Rule C: past-tense temporal anchors stay past — do NOT map onto
+    the upcoming occurrence of that weekday. Worked example: "dinner
+    Thursday" on Sun 2026-06-14 → null, NEVER 2026-06-18.
+  - Rule D: segment-isolation — event-date in the segment doesn't
+    bleed into action-task deadline unless the action has an
+    explicit "by <date>". Worked example: "housewarming Saturday
+    and I haven't replied" → the action is "reply", Saturday is the
+    event, not the deadline; null.
+  - 7 worked examples drawn from FICTIONAL vocabulary (Caldwell,
+    Priya, Bergstroms, etc.) NOT from the mb-4xtd failure set, so
+    those four dictations stay an eval set and don't leak into the
+    training-by-example.
+
+  Loader changes (`src/schema_loader.rs`):
+  - `Schema::profile_for(model: &str) -> &str` — lookup with
+    `mid-confident` default.
+  - `Schema::prompt_body(pass, model) -> Result<&str, ...>` —
+    override-then-default resolution; called from
+    `harness/pipeline.rs` once per pipeline run.
+  - Old `prompt_bodies: PromptBodies` struct removed; per-pass
+    bodies now live in `default_prompt_bodies: HashMap<pass, body>`
+    and `override_prompt_bodies: HashMap<(pass, profile), body>`.
+  - Parity test pinned: 3b model resolves to the verbatim contents
+    of `prompts/extract.md`; 7b resolves to the verbatim contents
+    of `prompts/extract.mid-confident.md`. Sandbox `cargo test`
+    144/144 green.
+
+- **Empirical result (iter-1, seed 42, vs `run-7b-baseline`):**
+
+  | Metric | 7b pre-fix | iter-1-7b-fix | Δ | Verdict |
+  |---|---|---|---|---|
+  | **Invented dates (HARD GATE)** | 4 | **0** | -4 | ✅ FIXED |
+  | Clean single-item | 33.3% | 33.3% | 0 | hold |
+  | Segmentation | 93.3% | 93.3% | 0 | hold |
+  | Category | 81.5% | 81.5% | 0 | hold |
+  | Entry-type | 88.9% | 88.9% | 0 | hold |
+  | Tag-collapse (G7) | 11.1% | 14.8% | +3.7 | improved |
+  | Junk-bucket | 100% | 100% | 0 | hold |
+
+  Clean Pareto-frontier acceptance: hard-gate restored, ZERO
+  regressions, one improvement. Seed-137 stability run confirmed
+  (see runs/iter-1-7b-fix-stab/).
+
+- **Caveat (not gating acceptance, worth flagging):** the strong
+  null-bias framing dropped three legitimate dates in
+  persona-05-case-03 ("by Saturday's game" → should be 2026-06-20,
+  "this weekend" → should be 2026-06-20, "by July fifteenth" →
+  should be 2026-07-15). None of these moved a top-line metric in
+  the current scorecard (no "missed dates" metric; clean-single is
+  identical 5/15), but it's real over-correction worth follow-up
+  in Wave 0.5.3+ once the closed tag vocabulary work creates a
+  natural place for a per-segment date-eligibility refinement.
+  Logged as a future-work observation, not a gating finding.
+
+- **Action:** PINNED P10 captures the architectural lesson. `mb-4xtd`
+  closed. Wave 0.5.1 (`mb-xmgs`) seals. Downstream waves
+  (`mb-yfzy`/`mb-rzpd`/`mb-o4ni`/`mb-5r1b`/`mb-qogz`) unblocked.
 
 ---
 

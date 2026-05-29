@@ -70,11 +70,70 @@ pub fn run_pipeline<D: OllamaDispatcher>(
 
     let mut errors: Vec<(String, PassError)> = Vec::new();
 
-    // ── Pass 1: segment ───────────────────────────────────────────
+    // Resolve per-pass prompt bodies up front via the model-class
+    // calibration profile (`mb-4xtd` / ADR 0049 Move 1). The dispatch
+    // model is stable for the whole pipeline call, so one resolution
+    // suffices. A missing prompt at this point is a schema-load bug,
+    // not a per-segment failure — the runner already verified the
+    // file existed at startup; we treat the unwrap-equivalent as
+    // fail-fast via the explicit error.
+    let segment_prompt = match schema.prompt_body("segment", model) {
+        Ok(b) => b,
+        Err(e) => {
+            errors.push((
+                format!("segment[{dictation_id}]"),
+                PassError::Validation {
+                    pass: "segment",
+                    detail: format!("schema resolution: {e}"),
+                    raw: String::new(),
+                },
+            ));
+            return PipelineResult {
+                entries: Vec::new(),
+                per_pass_errors: errors,
+            };
+        }
+    };
+    let classify_prompt = match schema.prompt_body("classify", model) {
+        Ok(b) => b,
+        Err(e) => {
+            errors.push((
+                format!("classify[{dictation_id}]"),
+                PassError::Validation {
+                    pass: "classify",
+                    detail: format!("schema resolution: {e}"),
+                    raw: String::new(),
+                },
+            ));
+            return PipelineResult {
+                entries: Vec::new(),
+                per_pass_errors: errors,
+            };
+        }
+    };
+    let extract_prompt = match schema.prompt_body("extract", model) {
+        Ok(b) => b,
+        Err(e) => {
+            errors.push((
+                format!("extract[{dictation_id}]"),
+                PassError::Validation {
+                    pass: "extract",
+                    detail: format!("schema resolution: {e}"),
+                    raw: String::new(),
+                },
+            ));
+            return PipelineResult {
+                entries: Vec::new(),
+                per_pass_errors: errors,
+            };
+        }
+    };
+
+    // ── Pass 1: segment ─────────────────────────────────
     let segments = match passes::segment(
         dispatcher,
         model,
-        &schema.prompt_bodies.segment,
+        segment_prompt,
         dictation,
         captured_iso,
         options,
@@ -104,30 +163,25 @@ pub fn run_pipeline<D: OllamaDispatcher>(
 
     for (idx, seg_text) in segments.iter().enumerate() {
         // ── Pass 2: classify ──────────────────────────────────────
-        let classification = match passes::classify(
-            dispatcher,
-            model,
-            &schema.prompt_bodies.classify,
-            seg_text,
-            options,
-        ) {
-            Ok(c) => c,
-            Err(e) => {
-                let raw_for_artifact = raw_from_err(&e).unwrap_or("<unavailable>").to_string();
-                let msg = e.to_string();
-                errors.push((format!("classify[{idx}]"), e));
-                let _ = write_json(
-                    &artifact_dir.join(format!("classify-{idx}.json")),
-                    &ClassifyArtifact {
-                        raw_model_output: &raw_for_artifact,
-                        parsed: None,
-                        error: Some(msg),
-                        segment_text: seg_text,
-                    },
-                );
-                continue;
-            }
-        };
+        let classification =
+            match passes::classify(dispatcher, model, classify_prompt, seg_text, options) {
+                Ok(c) => c,
+                Err(e) => {
+                    let raw_for_artifact = raw_from_err(&e).unwrap_or("<unavailable>").to_string();
+                    let msg = e.to_string();
+                    errors.push((format!("classify[{idx}]"), e));
+                    let _ = write_json(
+                        &artifact_dir.join(format!("classify-{idx}.json")),
+                        &ClassifyArtifact {
+                            raw_model_output: &raw_for_artifact,
+                            parsed: None,
+                            error: Some(msg),
+                            segment_text: seg_text,
+                        },
+                    );
+                    continue;
+                }
+            };
         let _ = write_json(
             &artifact_dir.join(format!("classify-{idx}.json")),
             &ClassifyArtifact {
@@ -142,7 +196,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
         let extraction = match passes::extract(
             dispatcher,
             model,
-            &schema.prompt_bodies.extract,
+            extract_prompt,
             seg_text,
             &classification,
             captured_iso,
