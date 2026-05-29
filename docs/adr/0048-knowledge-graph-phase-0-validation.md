@@ -292,6 +292,122 @@ wouldn't trust it in practice), Wave 6's `REPORT.md` must default to
 NO-GO, with the conjunction of those two conditions documented as the
 reasoning.
 
+### G7 — Tag-collapse metric: deterministic measurement (Option E, 2026-05-29)
+
+**Supersedes spec §8.3 (LLM tag-equivalence judge) for the tag-collapse
+metric only.** The Judge Validation Protocol architecture in §G5 and the
+`src/scoring/judge_validation.rs` module are preserved for any future
+LLM-judged metric, but **JVP is not invoked for tag scoring** under §G7.
+
+#### Why
+
+Wave 3.2 and Wave 3.3 empirically falsified the LLM-judged approach on
+this corpus:
+
+- **Wave 3.2** (`llama3.1:8b` primary, `gemma2:9b` cross-check) — Gate 3
+  STOP at 4/7 (57.1%, threshold ≥ 85%). Tag-collapse reported 81.8%
+  (45/55) but the verdict-level disagreement on three specific personas
+  meant the headline was not defensible.
+- **Wave 3.3** (`gemma2:9b` primary, `llama3.1:8b` cross-check — judge
+  swap per §G4) — Gate 3 STOP at 5/9 (55.6%). Same three personas; the
+  **disagreement direction inverted** with the swap. Same pipeline data
+  re-scored produced a tag-collapse number of 38.2% (21/55) — a **43-point
+  judge-dependent gap** with no defensible "correct" number in between.
+
+The two consecutive Gate 3 STOPs with directionally-inverted disagreement
+are not a prompt-tuning problem (rejected: Wave 3.3 ran with calibration
+v3 borderline-pair telemetry) and not a judge-selection problem
+(empirically falsified by the swap). Per AGENTS.md Principle 6 ("if
+something is hard to verify, that's the bug"), the metric design — not
+the judge — is the bug.
+
+#### What (replacement metric)
+
+For each pipeline entry vs. its answer-key entry:
+
+1. **Canonicalize** the actual `topic_tags` via a versioned synonym map
+   at `experimental/kg-validation/judge-calibration/synonym-map.json`:
+   each tag is replaced by its canonical form if mapped, else passes
+   through unchanged. Result is a `BTreeSet<String>` (set semantics,
+   order-independent).
+2. **Canonicalize** every `acceptable_topic_tag_sets[i]` from the answer
+   key the same way.
+3. Compute the **Jaccard similarity** of `actual_canonical` against each
+   `accept_canonical[i]`. Record the MAX.
+4. **Pass condition:** the entry is "tag-collapse correct" iff
+   `MAX(jaccard) == 1.0` — i.e. one of the acceptable sets matches the
+   actual set exactly after canonicalization.
+5. Compute the per-run ratio of correct entries / total scoreable
+   entries. **Spec §8.4 threshold ≥ 80% is unchanged.**
+
+Jaccard at lower thresholds (0.8, 0.67, 0.5) is **reported
+observationally** in `SCORE.json` and `SCORE_SUMMARY.md` but does NOT
+gate. Picking exact match (1.0) — rather than a partial-overlap
+threshold — is deliberate: the synonym map IS the equivalence engine,
+and accepting partial overlap on top of it would double-count forgiveness
+and obscure synonym-map gaps. **Misses point directly to synonym-map
+candidates for iteration**, which is the desired feedback loop.
+
+A **near-miss report** (top 10 most-frequent `(actual_tag,
+answer_key_tag)` pairs that prevented a 1.0 Jaccard, ranked by
+frequency) is surfaced in `SCORE_SUMMARY.md`. These are the
+empirical Wave-5 prompt-iteration + synonym-map-iteration candidates.
+
+#### Synonym map sourcing & versioning
+
+The map is JSON, schema_version `synonym-map-v1`, top-level fields
+`version` + `synonyms[]`. Each entry: `canonical` (string), `variants`
+(string[], may be empty), `rationale` (string), `source` (one of
+`auto-seed-answer-key` | `bernard-seed` | `diff-driven-codepuppy`).
+
+**Authoring procedure for v1:**
+
+1. **Auto-seed.** Walk every answer-key file; for every distinct tag in
+   every `acceptable_topic_tag_sets[*]`, seed an entry with that tag as
+   `canonical`, empty `variants`, `source: "auto-seed-answer-key"`.
+   This guarantees every answer-key tag is at minimum its own canonical
+   form (identity self-map for unknowns).
+2. **Hand-augment with Bernard's project-knowledge seed list** (see
+   Wave 3 dispatch brief for the full list — household / professional /
+   tradesperson / caregiver domain coverage). Source `bernard-seed`.
+3. **Diff-driven discovery.** Collect every tag emitted by the pipeline
+   in `runs/run-a-baseline/structured/*.json`; for each tag that isn't
+   already a canonical or a variant, propose a canonical only when the
+   equivalence is **clear and unambiguous**. Source
+   `diff-driven-codepuppy`. **Borderline → leave out** — the metric is
+   supposed to surface synonym-map gaps; over-collapsing hides them.
+
+**Discipline rules (binding on every authoring pass):**
+
+- Person-name tags NEVER collapse into domain tags (`karen` stays
+  distinct from `finance` even when consistently paired).
+- Specificity collapse only when the specific tag's extra information
+  is genuinely redundant (`auto-maintenance` → `car-repair` is fine;
+  `brake-pads` → `maintenance` is not, because `brake-pads` carries
+  irreducible specificity).
+- Domain overlap is NOT equivalence (`etsy` and `social-media` are
+  different channels even though Etsy is social commerce).
+- When in doubt: leave out. Adding a variant later is one-line; ripping
+  out a wrong collapse retroactively invalidates prior scoring.
+
+#### Operational consequences
+
+- **No LLM calls** during tag scoring. Wall time for the tag metric
+  drops from ~40 min (55 entries × ~45s LLM per call × multi-acceptable-set
+  fan-out) to milliseconds.
+- `--judge-model` / `--cross-judge-model` / `--judge-seed` flags remain
+  on `score-run` for the JVP architecture (preserved for future
+  LLM-judged metrics), but the tag-collapse code path no longer
+  consults them. JVP itself is not invoked in current Phase 0 since
+  tag-collapse is the only metric that used it.
+- The Wave 4 invariant-judge suite drops the JVP-completeness judge
+  (no judge to validate); the threshold judge picks up tag-collapse
+  via the same deterministic ratio as every other metric.
+- The Wave 5 prompt-iteration loop gains a concrete new input: the
+  near-miss report. Each top-N near-miss is either (a) a synonym-map
+  gap to close in `synonym-map.json`, or (b) a genuine pipeline
+  miscategorization to address in the extract / classify prompt.
+
 ## Thresholds (copied verbatim from spec §8.4 — committed BEFORE running)
 
 | Metric | Threshold | Type |
