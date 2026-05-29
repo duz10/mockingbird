@@ -274,3 +274,203 @@ Wave-5 prompt-tuning targets and are now well-documented for whichever
 agent picks up Wave 5 — but executing Wave 5 still requires a working
 judge to score iteration deltas, so judge-validation is on the critical
 path.
+
+---
+
+# Wave 3.3 (2026-05-29) — judge swap + borderline calibration
+
+**Status:** Wave 3.3 implemented options **B** (swap primary judge to
+`gemma2:9b`; rotate `llama3.1:8b` to cross-check) **+ C** (add 6
+borderline calibration pairs as observational companion to gated Gate 1).
+Re-scored `run-a-baseline`. **JVP HALTED again on Gate 3 — direction
+inverted.** Wave 4 still blocked. Bead `mb-57a1` remains OPEN.
+
+Commits this wave:
+- `6565916` — calibration v3 (borderline observational, +84/84 tests)
+- `36f5988` — judge config swap + ADR 0048 §G4/§G5 amendment
+- (this commit) — Wave 3.3 results + STATUS + LESSONS + bd update
+
+LLM cost: ~22 min wall for the full score-run
+(`runs/score-run-a-wave33.log`, 7:56 PM start → 8:22 PM end on
+`run-a-baseline`). Run-b NOT re-scored per halt rules.
+
+## Wave 3.3 headline
+
+| Layer | Wave 3.2 (llama3.1 primary) | Wave 3.3 (gemma2 primary) | Delta |
+|---|---|---|---|
+| Gate 1 calibration  | ✅ Pass 11/12 (91.7%)         | ✅ Pass 11/12 (91.7%)         | same |
+| Gate 1 borderline   | n/a                            | ⚪ 4/6 (66.7%) observational  | new   |
+| Gate 2 reasoning    | ✅ Pass 70/70 (100%)          | ✅ Pass 91/91 (100%)          | larger N (added borderline) |
+| **Gate 3 cross**    | 🛑 Stop 4/7 (57.1%)           | 🛑 **Stop 5/9 (55.6%)**       | **SAME RATE, DIRECTION INVERTED** |
+| Gate 4 distribution | ✅ Pass 64.3% equivalent       | ⚠️ Warn 23.1% equivalent      | now below-band — gemma2 over-strict |
+| Gate 5 determinism  | ⚠️ Warn 0/5                   | ⚠️ Warn 0/5                   | unchanged |
+| Tag-collapse metric | 81.8% (45/55) **INVALID**      | 38.2% (21/55) **INVALID**     | 43-pt gap, **judge-dependent** |
+| PCRP (run-a)        | 8 erode / 9 build              | 8 erode / 9 build              | unchanged (deterministic structural data) |
+
+## What Gate 3 inversion tells us
+
+Wave 3.2: primary=`llama3.1:8b` more permissive, cross=`gemma2:9b` more strict.
+  - Three disagreements were `primary=Equivalent / cross=NotEquivalent`.
+
+Wave 3.3 (judge swap): primary=`gemma2:9b` more strict, cross=`llama3.1:8b` more permissive.
+  - Three disagreements are `primary=NotEquivalent / cross=Equivalent` —
+    the **same three personas** (`persona-01-case-01 entry[0]`,
+    `persona-01-case-06 entry[0]`, `persona-03-case-05 entry[1]`),
+    direction flipped.
+
+The disagreement is a **stable property of the judge pair on this corpus**,
+not a property of which judge is in the primary slot. Both judges of
+different families clear the unambiguous calibration set (Gate 1 ≥ 90%)
+but do not agree on real-corpus pairs at the ≥ 85% threshold required by
+Gate 3.
+
+## What the borderline observational data tells us
+
+gemma2:9b scored 4/6 (66.7%) on the 6-pair borderline set:
+
+| Dimension          | Documented verdict | gemma2 verdict | Match |
+|---|---|---|---|
+| `tokenization`     | equivalent          | equivalent      | ✅ |
+| `specificity`      | not-equivalent      | not-equivalent  | ✅ |
+| `coreference`      | equivalent          | not-equivalent  | ❌ |
+| `domain-overlap`   | not-equivalent      | not-equivalent  | ✅ |
+| `abstraction-level`| equivalent          | not-equivalent  | ❌ |
+| `person-specific`  | not-equivalent      | not-equivalent  | ✅ |
+
+**Pattern:** perfect on the four "clear" dimensions; 0/2 on the two
+genuinely-fuzzy dimensions (`coreference` and `abstraction-level`).
+Both misses are the judge being **more strict than the documented
+verdict** — exactly matching its over-strict signature on Gate 3 and
+Gate 4. The borderline gate is doing its job: it surfaces the
+directional bias that the gated calibration set cannot.
+
+## What Gate 4 distribution tells us
+
+gemma2:9b marked 21/91 (23.1%) verdicts Equivalent — **below the 40–80%
+in-band** for distribution sanity. Wave 3.2's llama3.1 hit 64.3% — high
+end of in-band, but in-band.
+
+Neither judge produces a defensible tag-collapse number on its own:
+- `llama3.1:8b` over-counts equivalence (Wave 3.2 81.8% likely inflated);
+- `gemma2:9b` under-counts (Wave 3.3 38.2% likely deflated).
+
+The ground truth is somewhere in between, and the 43-point gap is the
+uncertainty band on a single-judge LLM-graded metric for this task.
+
+## Structural finding (the actual headline)
+
+**The tag-equivalence task as currently specified is more ambiguous
+than the inter-rater reliability of LLM judges of different families
+supports.** This is not a prompt-tuning problem (Wave-3.2 option A,
+rejected antipattern) nor a judge-selection problem (Wave 3.3 option B,
+empirically falsified — swapping inverted the direction without
+closing the gap). It is a task-definition / metric-design problem.
+
+The unambiguous calibration set (Gate 1) does not surface this because
+it by construction excludes ambiguity. The borderline observational set
+(Gate 1 new) does surface it: judges agree on `tokenization` and
+`person-specific` (where the rule is clear); they disagree on
+`coreference` and `abstraction-level` (where reasonable humans would
+also disagree).
+
+## Options forward — Wave 3.3 amendment
+
+The Wave 3.2 option list (A/B/C/D) is now superseded by Wave 3.3 data.
+New option space, in roughly increasing order of scope:
+
+### Option E — Replace the LLM tag-equivalence judge with a deterministic set-similarity metric (RECOMMENDED — cheapest valid fix)
+
+Compute tag-set similarity as a deterministic function:
+- **Exact-match rate** (entries where `tags_a == tags_b` after `normalize`)
+  as the primary metric.
+- **Jaccard similarity** on normalized tag sets as a secondary,
+  continuous metric (`|A ∩ B| / |A ∪ B|`).
+- Optional: small hand-curated synonym map (`dog ≈ pet`, `kid ≈ child`)
+  applied during normalization, version-controlled like the calibration
+  set is today.
+
+**Why this works:** the deterministic metric does not require
+inter-rater agreement on ambiguous pairs — those simply count as
+partial matches via Jaccard. The metric is reproducible, auditable,
+and requires zero LLM time per scoring run. The 43-point judge gap
+disappears because there is no judge.
+
+**Trade-off:** the metric cannot capture true semantic equivalence
+beyond the synonym map (`brake-pads ≈ pads` is exact-match-fail but
+semantically equivalent). Practically, those cases ARE the cases the
+LLM judges disagreed on — so we lose nothing actionable by giving them
+up, and we gain a stable signal for the cases that matter (mostly
+decided by `passes/normalize.rs` already).
+
+**Cost:** ~half a day of work. Rewrite `metrics.rs::tag_collapse_correct`
+to use Jaccard; delete the LLM-judge plumbing for the tag pass
+(keep the judge module for future use); ADR 0048 §G5 amendment
+deprecating Gates 1–4 of the JVP for tag-equivalence specifically
+(determinism Gate 5 still applies if any LLM-judging is retained
+elsewhere); update §8.4 threshold for tag-collapse (suggest:
+exact-match ≥ 60%, Jaccard mean ≥ 0.70).
+
+**This is the path Bernard recommends.** It honors the binding principle
+"If something is hard to verify, that's the bug" (AGENTS.md §6) — the
+verification is hard because the metric design is too judge-dependent;
+the fix is to redesign the metric, not to keep tuning the judge.
+
+### Option F — Reduce ambiguity in answer keys (controlled vocabulary)
+
+Refine the corpus answer keys to use a controlled tag vocabulary so
+that fewer pairs land in the ambiguous zone. Touches Wave 1 work
+(corpus). Expensive. Unlocks the LLM judge later but doesn't change
+that the LLM judge is fragile in principle for fuzzy decisions.
+
+### Option G — Add a third judge as tiebreaker
+
+ADR 0048 §G4 allows. Doesn't address the structural finding — if two
+judges of different families disagree at 55% on real-corpus pairs,
+a third probably joins one of the two camps. Not recommended absent
+empirical reason to expect otherwise.
+
+### Option H — Drop tag-collapse from §8.4 hard thresholds; mark observational
+
+Keep the LLM-judge tag metric but classify it observational-only,
+not gated. The other 6 metrics (clean-single, segmentation, category,
+entry-type, dates HARD GATE, junk) are deterministic and unaffected.
+Letter-and-spirit-of-the-rules variant of option D.
+
+**Recommended combination: E (replace metric) + downgrade JVP-for-tag-equivalence to observational (a structural variant of H).** Other 6 metrics keep their thresholds; the tag dimension shifts to a deterministic exact-match + Jaccard pair.
+
+## What Wave 3.3 changes for downstream work
+
+- **Wave 4 (`mb-he98` — invariant judges + dry-run rig):** still blocked
+  on a working tag metric. Two of the 7 Wave-4 judges (Threshold judge,
+  JVP-completeness judge) depend on the JVP+tag-collapse half of the
+  scoring system being valid. With option E adopted, those judges are
+  rewritten to evaluate the deterministic metric instead and the JVP
+  judge becomes "JVP not required for tag metric; required only if
+  other LLM-judged metrics are added" — substantively simpler.
+- **Wave 5 (Standing P1 prompt-tuning loop):** the four trust-eroding
+  themes documented in Wave 3.2 (side-hustle classification, topic-tag
+  drift, soft-date under-extraction, over-segmentation) are all still
+  the right Wave-5 targets and the structural metrics that score them
+  are unaffected by the judge problem. Wave 5 can proceed in parallel
+  with the judge-validation fix.
+
+## Resume protocol
+
+This is **escalation territory** (5-attempt rule; AGENTS.md). Wave 3
+has now consumed two full JVP execution iterations + two ADR §G5
+amendments + a calibration v2 fix + a calibration v3 borderline
+extension + a judge swap. Two consecutive Gate 3 STOPs at functionally
+the same rate with inverted direction is the signal that the failing
+gate is correctly identifying a structural problem the patches under
+consideration can't reach.
+
+**Decision Dustin needs to make** (Bernard cannot make autonomously
+because it amends ADR 0048):
+
+1. Adopt option E (deterministic tag metric)?
+2. Adopt option F (controlled-vocab corpus refinement)?
+3. Both?
+4. Something else?
+
+Once decided, the work is a single bead (or pair of beads), should ship
+in one iteration, and unblocks Wave 4.

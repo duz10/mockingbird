@@ -147,11 +147,21 @@ conservative); the clean-single dictation got over-split into 2
 entries — Wave 5 segmenter prompt-tuning concern, not structural.
 
 **Wave 3 (`mb-57a1` scorer + LLM tag-equivalence judge) — HALTED on
-JVP Gate 3 STOP.** Models pulled and full JVP+PCRP executed on run-a
-this iteration (2026-05-29). Judge invalid per ADR 0048 §G5; tag metric
-cannot feed downstream gating. Wave 4 remains blocked.
+JVP Gate 3 STOP, twice. Wave 3.2 (llama3.1:8b primary) and Wave 3.3
+(gemma2:9b primary after option-B swap + option-C borderline
+calibration) both halt on Gate 3 with functionally identical
+agreement rates (57.1% then 55.6%) but **inverted disagreement
+direction** on the same three personas. Structural finding: the
+tag-equivalence task as currently specified is more ambiguous than
+the inter-rater reliability of LLM judges of different families
+supports. Not a prompt-tuning problem (rejected); not a
+judge-selection problem (empirically falsified by the swap). It is
+a task-definition / metric-design problem.** Wave 3.3 details, options
+forward (E/F/G/H), and Bernard's recommendation in
+`docs/knowledge-graph/wave-3-results.md`. **Escalation territory —
+ADR 0048 §G5 amendment required to proceed; Dustin decision needed.**
 
-Shipped this iteration:
+Shipped Wave 3.2 (prior session):
 - Calibration v2 fix (commit `7f8ff1c`) — replaced `cal-eq-001`'s
   car-repair pair which was lexically identical to the judge prompt's
   first in-context example (would inflate Gate 1 verdict-correct on
@@ -222,10 +232,41 @@ wave-3-results.md` § "What's needed to unblock"):
   change masquerading as a fix; reject unless explicitly deferring
   judge-validity work.
 
-Resume protocol: pick A/B/C, re-run
-`.\target\release\score-run.exe --run-dir runs\run-a-baseline` (~50 min),
-check JVP overall; if Proceed/ProceedWithWarnings, re-run on run-b with
-`--stability-vs run-a-baseline`, then advance to Wave 4 (`mb-he98`).
+Resume protocol (post-Wave-3.3): A and D were antipatterns; B + C were
+shipped this iteration (commits `6565916` calibration v3 + `36f5988`
+judge swap + score-run on run-a). New post-Wave-3.3 option space
+(E/F/G/H) lives in `docs/knowledge-graph/wave-3-results.md` §"Options
+forward — Wave 3.3 amendment". Bernard's recommendation: **option E
+(replace LLM judge with deterministic exact-match + Jaccard tag
+metric)** — honors AGENTS.md §6 ("if something is hard to verify,
+that's the bug"), zero LLM-time-per-scoring-run, eliminates the
+43-point judge-dependent gap on tag-collapse, and substantively
+simplifies the Wave 4 judge bundle. Requires ADR 0048 §G5 amendment;
+Dustin call.
+
+Wave 3.3 shipped:
+- Calibration v3 (commit `6565916`) — 6 borderline observational pairs
+  alongside the 12 gated pairs. `tag-equivalence-v3`. JVP reports
+  per-dimension match rate (`tokenization`, `specificity`,
+  `coreference`, `domain-overlap`, `abstraction-level`,
+  `person-specific`). 84/84 sandbox tests.
+- Judge swap (commit `36f5988`) — primary `gemma2:9b`,
+  cross-check `llama3.1:8b`. ADR 0048 §G4/§G5 amended with Wave 3.3
+  rationale.
+- Score-run on run-a-baseline (`runs/score-run-a-wave33.log`, ~26 min
+  wall). Gate 1 ✅ (91.7%) + borderline 4/6 (66.7% — 100% on clear
+  dimensions, 0% on coreference + abstraction-level), Gate 2 ✅
+  (91/91), Gate 3 🛑 5/9 (55.6%, direction inverted vs Wave 3.2),
+  Gate 4 ⚠️ 23.1% (below-band, gemma2 over-strict), Gate 5 ⚠️ 0/5.
+  Tag-collapse metric shifted 81.8% → 38.2% (43-pt gap, judge-dependent
+  uncertainty band).
+- run-b NOT re-scored (judge invalid ⇒ not a defensible LLM budget
+  spend; halt rule honored).
+- PCRP themes unchanged from Wave 3.2 (same 8/9 trust ratio,
+  same cross-persona patterns) — deterministic structural data,
+  unaffected by the judge change.
+
+`mb-57a1` stays OPEN. Wave 4 (`mb-he98`) stays blocked.
 
 ---
 

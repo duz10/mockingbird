@@ -171,6 +171,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-29 | `[ADR 0048 Wave 3.3 / mb-57a1]` | Swapping the primary judge from `llama3.1:8b` to `gemma2:9b` inverts the disagreement direction on Gate 3 without closing the gap (Wave 3.2 4/7 → Wave 3.3 5/9; same three personas, primary=Equivalent/cross=NotEquivalent → primary=NotEquivalent/cross=Equivalent). Tag-collapse metric moves 81.8% → 38.2% on the SAME data — a 43-pt judge-dependent gap. Borderline observational set (added this wave) shows the pattern crisply: judges agree on `tokenization`/`specificity`/`domain-overlap`/`person-specific` (the clear dimensions, 4/4 perfect for gemma2) and disagree on `coreference` + `abstraction-level` (the genuinely-fuzzy dimensions, 0/2 for gemma2). The structural finding: LLM-judge tag-equivalence on a corpus with this much surface-token variation is more ambiguous than the inter-rater reliability of different judge families supports. Two consecutive Gate 3 STOPs with inverted direction is the signal that the failing gate is correctly identifying a methodology problem the patches under consideration (judge swap, prompt tune, threshold loosen) can't reach. Path forward: replace LLM-judge tag metric with deterministic exact-match + Jaccard (option E in wave-3-results.md) — honors AGENTS.md §6 "if something is hard to verify, that's the bug." Requires ADR 0048 §G5 amendment; not Bernard's call autonomously |
 | 2026-05-29 | `[ADR 0048 Wave 3.2 / mb-57a1]` | JVP Gate 3 STOP: llama3.1:8b is more permissive than gemma2:9b on tag-equivalence on the real corpus, while passing Gate 1 (unambiguous calibration) cleanly at 91.7%. Calibration sets of unambiguous pairs can't surface this skew — Gate 3 (cross-judge on real-corpus 10% sample) is the gate that catches it; the 5-gate JVP design is load-bearing because each gate covers a different failure mode. Calibration-fairness sub-finding: every cal pair's vocabulary must be disjoint from the judge prompt's in-context examples (cal-eq-001 v1 violated this; v2 fix in commit 7f8ff1c). PCRP-mislabel sub-finding: PCRP prose's literal claims ("hallucinated dates") must be cross-walked vs. structured output before being treated as fact; the themes are the durable signal, surface words are not |
 | 2026-05-28 | `[ADR 0048 Wave 0 / mb-4wxw + mb-w1lw + mb-i9l1]` | `bd close` of a downstream bead in the same iteration as its blocker's close fails with "blocked by open issues [<blocker-id>]" even when the blocker was already closed — bd evaluates the blocks-edge against a stale view (Dolt auto-commit batching, presumably). Workaround: pass `--force` for the downstream closes. Doesn't affect cross-iteration chains because the blocker close has committed by then |
 | 2026-05-27 | `[ADR 0046 Iter 2 SEAL / mb-3xww]` | Obsidian nested-vault trap during Mockingbird Mobile Sync setup: when an Obsidian vault is created via 'Create new vault' and the named folder already exists, Obsidian silently creates a nested `<vault>/<vault>/` structure; Mockingbird writes to outer, Obsidian reads from inner — symptom is "Vault up to date (N records)" toast is truthful but Obsidian shows nothing. Diagnosis: `Get-ChildItem <vault> -Force` shows both `.mockingbird/` AND a same-named nested folder; the nested folder contains `.obsidian/`. Fix: move `.obsidian/` + `Welcome.md` from inner to outer, delete empty inner (preserves Obsidian Sync pairing). Iter 4 wizard should detect + guide |
@@ -227,6 +228,67 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ## 📜 Body (chronological)
 
 ---
+
+## 2026-05-29 [ADR 0048 Wave 3.3 / mb-57a1] Judge swap inverts Gate 3 disagreement direction without closing the gap — the failing gate is correctly identifying a methodology problem the patches under consideration can't reach
+
+- **Context:** Wave 3.2 halted on Gate 3 cross-judge (`llama3.1:8b`
+  primary 4/7 agreement, `gemma2:9b` cross-check). Dispatched Wave 3.3:
+  shipped option B (swap primary to `gemma2:9b`; rotate `llama3.1:8b`
+  to cross-check) + option C (add 6 borderline observational pairs
+  to the calibration set alongside the 12 gated unambiguous ones).
+  Re-ran score-run on run-a-baseline.
+- **Finding 1 (judge swap):** Gate 3 STOPped again at 5/9 (55.6%) —
+  functionally identical agreement rate — but with the disagreement
+  **direction inverted**. The same three personas
+  (`persona-01-case-01 entry[0]`, `persona-01-case-06 entry[0]`,
+  `persona-03-case-05 entry[1]`) disagree, but now
+  `primary=NotEquivalent / cross=Equivalent` where Wave 3.2 had
+  `primary=Equivalent / cross=NotEquivalent`. The disagreement is a
+  stable property of the judge pair, not a property of which judge is
+  in the primary slot. Tag-collapse metric on the SAME pipeline data
+  moved 81.8% → 38.2% (43-pt gap) — the metric is essentially
+  judge-dependent.
+- **Finding 2 (borderline observational):** gemma2:9b hit 4/6
+  (66.7%) on the borderline set with a crisp pattern:
+  `tokenization` / `specificity` / `domain-overlap` / `person-specific`
+  = 4/4 perfect; `coreference` / `abstraction-level` = 0/2. The gated
+  calibration pairs are unambiguous by construction so this asymmetry
+  is invisible to Gate 1; the borderline gate surfaces it. Both misses
+  are the judge being **more strict** than the documented verdict —
+  the exact signature that produces Gate 4 below-band (23.1%
+  equivalent) and the Gate 3 inversion.
+- **Finding 3 (structural):** the tag-equivalence task on a corpus
+  with this much surface-token variation is more ambiguous than the
+  inter-rater reliability of LLM judges of different families supports.
+  This is not a prompt-tuning problem (Wave 3.2 option A, rejected
+  antipattern), not a judge-selection problem (Wave 3.3 option B,
+  empirically falsified), not a calibration-set-coverage problem
+  (Wave 3.3 option C shipped — borderline gate works but doesn't fix
+  the structural disagreement). It is a metric-design problem.
+- **Action (this iteration):** halt + surface per dispatch standing
+  rule ("Gate 3 fails AGAIN → halt + surface, escalate") + AGENTS.md
+  5-attempt rule. Bead `mb-57a1` left open. Wave 4 (`mb-he98`) stays
+  blocked. Full options-forward analysis at
+  `docs/knowledge-graph/wave-3-results.md` § "Wave 3.3 — judge swap +
+  borderline calibration".
+- **Recommended path forward (Dustin's call):** **option E** — replace
+  the LLM tag-equivalence judge with a deterministic exact-match +
+  Jaccard metric on normalized tag sets (optional small synonym map).
+  Honors AGENTS.md §6 ("if something is hard to verify, that's the
+  bug") — the verification is hard because the metric design is too
+  judge-dependent; the fix is to redesign the metric, not to keep
+  tuning the judge. Requires ADR 0048 §G5 amendment; ships in one
+  iteration; unblocks Wave 4 and substantively simplifies the Wave 4
+  judge bundle (two of the seven Wave-4 judges depend on the
+  JVP+tag-collapse half being valid).
+- **Sub-finding (defense in depth on borderline calibration):** the
+  borderline observational gate added this wave is now a permanent
+  diagnostic. Even after option E lands and the LLM-judge tag metric
+  retires, the per-dimension match rates (especially `coreference`
+  and `abstraction-level`) are useful for any future LLM-graded
+  metric. The 6-pair set lives at
+  `experimental/kg-validation/judge-calibration/tag-equivalence.json`
+  (`tag-equivalence-v3`, `borderline` section).
 
 ## 2026-05-29 [ADR 0048 Wave 3.2 / mb-57a1] JVP Gate 3 cross-judge STOP: `llama3.1:8b` is more permissive than `gemma2:9b` on tag-equivalence; Gate 1 calibration alone does NOT detect this
 
