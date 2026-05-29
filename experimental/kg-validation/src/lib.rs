@@ -6,6 +6,7 @@
 //! full isolation contract.
 
 pub mod harness;
+pub mod judges;
 pub mod ollama;
 pub mod passes;
 pub mod schema;

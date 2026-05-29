@@ -351,6 +351,43 @@ at that point.
 **Wave 3 SEALED.** `mb-57a1` closeable. `mb-jz5r` (Option E task)
 closeable. Wave 4 (`mb-he98`) unblocked.
 
+**Wave 4 (2026-05-29) — 6 invariant judges + run-judges rig shipped.**
+ADR 0048 §G7 retired JVP-completeness (LLM-judged) from the original
+7-judge draft along with the LLM tag-equivalence metric, leaving the
+deterministic 6-judge suite below. All six authored under
+`experimental/kg-validation/src/judges/` with inline known-good +
+known-bad fixture pairs; orchestrator at
+`experimental/kg-validation/src/bin/run-judges.rs` (`cargo run --release
+--bin run-judges --runs <dirs> --final-run <dir>`); operator docs at
+`docs/judges/phase-0-kg/README.md`. New anchor tag `phase-0-kg-start` at
+`aad06a6` (commit just before Wave 0; mirrors the `phase-mc-start`
+pattern) is the default `--baseline-ref` for sandbox-isolation.
+
+| # | Judge | Mechanism | Smoke verdict vs Wave 3 runs |
+|---|---|---|---|
+| 1 | `hard_gate_invented_dates_zero` | `SCORE.json::per_metric::invented_dates_count == 0` | ✅ PASS (0/55 both runs) |
+| 2 | `thresholds_match_spec_8_4` | per-metric floors vs spec §8.4 | ❌ FAIL (category 67–71%, entry-type 76–78%, tag-collapse 9–11%, clean-single 7–13%; **expected — Wave 5 prompt-iteration inputs**) |
+| 3 | `stability_meets_spec_8_5` | structural agreement ≥ 80%, date 100% | ✅ PASS (96.9 / 96.9 / 98.5 / 100; tag-set exact 83.1% reported but not gated per §G7) |
+| 4 | `sandbox_isolation_phase0_kg` | `git diff --name-only phase-0-kg-start HEAD` | ✅ PASS post-commit (initial smoke surfaced a stale root-`.gitignore` entry for `experimental/kg-validation/runs/` — the sandbox-local `.gitignore` already covers it; redundant root entry removed) |
+| 5 | `determinism_seed42_byte_identical` | live re-run via `run-corpus --seed 42`, byte-compare 3 dictations | ⚪ SKIPPED (opt-in; `--enable-determinism`. Deferred until Wave 5 ships a candidate green baseline.) |
+| 6 | `pcrp_completeness_and_trust` | `PERSONA_REVIEW.md` present + (`trust_eroding ≤ 5` OR metric > floor+5pts) | ❌ FAIL §G6 NO-GO (trust_eroding=8 AND no metric > floor+5pts — **expected; canonical signal that Wave 5 prompt iteration must ship before Wave 6 attempts a seal**) |
+
+Sandbox gate green: vanilla `cargo fmt --check && cargo clippy --all-targets
+-- -D warnings && cargo test` → **124/124 passing** (was 99 pre-Wave-4;
++24 judge tests + 1 new PCRP parser fixture for the canonical
+markdown-bullet emit form `- trust_eroding_failures_count: **N**`).
+Real bugs fixed during smoke: (a) PCRP parser's `strip_prefix` blocked
+by leading markdown bullet `- ` (real bug; aligned to actual
+`persona_review::render_markdown` emit shape; new regression test);
+(b) default `--baseline-ref` was `phase-mc-complete`, which predates
+phase-10 + ADRs 0045/0046/0047 by ~30 commits, producing 192 spurious
+violations (configuration bug; new anchor tag fixes it). The
+`thresholds` + `pcrp_completeness` FAILs are not judge bugs — they
+are the diagnostic surface working as designed; flipping them green
+is Wave 5's job.
+
+**`mb-he98` closeable. `mb-ojm5` (Wave 5 Wiggum loop, cap 5) unblocked.**
+
 ---
 
 Live-fire Win11 smoke test for Phase 10 is still Dustin's post-seal step
