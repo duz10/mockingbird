@@ -5,6 +5,8 @@
 //! production app completely untouched. See the crate README for the
 //! full isolation contract.
 
+pub mod embeddings;
+pub mod exemplars;
 pub mod harness;
 pub mod judges;
 pub mod ollama;

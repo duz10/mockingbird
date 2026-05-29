@@ -20,6 +20,9 @@ sha2 = "0.10"
 anyhow = "1"
 thiserror = "1"
 
+[dev-dependencies]
+tempfile = "3"
+
 [lib]
 path = "src/lib.rs"
 
@@ -38,3 +41,7 @@ path = "src/bin/run-judges.rs"
 [[bin]]
 name = "iap-check"
 path = "src/bin/iap-check.rs"
+
+[[bin]]
+name = "embed-reclassify"
+path = "src/bin/embed-reclassify.rs"

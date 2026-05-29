@@ -56,9 +56,64 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**KG Phase 0.5 + v1 architectural pivot — ADR 0049 Proposed, Wave 0.5.1 SEALED, Wave 0.5.2 next.**
+**KG Phase 0.5 + v1 architectural pivot — ADR 0049 Proposed, Wave 0.5.1 SEALED, Wave 0.5.2 HALTED on Move 2 falsification.**
 
 Epic `mb-symi` (P1). Charter at `docs/adr/0049-knowledge-graph-phase-0-5-and-v1-architectural-pivot.md`.
+
+### 🛑 Blocked / human input needed — `mb-hnb4` (P1 escalation)
+
+**Wave 0.5.2 ran two head-to-head iterations of the embeddings
+classifier vs the 7b LLM classify baseline. Both REJECTED on
+Pareto-frontier with regressions on every metric.** ADR 0049 §Move 2
+acceptance was "category OR entry-type lifts ≥10pp AND the other
+doesn't regress beyond a per-metric tolerance band." Observed:
+
+| Metric | iter-1-7b-fix (LLM classify) | iter-2-NN (embeddings nearest) | iter-2-centroid (embeddings centroid) |
+|---|---|---|---|
+| Clean single-item | 33.3% | 13.3% (**-20.0**) | 13.3% (**-20.0**) |
+| Category | 81.5% | 70.4% (**-11.1**) | 66.7% (**-14.8**) |
+| Entry-type | 88.9% | 68.5% (**-20.4**) | 75.9% (**-13.0**) |
+| Tag-collapse (G7) | 14.8% | 14.8% (untouched) | 14.8% (untouched) |
+| Segmentation | 93.3% | 93.3% (untouched) | 93.3% (untouched) |
+| Invented dates (HARD GATE) | 0 | 0 (untouched) | 0 (untouched) |
+| Junk | 100% | 100% (untouched) | 100% (untouched) |
+
+Move 2 only swaps category + entry_type, so the upstream pass
+metrics (segmentation, hard-gate, junk, tag-collapse) are mechanically
+untouched. The downstream classify metrics ALL regressed against
+the 7b LLM baseline on both classifier strategies (nearest-exemplar
+AND centroid-per-label) named in the ADR.
+
+**Architectural finding:** the ADR 0049 §Move 2 hypothesis ("small
+LLMs are bad at finite-set labels; pretrained text embeddings are
+better") is **falsified at Phase 0.5 corpus size + this exemplar
+strategy.** The 7b LLM classify pass is non-trivially better than
+nearest-exemplar embeddings on this 32-fixture corpus.
+
+**Bernard's options for Dustin (in `mb-hnb4`):**
+
+- **A — try iter-3 with k-NN majority vote (k=3)** — same architecture
+  family, last reasonable variant before exhausting the ADR's prototype
+  design space. Cheap (~25s + score). Unlikely to flip the result given
+  the two prototypes converged on similar magnitude of regression.
+- **B (recommended) — halt Move 2; advance to Wave 0.5.3** (closed
+  canonical tag vocabulary, `mb-rzpd`) which is independent of the
+  classifier choice. Document Move 2 falsification as a Wave 0.5.6
+  finding feeding the GO/NO-GO. Move 1 (SCHEMA-driven 7b classify)
+  already delivered substantial category/entry-type lift; further
+  lift on those two metrics is now a prompt-tuning / closed-vocab /
+  fine-tuning problem, not a pretrained-embeddings problem.
+- **C — expand corpus first** (to 64 or 128 dictations) and re-test
+  embeddings; the rejection may be corpus-size-bound not architectural.
+  High cost; defers Wave 0.5.3+ behind corpus authoring.
+
+**On-disk artifacts:**
+
+- `experimental/kg-validation/runs/iter-2-embed-classify/` (nearest, REJECT scorecard)
+- `experimental/kg-validation/runs/iter-2-embed-centroid/` (centroid, REJECT scorecard)
+- `experimental/kg-validation/src/embeddings.rs` + `exemplars.rs` (shipped, 13/13 tests green)
+- `experimental/kg-validation/src/bin/embed-reclassify.rs` (CLI; `--mode {nearest,centroid}`)
+- `nomic-embed-text` model pulled into Ollama (274 MB)
 
 ### ✅ Wave 0.5.1 SEALED — hard-gate restored via model-class calibration profiles (`mb-xmgs` + `mb-4xtd` closed)
 
@@ -105,10 +160,11 @@ natural place for per-segment date-eligibility.
 
 - `mb-xmgs` ✓ — Wave 0.5.1: SCHEMA.md refactor + 7b baseline + parity gate + calibration profiles + 7b hard-gate restoration. **SEALED.**
 - `mb-4xtd` ✓ — 7b hard-gate breach. **CLOSED** by iter-1-7b-fix (both seeds clean).
-- `mb-yfzy` ◐ — Wave 0.5.2: embeddings classifier (nomic-embed-text). **NOW UNBLOCKED.**
-- `mb-rzpd` — Wave 0.5.3: closed canonical tag vocab + new-tag-request flow.
-- `mb-o4ni` — Wave 0.5.4: entity extraction probe + entity-quality metric.
-- `mb-5r1b` — Wave 0.5.5: qwen2.5:3b cross-test on pivoted architecture.
+- `mb-yfzy` ● — Wave 0.5.2: embeddings classifier (nomic-embed-text). **BLOCKED on `mb-hnb4`** — two iters rejected.
+- `mb-hnb4` ○ — **HALT escalation**: Move 2 falsified at 32-pair corpus scale. Blocks `mb-yfzy` + `mb-5r1b`.
+- `mb-rzpd` — Wave 0.5.3: closed canonical tag vocab + new-tag-request flow. Independent of `mb-hnb4`; could pick this up if Dustin picks Option B.
+- `mb-o4ni` — Wave 0.5.4: entity extraction probe + entity-quality metric. Blocked on `mb-hnb4` + 0.5.1, 0.5.3.
+- `mb-5r1b` — Wave 0.5.5: qwen2.5:3b cross-test on pivoted architecture. Blocked on `mb-hnb4` + 0.5.2-0.5.4.
 - `mb-qogz` — Wave 0.5.6: REPORT.md + GO/NO-GO + ADR 0049 Accepted. **HALT BEFORE THIS** — Dustin reviews 0.5.1–0.5.5 evidence on disk first.
 
 Success criteria (ADR 0049): ≥ 3 of {category, entry-type, tag-collapse,

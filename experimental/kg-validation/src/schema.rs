@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 /// Layer 1 of the spec §7.2 three-layer tag system — controlled,
 /// pick exactly one. Closed set; the coarse filter the user leans
 /// on most.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Category {
     Personal,
@@ -41,7 +41,7 @@ pub enum Category {
 /// Layer 2 of the spec §7.2 three-layer tag system — controlled,
 /// small stable set. Drives downstream behavior (a `Task` gets a
 /// status, a `Note` does not).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EntryType {
     Task,
