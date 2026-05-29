@@ -57,6 +57,8 @@ $j | Add-Member -NotePropertyName 'wave_5_sweep' -NotePropertyValue @{
     skipped_note  = 'after-school/cake/brake/401k/budget held per ADR 0048 G7 discipline'
 } -Force
 
-$j | ConvertTo-Json -Depth 100 | Set-Content -Path $mapPath -Encoding UTF8
+# Write as UTF-8 WITHOUT BOM (Rust serde_json rejects BOM at line 1 col 1).
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText($mapPath, ($j | ConvertTo-Json -Depth 100), $utf8NoBom)
 
 Write-Host ('done: synonym-map version -> v1.1 (' + $applied.Count + ' new variant assignments)')
