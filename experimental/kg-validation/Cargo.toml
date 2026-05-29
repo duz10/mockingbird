@@ -34,3 +34,7 @@ path = "src/bin/score-run.rs"
 [[bin]]
 name = "run-judges"
 path = "src/bin/run-judges.rs"
+
+[[bin]]
+name = "iap-check"
+path = "src/bin/iap-check.rs"

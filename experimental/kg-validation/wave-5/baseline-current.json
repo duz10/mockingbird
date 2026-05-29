@@ -1,0 +1,10 @@
+{
+  "invented_dates_count": 0,
+  "segmentation_correct_pct": 86.66666666666667,
+  "category_correct_pct": 67.27272727272727,
+  "entry_type_correct_pct": 78.18181818181819,
+  "tag_collapse_correct_pct": 9.090909090909092,
+  "clean_single_item_correct_pct": 6.666666666666667,
+  "junk_correct_pct": 100.0,
+  "pcrp_trust_eroding": 8
+}

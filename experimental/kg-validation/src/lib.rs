@@ -11,3 +11,4 @@ pub mod ollama;
 pub mod passes;
 pub mod schema;
 pub mod scoring;
+pub mod wiggum;
