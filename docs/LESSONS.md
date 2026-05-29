@@ -251,6 +251,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-29 | `[ADR 0049 Wave 0.5.3 / mb-rzpd HALT]` | Closed-vocab tag validator (228-entry seed) regressed tag-collapse -9.1pp (iter 1, verbose prompt, model over-tagged with valid generics) then -11.0pp (iter 2, tight prompt, model under-tagged conservatively). 2-iter rejection cascade. Diagnosed root cause: the closed-vocab validator's normalize step does NOT apply the synonym map, so model emissions like `automobile-repair` are DROPPED instead of being collapsed to `car-repair` (which IS in vocab). Open-vocab baseline let these flow through to the scorer, which collapsed them via synonym map. Closed-vocab as shipped loses the synonym-collapse contribution entirely. The deeper architectural pattern: small-LLM + 228-item closed list cannot be reliably navigated by the model — both directions (verbose vs tight prompt) fail Jaccard 1.0, just in opposite ways (over- vs under-tagging). Path forward (Bernard's Option A in STATUS `mb-rzpd`): integrate synonym-map into validator (normalize → synonym-collapse → vocab check), single architectural fix in `tag_validator.rs`. Halt rather than burn iters 3-5 on prompt-only tweaks |
 | 2026-05-29 | `[ADR 0049 Wave 0.5.1 / mb-4xtd CLOSED]` | Hard-gate restored on qwen2.5:7b via SCHEMA.md model-class calibration profiles. Iter-1 result vs 7b-pre-fix baseline: invented_dates 4→0 (HARD GATE PASS); zero regressions on category (81.5%), entry-type (88.9%), segmentation (93.3%), clean-single (33.3%), junk (100%); tag-collapse +3.7pp (11.1%→14.8%). Stability at seed 137 also clean. Architectural shape: SCHEMA.md gains `## Model-class calibration profiles` (small-conservative / mid-confident with assignment table + unknown-model default = mid-confident on trust-gate-safe grounds) and `### Profile-specific prompt overrides` (`(pass, profile) → file` rows, layered on top of the default-per-pass table). Loader resolves `prompt_body(pass, model)` = `overrides[(pass, profile_for(model))]` ∥ `default[pass]`. New `prompts/extract.mid-confident.md` hardened with: front-loaded null-bias framing, three-condition hard-gate, four explicit rules (duration phrases ≠ dates, vague-future ≠ dates, past-tense anchors stay past, segment-isolation prevents event-date bleed), 7 in-context examples on fictional vocab (Caldwell/Priya/Bergstroms — distinct from mb-4xtd failure set so those stay eval not training). PINNED P10 captures the architectural lesson. **Pin counterpart to P9 (Wave 5 strict-IAP rejection cascade) — P9 is "strict no-regression cannot ratchet quality on small models"; P10 is "prompts calibrate to a specific model's prior; portable schemas need per-class calibration"** |
 | 2026-05-29 | `[ADR 0049 Wave 0.5.1 / mb-xmgs + mb-4xtd]` | Date hard-gate prompt empirically tuned for qwen2.5:3b does NOT transfer to qwen2.5:7b; same SCHEMA, same prompts, same corpus produces 4 + 5 invented dates on 7b at two seeds (vs 0 on 3b). 7b is more confident-by-default and the prompt's null-bias is empirically insufficient to overcome its prior on borderline temporal anchors (vague future, past-tense, multi-segment misassignment, pure fabrication). Operational lesson: parity-gate on the OLD model before changing the model — it cleanly isolates refactor-regression from model-regression. v1 implication: any model substitution in a schema-driven pipeline needs empirical re-baselining of trust gates; SCHEMA portability is necessary-but-not-sufficient because prompts are model-tuned even when they look universal. Move 1 still delivered 3/4 architectural-lift success-criteria simultaneously (+14.2 / +10.7 / +26.6 on category/type/clean-single) — quality lift and trust regression coexist on the same Pareto frontier |
 | 2026-05-29 | `[ADR 0048 Wave 3.3 / mb-57a1]` | Swapping the primary judge from `llama3.1:8b` to `gemma2:9b` inverts the disagreement direction on Gate 3 without closing the gap (Wave 3.2 4/7 → Wave 3.3 5/9; same three personas, primary=Equivalent/cross=NotEquivalent → primary=NotEquivalent/cross=Equivalent). Tag-collapse metric moves 81.8% → 38.2% on the SAME data — a 43-pt judge-dependent gap. Borderline observational set (added this wave) shows the pattern crisply: judges agree on `tokenization`/`specificity`/`domain-overlap`/`person-specific` (the clear dimensions, 4/4 perfect for gemma2) and disagree on `coreference` + `abstraction-level` (the genuinely-fuzzy dimensions, 0/2 for gemma2). The structural finding: LLM-judge tag-equivalence on a corpus with this much surface-token variation is more ambiguous than the inter-rater reliability of different judge families supports. Two consecutive Gate 3 STOPs with inverted direction is the signal that the failing gate is correctly identifying a methodology problem the patches under consideration (judge swap, prompt tune, threshold loosen) can't reach. Path forward: replace LLM-judge tag metric with deterministic exact-match + Jaccard (option E in wave-3-results.md) — honors AGENTS.md §6 "if something is hard to verify, that's the bug." Requires ADR 0048 §G5 amendment; not Bernard's call autonomously |
@@ -309,6 +310,78 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-29 [ADR 0049 Wave 0.5.3 / mb-rzpd HALT] Closed-vocab tag validator regresses tag-collapse in BOTH prompt directions because the validator's normalize step doesn't apply the synonym map
+
+- **Context:** Wave 0.5.3 (Move 3 of ADR 0049) shipped a 228-entry
+  closed canonical tag vocabulary in `SCHEMA.md` + a post-LLM
+  `tag_validator` pass that drops out-of-vocab tags and routes
+  them to `new-tag-requests.jsonl` for review. Two head-to-head
+  iterations on seed 42 vs the `iter-1-7b-fix` open-vocab baseline.
+- **Iter 1 (verbose prompt, "pick 2-4 tags"):** tag-collapse
+  5.7% vs 14.8% baseline (-9.1pp). Model picked extras like
+  `home-maintenance` and `client` (both in vocab) on entries where
+  the answer key wanted only the specific (e.g. `henderson` for the
+  person). Jaccard ≥ 1.0 punishes any extras. 35 new-tag-requests
+  on seed 42 (15 explicit, 20 implicit) — 47% of dictations have an
+  explicit request, over the kickoff's 30% sanity-check bar.
+- **Iter 2 (tight prompt, "pick 1-3, prefer 2, fewer is better",
+  3 negative-example notes):** tag-collapse 3.8% (-11.0pp). Now
+  model emits SO FEW tags that it misses answer-key tags entirely.
+  Top near-misses are `(missing)` against expected tags that ARE in
+  vocabulary (`meeting`, `app`, `bakery`, `costco`, `dad`). 19
+  new-tag-requests on seed 42 (only 1 explicit; model learned to
+  drop the field) but the explicit-request collapse came WITH a
+  tag-collapse collapse.
+- **Root cause diagnosed.** Read `src/passes/normalize.rs`:
+  `normalize_tags` does case-fold + singularize but does **NOT**
+  apply the synonym map. The synonym map lives in
+  `src/scoring/tag_collapse.rs` and is invoked only by the scorer.
+  Open-vocab baseline: pipeline emits `automobile-repair`; scorer
+  reads `automobile-repair`; synonym map collapses to `car-repair`;
+  matches answer key. Closed-vocab: pipeline's validator sees
+  `automobile-repair` is not in vocab, **DROPS it**; scorer never
+  sees it. Closed-vocab as shipped LOSES the synonym map's
+  contribution to Jaccard 1.0 matches.
+- **Architectural pattern:** small-LLM + closed list (228 items)
+  cannot be reliably navigated by the model alone. Verbose prompt
+  + permissive vocab → over-tagging (extras kill Jaccard); tight
+  prompt + same vocab → under-tagging (misses kill Jaccard).
+  Iter 3-5 of prompt-only tuning would oscillate between these
+  failure modes without addressing the missing synonym-collapse
+  step. Same shape of finding as ADR 0049 A1 (embeddings classifier
+  falsified at 32-pair scale): the mechanism is one-tool-short of
+  what the open-vocab baseline already used.
+- **Path forward (Bernard's recommendation, Option A in STATUS):**
+  integrate `SynonymMap` into the validator. New order:
+  normalize → synonym-collapse → vocab check. Validator plumbing
+  needs the synonym-map path passed through the runner; the
+  SynonymMap struct + `canonicalize()` already exist in
+  `scoring/tag_collapse.rs` — the work is wiring, not new logic.
+  Hypothesis: with synonym-collapse in-band, closed-vocab matches
+  open-vocab on legitimate model emissions AND keeps the
+  closed-vocab benefit of dropping truly novel noise.
+- **Halt discipline:** 2 IAP rejections in a row with a clearly
+  diagnosed architectural fix is the right surface-to-Bernard
+  point. The kickoff's 5-attempt rule is a cap, not a quota —
+  burning iters 3-5 on prompt-only tweaks when the fix is in
+  validator code would have been the wrong choice. Per ADR 0049's
+  HALT conditions: "IAP rejection cascade" — this is one.
+- **Operational lesson for future closed-list architectures in
+  this pipeline:** any closed list that imposes a constraint the
+  open-list baseline didn't have must also inherit the open-list
+  baseline's collapse / normalization steps, in-band, before the
+  constraint check. Otherwise the constrained variant is strictly
+  worse than the unconstrained on metrics that depend on those
+  collapse steps.
+- **Artifacts preserved (not committed):** four runs under
+  `experimental/kg-validation/runs/run-7b-closed-vocab-{seed42,seed137,iter2-seed42,iter2-seed137}/`,
+  validator code + 9 unit tests in `src/passes/tag_validator.rs`,
+  SCHEMA.md vocab section (228 tags), iter 2 prompt at
+  `prompts/extract.closed-vocab.mid-confident.md` (iter 1 prompt
+  recoverable via `git show 743ebf2:experimental/kg-validation/prompts/extract.closed-vocab.mid-confident.md`).
 
 ---
 

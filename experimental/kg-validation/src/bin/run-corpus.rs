@@ -173,6 +173,12 @@ fn real_main() -> anyhow::Result<()> {
     println!("failed     : {}", summary.failed);
     println!("errors     : {}", summary.errors.len());
     println!(
+        "new-tag-req: {} (explicit {}, implicit {})",
+        summary.new_tag_requests_total,
+        summary.new_tag_requests_explicit,
+        summary.new_tag_requests_implicit,
+    );
+    println!(
         "summary path: {}",
         config
             .output_dir

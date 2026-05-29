@@ -118,16 +118,35 @@ resolves to `next Mon=`.
 
 ---
 
-### CLOSED tag vocabulary
+### CLOSED tag vocabulary — STRICT
 
-You MUST pick `raw_topic_tags` ONLY from the list below. The
-post-LLM validator drops any tag not in this list, so any
-out-of-vocabulary tag is wasted output AND a missed connection in
-the knowledge graph.
+You MUST pick `raw_topic_tags` ONLY from the list below.
 
-Pick 2 to 4 tags drawn from the content (people, domains, projects,
-recurring concerns). Lowercase, hyphenated; no plurals — the form
-below IS the canonical form.
+**Three rules that override everything else:**
+
+1. **Pick 1 to 3 tags. Two is the sweet spot. Fewer is better.** A
+   tag that's "broadly related" but not *central* to the entry HURTS
+   the entry — graph connections are made on shared specific tags,
+   not generic ones. If you wouldn't say "this entry is fundamentally
+   about X," leave X off.
+
+2. **Tags must match a vocabulary entry LITERALLY.** Don't emit
+   `photo-update` when the vocab has `photos`. Don't emit
+   `e-commerce` when the vocab has `etsy`. Don't emit `vehicle` when
+   the vocab has `car` and `truck`. If you find yourself wanting to
+   emit a term that is *close to* but not *in* the list, pick the
+   closest in-vocab term INSTEAD — don't add the invented one
+   alongside it. The validator drops everything not in the list.
+
+3. **Don't tag the generic when the specific is available.** If the
+   entry is about renewing car insurance, prefer
+   `insurance` + `insurance-renewal` over
+   `insurance` + `car` + `home-maintenance`. Generic catch-alls like
+   `home`, `home-maintenance`, `work`, `family` are USEFUL only when
+   no more-specific tag in the list applies.
+
+Lowercase, hyphenated; no plurals — the form below IS the canonical
+form.
 
 Tags are grouped into clusters for readability. The clusters are
 informational only — pick from any cluster as the content demands.
@@ -212,7 +231,7 @@ informational only — pick from any cluster as the content demands.
 · `social` · `volunteer` · `volunteering` · `work`
 
 If — and only if — none of the closed-vocab tags above fit a concept
-that's central to the segment, propose it in `proposed_new_tags`:
+that's **central** to the segment, propose it in `proposed_new_tags`:
 
 ```
 "proposed_new_tags": [
@@ -220,9 +239,12 @@ that's central to the segment, propose it in `proposed_new_tags`:
 ]
 ```
 
-Keep `proposed_new_tags` rare. The closed vocabulary already covers
-the common cases; reach for a new-tag-request only when no
-combination of in-vocab tags captures the entry's topic.
+`proposed_new_tags` is for genuinely novel concepts the vocabulary
+has no remotely-matching entry for. It is NOT for variations of
+in-vocab tags (e.g. `photo-update` instead of `photos`, `e-commerce`
+instead of `etsy`). If a tag you want has a near-match in the
+vocabulary, USE the in-vocab match instead — don't propose the
+variation.
 
 ---
 
@@ -240,7 +262,22 @@ SEGMENT: I was thinking I should start a podcast about woodworking. Could be fun
 CLASSIFICATION: {"category": "personal", "entry_type": "idea"}
 
 OUTPUT:
-{"title": "Start a woodworking podcast", "due_iso": null, "raw_topic_tags": ["hobby", "content"], "proposed_new_tags": [{"tag": "woodworking", "rationale": "Concrete craft domain not covered by 'hobby' alone"}, {"tag": "podcast", "rationale": "Distinct content medium not in vocabulary"}]}
+{"title": "Start a woodworking podcast", "due_iso": null, "raw_topic_tags": ["hobby"], "proposed_new_tags": [{"tag": "woodworking", "rationale": "Concrete craft domain genuinely not covered by 'hobby' alone"}, {"tag": "podcast", "rationale": "Distinct content medium not in vocabulary"}]}
+
+Note: only ONE in-vocab tag (`hobby`) is emitted because `content`
+would be a low-precision filler. Restraint > breadth.
+
+CONTEXT: Today is Mon 2026-05-04. Mon=2026-05-04, Fri=2026-05-08, next Mon=2026-05-11.
+SEGMENT: Need to update the Etsy listings with new photos, the old ones look terrible.
+CLASSIFICATION: {"category": "professional", "entry_type": "task"}
+
+OUTPUT:
+{"title": "Update Etsy listings with new photos", "due_iso": null, "raw_topic_tags": ["etsy", "listing", "photos"]}
+
+Note: `etsy` (not `e-commerce`), `listing` (not `listings` — the
+vocab is singular), `photos` (not `photo-update`). Three in-vocab
+tags, all literal matches. NO new-tag-requests because every concept
+had a vocab match.
 
 CONTEXT: Today is Wed 2026-07-01. Mon=2026-07-06, Fri=2026-07-03, next Mon=2026-07-13.
 SEGMENT: I should look into solar panel rebates soon. Heard there's a state credit ending this year.
@@ -282,11 +319,17 @@ SEGMENT: Olivia's permission slip for the field trip is due Friday.
 CLASSIFICATION: {"category": "personal", "entry_type": "task"}
 
 OUTPUT:
-{"title": "Sign Olivia's permission slip for field trip", "due_iso": "2026-06-19", "raw_topic_tags": ["olivia", "school", "permission-slip", "field-trip"]}
+{"title": "Sign Olivia's permission slip for field trip", "due_iso": "2026-06-19", "raw_topic_tags": ["olivia", "permission-slip", "field-trip"]}
+
+Note: `school` is left off because `permission-slip` and `field-trip`
+already imply the school context — adding `school` would be a
+low-precision generic on top of two high-precision specifics.
+Restraint.
 
 ---
 
 Now produce the structured fields for the SEGMENT below. Return ONLY
 the JSON object. When the date is uncertain, output `null`. Pick
-tags ONLY from the closed vocabulary; use `proposed_new_tags`
-sparingly for concepts the vocabulary genuinely cannot express.
+1–3 tags ONLY from the closed vocabulary (fewer is better; every tag
+must be a LITERAL match). Use `proposed_new_tags` only for concepts
+with no remotely-matching vocabulary entry.
