@@ -17,8 +17,6 @@ use crate::ollama::{GenerateOptions, OllamaDispatcher};
 use crate::passes::classify::Classification;
 use crate::passes::{strip_json_envelope, PassError};
 
-const PROMPT: &str = include_str!("../../prompts/extract.md");
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Extraction {
     pub title: String,
@@ -26,9 +24,13 @@ pub struct Extraction {
     pub raw_topic_tags: Vec<String>,
 }
 
+/// `prompt_body` is the verbatim contents of `prompts/extract.md`
+/// as loaded by `crate::schema_loader::Schema` (ADR 0049 Move 1).
+/// The runtime prompt is byte-identical to the pre-refactor form.
 pub fn extract<D: OllamaDispatcher>(
     dispatcher: &D,
     model: &str,
+    prompt_body: &str,
     segment: &str,
     classification: &Classification,
     captured_iso: &str,
@@ -42,7 +44,7 @@ pub fn extract<D: OllamaDispatcher>(
     .expect("serialize classification context");
 
     let prompt = format!(
-        "{PROMPT}\n\nCONTEXT: {calendar}\nSEGMENT:\n{segment}\nCLASSIFICATION: {classification_json}\n"
+        "{prompt_body}\n\nCONTEXT: {calendar}\nSEGMENT:\n{segment}\nCLASSIFICATION: {classification_json}\n"
     );
 
     let raw = dispatcher.generate(model, &prompt, None, options)?;
@@ -134,6 +136,8 @@ mod tests {
         GenerateOptions::default()
     }
 
+    const TEST_PROMPT: &str = "dummy extract prompt body";
+
     fn classification() -> Classification {
         Classification {
             category: Category::Personal,
@@ -149,6 +153,7 @@ mod tests {
         let r = extract(
             &mock,
             "m",
+            TEST_PROMPT,
             "Call the daycare on Monday about Tyler's spot.",
             &classification(),
             "2026-06-14T08:00:00Z",
@@ -168,6 +173,7 @@ mod tests {
         let r = extract(
             &mock,
             "m",
+            TEST_PROMPT,
             "I should start a woodworking podcast soon.",
             &classification(),
             "2026-06-14T08:00:00Z",
@@ -184,6 +190,7 @@ mod tests {
         let err = extract(
             &mock,
             "m",
+            TEST_PROMPT,
             "anything",
             &classification(),
             "2026-06-14T08:00:00Z",
@@ -204,6 +211,7 @@ mod tests {
         let err = extract(
             &mock,
             "m",
+            TEST_PROMPT,
             "anything",
             &classification(),
             "2026-06-14T08:00:00Z",

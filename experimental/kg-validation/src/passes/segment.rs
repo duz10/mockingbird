@@ -9,20 +9,25 @@
 use crate::ollama::{GenerateOptions, OllamaDispatcher};
 use crate::passes::{strip_json_envelope, PassError};
 
-const PROMPT: &str = include_str!("../../prompts/segment.md");
-
 /// Run the segment pass for one dictation. Returns the (verbatim
 /// or lightly stitched) text of each candidate entry. Empty vec is
 /// the legitimate "junk" result.
+///
+/// `prompt_body` is the verbatim contents of `prompts/segment.md`
+/// as loaded by `crate::schema_loader::Schema` (ADR 0049 Move 1).
+/// The runtime prompt is `{prompt_body}{per_pass_context_suffix}`
+/// and the suffix below is byte-identical to the pre-refactor form
+/// (parity contract pinned by Wave 0.5.1 §parity-gate).
 pub fn segment<D: OllamaDispatcher>(
     dispatcher: &D,
     model: &str,
+    prompt_body: &str,
     dictation: &str,
     captured_iso: &str,
     options: &GenerateOptions,
 ) -> Result<Vec<String>, PassError> {
     let prompt =
-        format!("{PROMPT}\n\nCONTEXT: captured at {captured_iso}.\nDICTATION:\n{dictation}\n");
+        format!("{prompt_body}\n\nCONTEXT: captured at {captured_iso}.\nDICTATION:\n{dictation}\n");
 
     let raw = dispatcher.generate(model, &prompt, None, options)?;
     let candidate = strip_json_envelope(&raw);
@@ -55,6 +60,8 @@ mod tests {
         }
     }
 
+    const TEST_PROMPT: &str = "dummy segment prompt body";
+
     #[test]
     fn returns_three_entries_on_enumerated_multi_item() {
         let mock = MockOllama::new().default_response(
@@ -63,6 +70,7 @@ mod tests {
         let r = segment(
             &mock,
             "test-model",
+            TEST_PROMPT,
             "Okay so three things. One, finalize the budget by Thursday. Two, ping Marcus about the contractor invoice. And three, I had an idea — what if we ran the standup over video instead of in person.",
             "2026-06-14T08:00:00Z",
             &opts(),
@@ -80,6 +88,7 @@ mod tests {
         let r = segment(
             &mock,
             "test-model",
+            TEST_PROMPT,
             "Uh hold on, I need to remember to... actually no, never mind.",
             "2026-06-14T08:00:00Z",
             &opts(),
@@ -100,6 +109,7 @@ mod tests {
         let r = segment(
             &mock,
             "test-model",
+            TEST_PROMPT,
             "Thinking about the homepage. Maybe rewrite the hero, or maybe just swap the photo.",
             "2026-06-14T08:00:00Z",
             &opts(),
@@ -115,6 +125,7 @@ mod tests {
         let r = segment(
             &mock,
             "test-model",
+            TEST_PROMPT,
             "Call the dentist.",
             "2026-06-14T08:00:00Z",
             &opts(),
@@ -129,6 +140,7 @@ mod tests {
         let err = segment(
             &mock,
             "test-model",
+            TEST_PROMPT,
             "anything",
             "2026-06-14T08:00:00Z",
             &opts(),

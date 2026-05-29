@@ -13,6 +13,7 @@ use std::process::ExitCode;
 
 use kg_validation::harness::runner::{run_corpus, RunConfig};
 use kg_validation::ollama::OllamaClient;
+use kg_validation::schema_loader::Schema;
 
 const HELP: &str = "\
 run-corpus — Phase 0 validation harness for the Mockingbird Knowledge Graph.
@@ -21,7 +22,7 @@ USAGE:
   run-corpus [FLAGS]
 
 FLAGS:
-  --model <name>          Ollama model id (default: qwen2.5:3b-instruct-q4_K_M)
+  --model <name>          Ollama model id (default: read from SCHEMA.md model_defaults.segment)
   --seed <int>            Per-run sampling seed (default: 42)
   --run-id <name>         Output subdirectory name (default: ISO timestamp)
   --corpus-dir <path>     Corpus root (default: ./corpus)
@@ -47,8 +48,11 @@ fn main() -> ExitCode {
 fn real_main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
-    // Defaults.
-    let mut model = "qwen2.5:3b-instruct-q4_K_M".to_string();
+    // Defaults. `model` starts as `None`; if no `--model` is given,
+    // it's filled from `Schema::model_defaults.segment` after the
+    // schema loads. This honours the ADR 0049 Move 1 contract that
+    // SCHEMA.md is the source of truth for pipeline configuration.
+    let mut model: Option<String> = None;
     let mut seed: i64 = 42;
     let mut run_id: Option<String> = None;
     let mut corpus_dir = PathBuf::from("corpus");
@@ -71,7 +75,7 @@ fn real_main() -> anyhow::Result<()> {
                 dry_run = true;
             }
             "--model" => {
-                model = take_value(&args, &mut i, "--model")?;
+                model = Some(take_value(&args, &mut i, "--model")?);
             }
             "--seed" => {
                 let v = take_value(&args, &mut i, "--seed")?;
@@ -118,6 +122,15 @@ fn real_main() -> anyhow::Result<()> {
         chrono::Utc::now().to_rfc3339().replace(':', "-")
     });
 
+    // Load schema early so its defaults can fill in any CLI flags
+    // the caller omitted. The schema is itself loaded again below
+    // for the runner; the double-load is fine (it's a single tiny
+    // file read) and keeps the run-time loader call where the
+    // schema is consumed.
+    let schema_for_defaults = Schema::load_default()
+        .map_err(|e| anyhow::anyhow!("failed to load SCHEMA.md for defaults: {e}"))?;
+    let model = model.unwrap_or_else(|| schema_for_defaults.model_defaults.segment.clone());
+
     let config = RunConfig {
         model,
         seed,
@@ -139,10 +152,19 @@ fn real_main() -> anyhow::Result<()> {
     println!("captured_iso: {}", config.captured_iso);
     println!("dry_run     : {}", config.dry_run);
     println!("ollama_url  : {ollama_url}");
+
+    // Re-bind the already-loaded schema to keep the runner call site
+    // local. (ADR 0049 Move 1: SCHEMA.md is the contract; the pipeline
+    // refuses to start without it.)
+    let schema = schema_for_defaults;
+    println!(
+        "schema      : v{} ({})",
+        schema.schema_version, schema.schema_revision
+    );
     println!();
 
     let client = OllamaClient::with_base_url(ollama_url);
-    let summary = run_corpus(&client, &config);
+    let summary = run_corpus(&client, &schema, &config);
 
     println!();
     println!("=== SUMMARY ===");

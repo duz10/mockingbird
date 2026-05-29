@@ -14,6 +14,7 @@ use serde::Serialize;
 use crate::harness::pipeline::run_pipeline;
 use crate::ollama::{GenerateOptions, OllamaDispatcher};
 use crate::schema::Entry;
+use crate::schema_loader::Schema;
 
 #[derive(Debug, Clone)]
 pub struct RunConfig {
@@ -50,7 +51,11 @@ pub struct RunError {
     pub message: String,
 }
 
-pub fn run_corpus<D: OllamaDispatcher>(dispatcher: &D, config: &RunConfig) -> RunSummary {
+pub fn run_corpus<D: OllamaDispatcher>(
+    dispatcher: &D,
+    schema: &Schema,
+    config: &RunConfig,
+) -> RunSummary {
     let started_iso = Utc::now().to_rfc3339();
     let run_dir = config.output_dir.join(&config.run_id);
     let _ = std::fs::create_dir_all(run_dir.join("raw"));
@@ -143,6 +148,7 @@ pub fn run_corpus<D: OllamaDispatcher>(dispatcher: &D, config: &RunConfig) -> Ru
         let artifact_dir = run_dir.join("raw").join(id);
         let result = run_pipeline(
             dispatcher,
+            schema,
             &config.model,
             id,
             &dictation,
@@ -252,6 +258,7 @@ mod tests {
         let out = tempdir();
 
         let mock = MockOllama::new(); // never called in dry-run
+        let schema = Schema::load_default().expect("load default schema");
         let cfg = RunConfig {
             model: "unused".into(),
             seed: 42,
@@ -263,7 +270,7 @@ mod tests {
             num_ctx: 4096,
             dry_run: true,
         };
-        let summary = run_corpus(&mock, &cfg);
+        let summary = run_corpus(&mock, &schema, &cfg);
 
         assert_eq!(summary.failed, 0, "{:?}", summary.errors);
         assert!(summary.total_dictations >= 32);

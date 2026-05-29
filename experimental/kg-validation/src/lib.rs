@@ -10,5 +10,6 @@ pub mod judges;
 pub mod ollama;
 pub mod passes;
 pub mod schema;
+pub mod schema_loader;
 pub mod scoring;
 pub mod wiggum;

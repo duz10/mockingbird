@@ -16,6 +16,7 @@ use serde::Serialize;
 use crate::ollama::{GenerateOptions, OllamaDispatcher};
 use crate::passes::{self, Classification, Extraction, PassError};
 use crate::schema::{Entry, EntryType, Status};
+use crate::schema_loader::Schema;
 
 pub struct PipelineResult {
     pub entries: Vec<Entry>,
@@ -48,8 +49,16 @@ struct ExtractArtifact<'a> {
     segment_text: &'a str,
 }
 
+// Eight args is one over clippy's default cap. Every argument here
+// is a distinct runtime concern (dispatcher, schema, model id,
+// dictation identity, content, captured timestamp, sampling options,
+// artifact destination) and bundling them into a config struct
+// would just be visual shuffling. The function is an orchestrator;
+// its signature is the contract.
+#[allow(clippy::too_many_arguments)]
 pub fn run_pipeline<D: OllamaDispatcher>(
     dispatcher: &D,
+    schema: &Schema,
     model: &str,
     dictation_id: &str,
     dictation: &str,
@@ -62,7 +71,14 @@ pub fn run_pipeline<D: OllamaDispatcher>(
     let mut errors: Vec<(String, PassError)> = Vec::new();
 
     // ── Pass 1: segment ───────────────────────────────────────────
-    let segments = match passes::segment(dispatcher, model, dictation, captured_iso, options) {
+    let segments = match passes::segment(
+        dispatcher,
+        model,
+        &schema.prompt_bodies.segment,
+        dictation,
+        captured_iso,
+        options,
+    ) {
         Ok(v) => v,
         Err(e) => {
             errors.push((format!("segment[{dictation_id}]"), e));
@@ -88,7 +104,13 @@ pub fn run_pipeline<D: OllamaDispatcher>(
 
     for (idx, seg_text) in segments.iter().enumerate() {
         // ── Pass 2: classify ──────────────────────────────────────
-        let classification = match passes::classify(dispatcher, model, seg_text, options) {
+        let classification = match passes::classify(
+            dispatcher,
+            model,
+            &schema.prompt_bodies.classify,
+            seg_text,
+            options,
+        ) {
             Ok(c) => c,
             Err(e) => {
                 let raw_for_artifact = raw_from_err(&e).unwrap_or("<unavailable>").to_string();
@@ -120,6 +142,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
         let extraction = match passes::extract(
             dispatcher,
             model,
+            &schema.prompt_bodies.extract,
             seg_text,
             &classification,
             captured_iso,
@@ -201,6 +224,10 @@ mod tests {
     use crate::ollama::testing::MockOllama;
     use crate::schema::{Category, EntryType};
 
+    fn test_schema() -> Schema {
+        Schema::load_default().expect("load default sandbox schema")
+    }
+
     #[test]
     fn end_to_end_with_mock_dispatcher() {
         let tmp = tempdir();
@@ -235,8 +262,10 @@ mod tests {
             seed: Some(42),
             num_ctx: 4096,
         };
+        let schema = test_schema();
         let result = run_pipeline(
             &mock,
+            &schema,
             "test-model",
             "dict-1",
             "Two things. Call the daycare on Monday. Ship the order before Friday.",
@@ -276,8 +305,10 @@ mod tests {
     fn junk_returns_no_entries_no_errors() {
         let tmp = tempdir();
         let mock = MockOllama::new().respond_when("DICTATION", "[]");
+        let schema = test_schema();
         let result = run_pipeline(
             &mock,
+            &schema,
             "m",
             "junk-1",
             "Uh hold on, never mind.",
@@ -294,8 +325,10 @@ mod tests {
     fn segment_failure_aborts_dictation() {
         let tmp = tempdir();
         let mock = MockOllama::new().default_response("not json");
+        let schema = test_schema();
         let result = run_pipeline(
             &mock,
+            &schema,
             "m",
             "bad-1",
             "anything",
@@ -333,8 +366,10 @@ mod tests {
             )
             .respond_when("SEGMENT:\nbad segment", "not json");
 
+        let schema = test_schema();
         let result = run_pipeline(
             &mock,
+            &schema,
             "m",
             "mixed-1",
             "two segments",
