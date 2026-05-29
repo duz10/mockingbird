@@ -171,6 +171,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-29 | `[ADR 0048 Wave 3.2 / mb-57a1]` | JVP Gate 3 STOP: llama3.1:8b is more permissive than gemma2:9b on tag-equivalence on the real corpus, while passing Gate 1 (unambiguous calibration) cleanly at 91.7%. Calibration sets of unambiguous pairs can't surface this skew — Gate 3 (cross-judge on real-corpus 10% sample) is the gate that catches it; the 5-gate JVP design is load-bearing because each gate covers a different failure mode. Calibration-fairness sub-finding: every cal pair's vocabulary must be disjoint from the judge prompt's in-context examples (cal-eq-001 v1 violated this; v2 fix in commit 7f8ff1c). PCRP-mislabel sub-finding: PCRP prose's literal claims ("hallucinated dates") must be cross-walked vs. structured output before being treated as fact; the themes are the durable signal, surface words are not |
 | 2026-05-28 | `[ADR 0048 Wave 0 / mb-4wxw + mb-w1lw + mb-i9l1]` | `bd close` of a downstream bead in the same iteration as its blocker's close fails with "blocked by open issues [<blocker-id>]" even when the blocker was already closed — bd evaluates the blocks-edge against a stale view (Dolt auto-commit batching, presumably). Workaround: pass `--force` for the downstream closes. Doesn't affect cross-iteration chains because the blocker close has committed by then |
 | 2026-05-27 | `[ADR 0046 Iter 2 SEAL / mb-3xww]` | Obsidian nested-vault trap during Mockingbird Mobile Sync setup: when an Obsidian vault is created via 'Create new vault' and the named folder already exists, Obsidian silently creates a nested `<vault>/<vault>/` structure; Mockingbird writes to outer, Obsidian reads from inner — symptom is "Vault up to date (N records)" toast is truthful but Obsidian shows nothing. Diagnosis: `Get-ChildItem <vault> -Force` shows both `.mockingbird/` AND a same-named nested folder; the nested folder contains `.obsidian/`. Fix: move `.obsidian/` + `Welcome.md` from inner to outer, delete empty inner (preserves Obsidian Sync pairing). Iter 4 wizard should detect + guide |
 | 2026-05-23 | `[ADR 0046 Iter 1 / mb-jbf7]`    | Programmatic Strategy-A end-to-end smoke is blocked by mb-0n8c: example binaries that transitively link whisper-rs/ort/CUDA exit STATUS_ENTRYPOINT_NOT_FOUND identically to `cargo test --release`; pure-rusqlite examples (verify_wave49 shape) work fine. Pattern: pair every smoke example with a pure-rusqlite probe so the DB-schema half is verifiable independent of mb-0n8c, route the live-fire half through `mockingbird.exe` + Strategy B |
@@ -224,6 +225,62 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-29 [ADR 0048 Wave 3.2 / mb-57a1] JVP Gate 3 cross-judge STOP: `llama3.1:8b` is more permissive than `gemma2:9b` on tag-equivalence; Gate 1 calibration alone does NOT detect this
+
+- **Context:** Wave 3.2 ran full JVP+PCRP on run-a-baseline with the
+  dispatched primary judge `llama3.1:8b-instruct-q4_K_M` and cross-judge
+  `gemma2:9b`. Gate 1 (12 unambiguous calibration pairs) PASSED at
+  11/12 = 91.7%. Gate 3 (cross-judge agreement on 10% sample of real
+  corpus verdicts) STOPPED at 4/7 = 57.1% — both genuine disagreements
+  (one was a transient network error) were in the SAME direction:
+  `primary=Equivalent / cross=NotEquivalent`. Gate 4 distribution showed
+  primary marked 64.3% of verdicts Equivalent, at the high end of the
+  in-band 40–80% range. The 81.8% tag-collapse metric the primary
+  produced is therefore likely inflated.
+- **Finding:** Calibration sets built from unambiguous pairs can pass
+  Gate 1 cleanly while completely missing a judge's systematic skew on
+  fuzzy real-corpus cases. The two failure modes the calibration set
+  was designed for (random verdicts, prompt-misreading) are different
+  from the failure mode the corpus surfaces (one-direction permissive
+  drift on superset/decomposition disagreement). Gate 3 (cross-judge
+  on a real-corpus sample) is the gate that catches this; Gate 1 by
+  itself is necessary but not sufficient. ADR 0048 §G5's 5-gate design
+  is correct precisely because no single gate covers all of these
+  failure modes.
+- **Calibration-set fairness sub-finding:** The original `cal-eq-001`
+  pair (`[car-repair, auto]` vs `[car-repair, auto-maintenance]`) was
+  lexically identical to the judge prompt's first in-context example.
+  Wave 3.1 self-flagged this and Wave 3.2 fixed it (commit `7f8ff1c`)
+  by swapping in `[birthday, gift]` vs `[birthday, birthday-gift]` —
+  same anchored-synonym pattern, fresh vocabulary disjoint from all
+  prompt examples and other calibration pairs. The fix is the durable
+  rule: **every calibration pair must use vocabulary disjoint from the
+  judge prompt's in-context examples,** or Gate 1 measures memorization
+  not reasoning. Bumped `calibration_set_id` v1 → v2.
+- **PCRP-mislabel sub-finding:** PCRP reviewer (also `llama3.1:8b`)
+  called out persona-04-case-01 and persona-05-case-03 as having
+  "hallucinated dates". Cross-checking the structured output: the
+  pipeline actually **missed** dates that the answer key specified
+  (e.g. "before the weekend" → expected `2026-06-20`, pipeline emitted
+  no due date). The structural `invented_dates_count` hard gate is
+  correct at 0; the PCRP reviewer's prose framing was inverted. Lesson:
+  PCRP qualitative themes are valuable but their literal claims must
+  be cross-walked against the structured output before being treated
+  as fact. The themes (date-extraction is fragile on soft phrases) are
+  the durable signal; the surface words ("hallucinated") are not.
+- **Resume protocol:** Four options forward, fully documented in
+  `docs/knowledge-graph/wave-3-results.md` § "What's needed to unblock":
+  (A) tune judge prompt — bias toward NotEquivalent on
+  superset/decomposition with one fuzzy-NotEquivalent example, cheapest,
+  ~10 min iteration; (B) swap primary judge to `gemma2:9b` or
+  `qwen2.5:14b` — compliant with §G4 different-family rule;
+  (C) add 5–8 borderline pairs to the calibration set so Gate 1
+  measures fuzzy-case behavior, pairs with A or B;
+  (D) loosen Gate 3 thresholds — NOT recommended, this is documentation
+  change masquerading as a fix.
 
 ---
 

@@ -146,49 +146,86 @@ Friday" → `2026-06-19`; ambiguous "Monday morning" → `None`, i.e.
 conservative); the clean-single dictation got over-split into 2
 entries — Wave 5 segmenter prompt-tuning concern, not structural.
 
-**Wave 3 (`mb-57a1` scorer + LLM tag-equivalence judge) — PARTIAL,
-blocked on judge-model pull.** Shipped this iteration:
+**Wave 3 (`mb-57a1` scorer + LLM tag-equivalence judge) — HALTED on
+JVP Gate 3 STOP.** Models pulled and full JVP+PCRP executed on run-a
+this iteration (2026-05-29). Judge invalid per ADR 0048 §G5; tag metric
+cannot feed downstream gating. Wave 4 remains blocked.
 
-- ADR 0048 amended with §G5 (Judge Validation Protocol — 5 mechanical
-  gates) + §G6 (Persona Cross-Reference Pass — discipline rules + go/no-go
-  interaction) — commit `be5fc79`.
-- 12-pair hand-authored calibration set at
-  `experimental/kg-validation/judge-calibration/tag-equivalence.json`
-  (Gate 1 fixture) — commit `0e9eeb0`.
-- `src/scoring/{metrics,judge,judge_validation,persona_review}.rs` +
-  `src/bin/score-run.rs` + `prompts/judge-tag-equivalence.md`. Sandbox
-  gate green; 81/81 tests (was 44/44 pre-Wave-3, +37 new). Commit
-  `b890d2a`.
-- Both pipeline runs executed: `run-a-baseline` (seed 42, 172 s, 32/32) +
-  `run-b-stability` (seed 137, 168 s, 32/32). 0 parse errors.
-- Partial scoring on both runs with `--skip-jvp --skip-pcrp` (judge model
-  not on disk). Results in `docs/knowledge-graph/wave-3-results.md`.
+Shipped this iteration:
+- Calibration v2 fix (commit `7f8ff1c`) — replaced `cal-eq-001`'s
+  car-repair pair which was lexically identical to the judge prompt's
+  first in-context example (would inflate Gate 1 verdict-correct on
+  memorization). Replacement: `[birthday, gift]` vs `[birthday,
+  birthday-gift]` — same anchored-synonym pattern, fresh vocabulary
+  disjoint from all prompt examples and other calibration pairs.
+  Loader round-trip test bumped to `v2`. 81/81 sandbox tests still green.
+- Models pulled: `llama3.1:8b-instruct-q4_K_M` (4.9 GB) +
+  `gemma2:9b` (5.4 GB) — both confirmed via `ollama list`.
+- Full score-run on run-a-baseline (~50 min wall: ~40 min step 1 tag
+  judge × 55 entries, ~14 min JVP 5 gates, ~4 min PCRP 13 samples).
+  Run-b NOT re-scored — judge invalid ⇒ tag metric also invalid ⇒ not
+  a defensible LLM budget spend.
 
-Headline metrics (run-a-baseline / run-b-stability):
-- ✅ Invented dates: **0 / 0** (hard gate holds both runs)
-- ✅ Junk handling: 100% / 100%
-- ✅ Segmentation (multi-item): 86.7% / 86.7% (> 85% threshold)
-- ❌ Category correct: 67.3% / 70.9% (< 90% threshold)
-- ❌ Entry-type correct: 78.2% / 76.4% (< 85% threshold)
-- ❌ Clean single-item correct: 6.7% / 13.3% — dominant cause is
-  **over-segmentation of single-item dictations** (9/15 single-item cases
-  got split into 2 entries on run-a).
-- ⏸ Tag metric: skipped (no judge model)
+Headline (run-a-baseline):
+- ✅ Invented dates: **0** (hard gate holds)
+- ✅ Junk handling: 100% (2/2)
+- ✅ Segmentation (multi-item): 86.7% (13/15, ≥ 85% threshold)
+- ❌ Category correct: 67.3% (37/55, < 90%)
+- ❌ Entry-type correct: 78.2% (43/55, < 85%)
+- ❌ Clean single-item: 6.7% (1/15) — dominant cause is
+  **over-segmentation of single-item dictations** (9/15 split into 2).
+- ⚠️ Tag-variant collapse: 81.8% (45/55) — **INVALID** per JVP HALT.
 
-Stability run-a vs. run-b: 100% date agreement, 96-98% categorical-field
-agreement, 83% open-vocab tag-set agreement — pipeline is highly
-deterministic; metric variance reflects ~2 entries' verdicts changing
-between seeds.
+JVP outcome (overall **HALT**):
+- Gate 1 calibration: ✅ Pass 11/12 (91.7%) — sole miss cal-eq-004
+  (`[doctor-appointment]` vs `[doctor, appointment]`, borderline call).
+- Gate 2 reasoning audit: ✅ Pass 70/70 (100%).
+- Gate 3 cross-judge (`gemma2:9b`): 🛑 **Stop** 4/7 (57.1%, STOP < 85%).
+  Two genuine `primary=Equivalent / cross=NotEquivalent` disagreements
+  in the same direction → `llama3.1:8b` is more permissive than
+  `gemma2:9b` on equivalence on the real corpus. Combined with Gate 4's
+  64.3% equivalence rate (high end of in-band), the structural signal is
+  that the primary judge's verdicts skew Equivalent in a way the cross
+  doesn't corroborate, so the 81.8% tag-collapse metric is likely
+  inflated. Third disagreement was a transient network error (excluded:
+  4/6 = 66.7%, still STOP).
+- Gate 4 distribution: ✅ Pass 64.3% equivalent (in-band 40–80%).
+- Gate 5 determinism: ⚠️ Warn 0/5 byte-identical re-runs at fixed seed.
+  Verdict-stable across runs (chain-of-thought prose varies); recommend
+  Wave-5 to promote a parsed-verdict-only determinism check.
 
-**`mb-57a1` left OPEN.** Wave 4 is **blocked** by Wave-3 dispatch
-standing-rule #6 (JVP green + PCRP complete + stability on disk — only
-the stability prereq is satisfied). To unblock, a user-initiated
-`ollama pull llama3.1:8b-instruct-q4_K_M` (~5 GB; primary judge per ADR
-0048 §G4 different-family discipline) is required. Optional pull of
-`gemma2:9b` (~5 GB) would let JVP Gate 3 attempt PASS; without it Gate 3
-gracefully demotes to WARN-only per §G5. Resume protocol: `.\target\
-release\score-run.exe --run-dir runs\run-a-baseline` (5–10 min) then the
-same on run-b with `--stability-vs run-a-baseline`.
+PCRP (run-a, reviewer `llama3.1:8b`): 8 trust-eroding / 9 trust-building.
+Final-run §G6 condition triggered (≥ 5 trust-eroding AND no metric
+exceeds threshold by > 5pts) → default NO-GO. Cross-persona themes:
+side-hustle content miscategorized as `personal` (calibration locks
+didn't propagate into classify few-shots), topic-tag drift toward
+proximate-noun rather than filing vocabulary, **soft-date
+under-extraction** (PCRP mis-labeled as "hallucinated" — the structural
+hard-gate is correct; the failure mode is the inverse), and the
+over-segmentation pattern that also shows up structurally.
+
+**`mb-57a1` left OPEN.** Wave 4 still blocked. This is now a
+**judge-validation problem, not a model-pulls problem**. Four options
+forward (cheapest first; full detail in `docs/knowledge-graph/
+wave-3-results.md` § "What's needed to unblock"):
+
+- **A. Tune the judge prompt** — bias toward NotEquivalent on
+  superset/decomposition disagreement; one fuzzy-NotEquivalent in-context
+  example. Re-run JVP only. ~10 min iteration.
+- **B. Swap primary judge** to `gemma2:9b` (already on disk) or
+  `qwen2.5:14b`. Compliant with §G4 different-family rule. +30% LLM cost
+  per scoring run; may resolve the asymmetry cleanly.
+- **C. Add 5–8 borderline pairs to the calibration set** so Gate 1
+  measures behavior on fuzzy cases, not just unambiguous ones. Pairs
+  well with A or B.
+- **D. Loosen Gate 3 thresholds — NOT recommended.** Documentation
+  change masquerading as a fix; reject unless explicitly deferring
+  judge-validity work.
+
+Resume protocol: pick A/B/C, re-run
+`.\target\release\score-run.exe --run-dir runs\run-a-baseline` (~50 min),
+check JVP overall; if Proceed/ProceedWithWarnings, re-run on run-b with
+`--stability-vs run-a-baseline`, then advance to Wave 4 (`mb-he98`).
 
 ---
 
