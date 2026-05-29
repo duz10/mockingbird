@@ -56,34 +56,79 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**KG Phase 0.5 + v1 architectural pivot — ADR 0049 Proposed (A1 amendment Accepted in-doc; A2 amendment deferred to Wave 0.5.6 REPORT). Wave 0.5.1 SEALED, Wave 0.5.2 falsified + closed (ADR 0049 A1), Wave 0.5.3 SEALED as useful negative result (LESSONS P11), Wave 0.5.4 entity-extraction probe SCAFFOLDING in-flight.**
+**KG Phase 0.5 + v1 architectural pivot — ADR 0049 Proposed (A1 amendment Accepted in-doc; A2 amendment deferred to Wave 0.5.6 REPORT). Wave 0.5.1 SEALED, Wave 0.5.2 falsified + closed (ADR 0049 A1), Wave 0.5.3 SEALED as useful negative result (LESSONS P11), Wave 0.5.4 ACCEPT (entity layer empirically validated at 7b), Wave 0.5.5 METHODOLOGY FINDING (schema portability cliffs at 3b — LESSONS P12). HALTED at Wave 0.5.6 boundary per kickoff — Bernard surfaces to Dustin for v1 GO/NO-GO review.**
 
 Epic `mb-symi` (P1). Charter at `docs/adr/0049-knowledge-graph-phase-0-5-and-v1-architectural-pivot.md`.
 
-### 🟢 In-flight — `mb-o4ni` Wave 0.5.4 entity-extraction probe
+### 🛑 Halted at Wave 0.5.6 boundary — `mb-qogz` blocked on Bernard handoff
 
-Scaffolding landing this session (2026-05-30): 5-bucket entity taxonomy
-(`person` / `organization` / `object` / `place` / `project`) in SCHEMA.md,
-both `small-conservative` and `mid-confident` prompt variants, new
-`passes/extract_entities.rs` pass module, new `scoring/entity_quality.rs`
-Jaccard scorer, hand-labeled entity ground truth at
-`corpus/entity-labels.jsonl` (~15-20 entity-rich dictations), and
-`extract_entities` added to `SUPPORTED_PASSES` in `schema_loader.rs`.
+Per the planning-agent kickoff: "HALT before 0.5.6 REPORT.md authoring.
+Bernard surfaces to Dustin for review of all 0.5.1-0.5.5 evidence
+before the v1 GO/NO-GO REPORT is finalized." All evidence on disk;
+Wave 0.5.6 awaits Dustin's review.
 
-**Decoupled from production pipeline for probe phase** — runs as a
-standalone harness against per-segment text. Keeps the freshly-landed
-closed-vocab work on `main` (commit `8fdc7fb`) undisturbed and gives
-the probe clean failure isolation. Pipeline wiring + actual head-to-head
-LLM runs (seed 42 + 137 at 7b mid-confident) ship in the next iteration.
+### ✅ Wave 0.5.4 ACCEPT — entity layer empirically validated at 7b (`mb-o4ni` CLOSED)
 
-**Quality bar (from ADR 0049 charter + Bernard red-flag mitigation):**
-entity-quality ≥ 50% Jaccard on the labeled subset on seed 42; stability
-≥ 75% Jaccard across seeds; hard-gate `invented_dates_count == 0`
-preserved; no regression > 2pp on category/type/clean-single/segmentation/
-PCRP trust-eroding from iter-1-7b-fix baseline. ≥50% → v1 includes
-entity layer (conditional on 0.5.6 review); <50% → v1 falls back to
-tags-only (open-vocab + synonym-map + new-tag-request growth loop, the
-v1.1 deferral already named in ADR 0049).
+Full scaffolding shipped this session: SCHEMA.md (rev `phase-0.5-wave-4`)
+gains 5-bucket entity taxonomy + `extract_entities` pass routing with
+both `small-conservative` and `mid-confident` prompt variants;
+`passes/extract_entities.rs` (11 tests); `scoring/entity_quality.rs`
+(14 tests, Jaccard + fuzzy Levenshtein-≤2 sidecar + stability);
+`corpus/entity-labels.jsonl` (21 entity-rich dictations, every borderline
+call documented with `note:` fields); `bin/score-entities.rs` driver
+(decoupled from production pipeline for probe phase per ADR 0049 Move 4).
+
+**Head-to-head result vs ≥ 50% bar (qwen2.5:7b mid-confident):**
+
+| Metric | Seed 42 | Seed 137 | Bar | Verdict |
+|---|---:|---:|---:|---|
+| corpus_average_jaccard (strict) | **54.83%** | **53.40%** | ≥ 50% | ✅ PASS (+4.83 / +3.40pp margin) |
+| corpus_average_fuzzy_jaccard | 54.83% | 53.40% | (sidecar) | identical → composite-name drift, not surface-form drift |
+| stability_jaccard (42 vs 137) | — | 97.08% | ≥ 75% | ✅ PASS (+22pp margin) |
+
+9 of 10 Wave 0.5.3 closed-vocab near-misses (Mrs-Chen, Home Depot,
+brake-pads, Karen, launch, Costco, etc.) recover cleanly as entities —
+LESSONS P11 empirically validated. Weak-case cluster (5 dictations at
+20-25%) traces to composite-name drift (`freelance-website-redesign`
+vs label `website-redesign`) and type-judgment calls (`tokio:project`
+vs model's `tokio:organization`) — both reportable in Wave 0.5.6
+REPORT, neither a v1 blocker.
+
+On-disk artifacts: `runs/run-7b-entities-seed42/` + `-seed137/`
+(gitignored). Each contains `entities/<persona-case>.json`,
+`ENTITY_SCORE.json`, `ENTITY_SUMMARY.md`.
+
+### 📊 Wave 0.5.5 METHODOLOGY FINDING — schema portability cliffs at 3b (`mb-5r1b` CLOSED)
+
+Cross-test on qwen2.5:3b small-conservative (same SCHEMA, same pass,
+same scorer, same labels, same source-run-per-seed):
+
+| Metric | Seed 42 | Seed 137 | vs 7b seed 42 |
+|---|---:|---:|---:|
+| corpus_average_jaccard (strict) | 33.21% | 35.48% | **-21.62 / -17.92pp** |
+| stability_jaccard | — | 96.85% | — |
+
+21-point cliff is **structural under-extraction** at 3b, not stochastic
+noise (96.85% stability across seeds = consistent failure). Per-
+dictation diagnostic on `persona-05-case-03` (11-entity rich): 7b@42 =
+69%; 3b@42 = 17%, missing Mom, Dad, Lisa, Smiths, birthday-cake,
+soccer-cleats, summer-reading-log, school, receipts.
+
+**Promoted to LESSONS PINNED P12:** schema portability has a floor for
+some pass types (entity extraction in particular); per-class
+calibration profiles are necessary but not always sufficient. P12 is
+the symmetric counterpart to P10 (prompts tuned on small models don't
+transfer up); together they bound the SCHEMA portability axis in both
+directions.
+
+**v1 architectural implication (Wave 0.5.6 REPORT will frame the
+formal choice):** if v1 includes the entity layer, v1 must either
+(a) pin entity-extraction to a 7b+ model class, or (b) route per-pass
+to a model class (cheap 3b for `segment`/`classify`, capable 7b for
+`extract` + `extract_entities`). Option (b) is the Clark Nemotron
+pattern ADR 0049 already names as v1.1 capability.
+
+On-disk artifacts: `runs/run-3b-entities-seed42/` + `-seed137/`.
 
 ### ✅ Wave 0.5.3 SEALED — useful negative result (Bernard Option B, Dustin approved 2026-05-30)
 
@@ -213,8 +258,8 @@ natural place for per-segment date-eligibility.
 - `mb-hnb4` ✓ — Wave 0.5.2 HALT escalation. **CLOSED** per Bernard Option B; ADR 0049 A1 amendment authored.
 - `mb-rzpd` ✓ — Wave 0.5.3: closed canonical tag vocab + new-tag-request flow. **CLOSED 2026-05-30 as useful negative result (Bernard Option B; Dustin approved).** Three IAP iterations exhausted; LESSONS P11 promoted (tags ≠ entities; v1 commits to two-field schema). Wiring fix on `main` (commit `8fdc7fb`).
 - `mb-e10v` ✓ — Wave 0.5.3 iter 3: integrate `SynonymMap` into `tag_validator`. **CLOSED 2026-05-30** with wiring on `main`; the residual ~9pp gap traces to corpus tag/entity conflation, which Move 4 (entity extraction) addresses.
-- `mb-o4ni` ◐ — Wave 0.5.4: entity extraction probe + entity-quality metric. **SCAFFOLDING in-flight (this session).** Pipeline wiring + LLM runs in next iteration.
-- `mb-5r1b` — Wave 0.5.5: qwen2.5:3b cross-test on pivoted architecture. Blocked on `mb-o4ni` only now.
+- `mb-o4ni` ✓ — Wave 0.5.4: entity extraction probe + entity-quality metric. **CLOSED 2026-05-30 ACCEPT** at 54.83%/53.40% seed-42/137 Jaccard (bar 50%) + 97.08% stability. Entity layer empirically validated for v1 inclusion (conditional on Wave 0.5.6 review).
+- `mb-5r1b` ✓ — Wave 0.5.5: qwen2.5:3b cross-test on pivoted architecture. **CLOSED 2026-05-30** as methodology finding (LESSONS P12). Same SCHEMA + same pass + same labels collapses to 33.21%/35.48% on 3b vs 54.83%/53.40% on 7b — schema portability cliffs at 3b/7b for entity extraction. v1 must pin entity pass to 7b+ class OR route per-pass to model classes (ADR 0049 v1.1 Nemotron pattern).
 - `mb-qogz` — Wave 0.5.6: REPORT.md + GO/NO-GO + ADR 0049 Accepted. **HALT BEFORE THIS** — Dustin reviews 0.5.1–0.5.5 evidence on disk first.
 
 Success criteria (ADR 0049): ≥ 3 of {category, entry-type, tag-collapse,

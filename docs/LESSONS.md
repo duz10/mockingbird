@@ -243,6 +243,63 @@ the 3b→7b model swap, cleanly isolating refactor-regression from
 model-regression. Skipping the parity step would have entangled
 the two questions.
 
+### P12. Cross-class schema portability has a floor for some pass types; per-class calibration profiles do not always close the gap
+
+Wave 0.5.4 + Wave 0.5.5 ran the same SCHEMA, same `extract_entities`
+pass, same 21-dictation ground truth, same scorer — on qwen2.5:7b
+(mid-confident profile) and qwen2.5:3b (small-conservative profile).
+Results:
+
+| Model | Profile | Seed 42 | Seed 137 | Stability | vs 7b seed 42 |
+|---|---|---:|---:|---:|---:|
+| qwen2.5:7b | `mid-confident` | **54.83%** | **53.40%** | 97.08% | — |
+| qwen2.5:3b | `small-conservative` | 33.21% | 35.48% | 96.85% | **-21.62pp** |
+
+The 21-point cliff is **structural under-extraction** at 3b, not
+stochastic noise. Both 3b seeds are equally bad in a consistent way
+(96.85% stability) — the model isn't randomly failing, it's
+systematically dropping referents the prompt asks for. Per-dictation
+diagnostic on the entity-richest fixture (`persona-05-case-03`,
+11-entity rich): 7b@42 scored 69%; 3b@42 scored 17% — missing
+Mom, Dad, Lisa, Smiths, birthday-cake, soccer-cleats, summer-reading-
+log, school, receipts. 7b extracted all the load-bearing referents;
+3b extracted three and stopped.
+
+**Structural finding (narrow):** the small-conservative profile, as
+authored in Wave 0.5.4, does not deliver the entity-extraction lift
+the mid-confident profile delivers, on this corpus, on this label
+set. Whether further per-3b prompt iteration could close the gap is
+an open question — Wave 0.5.5 was a single-shot methodology probe,
+not an IAP loop. But the gap is large enough that closing it via
+prompt-only changes appears unlikely.
+
+**Architectural implication for v1 (deferred to Wave 0.5.6 REPORT):**
+If v1 includes the entity layer (conditional on the Wave 0.5.4 ≥ 50%
+bar pass), v1 must either (a) pin the entity-extraction pass to a
+7b+ model class, or (b) route per-pass to a model class (cheap 3b
+for segment/classify, capable 7b for `extract` + `extract_entities`).
+Option (b) is the pattern Clark's Nemotron suggestion implies and
+ADR 0049 already names as v1.1 capability.
+
+**Counterpart to P10:** P10 surfaced that prompts empirically tuned
+on a small model don't transfer to a larger model in the same family
+(the date hard-gate breach). P12 is the symmetric finding in the
+other direction: per-class calibration profiles for a complex
+extraction task don't always recover the lift the larger-model
+profile delivers, even when the schema is shared. The two together
+define the limits of SCHEMA portability: it's a 2-D problem, not
+a 1-D one. Different pass types (date hard-gate vs entity
+extraction) have different model-class sensitivity, and per-class
+calibration is necessary but not always sufficient.
+
+**Operational sub-finding:** when running a cross-class methodology
+probe, set the bar from the larger model's run and treat the smaller
+model as comparison-only — exactly what Wave 0.5.5 did. Treating
+both as gate-checked would have falsely "halted" Wave 0.5.5 even
+though the wave's purpose was the methodology question, not the
+quality bar. The decoupling of gate vs probe in the wave authoring
+is what made this finding cleanly reportable.
+
 ### P11. "Tags" and "entities" are different objects; conflating them in one field defeats both closed-vocab AND entity-extraction layers
 
 Wave 0.5.3 (`mb-rzpd` + `mb-e10v`) closed as a useful negative result.
@@ -297,6 +354,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-05-30 | `[ADR 0049 Wave 0.5.4 ACCEPT + Wave 0.5.5 METHODOLOGY FINDING / mb-o4ni + mb-5r1b]` | Entity-extraction probe ACCEPTS on qwen2.5:7b mid-confident: seed 42 = 54.83% strict Jaccard (bar 50%), seed 137 = 53.40%, stability = 97.08%. Empirically validates LESSONS P11 - 9 of 10 Wave 0.5.3 closed-vocab near-misses are now recovered as entities (Mrs Chen, Home Depot, brake-pads, Karen, launch, Costco). Per-dictation weak-case cluster (20-25% Jaccard) traces to composite-name drift and type-judgment calls (tokio:project vs tokio:organization). Fuzzy Jaccard sidecar identical to strict because Levenshtein-2 doesn't bridge composite-name gaps. Cross-test on qwen2.5:3b small-conservative collapses to 33.21% (seed 42) / 35.48% (seed 137) with 96.85% stability - same SCHEMA, same pass, same scorer, same labels: 21.62pp cliff is structural under-extraction not noise. Schema portability has a floor for some pass types (P12 promoted). v1 architectural implication: entity layer ships in v1 conditional on Wave 0.5.6 review AND v1 either pins entity pass to a 7b+ class OR routes per-pass to model classes (the Nemotron pattern, ADR 0049 v1.1 capability). Halt at Wave 0.5.6 boundary per kickoff |
 | 2026-05-30 | `[ADR 0049 Wave 0.5.3 CLOSE / mb-rzpd + mb-e10v]` | Wave 0.5.3 sealed as useful negative result per Bernard Option B. Iter 3 wiring fix (synonym-map in-band at validate-time) lifted ~2pp (3.8% -> 5.7% seed 42) but fell 9.1pp short of open-vocab baseline (14.8%). Diagnostic on near-miss top 10: 9 of 10 are open-class entity references (person names, brand names, concrete objects, project names), not semantic category tags. Phase 0 corpus conflates two distinct object types in a single tags: field. Closed-vocab is the right mechanism for semantic categories (bounded, closed-world, curatable); entity extraction is the right mechanism for open-class references (unbounded long tail). v1 commits to two-field schema (tags + entities) with closed-vocab on tags and Move 4 entity-extraction on entities. ADR 0049 amendment A2 deferred to Wave 0.5.6 REPORT. Promotes to PINNED P11. Wiring fix stays on main (commit 8fdc7fb) for any future closed-vocab work to inherit |
 | 2026-05-29 | `[ADR 0049 Wave 0.5.3 / mb-rzpd HALT]` | Closed-vocab tag validator (228-entry seed) regressed tag-collapse -9.1pp (iter 1, verbose prompt, model over-tagged with valid generics) then -11.0pp (iter 2, tight prompt, model under-tagged conservatively). 2-iter rejection cascade. Diagnosed root cause: the closed-vocab validator's normalize step does NOT apply the synonym map, so model emissions like `automobile-repair` are DROPPED instead of being collapsed to `car-repair` (which IS in vocab). Open-vocab baseline let these flow through to the scorer, which collapsed them via synonym map. Closed-vocab as shipped loses the synonym-collapse contribution entirely. The deeper architectural pattern: small-LLM + 228-item closed list cannot be reliably navigated by the model — both directions (verbose vs tight prompt) fail Jaccard 1.0, just in opposite ways (over- vs under-tagging). Path forward (Bernard's Option A in STATUS `mb-rzpd`): integrate synonym-map into validator (normalize → synonym-collapse → vocab check), single architectural fix in `tag_validator.rs`. Halt rather than burn iters 3-5 on prompt-only tweaks |
 | 2026-05-29 | `[ADR 0049 Wave 0.5.1 / mb-4xtd CLOSED]` | Hard-gate restored on qwen2.5:7b via SCHEMA.md model-class calibration profiles. Iter-1 result vs 7b-pre-fix baseline: invented_dates 4→0 (HARD GATE PASS); zero regressions on category (81.5%), entry-type (88.9%), segmentation (93.3%), clean-single (33.3%), junk (100%); tag-collapse +3.7pp (11.1%→14.8%). Stability at seed 137 also clean. Architectural shape: SCHEMA.md gains `## Model-class calibration profiles` (small-conservative / mid-confident with assignment table + unknown-model default = mid-confident on trust-gate-safe grounds) and `### Profile-specific prompt overrides` (`(pass, profile) → file` rows, layered on top of the default-per-pass table). Loader resolves `prompt_body(pass, model)` = `overrides[(pass, profile_for(model))]` ∥ `default[pass]`. New `prompts/extract.mid-confident.md` hardened with: front-loaded null-bias framing, three-condition hard-gate, four explicit rules (duration phrases ≠ dates, vague-future ≠ dates, past-tense anchors stay past, segment-isolation prevents event-date bleed), 7 in-context examples on fictional vocab (Caldwell/Priya/Bergstroms — distinct from mb-4xtd failure set so those stay eval not training). PINNED P10 captures the architectural lesson. **Pin counterpart to P9 (Wave 5 strict-IAP rejection cascade) — P9 is "strict no-regression cannot ratchet quality on small models"; P10 is "prompts calibrate to a specific model's prior; portable schemas need per-class calibration"** |
@@ -357,6 +415,88 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+---
+
+## 2026-05-30 [ADR 0049 Wave 0.5.4 ACCEPT + Wave 0.5.5 METHODOLOGY FINDING / mb-o4ni + mb-5r1b] Entity extraction validates v1 entity layer at 7b; schema portability cliffs at 3b (PINNED P12)
+
+- **Context:** Following Wave 0.5.3 closure (PINNED P11; tags ≠
+  entities, two-field v1 schema), Wave 0.5.4 (`mb-o4ni`) probes
+  whether a 7b LLM with calibrated SCHEMA.md prompting can extract
+  open-class entity references with sufficient quality to ship in
+  v1. Wave 0.5.5 (`mb-5r1b`) cross-tests on 3b to answer the
+  schema-portability question.
+- **Scaffolding shipped (Wave 0.5.4):** SCHEMA.md (rev
+  `phase-0.5-wave-4`) gains the 5-bucket entity taxonomy (person /
+  organization / object / place / project) and routes
+  `extract_entities` as a new pass with `small-conservative` and
+  `mid-confident` prompt variants. New `passes/extract_entities.rs`
+  (11 tests) mirrors `extract.rs` discipline (raw output preserved
+  on every parse/validation failure; defensive lowercase + dedupe).
+  New `scoring/entity_quality.rs` (14 tests) implements per-
+  dictation Jaccard + fuzzy sidecar (Levenshtein ≤ 2 + alias match).
+  21 entity-rich dictations hand-labeled in
+  `corpus/entity-labels.jsonl` (all 5 buckets exercised, every
+  borderline call documented with a `note:` field). New
+  `bin/score-entities.rs` driver runs the probe over an existing
+  source run's per-segment artifacts (decoupled from production
+  pipeline for the probe phase per ADR 0049 Move 4).
+- **Wave 0.5.4 result (7b mid-confident, vs ≥ 50% bar):**
+  - Seed 42: **54.83%** strict Jaccard ✅ PASS (+4.83pp margin)
+  - Seed 137: **53.40%** strict Jaccard ✅ PASS (+3.40pp margin)
+  - Stability: **97.08%** ✅ PASS (bar ≥ 75%)
+  - 9 of 10 Wave 0.5.3 closed-vocab near-misses (Mrs-Chen, Home
+    Depot, brake-pads, Karen, launch, Costco, etc.) now recover
+    cleanly as entities — empirically validates LESSONS P11.
+  - Weak-case cluster (5 dictations at 20-25%): composite-name
+    drift (`freelance-website-redesign` vs label
+    `website-redesign`; `school-auction-silent-items` vs
+    `school-auction`) and type-judgment calls
+    (`tokio:project` vs model's `tokio:organization`). Fuzzy
+    Jaccard sidecar = strict Jaccard because Levenshtein-2
+    doesn't bridge composite-name gaps.
+- **Wave 0.5.5 result (3b small-conservative cross-test):**
+  - Seed 42: **33.21%** strict Jaccard (FAIL the 50% bar; -21.62pp
+    vs 7b)
+  - Seed 137: **35.48%** strict Jaccard (FAIL; -17.92pp vs 7b
+    seed 137)
+  - Stability: 96.85% (the 3b under-extraction is consistent
+    across seeds, not stochastic — the model is systematically
+    dropping referents the prompt asks for)
+  - Per-dictation diagnostic on the 11-entity-rich fixture
+    `persona-05-case-03`: 7b@42 = 69%; 3b@42 = 17%, missing Mom,
+    Dad, Lisa, the Smiths, birthday-cake, soccer-cleats, summer-
+    reading-log, school, receipts. 7b extracts all load-bearing
+    referents; 3b extracts three and stops.
+  - The wave didn't have a quality bar (methodology probe), but
+    the 21pp cliff is a v1 architectural finding (PINNED P12).
+- **Wave verdicts:**
+  - Wave 0.5.4 (`mb-o4ni`) ✅ ACCEPT — entity layer ships in v1
+    conditional on Wave 0.5.6 review.
+  - Wave 0.5.5 (`mb-5r1b`) ✅ COMPLETE — methodology probe answered.
+    Schema portability has a floor for entity extraction at the
+    3b/7b boundary on this corpus, with the per-class profiles as
+    currently authored.
+- **v1 architectural implications (deferred to Wave 0.5.6 REPORT):**
+  1. v1 includes the entity layer (subject to Bernard's final review).
+  2. v1 either (a) pins the entity-extraction pass to a 7b+ model
+     class, or (b) routes per-pass to a model class (cheap 3b for
+     `segment`/`classify`, capable 7b for `extract` +
+     `extract_entities`). Option (b) is the Clark Nemotron pattern
+     ADR 0049 already names as v1.1 capability.
+  3. The v1 structured entry schema's two-field commit (LESSONS
+     P11) stands: `tags:` (closed-vocab Move 3 — preserved for v1.1)
+     and `entities:` (Move 4 — empirically validated for v1).
+- **HALT at Wave 0.5.6 boundary per kickoff.** Bernard surfaces to
+  Dustin for review of all 0.5.1-0.5.5 evidence before v1 GO/NO-GO
+  REPORT.md is finalized in Wave 0.5.6 (`mb-qogz`).
+- **Wall-clock:** Wave 0.5.4 7b seed 42 = 83s; 7b seed 137 = 80s;
+  3b seed 42 = 38s; 3b seed 137 = 34s. Total Ollama wall time across
+  4 corpus runs ≈ 4 min. The probe binary is cheap to re-run if
+  Wave 0.5.6 surfaces a label-discipline tightening (e.g. should
+  the 'extras' the model emits like `dishwasher`, `the apps`,
+  `the invoice` be promoted to labels — would push the strict
+  Jaccard several points higher).
 
 ---
 

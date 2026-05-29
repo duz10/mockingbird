@@ -45,3 +45,7 @@ path = "src/bin/iap-check.rs"
 [[bin]]
 name = "embed-reclassify"
 path = "src/bin/embed-reclassify.rs"
+
+[[bin]]
+name = "score-entities"
+path = "src/bin/score-entities.rs"
