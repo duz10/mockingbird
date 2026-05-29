@@ -57,12 +57,29 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**Nothing in flight.** Phase 0.5 KG sealed on Wave 0.5.6 (this iteration);
-ADR 0049 → Accepted. **Next up:** Phase 1A — schema-driven pipeline
-graduates from `experimental/kg-validation/` sandbox to production
-(`src-tauri/src/kg/`). Awaits Dustin kickoff. Per ADR 0049 §"Sandbox
-isolation", production files (`src-tauri/**`, `ui/**`, `migrations/**`)
-remain read-only to KG work until Phase 1A wave brief opens that window.
+**KG Phase 1A — schema-driven pipeline graduates to `src-tauri/src/kg/`.**
+Lateral ADR-chartered epic (ADR 0049). Epic bead `mb-2mc9`. Wave brief
+at `docs/knowledge-graph/phase-1a-brief.md`. Dispatched in three chunks:
+
+- **Chunk 1 (this commit) — DONE.** Parity fixture captured at
+  `docs/knowledge-graph/parity/` (32 dictations, sorted; 4-pass + entity
+  aggregate; MockOllama canned-responses sidecar). `src-tauri/src/kg/`
+  scaffold present with docstring-only `mod.rs`. `serde_yaml = "0.9"`
+  promoted to workspace dep. Wave brief authored. Sub-beads `mb-8thh` /
+  `mb-ep3c` / `mb-fl9y` all closed. Cargo gate green.
+- **Chunk 2 — pending.** Library subset graduates from
+  `experimental/kg-validation/src/`. `anyhow` excised; `ureq::Agent`
+  in `kg::ollama`; `include_str!` + `MOCKINGBIRD_KG_SCHEMA_DIR` env
+  override in `kg::schema_loader`.
+- **Chunk 3 — pending.** `kg_parity` probe binary lands and is green.
+  ADR 0049 §"Sandbox isolation" gets a closed-window note; epic bead
+  closes; STATUS clears the in-flight block.
+
+Per ADR 0049 §"Sandbox isolation" the graduation window is OPEN for
+`src-tauri/**` + `migrations/**` for this epic only; `ui/**` remains
+out of scope (that's Phase 1C). Per AGENTS.md "Work sizing" + LESSONS
+PINNED P5: lateral epic, **no new `phase-*-complete` tag**, seal via
+ADR 0049 §"Sandbox isolation" update + STATUS clear + epic bead close.
 
 **KG Phase 0.5 narrative archived:** the full wave-by-wave in-flight
 state that lived here through 0.5.1–0.5.5 is now in

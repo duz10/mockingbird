@@ -1,0 +1,1842 @@
+{
+  "fixture_version": "1.0",
+  "source_run_pipeline": "experimental/kg-validation/runs/iter-1-7b-fix/",
+  "source_run_entities": "experimental/kg-validation/runs/run-7b-entities-seed42/",
+  "model": "qwen2.5:7b-instruct-q4_K_M",
+  "profile": "mid-confident",
+  "seed": 42,
+  "captured_iso": "2026-06-14T08:00:00Z",
+  "dictation_count": 32,
+  "schema_revision": "phase-0.5-wave-4",
+  "pipeline_passes": [
+    "segment",
+    "classify",
+    "extract",
+    "extract_entities",
+    "normalize"
+  ],
+  "notes": "Wave 0.5.4 sealed scorecard fixture; consumed by Chunk 3's src-tauri/eval/kg_parity probe to gate the production graduation.",
+  "dictations": [
+    {
+      "dictation_id": "persona-01-case-01",
+      "dictation_text": "Uh okay, need to call the daycare on Monday morning, see if they have a spot in the after-school program for Tyler. Because if they don't, I gotta figure something else out before school starts in August.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Call daycare about after-school program",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "daycare",
+              "tyler",
+              "after-school"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "need to call the daycare on Monday morning, see if they have a spot in the after-school program for Tyler"
+          },
+          {
+            "title": "Find alternative plan for August",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "school",
+              "planning",
+              "alternative"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Because if they don't, I gotta figure something else out before school starts in August"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "tyler",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "daycare",
+            "type": "organization"
+          }
+        ],
+        "segment_count": 2,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-01-case-02",
+      "dictation_text": "Things I gotta remember. Need to call the dentist back about Madison's appointment, they left a voicemail. The car's making that grinding noise again, gonna take it to Joe's Monday. And the parent-teacher thing for Brandon is Wednesday night, can't forget that.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Call dentist about Madison's appointment",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "dentist",
+              "madison",
+              "appointment"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Need to call the dentist back about Madison's appointment, they left a voicemail"
+          },
+          {
+            "title": "Take car to Joe's",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "car",
+              "mechanic",
+              "repair"
+            ],
+            "due_iso": "2026-06-18",
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "The car's making that grinding noise again, gonna take it to Joe's Monday"
+          },
+          {
+            "title": "Attend Brandon's parent-teacher meeting",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "parent-teacher",
+              "brandon",
+              "meeting"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "the parent-teacher thing for Brandon is Wednesday night, can't forget that"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "madison",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "dentist",
+            "type": "organization"
+          },
+          {
+            "aliases": [],
+            "name": "joe's",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "brandon",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "parent-teacher",
+            "type": "project"
+          }
+        ],
+        "segment_count": 3,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-01-case-03",
+      "dictation_text": "I need to figure out what to do about that overdue water bill. The disconnect notice is what got my attention. Probably should call them and see if they'll set up a payment plan.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Call water company for payment plan",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "water-bill",
+              "payment-plan",
+              "utility"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "I need to figure out what to do about that overdue water bill. The disconnect notice is what got my attention. Probably should call them and see if they'll set up a payment plan."
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "water-bill",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "disconnect-notice",
+            "type": "object"
+          }
+        ],
+        "segment_count": 1,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-01-case-04",
+      "dictation_text": "Need to take the dog to the vet for his shots, that's been on the list forever. And also if I have time this weekend I want to clean out the garage, it's getting embarrassing.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Take dog to vet",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "dog",
+              "vet",
+              "shot"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Need to take the dog to the vet for his shots, that's been on the list forever"
+          },
+          {
+            "title": "Clean out garage",
+            "category": "personal",
+            "entry_type": "idea",
+            "topic_tags": [
+              "garage",
+              "cleaning",
+              "home"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "if I have time this weekend I want to clean out the garage, it's getting embarrassing"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "dog",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "vet",
+            "type": "organization"
+          },
+          {
+            "aliases": [],
+            "name": "garage",
+            "type": "object"
+          }
+        ],
+        "segment_count": 2,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-01-case-05",
+      "dictation_text": "Uh hold on, I need to remember to... actually no, never mind, I already wrote that one down.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [],
+        "segment_count": 0,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-01-case-06",
+      "dictation_text": "Just want to write this down before I forget — the new gate code for the apartment complex is 4477, they changed it Tuesday and my brain keeps reaching for the old one.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "New gate code for apartment",
+            "category": "personal",
+            "entry_type": "note",
+            "topic_tags": [
+              "apartment",
+              "code",
+              "security"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "the new gate code for the apartment complex is 4477, they changed it Tuesday and my brain keeps reaching for the old one"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "apartment-complex",
+            "type": "place"
+          },
+          {
+            "aliases": [],
+            "name": "gate-code",
+            "type": "object"
+          }
+        ],
+        "segment_count": 1,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-02-case-01",
+      "dictation_text": "Okay so two things. One, I need to pick up that replacement valve from the supply house before Friday because the Hendersons are expecting me Saturday morning. And two, just an idea, what if I started offering free quotes through the website? Might bring in more leads.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Pick up replacement valve",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "henderson",
+              "supply-house",
+              "repair"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "I need to pick up that replacement valve from the supply house before Friday because the Hendersons are expecting me Saturday morning"
+          },
+          {
+            "title": "Offer free quotes on website",
+            "category": "professional",
+            "entry_type": "idea",
+            "topic_tags": [
+              "website",
+              "quote",
+              "lead"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "just an idea, what if I started offering free quotes through the website? Might bring in more leads"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "hendersons",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "replacement-valve",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "supply-house",
+            "type": "place"
+          }
+        ],
+        "segment_count": 2,
+        "segment_failures": [
+          "seg 1: JSON parse failed in extract_entities pass: missing field `entities` at line 1 column 2\nRaw output:\n```json\n{}\n```"
+        ]
+      }
+    },
+    {
+      "dictation_id": "persona-02-case-02",
+      "dictation_text": "Note to self pick up the new drill bits from Home Depot, mine are basically toast. Also Mrs. Chen wants me to come back next week and look at her water heater situation, she texted earlier.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Pick up new drill bits",
+            "category": "personal",
+            "entry_type": "note",
+            "topic_tags": [
+              "home-depot",
+              "tool",
+              "drill-bit"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Note to self pick up the new drill bits from Home Depot, mine are basically toast."
+          },
+          {
+            "title": "Follow up with Mrs. Chen about water heater",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "chen",
+              "water-heater",
+              "repair"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Also Mrs. Chen wants me to come back next week and look at her water heater situation, she texted earlier."
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "drill-bits",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "home-depot",
+            "type": "organization"
+          },
+          {
+            "aliases": [],
+            "name": "mrs-chen",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "water-heater",
+            "type": "object"
+          }
+        ],
+        "segment_count": 2,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-02-case-03",
+      "dictation_text": "Couple things on my mind. The Henderson invoice is still unpaid, gonna have to call him about that, it's been thirty days. Need to check if my insurance certificate is up to date — actually wait, when does that renew? Whatever, I'll look it up. And I want to start tracking jobs in a better system than this notebook, maybe one of those apps.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Follow up with Henderson on invoice",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "henderson",
+              "invoice",
+              "follow-up"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "The Henderson invoice is still unpaid, gonna have to call him about that, it's been thirty days"
+          },
+          {
+            "title": "Check insurance certificate",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "insurance",
+              "certificate",
+              "renewal"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Need to check if my insurance certificate is up to date — actually wait, when does that renew?"
+          },
+          {
+            "title": "Start tracking jobs in app",
+            "category": "professional",
+            "entry_type": "idea",
+            "topic_tags": [
+              "job",
+              "system",
+              "app"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "And I want to start tracking jobs in a better system than this notebook, maybe one of those apps"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "henderson",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "invoice",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "insurance-certificate",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "notebook",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "apps",
+            "type": "object"
+          }
+        ],
+        "segment_count": 3,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-02-case-04",
+      "dictation_text": "Gotta replace the brake pads on the truck soon, they're really getting loud. If I lose the truck I lose work.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Replace brake pads on truck",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "truck",
+              "brake-pad",
+              "maintenance"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Gotta replace the brake pads on the truck soon, they're really getting loud."
+          },
+          {
+            "title": "Find new truck",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "truck",
+              "work",
+              "professional"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "If I lose the truck I lose work."
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "brake-pads",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "truck",
+            "type": "object"
+          }
+        ],
+        "segment_count": 2,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-03-case-01",
+      "dictation_text": "Reminder to send the budget revision to Karen by end of day Friday. She needs it before the steering committee meeting next Tuesday.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Send budget revision to Karen",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "budget",
+              "karen",
+              "committee"
+            ],
+            "due_iso": "2026-06-19",
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Reminder to send the budget revision to Karen by end of day Friday. She needs it before the steering committee meeting next Tuesday."
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "karen",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "budget-revision",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "steering-committee-meeting",
+            "type": "project"
+          }
+        ],
+        "segment_count": 1,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-03-case-02",
+      "dictation_text": "Quick brain dump before I forget. One, the slide deck for the all-hands needs a revision pass before Thursday morning. Two, what about a Wednesday team coffee thing instead of formal standups, might be better for morale. And three, I want to research the new Notion AI features for the team docs migration, just to see if it's worth piloting.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Revise all-hands slide deck",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "slide-deck",
+              "all-hand",
+              "revision"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "the slide deck for the all-hands needs a revision pass before Thursday morning"
+          },
+          {
+            "title": "Suggest Wednesday team coffee",
+            "category": "professional",
+            "entry_type": "idea",
+            "topic_tags": [
+              "team",
+              "morale",
+              "coffee"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "what about a Wednesday team coffee thing instead of formal standups, might be better for morale"
+          },
+          {
+            "title": "Research Notion AI features",
+            "category": "professional",
+            "entry_type": "research",
+            "topic_tags": [
+              "notion",
+              "ai",
+              "migration"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "I want to research the new Notion AI features for the team docs migration, just to see if it's worth piloting"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "slide-deck",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "all-hands",
+            "type": "project"
+          },
+          {
+            "aliases": [],
+            "name": "notion",
+            "type": "organization"
+          },
+          {
+            "aliases": [],
+            "name": "docs-migration",
+            "type": "project"
+          }
+        ],
+        "segment_count": 3,
+        "segment_failures": [
+          "seg 1: JSON parse failed in extract_entities pass: missing field `entities` at line 1 column 2\nRaw output:\n```json\n{}\n```"
+        ]
+      }
+    },
+    {
+      "dictation_id": "persona-03-case-03",
+      "dictation_text": "Okay, the freelance website redesign for Sarah — I told her I'd have v1 mockups ready by Saturday but I haven't even started yet. Need to block out tomorrow evening for that. This is what I get for saying yes to side work in the middle of Q2.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Create v1 mockups for Sarah's website",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "freelance",
+              "website",
+              "mockup"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "the freelance website redesign for Sarah — I told her I'd have v1 mockups ready by Saturday but I haven't even started yet"
+          },
+          {
+            "title": "Block out time for meeting",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "meeting",
+              "schedule",
+              "professional"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Need to block out tomorrow evening for that"
+          },
+          {
+            "title": "Reflect on side work",
+            "category": "professional",
+            "entry_type": "note",
+            "topic_tags": [
+              "side-work",
+              "reflection",
+              "professional"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "This is what I get for saying yes to side work in the middle of Q2"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "sarah",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "freelance-website-redesign",
+            "type": "project"
+          }
+        ],
+        "segment_count": 3,
+        "segment_failures": [
+          "seg 2: JSON parse failed in extract_entities pass: trailing characters at line 1 column 17\nRaw output:\n```json\n{\"entities\": []}`\n```"
+        ]
+      }
+    },
+    {
+      "dictation_id": "persona-03-case-04",
+      "dictation_text": "Quick note. The Q3 planning doc needs my section input by Friday, can't push that. And I keep meaning to set up a 401k rollover from my old job — I left Acme over a year ago and the money's still sitting there.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Input section for Q3 planning doc",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "q3",
+              "planning",
+              "doc"
+            ],
+            "due_iso": "2026-06-19",
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "The Q3 planning doc needs my section input by Friday, can't push that"
+          },
+          {
+            "title": "Set up 401k rollover",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "401k",
+              "rollover",
+              "finance"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "I keep meaning to set up a 401k rollover from my old job — I left Acme over a year ago and the money's still sitting there"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "q3-planning-doc",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "acme",
+            "type": "organization"
+          },
+          {
+            "aliases": [],
+            "name": "401k-rollover",
+            "type": "project"
+          }
+        ],
+        "segment_count": 2,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-03-case-05",
+      "dictation_text": "I've been thinking about whether I want to stay on the IC track or push toward management. Probably need to have a real conversation with my manager about it at the next one-on-one.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Consider IC vs management track",
+            "category": "professional",
+            "entry_type": "idea",
+            "topic_tags": [
+              "career",
+              "ic-track",
+              "management"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "I've been thinking about whether I want to stay on the IC track or push toward management."
+          },
+          {
+            "title": "Have conversation with manager",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "manager",
+              "conversation",
+              "one-on-one"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Probably need to have a real conversation with my manager about it at the next one-on-one."
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [],
+        "segment_count": 2,
+        "segment_failures": [
+          "seg 0: JSON parse failed in extract_entities pass: missing field `entities` at line 1 column 2\nRaw output:\n```json\n{}\n```"
+        ]
+      }
+    },
+    {
+      "dictation_id": "persona-03-case-06",
+      "dictation_text": "Just want to save this URL — that Hacker News thread about Rust async runtimes had some really good comments, especially the one from the Tokio maintainer. Could be useful for the migration work later.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Save Rust async runtimes HN thread",
+            "category": "professional",
+            "entry_type": "reference",
+            "topic_tags": [
+              "rust",
+              "async",
+              "migration"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Just want to save this URL — that Hacker News thread about Rust async runtimes had some really good comments, especially the one from the Tokio maintainer. Could be useful for the migration work later."
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "hacker-news",
+            "type": "organization"
+          },
+          {
+            "aliases": [],
+            "name": "rust-async-runtimes",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "tokio",
+            "type": "organization"
+          },
+          {
+            "aliases": [],
+            "name": "migration-work",
+            "type": "project"
+          }
+        ],
+        "segment_count": 1,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-03-case-07",
+      "dictation_text": "For the record, Karen mentioned in standup this morning that the launch is officially pushed from June to August. Worth keeping in mind for Q3 planning.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Launch delayed to August",
+            "category": "professional",
+            "entry_type": "note",
+            "topic_tags": [
+              "launch",
+              "planning",
+              "q3"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "For the record, Karen mentioned in standup this morning that the launch is officially pushed from June to August. Worth keeping in mind for Q3 planning."
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "karen",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "launch",
+            "type": "project"
+          }
+        ],
+        "segment_count": 1,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-04-case-01",
+      "dictation_text": "Reminder to order more of that craft vinyl from the wholesaler, I'm running low and I have those custom shirt orders to finish before the weekend. Also need to update the Etsy listings with new photos, the old ones look terrible.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Order more craft vinyl",
+            "category": "professional",
+            "entry_type": "note",
+            "topic_tags": [
+              "vinyl",
+              "wholesaler",
+              "inventory"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Reminder to order more of that craft vinyl from the wholesaler, I'm running low and I have those custom shirt orders to finish before the weekend"
+          },
+          {
+            "title": "Update Etsy listings with new photos",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "etsy",
+              "photos",
+              "update"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Also need to update the Etsy listings with new photos, the old ones look terrible"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "craft-vinyl",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "custom-shirt-orders",
+            "type": "project"
+          },
+          {
+            "aliases": [],
+            "name": "etsy",
+            "type": "organization"
+          },
+          {
+            "aliases": [],
+            "name": "listings",
+            "type": "object"
+          }
+        ],
+        "segment_count": 2,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-04-case-02",
+      "dictation_text": "Three things I keep forgetting. The CPA wants my Q2 numbers by next Friday for the side business, gotta send those over. Need to RSVP yes to Becca's wedding by the end of the month. And on the business side, what if I started a YouTube channel for the craft tutorials, could drive Etsy traffic.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Send Q2 numbers to CPA",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "cpa",
+              "q2",
+              "business"
+            ],
+            "due_iso": "2026-06-19",
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "The CPA wants my Q2 numbers by next Friday for the side business, gotta send those over"
+          },
+          {
+            "title": "RSVP to Becca's wedding",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "wedding",
+              "rsvp",
+              "becca"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Need to RSVP yes to Becca's wedding by the end of the month"
+          },
+          {
+            "title": "Start YouTube channel for craft tutorials",
+            "category": "professional",
+            "entry_type": "idea",
+            "topic_tags": [
+              "youtube",
+              "craft",
+              "etsy"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "what if I started a YouTube channel for the craft tutorials, could drive Etsy traffic"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "cpa",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "q2-numbers",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "side-business",
+            "type": "project"
+          },
+          {
+            "aliases": [],
+            "name": "becca",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "wedding",
+            "type": "project"
+          }
+        ],
+        "segment_count": 3,
+        "segment_failures": [
+          "seg 2: JSON parse failed in extract_entities pass: missing field `entities` at line 1 column 2\nRaw output:\n```json\n{}\n```"
+        ]
+      }
+    },
+    {
+      "dictation_id": "persona-04-case-03",
+      "dictation_text": "Don't forget the farmer's market booth fee is due by July first. Need to send Sandra the check this week so it gets there in time.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Pay farmer's market booth fee",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "market",
+              "fee",
+              "payment"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Don't forget the farmer's market booth fee is due by July first"
+          },
+          {
+            "title": "Send check to Sandra",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "check",
+              "sandra",
+              "money"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Need to send Sandra the check this week so it gets there in time"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "farmer's-market-booth-fee",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "sandra",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "check",
+            "type": "object"
+          }
+        ],
+        "segment_count": 2,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-04-case-04",
+      "dictation_text": "What if I did a holiday gift bundle for Q4? Could pair the candles with the printed cards, give a small discount. Might be worth testing in November when traffic picks up.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Consider Q4 holiday gift bundles",
+            "category": "professional",
+            "entry_type": "idea",
+            "topic_tags": [
+              "gift",
+              "q4",
+              "holiday"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "What if I did a holiday gift bundle for Q4?"
+          },
+          {
+            "title": "Pair candles with printed cards",
+            "category": "professional",
+            "entry_type": "idea",
+            "topic_tags": [
+              "candle",
+              "card",
+              "discount"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Could pair the candles with the printed cards, give a small discount."
+          },
+          {
+            "title": "Test in November",
+            "category": "professional",
+            "entry_type": "idea",
+            "topic_tags": [
+              "testing",
+              "traffic",
+              "idea"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Might be worth testing in November when traffic picks up."
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "candles",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "printed-cards",
+            "type": "object"
+          }
+        ],
+        "segment_count": 3,
+        "segment_failures": [
+          "seg 2: JSON parse failed in extract_entities pass: missing field `entities` at line 1 column 2\nRaw output:\n```json\n{}\n```"
+        ]
+      }
+    },
+    {
+      "dictation_id": "persona-04-case-05",
+      "dictation_text": "Two ideas floating around. Should I raise prices on the wholesale orders, the cost of materials keeps going up. And maybe time to redo the website, the templates I'm using are kind of dated and I think conversion is suffering.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Consider raising wholesale prices",
+            "category": "professional",
+            "entry_type": "idea",
+            "topic_tags": [
+              "price",
+              "material",
+              "cost"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Should I raise prices on the wholesale orders, the cost of materials keeps going up."
+          },
+          {
+            "title": "Redo outdated website",
+            "category": "professional",
+            "entry_type": "idea",
+            "topic_tags": [
+              "website",
+              "template",
+              "update"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "maybe time to redo the website, the templates I'm using are kind of dated and I think conversion is suffering."
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "website",
+            "type": "project"
+          },
+          {
+            "aliases": [],
+            "name": "templates",
+            "type": "object"
+          }
+        ],
+        "segment_count": 2,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-05-case-01",
+      "dictation_text": "Oh, what if we did taco night on Wednesdays instead of Thursday? That way when Mike has soccer practice the kids would still get a proper sit-down dinner instead of just microwaving stuff.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Taco night on Wednesdays",
+            "category": "personal",
+            "entry_type": "idea",
+            "topic_tags": [
+              "taco-night",
+              "schedule",
+              "meal"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "what if we did taco night on Wednesdays instead of Thursday?"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [],
+        "segment_count": 1,
+        "segment_failures": [
+          "seg 0: JSON parse failed in extract_entities pass: missing field `entities` at line 1 column 2\nRaw output:\n```json\n{}\n```"
+        ]
+      }
+    },
+    {
+      "dictation_id": "persona-05-case-02",
+      "dictation_text": "Ugh, okay let me get this all out before it leaves my head. Olivia's permission slip for the field trip is due Friday and I need to write a check for twelve dollars to go with it. Also we're almost out of dog food so add that to the Costco list. Mom's birthday is the eighth so I should probably figure out a gift idea this week instead of the night before like last year. And — oh — the dishwasher's making that gurgling sound again, might need to call somebody.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Get Olivia's field trip permission slip and payment",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "olivia",
+              "field-trip",
+              "permission-slip"
+            ],
+            "due_iso": "2026-06-19",
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Olivia's permission slip for the field trip is due Friday and I need to write a check for twelve dollars to go with it"
+          },
+          {
+            "title": "Add dog food to Costco list",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "dog-food",
+              "grocery",
+              "costco"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "we're almost out of dog food so add that to the Costco list"
+          },
+          {
+            "title": "Find Mom's birthday gift",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "mom",
+              "birthday",
+              "gift"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Mom's birthday is the eighth so I should probably figure out a gift idea this week instead of the night before like last year"
+          },
+          {
+            "title": "Call about dishwasher noise",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "dishwasher",
+              "repair",
+              "maintenance"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "the dishwasher's making that gurgling sound again, might need to call somebody"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "olivia",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "permission-slip",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "field-trip",
+            "type": "project"
+          },
+          {
+            "aliases": [],
+            "name": "check",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "dog-food",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "costco",
+            "type": "organization"
+          },
+          {
+            "aliases": [],
+            "name": "mom",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "birthday",
+            "type": "project"
+          },
+          {
+            "aliases": [],
+            "name": "dishwasher",
+            "type": "object"
+          }
+        ],
+        "segment_count": 4,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-05-case-03",
+      "dictation_text": "Okay before this gets away from me. Madison needs new soccer cleats by Saturday's game, she's outgrown the old ones. The Smiths invited us to brunch Sunday and I still haven't replied, gotta text Lisa back. Tax stuff — I need to gather all the receipts for the home office deduction this weekend, it's killing me how far behind I am. Mom called and said Dad's birthday cake should be chocolate this year not vanilla, so update the order with the bakery. And — what was the other thing — oh, the kids' summer reading log is due to the school by July fifteenth, that's coming up faster than I thought.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Buy Madison soccer cleats",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "madison",
+              "soccer",
+              "cleat"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Madison needs new soccer cleats by Saturday's game"
+          },
+          {
+            "title": "Reply to Smiths about brunch",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "smith",
+              "brunch",
+              "rsvp"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "The Smiths invited us to brunch Sunday and I still haven't replied"
+          },
+          {
+            "title": "Gather receipts for home office deduction",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "tax",
+              "receipt",
+              "deduction"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Tax stuff — I need to gather all the receipts for the home office deduction this weekend"
+          },
+          {
+            "title": "Update bakery order for Dad's birthday",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "birthday",
+              "bakery",
+              "dad"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Mom called and said Dad's birthday cake should be chocolate this year not vanilla, so update the order with the bakery"
+          },
+          {
+            "title": "Submit kids' summer reading log",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "kid",
+              "reading",
+              "school"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "the kids' summer reading log is due to the school by July fifteenth"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "madison",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "soccer-cleats",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "smiths",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "brunch",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "receipts",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "mom",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "dad",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "birthday-cake",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "bakery",
+            "type": "organization"
+          },
+          {
+            "aliases": [],
+            "name": "kids-summer-reading-log",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "school",
+            "type": "place"
+          }
+        ],
+        "segment_count": 5,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-05-case-04",
+      "dictation_text": "Reminder — I told Pat I'd help coordinate the school auction silent items by July first. Need to email her and confirm I'm still on for that. Honestly committing to this was probably a mistake, but here we are.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Coordinate school auction silent items",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "school",
+              "auction",
+              "coordination"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "I told Pat I'd help coordinate the school auction silent items by July first"
+          },
+          {
+            "title": "Confirm meeting",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "email",
+              "confirmation",
+              "meeting"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Need to email her and confirm I'm still on for that"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "pat",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "school-auction-silent-items",
+            "type": "project"
+          },
+          {
+            "aliases": [],
+            "name": "her",
+            "type": "person"
+          }
+        ],
+        "segment_count": 2,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-05-case-05",
+      "dictation_text": "Wait what was — hold on a second, Tyler what are you — okay I'll do this later. Bye.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [],
+        "segment_count": 0,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-06-case-01",
+      "dictation_text": "I should probably start looking into renters insurance. I keep meaning to and never getting around to it. Like, even just to get a quote.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Research renters insurance",
+            "category": "professional",
+            "entry_type": "research",
+            "topic_tags": [
+              "insurance",
+              "renter",
+              "coverage"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "I should probably start looking into renters insurance. I keep meaning to and never getting around to it. Like, even just to get a quote."
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [],
+        "segment_count": 1,
+        "segment_failures": []
+      }
+    },
+    {
+      "dictation_id": "persona-06-case-02",
+      "dictation_text": "Okay so the job application for the marketing role at Stripe — I need to finish the cover letter tonight, OR honestly maybe rewrite it from scratch because the one I have is too generic. And separately I was thinking I should join a recreational soccer league or something, it's been months since I've done anything physical that wasn't just like walking to the train.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Finish marketing role cover letter",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "stripe",
+              "cover-letter",
+              "application"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "the job application for the marketing role at Stripe — I need to finish the cover letter tonight"
+          },
+          {
+            "title": "Rewrite content from scratch",
+            "category": "professional",
+            "entry_type": "idea",
+            "topic_tags": [
+              "rewrite",
+              "content",
+              "generic"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "honestly maybe rewrite it from scratch because the one I have is too generic"
+          },
+          {
+            "title": "Join recreational soccer league",
+            "category": "personal",
+            "entry_type": "idea",
+            "topic_tags": [
+              "soccer",
+              "league",
+              "hobby"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "I was thinking I should join a recreational soccer league or something"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "cover-letter",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "marketing-role",
+            "type": "project"
+          },
+          {
+            "aliases": [],
+            "name": "stripe",
+            "type": "organization"
+          }
+        ],
+        "segment_count": 3,
+        "segment_failures": [
+          "seg 2: JSON parse failed in extract_entities pass: missing field `entities` at line 1 column 2\nRaw output:\n```json\n{}\n```"
+        ]
+      }
+    },
+    {
+      "dictation_id": "persona-06-case-03",
+      "dictation_text": "Three quick things. I owe Jamie twenty bucks from dinner Friday, gotta Venmo her back. Update my resume with the Stripe interview project before I lose track of what I built. And honestly, I should start meal prepping on Sundays, eating out four times a week is killing my budget.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Venmo Jamie for dinner",
+            "category": "personal",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "venmo",
+              "jami",
+              "money"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "I owe Jamie twenty bucks from dinner Friday, gotta Venmo her back"
+          },
+          {
+            "title": "Update resume with Stripe interview project",
+            "category": "professional",
+            "entry_type": "task",
+            "status": "todo",
+            "topic_tags": [
+              "resume",
+              "stripe",
+              "project"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "Update my resume with the Stripe interview project before I lose track of what I built"
+          },
+          {
+            "title": "Start Sunday meal prep",
+            "category": "personal",
+            "entry_type": "idea",
+            "topic_tags": [
+              "meal-prep",
+              "routine",
+              "health"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "I should start meal prepping on Sundays"
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [
+          {
+            "aliases": [],
+            "name": "jamie",
+            "type": "person"
+          },
+          {
+            "aliases": [],
+            "name": "venmo",
+            "type": "organization"
+          },
+          {
+            "aliases": [],
+            "name": "stripe",
+            "type": "organization"
+          },
+          {
+            "aliases": [],
+            "name": "resume",
+            "type": "object"
+          },
+          {
+            "aliases": [],
+            "name": "interview-project",
+            "type": "project"
+          }
+        ],
+        "segment_count": 3,
+        "segment_failures": [
+          "seg 2: JSON parse failed in extract_entities pass: missing field `entities` at line 1 column 2\nRaw output:\n```json\n{}\n```"
+        ]
+      }
+    },
+    {
+      "dictation_id": "persona-06-case-04",
+      "dictation_text": "I want to be the kind of person who actually reads books instead of just doom-scrolling, like seriously. Maybe start with that nonfiction one Jamie recommended about decision-making.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [
+          {
+            "title": "Read a book on decision-making",
+            "category": "personal",
+            "entry_type": "idea",
+            "topic_tags": [
+              "reading",
+              "decision-making",
+              "nonfiction"
+            ],
+            "captured_iso": "2026-06-14T08:00:00Z",
+            "body": "I want to be the kind of person who actually reads books instead of just doom-scrolling, like seriously. Maybe start with that nonfiction one Jamie recommended about decision-making."
+          }
+        ],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [],
+        "segment_count": 1,
+        "segment_failures": [
+          "seg 0: JSON parse failed in extract_entities pass: missing field `entities` at line 1 column 2\nRaw output:\n```json\n{}\n```"
+        ]
+      }
+    },
+    {
+      "dictation_id": "persona-06-case-05",
+      "dictation_text": "I want to make this the year I finally start saving seriously. Even just twenty percent of every paycheck into the Roth, that would be a real change.",
+      "captured_iso": "2026-06-14T08:00:00Z",
+      "pipeline_result": {
+        "entries": [],
+        "per_pass_errors": [],
+        "new_tag_requests": []
+      },
+      "entities": {
+        "entities": [],
+        "segment_count": 1,
+        "segment_failures": [
+          "seg 0: JSON parse failed in extract_entities pass: missing field `entities` at line 1 column 2\nRaw output:\n```json\n{}\n```"
+        ]
+      }
+    }
+  ]
+}

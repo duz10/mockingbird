@@ -440,6 +440,14 @@ necessarily edit production files. That window opens only after this
 ADR moves Accepted, the Phase 0.5 GO/NO-GO landed, and a Phase 1 wave
 brief is authored. Until then, all Phase 0.5 work is sandbox-only.
 
+**Phase 1A graduation window OPEN as of 2026-05-29** — see
+`docs/knowledge-graph/phase-1a-brief.md` for scope + binding decisions.
+The window covers `src-tauri/**` and `migrations/**` for the duration
+of epic `mb-2mc9` only. `ui/**` remains out of scope until Phase 1C.
+This is a scoped exception, not a permanent lift of the isolation
+discipline — future KG phases (1B/1C/1D/1E) each charter their own
+window.
+
 ---
 
 ## Beads inheritance from ADR 0048

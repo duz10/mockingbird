@@ -182,6 +182,14 @@ notify-debouncer-full = "0.3"
 # direct dep so usage is explicit at the call site.
 crossbeam-channel = "0.5"
 
+# Phase 1A KG (ADR 0049 / mb-2mc9) — YAML deserialization for the
+# schema-driven KG pipeline's SCHEMA.md companion configs (entity
+# taxonomy, prompt routing). Pure-Rust, MIT, transitively brought in
+# by other deps already; promoted to a direct workspace dep so the
+# kg:: subsystem can express it explicitly. No `reqwest` is added —
+# kg::ollama rides the existing ureq stack (ADR 0021).
+serde_yaml     = "0.9"
+
 # Phase 4 — Sync HTTP for cleanup providers (Ollama + Claude).
 # See ADR 0021: kept sync to fit the orchestrator's sync architecture
 # without dragging in a tokio runtime per dictation. `rustls-tls`

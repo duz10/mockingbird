@@ -51,6 +51,10 @@ phf     = { workspace = true }
 # Phase 4 — sync HTTP for cleanup providers (ADR 0021).
 ureq    = { workspace = true }
 
+# Phase 1A KG (ADR 0049 / mb-2mc9) — YAML for schema-driven KG
+# pipeline companion configs. Wired via workspace; see root Cargo.toml.
+serde_yaml = { workspace = true }
+
 # Phase MC — CRC32 for meeting chunk-WAV integrity (ADR 0029).
 crc32fast = { workspace = true }
 

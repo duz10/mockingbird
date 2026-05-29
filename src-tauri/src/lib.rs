@@ -31,6 +31,12 @@ pub mod hotkey;
 // courier processor and the runtime wiring respectively.
 pub mod inbox;
 pub mod injection;
+// Phase 1A KG (ADR 0049 / mb-2mc9) — schema-driven structured-entry
+// pipeline. Wave 1 (this commit) is a scaffold; Chunks 2+3 graduate
+// the library subset from experimental/kg-validation/ + land the
+// parity probe. Wired in alphabetical position between injection and
+// learning so future additions slot in naturally.
+pub mod kg;
 pub mod learning;
 pub mod logging;
 // Phase MC — sibling subsystem to dictation (ADR 0026). Wave 1 ships
