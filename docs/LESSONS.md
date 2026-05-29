@@ -4234,3 +4234,56 @@ Whisper) closed via ADR 0029 as its architectural closer.
 - Context: Authored 12 gold-standard tag-equivalence pairs at experimental/kg-validation/judge-calibration/tag-equivalence.json for JVP Gate 1. First unit test of the calibration loader against the real fixture failed with a mock-matching collision: the judge prompt template contains in-context examples that mention "car-repair" and "taxes", so MockOllama's first-match-wins substring matching on those anchors caught the wrong canned response for the wrong calibration pair.
 - Finding: Two distinct concerns conflated. (1) When unit-testing a judge call with a MockOllama, the rule anchors must be substrings that appear ONLY in the actual A/B query line at the bottom of the prompt, NOT anywhere in the in-context examples baked into the prompt template. (2) This is also a real-world concern for the calibration set itself: a calibration pair whose tags appear verbatim as an in-context example essentially gives the judge a free hint at gate-evaluation time, inflating Gate 1 scores. The 12 hand-authored pairs (cal-eq-001..007, cal-diff-001..005) deliberately use distinct tag content (e.g. cal-eq-001 uses "car-repair" + "auto" — which COLLIDES with the prompt example and should be revised in v2 of the calibration set).
 - Action: When adding a calibration pair, audit the judge prompt examples for tag-token collisions first. When mocking a judge call in tests, anchor on a distinctive sliver of the query line (e.g. unique compound like "kid-stuff") rather than a tag word that might appear in the prompt template. Open follow-up: v2 of the calibration set should replace cal-eq-001's "car-repair" tags with non-prompt-overlapping equivalents to avoid the Gate-1 inflation risk.
+
+## 2026-05-29 [phase-0-kg/wave-5] Strict-no-regression IAP cannot ratchet on small local models
+
+- Context: Wave 5 IAP Wiggum loop, 5 iterations cap, each iteration a single
+  prompt change (segmenter / extractor / extractor / classifier / extractor)
+  against the Wave 3.4 sealed baseline (qwen2.5:3b @ 32-dictation corpus).
+  IAP defined as 5 strict rules: aggregate same-or-better, no per-metric
+  regression, hard-gate intact, stability >=80%, PCRP trust-eroding count
+  cannot rise. REJECT -> revert + counter advances.
+- Finding: ZERO of 5 iterations satisfied all 5 rules even though 4 of 5 had
+  aggregate score > baseline and 4 of 5 held the hard-gate. Each iteration
+  improved at least one structural metric meaningfully AND regressed at
+  least one co-metric via global joint-distribution shift in the model's
+  output. The cleanest test was iter 5: an extract-only prompt change with
+  ZERO tag/category/type language still dropped tag-collapse 1.54pp, dropped
+  entry-type 0.82pp, and lifted PCRP +2. The model's output distribution is
+  not separable along prompt-section boundaries at this size. The IAP is
+  correct for the strict question "should we ship this pipeline
+  autonomously?" but is the wrong tool for the lateral question "should we
+  ship a different prompt as a default draft that the user reviews?" — for
+  the latter, a weighted Pareto frontier (accept if N-1 metrics improve,
+  the regression is below X pp, and PCRP variance noise is modeled rather
+  than gated) would have accepted iter 1, iter 3, and iter 4 individually
+  and likely a kitchen-sink composition of them. Independent finding:
+  PCRP trust_eroding count has ~2-3 variance from joint-output-shape
+  changes that should be modeled as noise around the true signal, not as
+  a strict ratchet bound.
+- Action: When the work container is "harden a trust-critical autonomous
+  pipeline", use strict no-regression IAP. When it is "tune a prompt that
+  will produce a user-reviewed draft", relax the IAP to a Pareto frontier
+  plus model PCRP as noisy (use band tolerance, not strict less-than-or-
+  equal). Document the workflow-mode choice in the kickoff brief BEFORE
+  running so the verdict doesn't get rationalized after.
+
+## 2026-05-29 [phase-0-kg/wave-5] PowerShell Set-Content -Encoding UTF8 writes a BOM that Rust serde_json rejects
+
+- Context: Wave 5 synonym-map sweep script (`experimental/kg-validation/wave-5/apply-synonym-sweep.ps1`)
+  wrote the updated map back via `$json | ConvertTo-Json -Depth 100 | Set-Content -Path $path -Encoding UTF8`.
+  Next `score-run` invocation died with `error: parse judge-calibration\synonym-map.json: expected value at line 1 column 1`.
+- Finding: PowerShell's `-Encoding UTF8` writes a UTF-8 byte-order mark
+  (`EF BB BF`) at the file start. Rust's `serde_json::from_str` does NOT
+  strip the BOM; it reads those bytes as the first "character" and reports
+  the parse error above because BOM is not a valid JSON token. Affects
+  ANY Rust tool that uses serde_json on PowerShell-emitted JSON. Hex-dump
+  confirmed: `EF BB BF 7B 0D` at offset 0; stripping the first 3 bytes
+  made the file parse cleanly.
+- Action: When writing JSON from PowerShell for Rust consumption, use
+  `New-Object System.Text.UTF8Encoding $false` (the `$false` constructor
+  flag means "without BOM") paired with `[System.IO.File]::WriteAllText($path, $payload, $utf8NoBom)`.
+  For ASCII-only payloads, `Out-File -Encoding ascii` also works. The
+  throwaway BOM-check on any such writer:
+  `[byte[]](Get-Content $f -Encoding Byte -TotalCount 5) | ForEach-Object { '{0:X2}' -f $_ }`
+  — first three bytes must NOT be `EF BB BF`.

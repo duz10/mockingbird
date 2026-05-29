@@ -1,7 +1,7 @@
 # ADR-0048: Knowledge Graph — Phase 0 pipeline validation (sandboxed harness)
 
-- **Status:** Proposed
-- **Date:** 2026-05-28
+- **Status:** Accepted (sealed 2026-05-29 with Wave 6 REPORT landing at `docs/knowledge-graph/REPORT.md`)
+- **Date:** 2026-05-28 (Proposed), 2026-05-29 (Accepted)
 - **Deciders:** Dustin (project lead), Bernard / code-puppy (chartering + implementor)
 - **Charter for:** ADR-lateral epic — Knowledge Graph Phase 0 prerequisite gate.
   Sealed via ADR Accepted + STATUS update + `REPORT.md` landing. **NO new

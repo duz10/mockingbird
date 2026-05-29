@@ -45,6 +45,7 @@
 - ADR 0042 — Activity Capture retention cascade (Accepted, sealed in `phase-10-complete`)
 - ADR 0043 — Activity Capture exclusion list + built-in rules (Accepted, sealed in `phase-10-complete`)
 - ADR 0044 — Activity Capture PDF export via `printpdf` (Accepted, sealed in `phase-10-complete`)
+- ADR 0048 — Knowledge Graph Phase 0 validation methodology (Accepted — sealed 2026-05-29 with `docs/knowledge-graph/REPORT.md`). Seven waves shipped: Wave 0 charter + scaffold; Wave 1 corpus (32 fixtures, full taxonomy coverage); Wave 2 4-pass pipeline + run-corpus harness; Wave 3 scorer (3 sub-iterations sealing on §G7 deterministic synonym-map metric per Option E); Wave 4 6 invariant judges + run-judges rig (`phase-0-kg-start` anchor at `aad06a6`); Wave 5 IAP Wiggum loop (cap 5; 0 accepted; documented the structural ceiling); Wave 6 REPORT.md + go/no-go (§G6 strict NO-GO; defensible GO-WITH-LIMITATIONS for an assisted-filing v1 UX). Final scorecard: hard-gate `invented_dates_count=0` PASS, junk-bucket 100% PASS, segmentation 86.7% PASS, category 67.3% FAIL, entry-type 78.2% FAIL, clean-single 6.7% FAIL, tag-collapse 9.1% FAIL. Synonym map v1.1. Stability ≥95% structural agreement. v1 recommendation: lighter spec scope PART B §9 with per-entry user confirmation; draft-review pane converting filling-quality errors into 1-tap corrections; raw transcript preserved per spec §10 dual-write. **No `phase-*-complete` tag** — lateral epic. Future v1 charter ADR (provisionally 0049) inherits Q1/Q2/Q3 decisions from ADR 0048 §3 + assisted-filing-UX contract from REPORT §8. Beads sealed: `mb-4wxw`, `mb-w1lw`, `mb-i9l1`, `mb-t7w5`, `mb-901u`, `mb-i4us`, `mb-nbel`, `mb-57a1`, `mb-jz5r`, `mb-he98`, `mb-ojm5`, `mb-0baz`.
 - ADR 0046 — Mobile extension via synced Obsidian vault (Accepted — sealed 2026-05-24). Four iterations shipped (desktop file ingest → outbound vault projection → inbound mobile courier → polish). User-facing surface: `+ Audio file` desktop import button, deterministic Markdown projection of dictation + meeting history to `<vault>/history/`, inbox courier auto-processing iOS-Shortcut-delivered voice memos from `<vault>/inbox/`, full Mobile Sync settings tab (8 keys + connection-health card), nested-vault detection wizard, import progress overlay, iOS Shortcut recipe (`docs/mobile/ios-shortcut.md`, 3 actions per Wave 0 Finding 5). Channel boundary preserved across 3 reuse sites: `dictation/ingest.rs` (Iter 1 ADR §3.2 amendment) consumed by IPC handler, inbox courier, and import progress overlay event-tap with zero further sealed-surface modifications. Two `sealed-phases-untouched` judges PASS (Iter 1 @ 95%, Iter 3 @ 99%); Iter 2 + Iter 4 didn't need them (greenfield + UI-side). 19 beads closed. Seal commit: HEAD of `main` at consolidation time (this STATUS update was committed in the seal commit itself; see `git log --grep='ADR 0046 SEALED'`). Wave 5 hardening matrix (`mb-qxrm`) remains open as live-corpus catch-up; not gating epic seal. **No new `phase-*-complete` tag** (lateral epic per LESSONS PINNED P5).
 - ADR 0047 — Cleanup pipeline refinement (Accepted 2026-05-25). Per-pass system headers in `meetings/llm_pass.rs` (`cleaner_punctuation` no longer carries the global "Be concise" instruction — the load-bearing fix); length-ratio shrink fallback (`SettingKey::LlmShrinkFallbackThreshold`, default 0.65); Whisper `initial_prompt` wired from the user's dictionary at both dictation call sites; temperature standardized to 0.2 across casual / normal / formal / meetings (migration 019); new `DictationCleanupLevel` dial (`None` / `Light` / `Medium` / `High`; default `High` preserves prior behaviour; `Medium` uses the new `normal_v6_additive` prompt); LLM-skip-on-short-utterance (`SettingKey::LlmSkipWordThreshold`, default 12 words; gated on `!looks_listy()`; consumed `mb-cjc` / ADR 0022 Wave 3); casual mode repointed to `qwen2.5:7b-instruct-q4_K_M` (migration 021; one-liners absorbed by the skip path); opt-in Q5_K_M via `SettingKey::PreferQ5Models` with VRAM-gated runtime substitution (migration 022; defaults off); Compress Transform on `LlmPassCard` as on-demand pull-only affordance (`dictation/prompts/compress.md`); `sessions.edit_free_within_5min` instrumentation as the empirical quality signal (surfaced in Insights "Your usage"). UI surface for the dial + Q5 toggle deferred to `mb-h0nn`. Empirically validated by `docs/cleanup/eval-adr0047-cleaner-punctuation.md` (18/20 fixtures preserve all expected phrases on `qwen2.5:3b-instruct-q4_K_M`; zero over-consolidation regressions). Sealed via 13 commits `c7af486..` + this seal commit; **no `phase-*-complete` tag** per LESSONS PINNED P5.
 - ADR 0045 — Dictation programmatic start/stop (Accepted 2026-05-27). Amends ADR 0037 §4: the `NoProgrammaticStart` rule is removed for Dictation; the kind now supports two start modes — Right Alt PTT (UNCHANGED) and programmatic via `dictation_start` / `dictation_stop` IPC. Both modes drive the same `HotkeyStateMachine` via a sentinel VK (`0x07`) so the FSM, orchestrator, and `dictation:state` event stream are mode-agnostic. CC Dictation tile now lands on `ShowingSessionCard{Dictation}` (closes the silent-dismiss gap `mb-ytex`). New `<DictationRecordButton>` above the search input on the Dictations page. Shipped as bead `mb-ddfx` (commit `b313742`); no new tag, Phase 10 seal unchanged. **Follow-up beads `mb-tfyp` + `mb-sowc` (2026-05-27):** added `sessions.start_mode` column (migration 017, `'ptt'` / `'in_app'`) so the in-app start path no longer incorrectly produces `ABORTED_FOCUS_CHANGED` session rows. UI list-pill now renders `IN_APP` (neutral) for programmatic sessions; detail panel shows "Push-to-talk" vs "In-app" next to the mode. Recording-pill overlay gains a primary Stop button only when `startMode === 'in_app'` (PTT pill unchanged — zero regression). Plumbed via `dictation:state` event payload (new optional `startMode` field). New `InjectionOutcome::InAppNoInject` variant (db str `"in_app"`) replaces the abort path for in-app sessions — same observable result (no paste), cleaner semantics.
@@ -55,8 +56,25 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**Knowledge Graph Phase 0 epic — ADR 0048 chartered (Wave 0 complete).**
-*Lateral epic per LESSONS PINNED P5; no `phase-*-complete` tag will be cut.*
+*Nothing in-flight at iteration boundary.* The KG Phase 0 epic (ADR 0048) sealed
+2026-05-29 with Wave 6 REPORT.md landing — moved into the sealed lateral-epics
+list above. The Wave 0–6 history that used to live in this block is preserved
+below for one-iteration grace (the next consolidation can prune it).
+
+Next likely work fronts (pick per `bd ready` / Dustin direction):
+- v1 charter ADR (provisionally ADR 0049) inheriting KG Phase 0 REPORT §8
+  assisted-filing-UX recommendation.
+- Phase 10 live-fire Win11 smoke test (LESSONS P7 — still Dustin's post-seal step).
+- Standing P1 `mb-ez9` (empirical mode-prompt iteration; picks up when fixtures land).
+- Standing P2s `mb-xwi` / `mb-nc9u` / `mb-e2t8`.
+- Standing P3s (see below) and the open KG Phase 0 follow-up beads still in `bd ready`.
+
+---
+
+### Previous in-flight summary (now sealed) — KG Phase 0 (ADR 0048)
+
+**Knowledge Graph Phase 0 epic — ADR 0048 Accepted, REPORT.md landed.**
+*Lateral epic per LESSONS PINNED P5; no `phase-*-complete` tag cut.*
 Wave 0 (charter + scaffold) landed 2026-05-28: spec imported to
 `docs/knowledge-graph/spec.md` (immutable), ADR 0048 drafted (Proposed),
 10-bead epic with dependency graph (`mb-4wxw` → `mb-0baz`), sandbox crate
@@ -387,6 +405,86 @@ are the diagnostic surface working as designed; flipping them green
 is Wave 5's job.
 
 **`mb-he98` closeable. `mb-ojm5` (Wave 5 Wiggum loop, cap 5) unblocked.**
+
+**Wave 5 SEALED (2026-05-29) — IAP loop ran cap, no iteration accepted; baseline UNCHANGED.**
+
+Five iterations exhausted per the Iteration Acceptance Protocol (IAP)
+documented in the kickoff brief + `experimental/kg-validation/wave-5/ITERATION_JOURNAL.md`:
+
+| Iter | Prompt touched | Aggregate Δ | Hard-gate | PCRP Δ | Verdict | Rules tripped |
+|---|---|---|---|---|---|---|
+| 1 | segmenter "when in doubt keep as one entry" | +0.47 | intact | +3 | REJECT | Rule 5 (PCRP) |
+| 2 | extractor tag-budget cap | +0.15 | intact | +3 | REJECT | Rules 2 + 5 |
+| 3 | classifier side-hustle → professional | −3.39 | **BROKEN** | 0 | REJECT | Rules 1 + 2 + 3 (cascade `due_iso` hallucination on persona-06-case-03 "before I lose track") |
+| 4 | extractor tag-vocabulary + date hardening | +0.28 | intact | 0 | REJECT | Rule 2 (entry-type −0.82pp via cascade classify-pass parse failure on persona-06-case-05) |
+| 5 | extractor date soft-urgency only (minimal) | +0.24 | intact | +2 | REJECT | Rules 2 + 5 |
+
+Four of five iterations had aggregate score > baseline; four of five held the
+hard-gate; zero of five satisfied strict no-regression on all gated metrics.
+The IAP correctly prevents lateral local-optimum drift; this run demonstrates
+that **no single prompt change on qwen2.5:3b @ 32 dictations can ratchet the
+strict-no-regression IAP**. Each iteration's changes have global cascade onto
+co-metrics — iter 5 made an extract-only change with ZERO tag/category/type
+language and still dropped tag-collapse 1.54pp + entry-type 0.82pp + lifted
+PCRP +2 via joint-distribution shift.
+
+**Synonym map sweep (parallel track, separate `[synonym-map]` commit `33dd5ae` +
+BOM-fix `f4c1a43`):** map version v1.0 → v1.1. Three conservative ADR 0048 G7-
+compliant additions: `kid` += `kids,children`; `apartment` += `apartment-complex`;
+`home-maintenance` += `cleanup,home-cleanup`. Five candidates skipped per
+discipline (person names never collapse, specificity preserved, domain overlap
+not equivalence): `after-school` → `kid`, `cake` → `bakery|dad`, `brake` →
+`car-repair`, `401k` → `retirement`, `budget` → `meeting|slide-deck`. Tag-
+collapse PRIMARY (Jaccard 1.0) lift: **0pp** (5/55 → 5/55). Jaccard ≥ 0.50
+lifted 26 → 27. **Finding:** tag-collapse ceiling is fundamental vocabulary
+mismatch between the open-vocabulary extractor and the persona-calibrated
+answer keys, not missing synonym entries.
+
+**Wave 5 baseline (= Wave 3.4 sealed scorecard = production-ready prompt set):**
+UNCHANGED. Hard-gate 0 ✅. Junk 100% ✅. Segmentation 86.7% ✅. Category 67.3% ❌.
+Entry-type 78.2% ❌. Clean-single 6.7% ❌. Tag-collapse 9.1% ❌. PCRP 8 trust-
+eroding (likely ~5 de-mislabeled per LESSONS PINNED PCRP pattern; reviewer
+reads `captured_iso` as `due_iso`).
+
+`mb-ojm5` closeable.
+
+**Wave 6 SEALED (2026-05-29) — REPORT.md landed; ADR 0048 → Accepted; KG Phase 0 epic SEALED.**
+
+Deliverable: [`docs/knowledge-graph/REPORT.md`](docs/knowledge-graph/REPORT.md)
+(433 lines, 10 sections per spec §8.6 + kickoff brief).
+
+**Verdict: NO-GO on the strict reading (§G6 trigger fires: trust_eroding=8
+AND no metric exceeds threshold by >5pp). GO-WITH-LIMITATIONS for an
+assisted-filing v1 UX where the user reviews each structured entry before
+commit** — on the grounds that (a) the trust-critical gates (hard-gate, junk)
+PASS by wide margin; (b) the PCRP count is inflated by the documented
+reviewer-prompt mislabel; (c) stability is glorious across all metrics
+(≥95% structural agreement); (d) the failing metrics (category 67%, entry-
+type 78%, clean-single 7%, tag-collapse 9%) are filling-quality problems
+that a user reviewing each draft can fix in seconds.
+
+**v1 recommendation in §8 of REPORT.md:** ship the spec PART B §9 lighter
+scope but **require explicit per-entry user confirmation** before commit;
+build a draft-review pane exposing inline-editable title/category/entry_type/
+due_iso/topic_tags; never expose dictation content as "filed" without
+confirmation; preserve `History/` dual-write per spec §10. The 78%/67%/9%
+accuracy converts from a trust-eroding silent error into a 1-tap correction.
+
+**Future-Phase-0.5 charter implications captured in REPORT §10:** if v1 needs
+to evolve toward autonomous filing, the path is EITHER a larger local model
+(qwen2.5:7b / llama3.1:8b / 14b on suitable hardware — untested in Phase 0)
+OR a hybrid "model drafts + heuristics layer for confident slots + tag
+post-processing engine". Prompt engineering on qwen2.5:3b alone cannot close
+the gaps per the Wave 5 evidence.
+
+**ADR 0048 → Accepted** (commit this iteration). KG Phase 0 epic SEALED as
+lateral epic per LESSONS PINNED P5; **NO `phase-*-complete` tag** (Phase 0 KG
+is not a numbered PLAN §10 phase). The next ADR for this product surface
+will be the v1 charter (provisionally ADR 0049) inheriting the Q1/Q2/Q3
+decisions captured in ADR 0048 §3 + the assisted-filing-UX recommendation
+from REPORT.md §8.
+
+`mb-0baz` closeable. `mb-ojm5` closeable. KG epic SEALED.
 
 ---
 
