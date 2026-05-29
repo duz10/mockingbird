@@ -1,0 +1,1546 @@
+{
+    "version":  "v1",
+    "schema_version":  "synonym-map-v1",
+    "generated_from":  [
+                           "corpus/answer-keys/*.json (auto-seed)",
+                           "Wave 3 dispatch brief (bernard-seed)",
+                           "runs/run-a-baseline/structured/*.json (diff-driven-codepuppy)"
+                       ],
+    "discipline_notes":  "Per ADR 0048 G7: person names NEVER collapse to domain tags; specificity preserved when extra info is irreducible; domain overlap is NOT equivalence; when in doubt, leave out.",
+    "synonyms":  [
+                     {
+                         "canonical":  "401k",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "access-code",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "accounting",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "accounts-receivable",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "ai",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "apartment",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "app",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "appliance",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "application",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "appointment",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "async",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "auction",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "bakery",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "becca",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "bill",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "birthday",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "birthday-cake",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "book",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "booth-fee",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "brake-pad",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "brandon",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "brunch",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "budget",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "budgeting",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "budget-revision",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "business",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "business-expense",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "business-tool",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "car",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "career",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "career-conversation",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "career-direction",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "car-repair",
+                         "variants":  [
+                                          "auto",
+                                          "auto-maintenance",
+                                          "auto-repair",
+                                          "car-maintenance",
+                                          "vehicle-repair"
+                                      ],
+                         "rationale":  "Automotive maintenance domain. Bernard seed.",
+                         "source":  "bernard-seed"
+                     },
+                     {
+                         "canonical":  "certificate",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "chen",
+                         "variants":  [
+                                          "mrs-chen"
+                                      ],
+                         "rationale":  "Honorific stripping for the same person; same persona-03 reference.",
+                         "source":  "diff-driven-codepuppy"
+                     },
+                     {
+                         "canonical":  "cleaning",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "cleat",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "client",
+                         "variants":  [
+                                          "customer"
+                                      ],
+                         "rationale":  "Client and customer synonyms. Bernard seed.",
+                         "source":  "bernard-seed"
+                     },
+                     {
+                         "canonical":  "client-visit",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "content",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "conversion",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "cooking",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "costco",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "cover-letter",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "cpa",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "craft-tutorial",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "craft-vinyl",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "dad",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "daycare",
+                         "variants":  [
+                                          "childcare",
+                                          "child-care",
+                                          "kid-care"
+                                      ],
+                         "rationale":  "Daycare and childcare synonyms. Bernard seed.",
+                         "source":  "bernard-seed"
+                     },
+                     {
+                         "canonical":  "dentist",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "design",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "dinner",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "dishwasher",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "docs-migration",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "doctor-appointment",
+                         "variants":  [
+                                          "dr-appointment",
+                                          "medical-appointment"
+                                      ],
+                         "rationale":  "Doctor-appointment synonyms. Bernard seed. NOTE: NOT a collapse target for pediatrician - pediatric specificity preserved.",
+                         "source":  "bernard-seed"
+                     },
+                     {
+                         "canonical":  "documentation",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "dog",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "dog-food",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "drill-bit",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "email",
+                         "variants":  [
+                                          "correspondence",
+                                          "email-followup",
+                                          "outreach"
+                                      ],
+                         "rationale":  "Email and outreach synonyms. Bernard seed.",
+                         "source":  "bernard-seed"
+                     },
+                     {
+                         "canonical":  "etsy",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "exercise",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "family",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "farmers-market",
+                         "variants":  [
+                                          "farmer\u0027s-market"
+                                      ],
+                         "rationale":  "Punctuation variant: pipeline emits possessive apostrophe; answer key omits it. Normalizer does not strip apostrophes, so synonym map closes the gap. Safe collapse, identical referent.",
+                         "source":  "diff-driven-codepuppy"
+                     },
+                     {
+                         "canonical":  "field-trip",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "finance",
+                         "variants":  [
+                                          "money",
+                                          "personal-finance"
+                                      ],
+                         "rationale":  "General financial-management synonyms. Bernard seed. Per caveat: budget / budgeting / budget-revision intentionally NOT collapsed - different concept than the finance domain.",
+                         "source":  "bernard-seed"
+                     },
+                     {
+                         "canonical":  "financial-goal",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "fitness",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "food",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "freelance",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "friend",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "fyi",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "garage",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "gate-code",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "gift",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "gift-bundle",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "gift-idea",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "grocery",
+                         "variants":  [
+                                          "food-shopping",
+                                          "grocery-shopping",
+                                          "shopping-list"
+                                      ],
+                         "rationale":  "Grocery shopping artifacts collapse. Bernard seed.",
+                         "source":  "bernard-seed"
+                     },
+                     {
+                         "canonical":  "growth",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "habit",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "henderson",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "hobby",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "holiday",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "home",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "home-maintenance",
+                         "variants":  [
+                                          "chore",
+                                          "house-chore",
+                                          "household"
+                                      ],
+                         "rationale":  "Household maintenance domain. Bernard seed. Canonical chosen as home-maintenance since answer-key uses home-maintenance.",
+                         "source":  "bernard-seed"
+                     },
+                     {
+                         "canonical":  "home-office",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "home-office-deduction",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "ic-vs-management",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "insurance",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "insurance-renewal",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "inventory",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "invoice",
+                         "variants":  [
+                                          "billing",
+                                          "invoicing"
+                                      ],
+                         "rationale":  "Invoicing synonyms. Bernard seed.",
+                         "source":  "bernard-seed"
+                     },
+                     {
+                         "canonical":  "jamie",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "job-application",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "job-search",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "job-tracking",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "joe",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "karen",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "kid",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "kids-sport",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "launch-date",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "launch-slip",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "lead",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "lisa",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "listing",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "madison",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "maintenance",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "manager",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "marketing",
+                         "variants":  [
+                                          "advertising",
+                                          "promotion"
+                                      ],
+                         "rationale":  "Marketing channel synonyms. Bernard seed.",
+                         "source":  "bernard-seed"
+                     },
+                     {
+                         "canonical":  "meal-planning",
+                         "variants":  [
+                                          "meal-prep",
+                                          "meal-preparation"
+                                      ],
+                         "rationale":  "Meal-prep and meal-planning synonyms. Bernard seed.",
+                         "source":  "bernard-seed"
+                     },
+                     {
+                         "canonical":  "mechanic",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "meeting",
+                         "variants":  [
+                                          "1on1",
+                                          "all-hand",
+                                          "check-in",
+                                          "one-on-one",
+                                          "standup",
+                                          "sync"
+                                      ],
+                         "rationale":  "Meeting-type synonyms incl. cadence variants. Bernard seed. Abstraction-level collapse: a 1on1 IS a meeting for filing purposes.",
+                         "source":  "bernard-seed"
+                     },
+                     {
+                         "canonical":  "mockup",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "mom",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "morale",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "notion",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "olivia",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "parent-teacher",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "payment",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "payment-plan",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "pediatrician",
+                         "variants":  [
+                                          "kid-doctor",
+                                          "kids-doctor"
+                                      ],
+                         "rationale":  "Pediatrician synonyms. Bernard seed. Discipline: does NOT collapse to general doctor - pediatric specificity matters.",
+                         "source":  "bernard-seed"
+                     },
+                     {
+                         "canonical":  "permission-slip",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "pet-care",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "photos",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "planning",
+                         "variants":  [
+                                          "project-planning",
+                                          "q3-planning",
+                                          "q4-planning",
+                                          "quarterly-planning"
+                                      ],
+                         "rationale":  "Planning abstraction-level collapse. Bernard seed. Quarterly variants collapse to general planning.",
+                         "source":  "bernard-seed"
+                     },
+                     {
+                         "canonical":  "planning-doc",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "plumbing-supply",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "portfolio",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "presentation",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "pricing",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "pricing-strategy",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "product-idea",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "project-status",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "q2",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "q3",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "q4-holiday",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "reading",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "reading-log",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "receipt",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "renters-insurance",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "repair",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "resume",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "resume-update",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "retirement",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "rollover",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "roth",
+                         "variants":  [
+                                          "roth-ira"
+                                      ],
+                         "rationale":  "Roth IRA abbreviation; pipeline expands, answer key contracts. Same retirement-account referent.",
+                         "source":  "diff-driven-codepuppy"
+                     },
+                     {
+                         "canonical":  "rsvp",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "rust",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "rust-async",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "sarah",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "saving",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "school",
+                         "variants":  [
+                                          "kids-school",
+                                          "school-dropoff",
+                                          "school-pickup"
+                                      ],
+                         "rationale":  "School-context synonyms. Bernard seed. All resolve to the school-coordination domain.",
+                         "source":  "bernard-seed"
+                     },
+                     {
+                         "canonical":  "school-auction",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "self-improvement",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "shirt",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "shot",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "side-business",
+                         "variants":  [
+                                          "side-work"
+                                      ],
+                         "rationale":  "Side-hustler synonyms; same persona-04 economic activity.",
+                         "source":  "diff-driven-codepuppy"
+                     },
+                     {
+                         "canonical":  "slide-deck",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "small-business",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "smith",
+                         "variants":  [
+                                          "the-smith"
+                                      ],
+                         "rationale":  "Family-name reference: pipeline emits the-Smith; answer key uses plural Smiths which normalizes to smith. Same family referent. Per G7 this is a person-name match within the same household, not a person-domain collapse.",
+                         "source":  "diff-driven-codepuppy"
+                     },
+                     {
+                         "canonical":  "soccer",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "social",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "software",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "stripe",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "summer-reading",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "tax",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "tax-prep",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "team",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "team-culture",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "technical-reference",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "tokio",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "tool",
+                         "variants":  [
+                                          "equipment",
+                                          "gear",
+                                          "supply"
+                                      ],
+                         "rationale":  "Tradesperson tool and supply synonyms. Bernard seed.",
+                         "source":  "bernard-seed"
+                     },
+                     {
+                         "canonical":  "tooling",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "truck",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "utility",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "venmo",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "vet",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "volunteer",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "volunteering",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "water",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "water-bill",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "water-heater",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "website",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "website-redesign",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "wedding",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "wholesale",
+                         "variants":  [
+                                          "wholesaler"
+                                      ],
+                         "rationale":  "Activity vs. actor synonym for the same wholesale-purchasing context in persona-04 corpus.",
+                         "source":  "diff-driven-codepuppy"
+                     },
+                     {
+                         "canonical":  "work",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     },
+                     {
+                         "canonical":  "youtube",
+                         "variants":  [
+
+                                      ],
+                         "rationale":  "Auto-seeded from corpus answer-keys vocabulary; identity canonical.",
+                         "source":  "auto-seed-answer-key"
+                     }
+                 ]
+}
