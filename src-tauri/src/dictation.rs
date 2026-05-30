@@ -330,7 +330,12 @@ pub(crate) fn resolve_active_mode_from_db(
 /// inside [`kg::enqueue_for_filing`] so the Phase 1D backfill
 /// (a separate explicit consumer that must bypass the toggle) can
 /// reuse the same store function without a parallel path.
-fn try_enqueue_for_kg_filing(
+/// `pub(crate)` so the Chunk 5 graph-off invariant probe
+/// (`kg::graph_off_invariant`) can exercise this exact gate without
+/// instantiating the orchestrator. The probe asserts the
+/// `kg-graph-off-untouched` principal invariant (ADR 0050 §"Invariants")
+/// across all eight `InjectionOutcome` variants.
+pub(crate) fn try_enqueue_for_kg_filing(
     conn: &Connection,
     session_id: i64,
     outcome: InjectionOutcome,
