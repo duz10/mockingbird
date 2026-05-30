@@ -58,14 +58,25 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**Nothing in flight.** Phase 1A KG graduation sealed; Phase 1B (SQLite
-entity/tag/edge tables) awaits Dustin kickoff.
-
-**Phase 1B kickoff note (from Phase 1A seal):** the production
-`extract_entities` pass emits per-segment provenance; the parity
-fixture aggregates to per-dictation. Phase 1B's entity-table schema
-must commit on one shape before drafting migrations. See
-`docs/knowledge-graph/parity/README.md` §3 for the two options.
+**KG Phase 1B in flight (lateral epic under ADR 0049 § "Sandbox isolation").**
+Dustin kickoff received 2026-06-02. Chartered by
+[ADR 0050](docs/adr/0050-kg-phase-1b-persistence-and-dictation-hook.md)
+(Proposed; flips Accepted at Chunk 5 seal). Wave brief at
+[`docs/knowledge-graph/phase-1b-brief.md`](docs/knowledge-graph/phase-1b-brief.md).
+Epic bead `mb-bjni` with five sub-beads (`mb-go9l` charter, `mb-geds`
+migration + store + SettingKey, `mb-eke8` worker thread, `mb-ryq4`
+dictation tail surgical edit, `mb-k17a` extended parity probe + graph-off
+judge + seal). D1–D8 binding parameters pre-approved by Dustin at
+kickoff (full rationale in ADR 0050 §"Decision"; one-line table in
+the brief §4). Per-segment provenance shape (D1) resolved per Phase
+1A seal note + `docs/knowledge-graph/parity/README.md` §3:
+`kg_entity_mentions` + `kg_tag_mentions` carry `(entry_id, segment_idx,
+...)` UNIQUE; per-dictation rollups via GROUP BY in concept-page
+views. Principal invariant `kg-graph-off-untouched` (default-off
+`SettingKey::KgGraphEnabled` → dictation byte-identical to pre-1B
+baseline) gates Chunk 5 under strict IAP. No new `phase-*-complete`
+tag — seals via ADR Accepted + this STATUS update + epic close
+(LESSONS P5).
 
 **KG Phase 0.5 narrative archived:** the full wave-by-wave in-flight
 state that lived here through 0.5.1–0.5.5 is now in
