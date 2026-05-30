@@ -29,6 +29,7 @@
 //!   caller can pin which segment failed.
 
 use std::path::Path;
+use std::time::Instant;
 
 use serde::Serialize;
 
@@ -65,6 +66,52 @@ pub struct PipelineResult {
     /// failed appears here with `entities: Vec::new()` and the
     /// matching `extract_entities[i]` error in [`Self::per_pass_errors`].
     pub segment_entities: Vec<SegmentEntities>,
+    /// Phase 1C.0 (`mb-plz9`, ADR 0051) — per-pass wall-clock
+    /// timings, aggregated across all segments. The `segment` pass
+    /// runs once per dictation; the other four run once per surviving
+    /// segment and their totals here are the sum across segments.
+    ///
+    /// Additive field, parity-safe by construction (same pattern as
+    /// `segment_entities` in Chunk 3): the parity probe's
+    /// `pipeline_result_to_value` builds the assertion JSON from the
+    /// original three keys (`entries`, `per_pass_errors`,
+    /// `new_tag_requests`) and ignores everything else. The latency
+    /// bench binary (`kg_latency_bench`) consumes this field; the
+    /// production filing worker logs it as structured tracing fields
+    /// for empirical latency-budget tracking (ADR 0049 §6 ~1 min
+    /// target).
+    pub pass_timings: PassTimings,
+}
+
+/// Per-pass wall-clock budget for one dictation through `run_pipeline`.
+///
+/// All values are milliseconds. The `_total` suffixed fields are the
+/// sum across surviving segments (a segment that aborted upstream
+/// of a given pass contributes 0 to that pass). `segment_ms` is the
+/// single per-dictation segment-pass call.
+///
+/// `Default::default()` zeroes all fields, which matches the natural
+/// "no measurement taken" semantics for early-return paths
+/// (schema-load failure, segment-pass failure).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PassTimings {
+    /// Wall time for the single `passes::segment` call.
+    pub segment_ms: u64,
+    /// Sum of `passes::classify` calls across all segments.
+    pub classify_ms_total: u64,
+    /// Sum of `passes::extract` calls across all segments.
+    pub extract_ms_total: u64,
+    /// Sum of `passes::extract_entities` calls across all segments.
+    /// A segment whose extract-entities pass failed contributes its
+    /// (failing) wall time; the failure itself shows up in
+    /// `per_pass_errors`.
+    pub extract_entities_ms_total: u64,
+    /// Sum of the per-segment normalize/validate pass — covers both
+    /// `passes::normalize_tags` (open-vocab path) and
+    /// `passes::validate_tags` (closed-vocab path). These are
+    /// CPU-only deterministic helpers; expected to be near-zero
+    /// relative to the LLM passes above.
+    pub normalize_ms_total: u64,
 }
 
 /// Per-segment slice of the `extract_entities` pass output. The
@@ -148,6 +195,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
     let mut errors: Vec<(String, PassError)> = Vec::new();
     let mut new_tag_requests: Vec<(usize, NewTagRequest)> = Vec::new();
     let mut segment_entities: Vec<SegmentEntities> = Vec::new();
+    let mut pass_timings = PassTimings::default();
 
     // Resolve per-pass prompt bodies up front via the model-class
     // calibration profile (`mb-4xtd` / ADR 0049 Move 1). The dispatch
@@ -170,6 +218,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
                 per_pass_errors: errors,
                 new_tag_requests,
                 segment_entities,
+                pass_timings,
             };
         }
     };
@@ -189,6 +238,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
                 per_pass_errors: errors,
                 new_tag_requests,
                 segment_entities,
+                pass_timings,
             };
         }
     };
@@ -208,6 +258,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
                 per_pass_errors: errors,
                 new_tag_requests,
                 segment_entities,
+                pass_timings,
             };
         }
     };
@@ -227,19 +278,23 @@ pub fn run_pipeline<D: OllamaDispatcher>(
                 per_pass_errors: errors,
                 new_tag_requests,
                 segment_entities,
+                pass_timings,
             };
         }
     };
 
-    // ── Pass 1: segment ─────────────────────────────────
-    let segments = match passes::segment(
+    // ── Pass 1: segment ───────────────────
+    let t0 = Instant::now();
+    let segment_result = passes::segment(
         dispatcher,
         model,
         segment_prompt,
         dictation,
         captured_iso,
         options,
-    ) {
+    );
+    pass_timings.segment_ms = t0.elapsed().as_millis() as u64;
+    let segments = match segment_result {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!(
@@ -254,6 +309,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
                 per_pass_errors: errors,
                 new_tag_requests,
                 segment_entities,
+                pass_timings,
             };
         }
     };
@@ -271,28 +327,33 @@ pub fn run_pipeline<D: OllamaDispatcher>(
     let mut entries: Vec<Entry> = Vec::new();
 
     for (idx, seg_text) in segments.iter().enumerate() {
-        // ── Pass 2: classify ──────────────────────────────────────
-        let classification =
-            match passes::classify(dispatcher, model, classify_prompt, seg_text, options) {
-                Ok(c) => c,
-                Err(e) => {
-                    let raw_for_artifact = raw_from_err(&e).unwrap_or("<unavailable>").to_string();
-                    let msg = e.to_string();
-                    errors.push((format!("classify[{idx}]"), e));
-                    if let Some(dir) = artifact_dir {
-                        let _ = write_json(
-                            &dir.join(format!("classify-{idx}.json")),
-                            &ClassifyArtifact {
-                                raw_model_output: &raw_for_artifact,
-                                parsed: None,
-                                error: Some(msg),
-                                segment_text: seg_text,
-                            },
-                        );
-                    }
-                    continue;
+        // ── Pass 2: classify ──────────────────────
+        let t_cls = Instant::now();
+        let classify_result =
+            passes::classify(dispatcher, model, classify_prompt, seg_text, options);
+        pass_timings.classify_ms_total = pass_timings
+            .classify_ms_total
+            .saturating_add(t_cls.elapsed().as_millis() as u64);
+        let classification = match classify_result {
+            Ok(c) => c,
+            Err(e) => {
+                let raw_for_artifact = raw_from_err(&e).unwrap_or("<unavailable>").to_string();
+                let msg = e.to_string();
+                errors.push((format!("classify[{idx}]"), e));
+                if let Some(dir) = artifact_dir {
+                    let _ = write_json(
+                        &dir.join(format!("classify-{idx}.json")),
+                        &ClassifyArtifact {
+                            raw_model_output: &raw_for_artifact,
+                            parsed: None,
+                            error: Some(msg),
+                            segment_text: seg_text,
+                        },
+                    );
                 }
-            };
+                continue;
+            }
+        };
         if let Some(dir) = artifact_dir {
             let _ = write_json(
                 &dir.join(format!("classify-{idx}.json")),
@@ -305,8 +366,9 @@ pub fn run_pipeline<D: OllamaDispatcher>(
             );
         }
 
-        // ── Pass 3: extract ───────────────────────────────────────
-        let extraction = match passes::extract(
+        // ── Pass 3: extract ───────────────────────────────────
+        let t_ext = Instant::now();
+        let extract_result = passes::extract(
             dispatcher,
             model,
             extract_prompt,
@@ -314,7 +376,11 @@ pub fn run_pipeline<D: OllamaDispatcher>(
             &classification,
             captured_iso,
             options,
-        ) {
+        );
+        pass_timings.extract_ms_total = pass_timings
+            .extract_ms_total
+            .saturating_add(t_ext.elapsed().as_millis() as u64);
+        let extraction = match extract_result {
             Ok(x) => x,
             Err(e) => {
                 let raw_for_artifact = raw_from_err(&e).unwrap_or("<unavailable>").to_string();
@@ -337,6 +403,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
         };
 
         // ── Pass 4: normalize + (Wave 0.5.3) closed-vocab validate ─
+        let t_norm = Instant::now();
         let (final_tags, new_requests_for_segment) = if schema.has_closed_tag_vocabulary() {
             let validation =
                 passes::validate_tags(&extraction, schema.canonical_tag_vocabulary(), synonym_map);
@@ -347,6 +414,9 @@ pub fn run_pipeline<D: OllamaDispatcher>(
                 Vec::new(),
             )
         };
+        pass_timings.normalize_ms_total = pass_timings
+            .normalize_ms_total
+            .saturating_add(t_norm.elapsed().as_millis() as u64);
 
         for req in &new_requests_for_segment {
             new_tag_requests.push((idx, req.clone()));
@@ -365,7 +435,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
             );
         }
 
-        // ── Pass 5: extract_entities ──────────────────────────────
+        // ── Pass 5: extract_entities ─────────────────────────────
         // Phase 1B Chunk 3 (`mb-eke8`, ADR 0050) — sits between
         // `extract` and normalize/assemble per ADR 0049 §6 pipeline
         // order. Failure here records `extract_entities[i]` to
@@ -373,13 +443,18 @@ pub fn run_pipeline<D: OllamaDispatcher>(
         // this segment — the `Entry` is still assembled because
         // entries are valuable independent of entity provenance
         // (entity attribution is best-effort in 1B per ADR 0050).
-        let entities = match passes::extract_entities(
+        let t_ents = Instant::now();
+        let entities_result = passes::extract_entities(
             dispatcher,
             model,
             extract_entities_prompt,
             seg_text,
             options,
-        ) {
+        );
+        pass_timings.extract_entities_ms_total = pass_timings
+            .extract_entities_ms_total
+            .saturating_add(t_ents.elapsed().as_millis() as u64);
+        let entities = match entities_result {
             Ok(e) => e.entities,
             Err(e) => {
                 tracing::warn!(
@@ -421,6 +496,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
         per_pass_errors: errors,
         new_tag_requests,
         segment_entities,
+        pass_timings,
     }
 }
 

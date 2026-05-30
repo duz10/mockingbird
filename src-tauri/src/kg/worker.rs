@@ -68,7 +68,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -299,7 +299,7 @@ fn process_one(
         (text, started_at)
     };
 
-    // ── Run the 5-pass pipeline ────────────────────────────────
+    // ── Run the 5-pass pipeline ────────────────────────
     // Per-run seed = entry_id so retries are deterministic for a
     // given dictation. PLAN §8.5 stability requires the caller set
     // a seed.
@@ -309,6 +309,8 @@ fn process_one(
         num_ctx: 4096,
     };
     let dictation_id = format!("session-{entry_id}");
+    let total_t0 = Instant::now();
+    let pipeline_t0 = Instant::now();
     let result = run_pipeline(
         ollama,
         schema,
@@ -320,6 +322,7 @@ fn process_one(
         &options,
         None, // production callers don't dump per-pass artifacts
     );
+    let pipeline_run_ms = pipeline_t0.elapsed().as_millis() as u64;
 
     // A pipeline that produced any per-pass error AND nothing to
     // file is a hard failure — retry. A pipeline with partial
@@ -334,8 +337,11 @@ fn process_one(
     }
 
     let segments = build_segment_outputs(&result);
+    let segment_count = segments.len();
+    let pt = result.pass_timings.clone();
 
-    // ── Persist + mark_done atomically ─────────────────────────
+    // ── Persist + mark_done atomically ──────────────────────
+    let store_t0 = Instant::now();
     let mut c = conn
         .lock()
         .map_err(|_| AppError::Other("db mutex poisoned in process_one (persist)".to_string()))?;
@@ -344,6 +350,30 @@ fn process_one(
     apply_filed_outcome(&tx, entry_id, &segments, &now)?;
     mark_done(&tx, queue_id, &now)?;
     tx.commit()?;
+    let store_apply_ms = store_t0.elapsed().as_millis() as u64;
+    let total_filing_ms = total_t0.elapsed().as_millis() as u64;
+
+    // Phase 1C.0 (`mb-plz9`, ADR 0051) — structured latency event.
+    // One emission per successful filing, log-only (no metrics table
+    // in 1C.0; deferred to 1C+ if 1C.2 surfaces a UX-visible need).
+    // Field shape is the contract the `kg_latency_bench` binary's
+    // CSV output mirrors, so an aggregate of these log records on a
+    // live machine is comparable to a one-shot bench run.
+    tracing::info!(
+        target: "kg::worker::latency",
+        queue_id,
+        entry_id,
+        segment_count,
+        pipeline_run_ms,
+        segment_ms = pt.segment_ms,
+        classify_ms_total = pt.classify_ms_total,
+        extract_ms_total = pt.extract_ms_total,
+        extract_entities_ms_total = pt.extract_entities_ms_total,
+        normalize_ms_total = pt.normalize_ms_total,
+        store_apply_ms,
+        total_filing_ms,
+        "filing latency snapshot"
+    );
     Ok(())
 }
 
@@ -676,7 +706,7 @@ mod tests {
     #[test]
     fn build_segment_outputs_joins_entities_with_topic_tags_by_idx() {
         use super::super::passes::{EntityType, ExtractedEntity};
-        use super::super::pipeline::{PipelineResult, SegmentEntities};
+        use super::super::pipeline::{PassTimings, PipelineResult, SegmentEntities};
         use super::super::schema::{Category, Entry, EntryType, Status};
 
         let result = PipelineResult {
@@ -718,6 +748,7 @@ mod tests {
                     entities: vec![],
                 },
             ],
+            pass_timings: PassTimings::default(),
         };
         let segs = build_segment_outputs(&result);
         assert_eq!(segs.len(), 2);
