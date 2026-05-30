@@ -66,6 +66,13 @@ pub(crate) mod schema_loader;
 // composes the rest.
 pub(crate) mod store;
 pub(crate) mod synonyms;
+// Phase 1B Chunk 3 (`mb-eke8`, ADR 0050) — filing worker thread.
+// Drains `kg_filing_queue` FIFO, runs the 5-pass pipeline, commits via
+// `store::apply_filed_outcome` + `queue::mark_done` in a single txn.
+// Spawned at boot iff `KgGraphEnabled = true` (read-once Decision C).
+// Module is `pub(crate)`; the only thing `lib.rs::run()` reaches for
+// is `worker::KgFilingRuntime::spawn` so the spawn site stays narrow.
+pub(crate) mod worker;
 
 // Phase 1A Wave 3 (`mb-qdgn`) — bit-identical re-run gate against the
 // Wave 0.5.4 seed-42 fixture. Lives inside the kg module so it can
