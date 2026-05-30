@@ -213,6 +213,34 @@
   "kg.settings.notice.body": "Newly recorded dictations are indexed within about a minute. Existing dictations from before you enabled this won\u2019t be indexed until a future update.",
   "kg.settings.saveError": "Couldn’t save: {error}",
 
+  "kg.settings.vault.heading": "Vault",
+  "kg.settings.vault.pathLabel": "Vault path",
+  "kg.settings.vault.unset": "No vault configured",
+  "kg.settings.vault.unset.help": "Set the vault path in Mobile Sync settings.",
+  "kg.settings.vault.openMobileSync": "Open Mobile Sync settings",
+  "kg.settings.vault.launch": "Open vault in Obsidian",
+  "kg.settings.vault.launch.disabled.tooltip": "Configure vault in Mobile Sync to enable.",
+  "kg.settings.vault.launch.error": "Couldn’t open Obsidian: {error}",
+  "kg.settings.vault.singleSourceNote": "Vault path is configured in Mobile Sync settings; this is a read-only mirror.",
+
+  "kg.settings.vocab.heading": "Vocabularies",
+  "kg.settings.vocab.subtitle": "Controlled lists the pipeline uses when filing an entry. Read-only in this release.",
+  "kg.settings.vocab.categories": "Categories (Layer 1)",
+  "kg.settings.vocab.entryTypes": "Entry types (Layer 2)",
+  "kg.settings.vocab.loadError": "Couldn’t load vocabularies: {error}",
+
+  "kg.settings.mode.heading": "Processing mode",
+  "kg.settings.mode.indicator": "Ingest mode: silent",
+  "kg.settings.mode.body": "v1 files entries in the background without prompting. There is no interactive review step.",
+
+  "kg.settings.dualWrite.heading": "Where notes land",
+  "kg.settings.dualWrite.body": "KG audio notes also appear in your Dictations history. Text notes are KG-only.",
+
+  "kg.dashboard.actions.heading": "Actions",
+  "kg.dashboard.actions.launch": "Open vault in Obsidian",
+  "kg.dashboard.actions.launch.disabled.tooltip": "Configure vault in Mobile Sync settings to enable.",
+  "kg.dashboard.actions.launch.error": "Couldn’t open Obsidian: {error}",
+
   "kg.status.title": "Filing status",
   "kg.status.line": "Pending: {pending} · Processing: {processing} · Failed: {failed} · Last filed: {lastDone}",
   "kg.status.never": "never",

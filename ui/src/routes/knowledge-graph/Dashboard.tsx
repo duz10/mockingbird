@@ -13,7 +13,8 @@
 //   5. RecentActivityBand    -- last N done filings, chip strips
 //                               now interactive (1D.4).
 //   6. FlaggedBand           -- failed filings + Retry buttons (1D.4).
-//   7. UpcomingDueBand       -- placeholder, Phase 1E populates.
+//   7. ActionsBand           -- launch-into-Obsidian (1D.5).
+//   8. UpcomingDueBand       -- placeholder, Phase 1E populates.
 //
 // The page mounts a single `ConceptModal` instance at the bottom
 // of the JSX tree; bands that surface chips (Retrieval +
@@ -52,6 +53,7 @@ import type {
   RecentActivity,
 } from "../../lib/types";
 
+import { ActionsBand } from "./Actions";
 import { CaptureBand } from "./CaptureBand";
 import { ConceptModal } from "./ConceptModal";
 import { EntryChips } from "./EntryChips";
@@ -143,6 +145,12 @@ export function KnowledgeGraphDashboard() {
             onConceptOpen={handleConceptOpen}
           />
           <FlaggedBand rows={snap.flaggedForReview} onRetried={refetch} />
+          {/* Wave 1D.5 (mb-navi) -- Actions band hosts the
+           *  launch-into-Obsidian button (mirror of the Settings
+           *  KG tab affordance). Placed below FlaggedBand so the
+           *  user's first scan top-down hits read-only data first
+           *  and the side-effect button last. */}
+          <ActionsBand />
           <UpcomingDueBand />
         </div>
       )}

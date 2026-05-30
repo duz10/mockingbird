@@ -114,6 +114,10 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         kg::kg_tag_detail,
         // Phase 1D Wave 1D.2 — KG dashboard payload (ADR 0052).
         kg::kg_dashboard_snapshot,
+        // Phase 1D Wave 1D.5 — Settings KG tab vocabularies + Obsidian
+        // launcher (ADR 0052).
+        kg::kg_vocabularies_get,
+        kg::kg_launch_obsidian,
         // Learning
         learning::list_learning_runs,
         learning::trigger_learning_run,

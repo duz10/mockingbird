@@ -32,6 +32,7 @@ import type {
   MeetingSettingsSnapshot,
   ModeRow,
   QueueStatus,
+  Vocabularies,
   SessionDetail,
   SessionImportSummary,
   SessionSummary,
@@ -280,6 +281,25 @@ export const api = {
   kg_dashboard_snapshot: () =>
     invoke<DashboardSnapshot>("kg_dashboard_snapshot"),
 
+  /** Phase 1D Wave 1D.5 (`mb-navi`, ADR 0052) -- v1 controlled
+   *  vocabularies (Layer 1 categories + Layer 2 entry types) for
+   *  the Settings -> KG tab's read-only display. Static metadata
+   *  derived from `kg::schema::{Category, EntryType}`; safe to call
+   *  with `kgGraphEnabled=false` (no DB read, no graph state
+   *  touched -- explicitly allowlisted by the graph-off invariant
+   *  judge for this reason). */
+  kg_vocabularies_get: () => invoke<Vocabularies>("kg_vocabularies_get"),
+  /** Phase 1D Wave 1D.5 (`mb-navi`, ADR 0052) -- launch the
+   *  configured Obsidian vault via the `obsidian://` URI scheme.
+   *  Reads `VaultPath` from the Mobile Sync settings (single
+   *  source of truth per ADR 0046). Errors when:
+   *  - vault path is unconfigured (UI should pre-check + disable
+   *    the button; this IPC validates as belt-and-braces);
+   *  - Obsidian isn't installed / URL handler unregistered;
+   *  - platform is not Windows (macOS/Linux are stubs until
+   *    Phase 9). */
+  kg_launch_obsidian: () => invoke<void>("kg_launch_obsidian"),
+
   // Learning loop
   list_learning_runs: (limit: number) =>
     invoke<LearningRun[]>("list_learning_runs", { limit }),
@@ -484,6 +504,19 @@ function fixtureFor<T>(command: string, args?: object): T {
         flaggedForReview: [],
         upcomingDue: [],
       } as DashboardSnapshot) as T;
+    // Phase 1D Wave 1D.5 (mb-navi, ADR 0052) -- vocabularies +
+    // launch fixtures. Vocabularies returns the v1 taxonomy
+    // verbatim (matches the Rust enum variants pinned by
+    // `vocabularies_matches_schema_enums`). Launch is a void IPC;
+    // the browser-preview fixture is a successful no-op so the
+    // Settings tab can be exercised without a real Tauri shell.
+    case "kg_vocabularies_get":
+      return fixture(command, {
+        categories: ["personal", "professional", "objective"],
+        entryTypes: ["task", "research", "idea", "note", "reference"],
+      } as Vocabularies) as T;
+    case "kg_launch_obsidian":
+      return fixture(command, undefined) as T;
     // Phase 1C Wave 1C.3 — Dictations retrieval fixtures.
     // Defaults match the kgGraphEnabled=false world: empty
     // autocomplete lists, empty entry-id sets, empty summary map.

@@ -4,88 +4,116 @@
 // `KgGraphEnabled` activation toggle. Wave 1C.2 (`mb-9ufg`) added
 // an inline Filing-status + failed-filings panel beneath it.
 //
-// Phase 1D Wave 1D.4 (`mb-6hm2`, ADR 0052 D5) **subtracts** the
-// failed-filings panel from this tab and relocates it onto the KG
-// dashboard's Flagged-for-review band, where the rest of the
-// queue UX already lives. The Settings tab now retains only the
-// activation toggle (plus Wave 1D.5's vault-path / vocabularies /
-// launch-into-Obsidian additions, which arrive in the next wave).
+// Phase 1D Wave 1D.4 (`mb-6hm2`, ADR 0052 D5) **subtracted** the
+// failed-filings panel from this tab and relocated it onto the KG
+// dashboard's Flagged-for-review band.
 //
-// Rationale: the failed-filings UX is KG plumbing, and after Wave
-// 1D.2 the KG dashboard is the canonical home for KG plumbing.
-// Keeping it duplicated on the Settings tab would be a SOLID/SRP
-// violation in the small (two surfaces, one concern, one would
-// drift) and a discoverability bug in the large (users would
-// look for failed filings in two places). The toggle stays here
-// because activation is a global preference -- it's where every
-// other privacy/feature toggle lives.
+// Phase 1D Wave 1D.5 (`mb-navi`, ADR 0052) fleshes the tab back out
+// with read-only KG-flavoured reference rows (none of which need a
+// new SQL surface):
 //
-// State source-of-truth: the typed Rust `Settings` facade reached
-// via `api.kg_settings_get_all()` / `api.kg_settings_set()`. Per-
-// tick worker poll (Wave 1C.1 / D6) means a flip here takes effect
-// within ~5s of the next worker tick -- no restart required, no
-// confirmation modal (D2 calls for single-tap reversible).
+//   * Vault path display -- pulls `vaultPath` from the Mobile Sync
+//     settings (ADR 0046 single source of truth). The tab does NOT
+//     edit the path; an inline button cross-navigates to the Mobile
+//     Sync tab via `onOpenMobileSync` (Settings.tsx owns the
+//     `setTab` state).
+//   * Vocabularies review -- the v1 controlled categories +
+//     entry types (read-only). Sourced from `kg_vocabularies_get`
+//     so the displayed list cannot drift from what the pipeline
+//     actually emits; the Rust IPC is statically derived from the
+//     `Category` / `EntryType` enums and pinned by a unit test.
+//   * Processing-mode indicator -- single-line label per spec
+//     §15.5 ("ingest mode: silent").
+//   * Dual-write copy -- one-line reminder of how audio vs text
+//     notes route into Dictations vs KG (matches the dashboard's
+//     CaptureBand subtitle).
+//   * Launch-into-Obsidian button -- mirror of the KG dashboard's
+//     `Actions` band. Enabled iff a vault path is configured;
+//     disabled (+ tooltip) otherwise.
 //
-// Pattern mirrors `SettingsMeetingTab` (Phase MC Wave 5): typed
-// snap fetched once on mount, optimistic local flip + persist,
-// reload from the server on persist error, inline error banner
-// (no toast -- the existing settings UX is banner-based).
+// State source-of-truth: typed Rust `Settings` facade via
+// `api.kg_settings_get_all()` / `api.kg_settings_set()` for the
+// toggle, `api.vault_settings_get()` for the vault path,
+// `api.kg_vocabularies_get()` for the lists, `api.kg_launch_obsidian()`
+// for the button click. Pattern mirrors `SettingsMeetingTab`.
 
 import { useCallback, useEffect, useState } from "react";
 
-import { Card, Spinner } from "../components/primitives";
+import { Button, Card, Spinner } from "../components/primitives";
 import { t } from "../i18n";
 import { useAppStore } from "../lib/store";
 import { api } from "../lib/tauri";
-import type { KgSettings } from "../lib/types";
+import type {
+  KgSettings,
+  VaultSettingsSnapshot,
+  Vocabularies,
+} from "../lib/types";
 
 import styles from "./Settings.module.css";
 
-export function SettingsKgTab() {
+export interface SettingsKgTabProps {
+  /** Callback that flips the parent's tab state to the Mobile Sync
+   *  tab. Optional so the component can be mounted directly in
+   *  isolation tests; in production wiring (`Settings.tsx`) it
+   *  always gets a real handler. */
+  onOpenMobileSync?: () => void;
+}
+
+export function SettingsKgTab({ onOpenMobileSync }: SettingsKgTabProps = {}) {
   const [snap, setSnap] = useState<KgSettings | null>(null);
   const [savingError, setSavingError] = useState<string | null>(null);
+  // Wave 1D.5: vault path + vocabularies are sibling reads to the
+  // KG settings snapshot. They live in component state rather than
+  // the global app store because (a) no other surface reads them
+  // off the store today, and (b) they're cheap (one IPC each, one
+  // time, on mount). Promote later if a second consumer appears.
+  const [vault, setVault] = useState<VaultSettingsSnapshot | null>(null);
+  const [vocab, setVocab] = useState<Vocabularies | null>(null);
+  const [vocabError, setVocabError] = useState<string | null>(null);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  const [launching, setLaunching] = useState(false);
+
   // Phase 1D Wave 1D.2 (ADR 0052) -- broadcast toggle flips to the
   // app store so the Sidebar's KG nav item appears/disappears
-  // reactively. The store is the source-of-truth for cross-page KG
-  // visibility; this tab is one of two writers (the App-boot fetch
-  // in App.tsx is the other / initial). Mirrors the same pattern
-  // settings -> theme reactivity uses.
+  // reactively.
   const setKgGraphEnabledInStore = useAppStore((s) => s.setKgGraphEnabled);
 
+  // Single mount effect that kicks off all three reads in parallel.
+  // No `Promise.all` -- each setter is independent and we want
+  // partial render-on-first-arrival rather than block-until-all-done.
   useEffect(() => {
     let cancelled = false;
     void api.kg_settings_get_all().then((s) => {
-      if (!cancelled) {
-        setSnap(s);
-        // Re-sync the app store on tab mount -- handles the case
-        // where another process (CLI, future external API) flipped
-        // the setting since boot.
-        setKgGraphEnabledInStore(s.kgGraphEnabled);
-      }
+      if (cancelled) return;
+      setSnap(s);
+      setKgGraphEnabledInStore(s.kgGraphEnabled);
     });
+    void api.vault_settings_get().then((v) => {
+      if (!cancelled) setVault(v);
+    });
+    void api
+      .kg_vocabularies_get()
+      .then((v) => {
+        if (!cancelled) {
+          setVocab(v);
+          setVocabError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setVocabError(String(err));
+      });
     return () => {
       cancelled = true;
     };
   }, [setKgGraphEnabledInStore]);
 
-  // Patch the one KG setting. Optimistic local flip + persist; on
-  // persist error revert by re-reading from the server (mirror
-  // SettingsMeetingTab.patch). The Rust-side allowlist
-  // (`is_kg_setting_allowed_for_ui` in `commands/kg.rs`) currently
-  // accepts only `kg_graph_enabled`; any future KG setting added
-  // here must also be added there.
   const patch = useCallback(
     async <K extends keyof KgSettings>(key: K, value: KgSettings[K]) => {
       setSnap((prev) => (prev ? { ...prev, [key]: value } : prev));
-      // Optimistically update the cross-page store too so the
-      // Sidebar's KG nav item flips in the same React tick as the
-      // toggle. If the persist fails, the catch block rolls both
-      // back from the server snapshot.
       if (key === "kgGraphEnabled") {
         setKgGraphEnabledInStore(value as boolean);
       }
       try {
-        // SettingKey::as_str for KgGraphEnabled is "kg_graph_enabled".
         await api.kg_settings_set(toDbKey(key), value);
         setSavingError(null);
       } catch (err) {
@@ -98,9 +126,25 @@ export function SettingsKgTab() {
     [setKgGraphEnabledInStore],
   );
 
+  const onLaunch = useCallback(async () => {
+    setLaunching(true);
+    setLaunchError(null);
+    try {
+      await api.kg_launch_obsidian();
+    } catch (err) {
+      setLaunchError(String(err));
+    } finally {
+      setLaunching(false);
+    }
+  }, []);
+
+  // Settings snapshot is the only true blocker; vault + vocab can
+  // render their loading states inline rather than spinner-gating
+  // the whole tab.
   if (!snap) return <Spinner />;
 
   const enabled = snap.kgGraphEnabled;
+  const vaultConfigured = !!vault?.vaultPath && vault.vaultPath.trim() !== "";
 
   return (
     <div className={styles.stack}>
@@ -137,61 +181,217 @@ export function SettingsKgTab() {
           </label>
         </Row>
 
-        {/* D2: post-enable notice. Only rendered when the toggle is
-            ON -- the off-state copy on the toggle itself is enough
-            to explain the off-state. Empirical copy: the 1C.0
-            baseline measured p95 = 59s for a 5-segment dictation,
-            so "about a minute" is honest. Visually distinct from
-            the error banner via a neutral surface + mode-normal
-            accent border. */}
-        {enabled ? (
-          <div
-            role="status"
-            aria-live="polite"
-            aria-label={t("kg.settings.notice.title")}
-            style={{
-              marginTop: "var(--s-3)",
-              background: "var(--surf-1)",
-              borderLeft: "3px solid var(--mode-normal)",
-              borderRadius: "var(--r-2)",
-              padding: "var(--s-2) var(--s-3)",
-            }}
-          >
-            <div
+        {enabled ? <PostEnableNotice /> : null}
+      </Card>
+
+      {/* ---- Vault (read-only mirror of Mobile Sync settings) ---- */}
+      <Card title={t("kg.settings.vault.heading")}>
+        <Row label={t("kg.settings.vault.pathLabel")}>
+          {vault === null ? (
+            <Spinner />
+          ) : vaultConfigured ? (
+            <span
+              className={styles.pathRow}
+              title={vault.vaultPath ?? undefined}
+              style={{ maxWidth: 360 }}
+            >
+              <code>{vault.vaultPath}</code>
+            </span>
+          ) : (
+            <span
               style={{
+                color: "var(--on-surf-muted)",
                 font: "var(--type-sm)",
-                fontWeight: 600,
-                color: "var(--on-surf)",
-                marginBottom: "var(--s-1)",
               }}
             >
-              {t("kg.settings.notice.title")}
-            </div>
+              {t("kg.settings.vault.unset")}
+            </span>
+          )}
+        </Row>
+
+        {!vaultConfigured && vault !== null ? (
+          <Row label="">
             <div
               style={{
+                display: "flex",
+                gap: "var(--s-2)",
+                alignItems: "center",
                 font: "var(--type-sm)",
                 color: "var(--on-surf-muted)",
               }}
             >
-              {t("kg.settings.notice.body")}
+              <span>{t("kg.settings.vault.unset.help")}</span>
+              {onOpenMobileSync ? (
+                <Button
+                  size="sm"
+                  onClick={onOpenMobileSync}
+                  ariaLabel={t("kg.settings.vault.openMobileSync")}
+                >
+                  {t("kg.settings.vault.openMobileSync")}
+                </Button>
+              ) : null}
             </div>
-          </div>
+          </Row>
         ) : null}
+
+        <Row label="">
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--s-2)" }}>
+            <Button
+              variant="primary"
+              onClick={() => void onLaunch()}
+              disabled={!vaultConfigured || launching}
+              ariaLabel={t("kg.settings.vault.launch")}
+              title={
+                vaultConfigured
+                  ? undefined
+                  : t("kg.settings.vault.launch.disabled.tooltip")
+              }
+            >
+              {t("kg.settings.vault.launch")}
+            </Button>
+            {launchError ? (
+              <span role="alert" style={{ color: "var(--mode-error)", font: "var(--type-sm)" }}>
+                {t("kg.settings.vault.launch.error").replace("{error}", launchError)}
+              </span>
+            ) : null}
+          </div>
+        </Row>
+
+        <p
+          style={{
+            margin: 0,
+            color: "var(--on-surf-muted)",
+            font: "var(--type-xs)",
+          }}
+        >
+          {t("kg.settings.vault.singleSourceNote")}
+        </p>
       </Card>
 
-      {/* Wave 1D.4 subtractive change: the SettingsKgFailedFilings
-          card relocated to the KG dashboard's Flagged-for-review
-          band. See `ui/src/routes/knowledge-graph/Dashboard.tsx`
-          (FlaggedBand) for the current home of the queue + retry
-          UX. */}
+      {/* ---- Vocabularies (read-only display) ---- */}
+      <Card title={t("kg.settings.vocab.heading")}>
+        <p
+          style={{
+            margin: 0,
+            color: "var(--on-surf-muted)",
+            font: "var(--type-sm)",
+          }}
+        >
+          {t("kg.settings.vocab.subtitle")}
+        </p>
+        {vocabError ? (
+          <div className={styles.errorBanner} role="alert">
+            {t("kg.settings.vocab.loadError").replace("{error}", vocabError)}
+          </div>
+        ) : vocab === null ? (
+          <Spinner />
+        ) : (
+          <>
+            <VocabList
+              heading={t("kg.settings.vocab.categories")}
+              values={vocab.categories}
+            />
+            <VocabList
+              heading={t("kg.settings.vocab.entryTypes")}
+              values={vocab.entryTypes}
+            />
+          </>
+        )}
+      </Card>
+
+      {/* ---- Processing mode (informational) ---- */}
+      <Card title={t("kg.settings.mode.heading")}>
+        <Row label={t("kg.settings.mode.indicator")}>
+          <span
+            style={{
+              color: "var(--on-surf-muted)",
+              font: "var(--type-sm)",
+            }}
+          >
+            {t("kg.settings.mode.body")}
+          </span>
+        </Row>
+      </Card>
+
+      {/* ---- Dual-write info ---- */}
+      <Card title={t("kg.settings.dualWrite.heading")}>
+        <p
+          style={{
+            margin: 0,
+            color: "var(--on-surf-muted)",
+            font: "var(--type-sm)",
+          }}
+        >
+          {t("kg.settings.dualWrite.body")}
+        </p>
+      </Card>
+    </div>
+  );
+}
+
+function PostEnableNotice() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={t("kg.settings.notice.title")}
+      style={{
+        marginTop: "var(--s-3)",
+        background: "var(--surf-1)",
+        borderLeft: "3px solid var(--mode-normal)",
+        borderRadius: "var(--r-2)",
+        padding: "var(--s-2) var(--s-3)",
+      }}
+    >
+      <div
+        style={{
+          font: "var(--type-sm)",
+          fontWeight: 600,
+          color: "var(--on-surf)",
+          marginBottom: "var(--s-1)",
+        }}
+      >
+        {t("kg.settings.notice.title")}
+      </div>
+      <div style={{ font: "var(--type-sm)", color: "var(--on-surf-muted)" }}>
+        {t("kg.settings.notice.body")}
+      </div>
+    </div>
+  );
+}
+
+function VocabList({ heading, values }: { heading: string; values: string[] }) {
+  return (
+    <div style={{ marginTop: "var(--s-2)" }}>
+      <div
+        style={{
+          font: "var(--type-sm)",
+          fontWeight: 600,
+          color: "var(--on-surf)",
+          marginBottom: "var(--s-1)",
+        }}
+      >
+        {heading}
+      </div>
+      <ul
+        aria-label={heading}
+        style={{
+          margin: 0,
+          paddingLeft: "var(--s-4)",
+          color: "var(--on-surf-muted)",
+          font: "var(--type-sm)",
+        }}
+      >
+        {values.map((v) => (
+          <li key={v}>{v}</li>
+        ))}
+      </ul>
     </div>
   );
 }
 
 // Map the TS camelCase field name onto the DB-form SettingKey string
-// the Rust allowlist matches. Kept as a tiny pure function so a
-// future KG setting addition is a one-line extension here + a
-// matching line in `is_kg_setting_allowed_for_ui`.
+// the Rust allowlist matches.
 function toDbKey(key: keyof KgSettings): string {
   switch (key) {
     case "kgGraphEnabled":

@@ -148,6 +148,14 @@ pub(crate) mod dashboard;
 pub(crate) mod ingest_text;
 pub use ingest_text::ingest_text_note;
 
+// Phase 1D Wave 1D.5 (`mb-navi`, ADR 0052) -- Obsidian launcher.
+// Pure side-effect module that turns a configured vault path into
+// an `obsidian://open?vault=<name>` URI invocation. Consumed by
+// `commands::kg::kg_launch_obsidian`. Module is `pub(crate)`; the
+// only function the IPC layer needs is `launch_obsidian_vault`.
+pub(crate) mod launcher;
+pub use launcher::launch_obsidian_vault;
+
 // Smoke test for the public surface — confirms the wiring compiles
 // and `run_pipeline` is callable via a `MockOllama`. This is NOT the
 // parity probe (that lands in Chunk 3).

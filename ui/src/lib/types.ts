@@ -366,6 +366,19 @@ export interface KgSettings {
   kgGraphEnabled: boolean;
 }
 
+/** Phase 1D Wave 1D.5 (`mb-navi`, ADR 0052) -- typed payload of
+ *  `api.kg_vocabularies_get()`. Mirrors the Rust `Vocabularies`
+ *  struct in `src-tauri/src/commands/kg.rs`. Both lists are the
+ *  serde-lowercase rendering of the canonical enums
+ *  (`kg::schema::Category` for `categories`, `kg::schema::EntryType`
+ *  for `entryTypes`) so the values match what the pipeline emits
+ *  into YAML frontmatter. Read-only in v1; an editor is deferred
+ *  to a post-v1 bead. */
+export interface Vocabularies {
+  categories: string[];
+  entryTypes: string[];
+}
+
 /** Phase 1C Wave 1C.2 — one row from `kg_filing_queue` projected for
  *  the Settings "Filing status" UX (ADR 0051 D1). Mirrors
  *  `FailedFiling` in `src-tauri/src/kg/store/queue.rs`, serialized

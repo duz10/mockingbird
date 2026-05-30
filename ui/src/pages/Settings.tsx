@@ -119,7 +119,9 @@ export function SettingsPage() {
           )}
           {tab === "meeting" && <SettingsMeetingTab />}
           {tab === "mobileSync" && <SettingsMobileSyncTab />}
-          {tab === "kg" && <SettingsKgTab />}
+          {tab === "kg" && (
+            <SettingsKgTab onOpenMobileSync={() => setTab("mobileSync")} />
+          )}
           {tab === "advanced" && <AdvancedPanel settings={settings} patch={patch} />}
         </div>
       </div>

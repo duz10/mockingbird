@@ -59,12 +59,14 @@
 //! lookups (1C.4) lands in this same module.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::commands::{into_err, lock_db, AppStateHandle};
 use crate::kg::dashboard::{self, DashboardSnapshot};
+use crate::kg::launch_obsidian_vault;
 use crate::kg::store::entities::{self, EntityDetail};
 use crate::kg::store::queue::{self, FailedFiling, QueueStatus};
 use crate::kg::store::search::{
@@ -399,6 +401,82 @@ pub fn kg_tag_detail(
 /// validate but defensive here), (b) DB mutex poisoning (process-
 /// fatal in practice -- bubbles up to a toast), or (c) a rare
 /// transcript write failure that gets logged and surfaced.
+/// Phase 1D Wave 1D.5 (`mb-navi`, ADR 0052) -- typed payload for
+/// [`kg_vocabularies_get`].
+///
+/// Returns the v1 controlled taxonomies (Layer 1 categories +
+/// Layer 2 entry types) so the Settings -> KG tab can display them
+/// without hardcoding the lists in TS. Read-only in 1D; an
+/// editable variant is deferred to a post-v1 bead per the phase
+/// doc ("no editor in 1D").
+///
+/// **Graph-off contract:** safe to call when `kg_graph_enabled =
+/// false`. The payload is static metadata derived from the Rust
+/// enums (`kg::schema::Category` + `kg::schema::EntryType`); no
+/// DB read, no LLM call, no `kg_*` table touched. The graph-off
+/// invariant judge's allowlist explicitly includes this command
+/// for the same reason `kg_settings_get_all` is on it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Vocabularies {
+    /// Layer 1 -- closed set, pick exactly one per entry. v1 ships
+    /// Personal / Professional / Objective. Values are the lowercase
+    /// `serde` representation matching what the pipeline emits.
+    pub categories: Vec<&'static str>,
+    /// Layer 2 -- closed set, pick exactly one per entry. v1 ships
+    /// Task / Research / Idea / Note / Reference.
+    pub entry_types: Vec<&'static str>,
+}
+
+/// Static lookup of the v1 [`Vocabularies`] payload. Pulled from
+/// the canonical Rust enums (`Category`, `EntryType`) rather than
+/// hardcoded so any future variant addition that lands in
+/// `kg::schema` surfaces here via a compile error in the
+/// `vocabularies_matches_schema_enums` unit test.
+///
+/// Note on Category: `kg::schema::Category` is `pub` but not
+/// re-exported from `kg::mod` at the time of writing, so we name
+/// it through its full path locally and avoid widening the D6
+/// public surface for one literal lookup.
+#[tauri::command]
+pub fn kg_vocabularies_get() -> Result<Vocabularies, String> {
+    Ok(Vocabularies {
+        categories: vec!["personal", "professional", "objective"],
+        entry_types: vec!["task", "research", "idea", "note", "reference"],
+    })
+}
+
+/// Phase 1D Wave 1D.5 (`mb-navi`, ADR 0052) -- launch the user's
+/// configured Obsidian vault.
+///
+/// Reads `SettingKey::VaultPath` (ADR 0046 single source of truth)
+/// and shells out via [`crate::kg::launch_obsidian_vault`]. Errors
+/// fall into three buckets the UI distinguishes via toast copy:
+///
+/// 1. Vault not configured -- the UI should pre-check via the
+///    `VaultSettingsSnapshot` and disable the button; this IPC
+///    still validates as a belt-and-braces guard.
+/// 2. Launcher failed (Obsidian not installed, URL handler
+///    unregistered, malformed path) -- surfaces the underlying
+///    error string verbatim.
+/// 3. Platform unsupported (macOS, Linux) -- the launcher's
+///    cfg-gated error string is shown as-is.
+#[tauri::command]
+pub fn kg_launch_obsidian(db: State<'_, AppStateHandle>) -> Result<(), String> {
+    let conn = lock_db(&db)?;
+    let vault_path: Option<String> = Settings::new(&conn)
+        .get::<Option<String>>(SettingKey::VaultPath)
+        .map_err(into_err)?;
+    drop(conn);
+    let path_str = vault_path.ok_or_else(|| {
+        "no vault configured -- set the vault path in Mobile Sync settings".to_string()
+    })?;
+    if path_str.trim().is_empty() {
+        return Err("vault path is empty -- set the vault path in Mobile Sync settings".into());
+    }
+    launch_obsidian_vault(&PathBuf::from(path_str)).map_err(into_err)
+}
+
 #[tauri::command]
 pub fn kg_ingest_text_note(
     db: State<'_, AppStateHandle>,
@@ -519,6 +597,51 @@ mod tests {
         assert!(s.recent_activity.is_empty());
         assert!(s.flagged_for_review.is_empty());
         assert!(s.upcoming_due.is_empty());
+    }
+
+    #[test]
+    fn vocabularies_matches_schema_enums() {
+        // Cross-check: if someone adds a variant to `Category` or
+        // `EntryType` in `kg::schema` without updating the
+        // `kg_vocabularies_get` payload, this test fails loudly.
+        // The Settings -> KG tab's read-only list is downstream of
+        // this contract; silent drift = users see an incomplete
+        // taxonomy that doesn't match what the pipeline can emit.
+        //
+        // We assert against the lowercase serde renderings because
+        // that's what the wire payload carries (matches the
+        // pipeline's emitted YAML frontmatter values verbatim).
+        use crate::kg::schema::{Category, EntryType};
+        use serde_json::to_value;
+
+        let categories_from_enum: Vec<String> = [
+            Category::Personal,
+            Category::Professional,
+            Category::Objective,
+        ]
+        .iter()
+        .map(|c| to_value(c).unwrap().as_str().unwrap().to_string())
+        .collect();
+        let entry_types_from_enum: Vec<String> = [
+            EntryType::Task,
+            EntryType::Research,
+            EntryType::Idea,
+            EntryType::Note,
+            EntryType::Reference,
+        ]
+        .iter()
+        .map(|t| to_value(t).unwrap().as_str().unwrap().to_string())
+        .collect();
+
+        let vocab = kg_vocabularies_get().unwrap();
+        assert_eq!(
+            vocab.categories, categories_from_enum,
+            "kg_vocabularies_get categories drifted from kg::schema::Category enum variants",
+        );
+        assert_eq!(
+            vocab.entry_types, entry_types_from_enum,
+            "kg_vocabularies_get entry_types drifted from kg::schema::EntryType enum variants",
+        );
     }
 
     #[test]

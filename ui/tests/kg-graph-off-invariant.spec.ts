@@ -20,10 +20,11 @@
 //
 // Walks (extended in 1D.4):
 //   1. Settings -> KG tab (toggle visible + OFF). Spy sees only
-//      kg_settings_get_all (one boot fetch from App.tsx + one tab
-//      mount). The "Filing status" panel was relocated to the KG
-//      dashboard in Wave 1D.4, so the Settings tab is now the
-//      toggle only.
+//      `kg_settings_get_all` (boot fetch from App.tsx + tab
+//      mount) and `kg_vocabularies_get` (Wave 1D.5 read-only
+//      vocabularies card mount). Both are on `OFF_MODE_ALLOWLIST`
+//      because neither touches any kg_* table -- they read static
+//      settings + static enum-derived metadata.
 //   2. Dictations page (no KG surface, no IPC fires). Spy unchanged.
 //   3. Click a session row to open the detail pane. Spy unchanged
 //      (concept-modal triggers no longer exist on Dictations).
@@ -42,12 +43,27 @@
 
 import { expect, test, type ConsoleMessage } from "@playwright/test";
 
-// The single `kg_*` command authorized to fire while the toggle is
-// OFF: the read-only settings snapshot that the App boot fetch +
-// the Settings tab both need to know whether to hide / show the
-// KG nav item and toggle state. Anything else in the spy's
-// recorded set is a graph-off-invariant breach.
-const OFF_MODE_ALLOWLIST = new Set(["kg_settings_get_all"]);
+// The `kg_*` commands authorized to fire while the toggle is OFF.
+// Anything else in the spy's recorded set is a graph-off-invariant
+// breach.
+//
+//   * `kg_settings_get_all` -- the read-only settings snapshot that
+//     the App boot fetch + the Settings tab both need to know
+//     whether to hide / show the KG nav item and toggle state.
+//
+//   * `kg_vocabularies_get` -- **Wave 1D.5 (mb-navi) addition.** The
+//     Settings -> KG tab displays the v1 controlled categories +
+//     entry types as a read-only reference list. The Rust IPC is
+//     statically derived from `kg::schema::{Category, EntryType}`
+//     and pinned by a unit test; it performs NO DB read and touches
+//     NO graph state, so calling it with the toggle off does not
+//     leak any graph data. Allowlisting it here keeps the invariant
+//     honest about its actual contract (no graph DATA touched when
+//     off) rather than the literal letter (no kg_* IPC at all).
+const OFF_MODE_ALLOWLIST = new Set([
+  "kg_settings_get_all",
+  "kg_vocabularies_get",
+]);
 
 // Wave 1D.2 (`mb-j00j`) -- the KG dashboard IPC. Must NOT appear in
 // the spy while the toggle is off AND we're on /knowledge-graph;
@@ -115,7 +131,9 @@ test.describe("KG graph-off-UI invariant -- 1D.4 tightened (mb-f4gn / mb-6hm2)",
 
     // Wave 1D.4 subtraction: the "Filing status" panel relocated to
     // the KG dashboard's Flagged band. Settings -> KG should NOT
-    // surface it regardless of toggle state.
+    // surface it regardless of toggle state. (Wave 1D.5 then added
+    // back the vault path / vocabularies / launch button -- all
+    // read-only; none of them touch the failed-filings surface.)
     await expect(
       page.getByRole("heading", { name: /filing status/i }),
     ).toHaveCount(0);
