@@ -153,17 +153,23 @@ test.describe("KG Phase 1C.3 — Dictations retrieval UX (mb-5ly5)", () => {
     ).toBeVisible();
 
     // Row 100 ("high fanout"): first 5 entity chips visible by ARIA
-    // label, plus "+2 more" overflow pill. The chip elements are
-    // `<span aria-label="Entity X">` — `<span>` has no implicit
-    // role so `getByRole("generic", ...)` doesn't match; use
-    // `getByLabel`. The remove-buttons in the FilterBar's selected-
-    // chip area use "Remove entity X" / "Remove tag X" so the chip-
-    // strip labels don't collide with filter chips here.
+    // label, plus "+2 more" overflow pill.
+    //
+    // **Updated 2026-05-30 for Wave 1C.4 (mb-sx6p):** the chip
+    // elements were `<span aria-label="Entity X">` until 1C.4,
+    // when the chip strip gained click-to-open-concept-modal
+    // wiring. With `kgEnabled=true` the Dictations page passes
+    // `onConceptOpen` down, which flips chips from `<span>` to
+    // `<button>` and changes the aria-label from "Entity X" to
+    // "Open concept page for entity X" (per i18n keys
+    // `kg.chip.entityOpenAria` / `kg.chip.tagOpenAria`). The
+    // remove-buttons in the FilterBar's selected-chip area still
+    // use "Remove entity X" so locators don't collide.
     await expect(
-      page.getByLabel(/^entity mom$/i).first(),
+      page.getByLabel(/^open concept page for entity mom$/i).first(),
     ).toBeVisible();
     await expect(
-      page.getByLabel(/^entity project apollo$/i),
+      page.getByLabel(/^open concept page for entity project apollo$/i),
     ).toBeVisible();
     // The 6th + 7th entities (Stapler, Bernard) are NOT rendered as
     // individual chips — collapsed into the overflow pill.
