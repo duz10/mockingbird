@@ -10,7 +10,7 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-06-03 (ADR 0050 KG Phase 1B SEALED — persistence + async filing worker + dictation-tail hook, lateral epic under ADR 0049 §"Sandbox isolation"; no new `phase-*-complete` tag per LESSONS P5). Prior anchor: 2026-05-29 (ADR 0049 KG Phase 0.5 + v1 architectural pivot).
+**Last consolidated:** 2026-05-30 (KG Phase 1C Wave 1C.1 shipped — Settings KG tab + activation toggle + boot-vs-poll worker promotion; mb-ucmx/mb-s6a8/mb-7w5f closed; ADR 0051 still Proposed, seals after 1C.5). Prior anchor: 2026-06-03 (ADR 0050 KG Phase 1B SEALED). Wave 1C.0 charter anchor: 2026-05-30 (Phase 1C in-flight).
 
 ## ✅ Sealed (do not re-execute)
 
@@ -59,14 +59,16 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**KG Phase 1C in flight** — 6-wave ADR-chartered lateral epic (`mb-j368`) under ADR 0051 (Proposed 2026-05-30). Wave 1C.0 (charter) shipped: ADR 0051 + `docs/knowledge-graph/phase-1c-brief.md` + per-pass `PassTimings` instrumentation in `kg::pipeline` (parity-safe additive field; 32/32 re-verified default + `--persist`) + worker structured tracing for filing latency + `kg_latency_bench` bin + `docs/knowledge-graph/phase-1c-latency-baseline.md` (empirical p95 = 59s for a 5-segment dictation, sits right at the ADR 0049 §6 ~1 min budget). Closes `mb-b3jy`. Wave 1C.5's principal invariant pinned for seal: **`kg-graph-off-ui-untouched`** (with `KgGraphEnabled=false`, every KG UI element except the Settings tab itself stays hidden; no KG IPC invoked from UI). Remaining waves: 1C.1 Settings tab + activation toggle + boot-vs-poll promotion (`mb-ucmx`); 1C.2 failed-filings UX + `requeue_failed` (`mb-9ufg`); 1C.3 Dictations filter chips + per-row entity/tag display (`mb-5ly5`); 1C.4 concept modal (`mb-sx6p`); 1C.5 3-judge deterministic gate + ADR Accepted + epic seal (`mb-f4gn`).
+**KG Phase 1C in flight** — 6-wave ADR-chartered lateral epic (`mb-j368`) under ADR 0051 (Proposed 2026-05-30). Wave 1C.0 (charter) + Wave 1C.1 (Settings tab + activation + boot-vs-poll) shipped. Wave 1C.5's principal invariant pinned for seal: **`kg-graph-off-ui-untouched`** (with `KgGraphEnabled=false`, every KG UI element except the Settings tab itself stays hidden; no KG IPC invoked from UI). Remaining waves: 1C.2 failed-filings UX + `requeue_failed` (`mb-9ufg`); 1C.3 Dictations filter chips + per-row entity/tag display (`mb-5ly5`); 1C.4 concept modal (`mb-sx6p`); 1C.5 3-judge deterministic gate + ADR Accepted + epic seal (`mb-f4gn`).
+
+**Wave 1C.1 SHIPPED (2026-05-30, `mb-ucmx` + `mb-s6a8` + `mb-7w5f`):** New `commands/kg.rs` with `kg_settings_get_all` / `kg_settings_set` mirroring the Phase MC Wave 5 meeting-settings allowlist shape (single-key allowlist accepting only `kg_graph_enabled` for now; +3 unit tests). Worker `KgFilingRuntime` now spawns unconditionally at boot; `KgGraphEnabled` gate moved inside the drain loop as a per-tick poll (~1 SQL per `IDLE_SLEEP=5s` when off; fail-closed on mutex poison / settings layer hiccup; +3 unit tests). New `ui/src/pages/SettingsKgTab.tsx` (163 LoC) with optimistic-flip toggle + conditional `role="status"` notice block carrying the empirically-informed copy from `phase-1c-latency-baseline.md` ("indexed within about a minute"). 4-line additive edit to `ui/src/pages/Settings.tsx` (new `"kg"` tab). Additive `KgSettings` type + `kg_settings_get_all/set` IPC bindings in `lib/{types,tauri}.ts` + 9 i18n keys + 3 IPC-contract vitest. Playwright single-judge sweep `ui/tests/kg-settings-tab.spec.ts` (6 assertions, 4 screenshots, green). Gates: cargo `check` + `fmt --check` + `clippy --release -- -D warnings` + `test --release --no-run` all green; parity 32/32 in both modes (no worker.rs regression); UI `tsc` + 117 vitest + vite build all green; lint skipped per `mb-yxh`. LESSONS body entry covers 3 findings (capabilities/default.json wildcard, qa-kitten authoring lane, boot-vs-poll pattern). Commits: Rust `b5b2e74`, UI `2f6719f`, Playwright `35414f1`, STATUS+LESSONS+bd this commit (`git log --grep='kg-phase-1c-wave-1c.1'`).
 
 ### Phase 1C kickoff notes (from the Phase 1B seal)
 
-- **`KgGraphEnabled` toggle is on disk** (default `false` per migration 024 seed). 1C surfaces it in Settings UX + builds the retrieval surface (entity / tag concept pages backed by the two `concept_page_*` VIEWs Chunk 2 shipped).
-- **Worker reads `KgGraphEnabled` once at boot** (Chunk 3 Decision C). 1C may want to promote to per-tick polling if runtime-toggle UX matters — standing bead surfaced (P3 candidate).
-- **Failed-filings (`state='failed'` in `kg_filing_queue`)** need a user-visible surface + a manual retry button. Standing bead surfaced (P2).
-- **Latency budget (ADR 0049 §6 ~1 min target)** is unmeasured. 1C/1D should capture empirics from real hardware. Standing bead surfaced (P2).
+- **`KgGraphEnabled` toggle is on disk** (default `false` per migration 024 seed). ✅ Wave 1C.1 surfaced it in Settings UX (`mb-s6a8` closed).
+- **Worker reads `KgGraphEnabled` once at boot** (Chunk 3 Decision C). ✅ Wave 1C.1 promoted to per-tick polling (`mb-7w5f` closed); runtime toggle works without restart.
+- **Failed-filings (`state='failed'` in `kg_filing_queue`)** need a user-visible surface + a manual retry button. Standing bead `mb-9ufg` (Wave 1C.2 target).
+- **Latency budget (ADR 0049 §6 ~1 min target)** measured in Wave 1C.0 — `phase-1c-latency-baseline.md` shows p95 = 59s on a 5-segment dictation (sits right at budget). Empirical p95 is now load-bearing for the 1C.1 "about a minute" notice copy.
 
 **KG Phase 0.5 narrative archived:** the full wave-by-wave in-flight
 state that lived here through 0.5.1–0.5.5 is now in
