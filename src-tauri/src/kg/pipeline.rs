@@ -33,7 +33,7 @@ use std::path::Path;
 use serde::Serialize;
 
 use super::ollama::{GenerateOptions, OllamaDispatcher};
-use super::passes::{self, Classification, Extraction, ExtractedEntity, NewTagRequest, PassError};
+use super::passes::{self, Classification, ExtractedEntity, Extraction, NewTagRequest, PassError};
 use super::schema::{Entry, EntryType, Status};
 use super::schema_loader::Schema;
 use super::synonyms::SynonymMap;

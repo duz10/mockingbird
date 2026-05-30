@@ -84,7 +84,10 @@ use crate::hotkey::HotkeyEvent;
 use crate::injection::secure_guard::SecureInputGuard;
 use crate::injection::strategy::InjectionStrategy;
 use crate::injection::{InjectionOutcome, Injector};
+use crate::kg;
 use crate::recording_window::RecordingWindow;
+use crate::settings::model::SettingKey;
+use crate::settings::Settings;
 use crate::stt::{SpeechToText, TranscribeRequest};
 use crate::window_context::{ForegroundWindow, WindowContext};
 
@@ -283,6 +286,76 @@ pub(crate) fn resolve_active_mode_from_db(
                 "active-mode: modes-table lookup failed; using boot-time config");
             fallback()
         }
+    }
+}
+
+/// ADR 0050 / mb-ryq4 — Phase 1B Chunk 4. Bridge the dictation tail
+/// to the Knowledge Graph filing queue.
+///
+/// Called from `persist_complete` after the session row + transcripts
+/// have been written and (for the success paths) the edit-free-send
+/// metric has been armed. Returns `()` — by contract this MUST NOT
+/// propagate errors back to the dictation orchestrator (ADR 0050
+/// invariant `kg-graph-failure-non-regressing`).
+///
+/// ## Why a free fn (and not inline)
+///
+/// Three guard rails sit in a small, easily-mistested arrangement
+/// here: the outcome match (which subset of [`InjectionOutcome`]
+/// variants are "successful enough to file"), the
+/// [`SettingKey::KgGraphEnabled`] read (default-off binding per
+/// ADR 0049 §6), and the ignore-error wrapper around
+/// [`kg::enqueue_for_filing`]. Extracting them lets a throwaway-crate
+/// harness exercise each one without instantiating the full
+/// orchestrator (which transitively pulls whisper-rs/ort/cuda —
+/// LESSONS P2). The call site in `persist_complete` is one line; the
+/// surface area authorized by ADR 0050 §"Dictation-surface
+/// authorization clause" is unchanged.
+///
+/// ## Outcome gate (Decision B)
+///
+/// Enqueues iff `outcome` is one of:
+/// - [`InjectionOutcome::Ok`]
+/// - [`InjectionOutcome::OkClipboardNotRestored`]
+/// - [`InjectionOutcome::InAppNoInject`] (ADR 0045 — text exists in
+///   the Dictations list; the no-inject is intentional, not defensive)
+///
+/// The five abort/failure variants intentionally do NOT enqueue:
+/// `AbortedSecure`, `AbortedUserOptOut`, `AbortedFocusChanged`,
+/// `FailedClipboardLocked`, `FailedSendInput`.
+///
+/// ## Gate location (Decision A)
+///
+/// The `KgGraphEnabled` check lives at this call site rather than
+/// inside [`kg::enqueue_for_filing`] so the Phase 1D backfill
+/// (a separate explicit consumer that must bypass the toggle) can
+/// reuse the same store function without a parallel path.
+fn try_enqueue_for_kg_filing(
+    conn: &Connection,
+    session_id: i64,
+    outcome: InjectionOutcome,
+    captured_iso: &str,
+) {
+    if !matches!(
+        outcome,
+        InjectionOutcome::Ok
+            | InjectionOutcome::OkClipboardNotRestored
+            | InjectionOutcome::InAppNoInject
+    ) {
+        return;
+    }
+    let kg_enabled = Settings::new(conn)
+        .get::<bool>(SettingKey::KgGraphEnabled)
+        .unwrap_or(false);
+    if !kg_enabled {
+        return;
+    }
+    if let Err(e) = kg::enqueue_for_filing(conn, session_id, captured_iso) {
+        tracing::warn!(
+            error = ?e,
+            session_id,
+            "KG enqueue failed; dictation tail continues (kg-graph-failure-non-regressing)"
+        );
     }
 }
 
@@ -939,6 +1012,12 @@ impl DictationOrchestrator {
                 );
             }
         }
+
+        // ADR 0050 / mb-ryq4 — Phase 1B Chunk 4. Hook the dictation
+        // tail to the KG filing queue (default-off; gated by
+        // SettingKey::KgGraphEnabled). All gating logic + the
+        // ignore-error contract live in the helper — see its docs.
+        try_enqueue_for_kg_filing(&conn, id, p.outcome, &p.recording_ended_iso);
 
         // Drop the DB lock before emitting so the frontend's
         // refetch (which goes through `list_sessions` -> DB) doesn't

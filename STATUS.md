@@ -79,6 +79,39 @@ tag — seals via ADR Accepted + this STATUS update + epic close
 (LESSONS P5).
 
 **Chunk progress (most-recent first):**
+- **Chunk 4 SEALED** 2026-06-02 (`mb-ryq4`; commit pending below — see
+  `git log -1`). Surgical edit landed in `src-tauri/src/dictation.rs`
+  per ADR 0050 §"Dictation-surface authorization clause": one
+  free-fn `try_enqueue_for_kg_filing` at module level (helper —
+  explicitly authorized by the kickoff for testability without
+  instantiating the orchestrator) + one call-site insertion inside
+  `persist_complete`, immediately after the edit-free-send arm.
+  Outcome gate enqueues iff `matches!(outcome, Ok |
+  OkClipboardNotRestored | InAppNoInject)` (Decision B; ADR 0045
+  recommendation honored — InAppNoInject DOES enqueue). Gate read
+  uses `Settings::new(&conn).get::<bool>(SettingKey::KgGraphEnabled)`
+  with `.unwrap_or(false)` fallback. Ignore-error wrapper logs
+  `tracing::warn!` on Err and discards (Decision C / invariant
+  `kg-graph-failure-non-regressing`). Default-off binding holds: with
+  `KgGraphEnabled = false`, the helper short-circuits before any DB
+  read beyond the settings probe. **Cargo gate:** `check`, `clippy
+  --release -- -D warnings`, `fmt --check`, `test --release --no-run`
+  all GREEN. **Parity:** `kg_parity` 32/32 GREEN (no regression from
+  the dictation edit, as expected — `kg::run_pipeline` untouched).
+  **Throwaway-crate invariant tests:** `$env:TEMP\mb_ryq4_tests` —
+  15/15 GREEN covering: graph-off no-op × 8 InjectionOutcome variants,
+  explicit-false no-op, graph-on enqueue × 3 success variants,
+  outcome-gate parameterized sweep, ignore-error closure, plus
+  idempotency bonus (UNIQUE(entry_id) collapse on re-enqueue). **Stray
+  fmt regression swept up:** `45ac718` (Chunk 3 pipeline.rs commit)
+  introduced `use super::passes::{Classification, Extraction,
+  ExtractedEntity, ...}` out of alphabetical order — `fmt --check`
+  caught it on this iteration's gate. One-line fix included in this
+  commit. LESSONS body entry appended (cargo gate must include
+  `fmt --check` even when the iteration's edits don't touch the
+  offending file). Open for Chunk 5: extended parity `--persist`
+  mode, `kg-graph-off-untouched` invariant judge, ADR 0050 acceptance
+  + epic close + STATUS update.
 - **Chunk 3 SEALED** 2026-06-02 (`mb-eke8`; commits `45ac718` pipeline
   5th-pass wiring + additive `PipelineResult.segment_entities`, `082aee2`
   `kg::worker::KgFilingRuntime` filing thread + crash-recovery sweep +
