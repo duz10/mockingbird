@@ -170,6 +170,26 @@
   flex: 0 0 auto;
 }
 
+/* --- FlaggedBand retry-toast (Wave 1D.4 relocation) -------------- */
+
+.toastOk,
+.toastError {
+  margin-top: var(--s-2);
+  background: var(--surf-1);
+  border-radius: var(--r-2);
+  padding: var(--s-2) var(--s-3);
+  font: var(--type-sm);
+  color: var(--on-surf);
+}
+
+.toastOk {
+  border-left: 3px solid var(--mode-normal);
+}
+
+.toastError {
+  border-left: 3px solid var(--status-error);
+}
+
 /* --- Empty states ------------------------------------------------- */
 
 .empty {

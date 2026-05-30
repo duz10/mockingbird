@@ -1,6 +1,13 @@
-// Concept modal — entity + tag drill-down sheet.
+// Concept modal -- entity + tag drill-down sheet.
 //
-// Phase 1C Wave 1C.4 / ADR 0051 D4 (`mb-sx6p`). Composes the
+// Originally lived at `ui/src/pages/ConceptModal.tsx` (Phase 1C
+// Wave 1C.4 / ADR 0051 D4 / `mb-sx6p`). Relocated to
+// `routes/knowledge-graph/ConceptModal.tsx` in Phase 1D Wave 1D.4
+// (`mb-6hm2`, ADR 0052 D5) when the KG screen became the canonical
+// home for entity / tag drill-down. The Dictations page is now
+// KG-free; the modal mounts on the KG dashboard.
+//
+// Composes the
 // design-system `Dialog` primitive, which uses the native <dialog>
 // element under the hood and gets us focus trap, Escape-to-close,
 // backdrop-click-to-close, and aria-modal semantics for free
@@ -11,8 +18,8 @@
 //   * `{ kind: "entity", entityId }`  -> `kgEntityDetail`
 //   * `{ kind: "tag",    tagSlug   }` -> `kgTagDetail`
 //
-// The parent (`Dictations.tsx`) owns the `activeConcept` state
-// and mounts a single instance of this component at the page
+// The parent (`KnowledgeGraphDashboard`) owns the `activeConcept`
+// state and mounts a single instance of this component at the page
 // level. The modal stays mounted with `open=false` between
 // invocations so the next open doesn't flash a stale-then-cleared
 // frame.
@@ -28,17 +35,17 @@
 import { useEffect, useState } from "react";
 import { toast as sonnerToast } from "sonner";
 
-import { Button, Spinner } from "../components/primitives";
-import { Dialog } from "../design/components/Dialog";
-import { t } from "../i18n";
-import { formatTimestamp, truncate } from "../lib/format";
-import { api } from "../lib/tauri";
+import { Button, Spinner } from "../../components/primitives";
+import { Dialog } from "../../design/components/Dialog";
+import { t } from "../../i18n";
+import { formatTimestamp, truncate } from "../../lib/format";
+import { api } from "../../lib/tauri";
 import type {
   ActiveConcept,
   EntityDetail,
   EntryRef,
   TagDetail,
-} from "../lib/types";
+} from "../../lib/types";
 
 import styles from "./ConceptModal.module.css";
 

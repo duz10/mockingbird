@@ -270,6 +270,11 @@
   "kg.dashboard.recent.heading": "Recent activity",
   "kg.dashboard.recent.empty": "No filings yet \u2014 once a dictation finishes filing, it\u2019ll appear here.",
 
+  "kg.retrieval.heading": "Find entries",
+  "kg.retrieval.idle": "Pick an entity or tag above to narrow the entries.",
+  "kg.retrieval.empty.title": "No entries yet",
+  "kg.retrieval.empty.subtitle": "Record a dictation or capture a note to start building your graph.",
+
   "kg.dashboard.flagged.heading": "Flagged for review",
   "kg.dashboard.flagged.empty": "Nothing flagged \u2014 all filings succeeded.",
   "kg.dashboard.flagged.entry": "Dictation #{entryId}",

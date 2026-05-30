@@ -1,0 +1,62 @@
+/* Phase 1D Wave 1D.4 (`mb-6hm2`, ADR 0052 D5) -- Retrieval band
+ * styles. Sibling of Dashboard.module.css.
+ *
+ * Visual language matches the Dictations list row to keep the
+ * "rows are rows" mental model consistent; tightened vertical
+ * rhythm because the dashboard is a denser surface. Tokens-only
+ * per the design-system rule. */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: var(--s-2) var(--s-3);
+  background: var(--surf-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  cursor: pointer;
+  outline: none;
+}
+
+.row:hover {
+  background: var(--surf-2);
+}
+
+.row:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-faint);
+}
+
+.rowActive {
+  border-color: var(--accent);
+  background: var(--surf-2);
+}
+
+.rowHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.rowTitle {
+  font: var(--type-sm);
+  color: var(--on-surf);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.idle {
+  margin: var(--s-3) 0 0;
+  padding: var(--s-2) var(--s-3);
+  background: var(--surf-1);
+  border-radius: var(--r-2);
+  color: var(--on-surf-muted);
+  font: var(--type-sm);
+}

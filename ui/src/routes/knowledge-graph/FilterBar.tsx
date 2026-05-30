@@ -1,6 +1,15 @@
-// Filter bar for the Dictations page (Phase 1C Wave 1C.3 / ADR
-// 0051 D1 / bead `mb-5ly5`). Two independent multi-select chip
-// groups, one per retrieval axis the wave brief blesses:
+// Filter bar for the Knowledge Graph dashboard's Retrieval band.
+//
+// Originally lived at `ui/src/pages/DictationsFilterBar.tsx`
+// (Phase 1C Wave 1C.3 / ADR 0051 D1 / bead `mb-5ly5`); relocated
+// to its present home in Phase 1D Wave 1D.4 (`mb-6hm2`, ADR 0052
+// D5) when the KG screen graduated to a first-class destination
+// and the chips followed the rest of the KG-specific surface
+// here. Behaviour is byte-for-byte preserved -- the relocation
+// commit is subtractive on the Dictations side, additive here.
+//
+// Two independent multi-select chip groups, one per retrieval
+// axis the original wave brief blessed:
 //
 //   * Entities -- typed identifiers (entity_id: number). The
 //     selected chip displays the canonicalName + entityType from
@@ -13,14 +22,13 @@
 // DROPPED this wave (data not persisted in 1B; future bead
 // `mb-oji5` per the kickoff).
 //
-// The parent (Dictations.tsx) owns the filter state and the
-// IPC-call effect; this component is a controlled view + a
-// debounced autocomplete shell. We get the parent's onChange + the
-// current selections in, render the chips + a popover-style
-// suggestions list, and call back when the user adds/removes a
-// chip. The parent then triggers `kgSearchEntries(filter)` via
-// its own effect (mirrors the existing search-debounce pattern in
-// Dictations.tsx).
+// The parent (`Retrieval.tsx` on the KG screen) owns the filter
+// state and the IPC-call effect; this component is a controlled
+// view + a debounced autocomplete shell. We get the parent's
+// onChange + the current selections in, render the chips + a
+// popover-style suggestions list, and call back when the user
+// adds/removes a chip. The parent then triggers
+// `kgSearchEntries(filter)` via its own effect.
 //
 // Accessibility: each input is a labelled <combobox>-style search,
 // the selected chips have remove-button affordances with descriptive
@@ -30,12 +38,12 @@
 
 import { useCallback, useEffect, useId, useState } from "react";
 
-import { Button } from "../components/primitives";
-import { t } from "../i18n";
-import { api } from "../lib/tauri";
-import type { EntitySuggestion, TagSuggestion } from "../lib/types";
+import { Button } from "../../components/primitives";
+import { t } from "../../i18n";
+import { api } from "../../lib/tauri";
+import type { EntitySuggestion, TagSuggestion } from "../../lib/types";
 
-import styles from "./DictationsFilterBar.module.css";
+import styles from "./FilterBar.module.css";
 
 // Wave brief specifies a 200 ms debounce on prefix queries -- short
 // enough to feel responsive while typing, long enough to drop the
@@ -75,7 +83,7 @@ interface Props {
   onClearAll: () => void;
 }
 
-export function DictationsFilterBar({
+export function KgFilterBar({
   entities,
   tags,
   onEntitiesChange,

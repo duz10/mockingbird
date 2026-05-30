@@ -1,28 +1,32 @@
-// Per-row Knowledge Graph strip for the Dictations list.
+// Per-row Knowledge Graph entity/tag/filing strip.
 //
-// Phase 1C Wave 1C.3 / ADR 0051 D1 (per-row entity/tag display) +
-// D8 (filing-state pill). Bead `mb-5ly5`.
+// Originally lived at `ui/src/pages/DictationKgChips.tsx` (Phase
+// 1C Wave 1C.3 / ADR 0051 D1 + D8; bead `mb-5ly5`). Relocated to
+// `routes/knowledge-graph/EntryChips.tsx` in Phase 1D Wave 1D.4
+// (`mb-6hm2`, ADR 0052 D5) alongside the rest of the KG retrieval
+// surface. Today's only callers are KG-screen components
+// (`Retrieval` rows, dashboard `RecentActivityBand`); the
+// Dictations page is now KG-free.
 //
 // Composition: top-5 entity chips (server-ordered DESC by mention
 // rank) + "+N more" overflow + same shape for tags + a single
-// filing-state pill. The whole strip stays *visually inert* this
-// wave -- chips are spans, not buttons. Click-to-add-to-filter
-// graduates to interactive in Wave 1C.4 (concept modal,
-// `mb-sx6p`) per the kickoff risk list.
-//
-// The parent (`DictationsList.tsx`) is the only caller and gates
-// rendering on `kgGraphEnabled === true`. When the summary is
-// missing for a row (e.g. legacy never-filed session pre-Phase-1B)
-// we render NOTHING -- empty strips would add visual noise without
-// signal. The component returns `null` in that case so the row
-// height stays unchanged.
+// filing-state pill. Chips switch between inert <span> and
+// interactive <button> based on whether `onConceptOpen` is passed
+// (Wave 1C.4 / `mb-sx6p` behaviour). When the summary is missing
+// (e.g. legacy never-filed session) we render NOTHING -- empty
+// strips would add visual noise without signal. The component
+// returns `null` in that case so the row height stays unchanged.
 
 import type { MouseEvent } from "react";
 
-import { t } from "../i18n";
-import type { ActiveConcept, EntrySummary, FilingState } from "../lib/types";
+import { t } from "../../i18n";
+import type {
+  ActiveConcept,
+  EntrySummary,
+  FilingState,
+} from "../../lib/types";
 
-import styles from "./DictationKgChips.module.css";
+import styles from "./EntryChips.module.css";
 
 // Server orders entities + tags DESC by mention rank; we keep the
 // top N inline and surface the overflow via a "+N more" hint.
@@ -46,7 +50,7 @@ interface Props {
   onConceptOpen?: (concept: ActiveConcept) => void;
 }
 
-export function DictationKgChips({ summary, onConceptOpen }: Props) {
+export function EntryChips({ summary, onConceptOpen }: Props) {
   // Legacy / never-filed row: render nothing so the row height
   // doesn't shift between summary-present and summary-absent
   // states. A future wave may surface a "not yet indexed" pill;

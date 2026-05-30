@@ -3,12 +3,14 @@
 // Extracted from Dictations.tsx as part of Phase 1C Wave 1C.3
 // (`mb-5ly5`) so the parent file lands back under the 600-LoC
 // reviewability ceiling once the per-row KG chips, filter bar,
-// and `kgEntriesSummary` plumbing arrive. Behavior is byte-for-
-// byte identical to the inline version through Wave 1C.2 with
-// one additive concession: an optional `kgSummary` prop wired
-// through for Wave 1C.4 (concept-modal entry point on the detail
-// header). Today the prop is intentionally unused -- threading it
-// now means 1C.4 doesn't have to re-touch the page-level state.
+// and `kgEntriesSummary` plumbing arrived.
+//
+// **Phase 1D Wave 1D.4 (`mb-6hm2`, ADR 0052 D5):** the optional
+// `kgSummary` forward-compat prop is gone. The KG retrieval surface
+// relocated to `ui/src/routes/knowledge-graph/`; the Dictations
+// page is back to the pre-1C shape and never threads KG state to
+// the detail pane. Leaving the unused-then-never-used prop
+// would have been YAGNI residue.
 
 import { useEffect, useRef, useState } from "react";
 
@@ -20,7 +22,7 @@ import {
   formatTimestamp,
   prettyAppName,
 } from "../lib/format";
-import type { EntrySummary, SessionDetail } from "../lib/types";
+import type { SessionDetail } from "../lib/types";
 
 import { DictationsLlmPassCard } from "./DictationsLlmPassCard";
 import styles from "./Dictations.module.css";
@@ -30,11 +32,6 @@ interface Props {
   onDelete: () => void;
   onMarkExample: () => void;
   onCopy: () => void;
-  /** Reserved for Wave 1C.4. Today unused so this prop is a
-   *  forward-compat seam: the parent threads it through whenever
-   *  KG is enabled, the 1C.4 concept-modal commit adds the actual
-   *  click handlers without re-touching `Dictations.tsx`. */
-  kgSummary?: EntrySummary;
 }
 
 export function DictationsDetailPane({
@@ -42,7 +39,6 @@ export function DictationsDetailPane({
   onDelete,
   onMarkExample,
   onCopy,
-  kgSummary,
 }: Props) {
   const s = detail.session;
   const latencyTotal =
@@ -156,13 +152,6 @@ export function DictationsDetailPane({
       </Card>
 
       <DictationsLlmPassCard sessionId={detail.session.id} />
-
-      {/* kgSummary is reserved for the Wave 1C.4 concept-modal
-          entry point on the detail header. Kept alive via a typed
-          runtime reference (no-op) so the prop survives the
-          unused-imports lint without an `_` underscore prefix
-          that would break the call-site contract. */}
-      {kgSummary ? null : null}
     </>
   );
 }

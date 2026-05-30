@@ -1,32 +1,35 @@
-// Phase 1C Wave 1C.1 + 1C.2 — Knowledge Graph settings tab.
+// Settings -> Knowledge Graph tab.
 //
-// Surfaces the `KgGraphEnabled` activation toggle (ADR 0051 D2 +
-// `mb-s6a8`). Default off; once enabled, newly recorded dictations
-// get filed into the KG within ~1 min (ADR 0049 §6 budget, verified
-// by the 1C.0 latency baseline at p95 = 59s).
+// Phase 1C Wave 1C.1 (`mb-s6a8`, ADR 0051 D2) shipped the
+// `KgGraphEnabled` activation toggle. Wave 1C.2 (`mb-9ufg`) added
+// an inline Filing-status + failed-filings panel beneath it.
+//
+// Phase 1D Wave 1D.4 (`mb-6hm2`, ADR 0052 D5) **subtracts** the
+// failed-filings panel from this tab and relocates it onto the KG
+// dashboard's Flagged-for-review band, where the rest of the
+// queue UX already lives. The Settings tab now retains only the
+// activation toggle (plus Wave 1D.5's vault-path / vocabularies /
+// launch-into-Obsidian additions, which arrive in the next wave).
+//
+// Rationale: the failed-filings UX is KG plumbing, and after Wave
+// 1D.2 the KG dashboard is the canonical home for KG plumbing.
+// Keeping it duplicated on the Settings tab would be a SOLID/SRP
+// violation in the small (two surfaces, one concern, one would
+// drift) and a discoverability bug in the large (users would
+// look for failed filings in two places). The toggle stays here
+// because activation is a global preference -- it's where every
+// other privacy/feature toggle lives.
 //
 // State source-of-truth: the typed Rust `Settings` facade reached
 // via `api.kg_settings_get_all()` / `api.kg_settings_set()`. Per-
 // tick worker poll (Wave 1C.1 / D6) means a flip here takes effect
-// within ~5s of the next worker tick — no restart required, no
+// within ~5s of the next worker tick -- no restart required, no
 // confirmation modal (D2 calls for single-tap reversible).
 //
-// Wave 1C.2 (`mb-9ufg`) adds a second card below the toggle:
-// "Filing status" + failed-filings list with per-row Retry button.
-// The card itself lives in `SettingsKgFailedFilings.tsx`; we keep
-// the tab file focused on the activation toggle + post-enable
-// notice so each file stays well under the reviewability ceiling.
-//
-// Scope NOT in this file (deferred per ADR 0051 wave plan):
-//   * Concept-page modal trigger — Wave 1C.4 (`mb-sx6p`).
-//   * Filter-chip authoring — lives on Dictations page (Wave 1C.3).
-//   * Advanced settings (model picker, IDLE_SLEEP) — never
-//     authorized by ADR 0051's UI sealed-surface clause.
-//
-// Pattern mirrors `SettingsMeetingTab` (Phase MC Wave 5): typed snap
-// fetched once on mount, optimistic local flip + persist, reload
-// from the server on persist error, inline error banner (no toast —
-// the existing settings UX is banner-based).
+// Pattern mirrors `SettingsMeetingTab` (Phase MC Wave 5): typed
+// snap fetched once on mount, optimistic local flip + persist,
+// reload from the server on persist error, inline error banner
+// (no toast -- the existing settings UX is banner-based).
 
 import { useCallback, useEffect, useState } from "react";
 
@@ -36,7 +39,6 @@ import { useAppStore } from "../lib/store";
 import { api } from "../lib/tauri";
 import type { KgSettings } from "../lib/types";
 
-import { SettingsKgFailedFilings } from "./SettingsKgFailedFilings";
 import styles from "./Settings.module.css";
 
 export function SettingsKgTab() {
@@ -136,11 +138,12 @@ export function SettingsKgTab() {
         </Row>
 
         {/* D2: post-enable notice. Only rendered when the toggle is
-            ON — the off-state copy on the toggle itself is enough to
-            explain the off-state. Empirical copy: the 1C.0 baseline
-            measured p95 = 59s for a 5-segment dictation, so "about a
-            minute" is honest. Visually distinct from the error banner
-            via a neutral surface + mode-normal accent border. */}
+            ON -- the off-state copy on the toggle itself is enough
+            to explain the off-state. Empirical copy: the 1C.0
+            baseline measured p95 = 59s for a 5-segment dictation,
+            so "about a minute" is honest. Visually distinct from
+            the error banner via a neutral surface + mode-normal
+            accent border. */}
         {enabled ? (
           <div
             role="status"
@@ -176,22 +179,19 @@ export function SettingsKgTab() {
         ) : null}
       </Card>
 
-      {/* Wave 1C.2 — Filing status + failed-filings card. Gated on
-          the toggle so we neither query the DB nor expose plumbing
-          UI when the user hasn't opted in (ADR 0049 sandbox-isolation
-          aligns: no KG surface visible without explicit consent).
-          Mount/unmount tracks the toggle so the child's `useEffect`
-          re-fetches on every off→on flip — guaranteeing the user
-          sees the clean post-enable state. */}
-      {enabled ? <SettingsKgFailedFilings /> : null}
+      {/* Wave 1D.4 subtractive change: the SettingsKgFailedFilings
+          card relocated to the KG dashboard's Flagged-for-review
+          band. See `ui/src/routes/knowledge-graph/Dashboard.tsx`
+          (FlaggedBand) for the current home of the queue + retry
+          UX. */}
     </div>
   );
 }
 
 // Map the TS camelCase field name onto the DB-form SettingKey string
-// the Rust allowlist matches. Kept as a tiny pure function so a future
-// KG setting addition is a one-line extension here + a matching line
-// in `is_kg_setting_allowed_for_ui`.
+// the Rust allowlist matches. Kept as a tiny pure function so a
+// future KG setting addition is a one-line extension here + a
+// matching line in `is_kg_setting_allowed_for_ui`.
 function toDbKey(key: keyof KgSettings): string {
   switch (key) {
     case "kgGraphEnabled":

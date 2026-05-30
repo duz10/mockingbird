@@ -1,19 +1,22 @@
 // Session list + search-hits list for the Dictations page.
 //
-// Extracted from Dictations.tsx as part of Phase 1C Wave 1C.3
-// (`mb-5ly5`) so the parent gets back under the 600-LoC ceiling
-// AND so the per-row KG chip strip (`DictationKgChips`) has a
-// natural mount point that doesn't bloat the page-level component.
+// Extracted from Dictations.tsx in Phase 1C Wave 1C.3 (`mb-5ly5`)
+// when the page grew the KG retrieval surface and the parent file
+// pushed past the 600-LoC reviewability ceiling. Phase 1D Wave
+// 1D.4 (`mb-6hm2`, ADR 0052 D5) **subtracts** the KG plumbing that
+// briefly lived here (the `kgSummaries` map + `onConceptOpen`
+// forwarders + per-row `DictationKgChips` mount). The KG chips and
+// concept modal now live on the KG screen
+// (`ui/src/routes/knowledge-graph/`); this file is back to the
+// pre-1C shape -- a dumb list of session rows.
 //
-// Behavior is byte-for-byte identical to the inline version
-// through Wave 1C.2 -- this is a pure relocation -- with one
-// additive concession to 1C.3: an optional `kgSummaries` map that,
-// when present, renders the KG strip under each row.
-//
-// The parent decides whether to pass `kgSummaries` (only when
-// `kgGraphEnabled === true` -- preserves the
-// `kg-graph-off-ui-untouched` invariant pinned for Wave 1C.5's
-// judge bundle).
+// Kept as a sibling component (rather than re-inlining into
+// Dictations.tsx) because the file still earns its keep on
+// reviewability grounds and we'll likely want to mount the same
+// list on a future "All captures" surface or similar without
+// re-extracting it. YAGNI says don't anticipate; cohesion says
+// don't undo a clean extraction just because it temporarily got
+// thinner.
 
 import { EmptyState, Pill } from "../components/primitives";
 import { SearchIcon } from "../design/Icon";
@@ -24,20 +27,9 @@ import {
   prettyAppName,
   truncate,
 } from "../lib/format";
-import type {
-  ActiveConcept,
-  EntrySummary,
-  SessionSummary,
-  TranscriptSearchHit,
-} from "../lib/types";
+import type { SessionSummary, TranscriptSearchHit } from "../lib/types";
 
-import { DictationKgChips } from "./DictationKgChips";
 import styles from "./Dictations.module.css";
-
-/** Map of session id -> KG summary, returned in one batched call
- *  by `kgEntriesSummary`. Keys are stringified because JSON object
- *  keys can't be numbers on the wire. */
-export type KgSummaryMap = Record<string, EntrySummary>;
 
 /* ADR 0045 + mb-tfyp -- list-pill semantics.
  *
@@ -79,20 +71,10 @@ export function SessionList({
   sessions,
   selectedId,
   onSelect,
-  kgSummaries,
-  onConceptOpen,
 }: {
   sessions: SessionSummary[];
   selectedId: number | null;
   onSelect: (id: number) => void;
-  /** Phase 1C Wave 1C.3 -- when present, render the KG chip strip
-   *  under each row. The parent gates this on
-   *  `kgGraphEnabled === true`. */
-  kgSummaries?: KgSummaryMap;
-  /** Phase 1C Wave 1C.4 -- forwarded into each row's chip strip.
-   *  Optional; when omitted, chips render as inert spans (the
-   *  Wave 1C.3 behaviour). */
-  onConceptOpen?: (concept: ActiveConcept) => void;
 }) {
   return (
     <div className={styles.list} role="listbox" aria-label="Sessions">
@@ -102,8 +84,6 @@ export function SessionList({
           session={s}
           active={s.id === selectedId}
           onClick={() => onSelect(s.id)}
-          kgSummary={kgSummaries?.[String(s.id)]}
-          onConceptOpen={onConceptOpen}
         />
       ))}
     </div>
@@ -114,14 +94,10 @@ function SessionRow({
   session,
   active,
   onClick,
-  kgSummary,
-  onConceptOpen,
 }: {
   session: SessionSummary;
   active: boolean;
   onClick: () => void;
-  kgSummary?: EntrySummary;
-  onConceptOpen?: (concept: ActiveConcept) => void;
 }) {
   return (
     <div
@@ -150,11 +126,6 @@ function SessionRow({
         <span>{formatDuration(session.durationMs)}</span>
         {renderStatusPill(session)}
       </div>
-      {/* DictationKgChips is null-returning when summary missing,
-          empty, or filing-state silent (done/not_enqueued + no
-          chips), so the row layout is unchanged when KG is off
-          OR when the row has no KG content. */}
-      <DictationKgChips summary={kgSummary} onConceptOpen={onConceptOpen} />
     </div>
   );
 }
@@ -167,14 +138,10 @@ export function SearchHitsList({
   hits,
   selectedId,
   onSelect,
-  kgSummaries,
-  onConceptOpen,
 }: {
   hits: TranscriptSearchHit[];
   selectedId: number | null;
   onSelect: (id: number) => void;
-  kgSummaries?: KgSummaryMap;
-  onConceptOpen?: (concept: ActiveConcept) => void;
 }) {
   if (hits.length === 0) {
     return (
@@ -217,10 +184,6 @@ export function SearchHitsList({
           <div className={styles.rowMeta}>
             <span>stage: {h.stage}</span>
           </div>
-          <DictationKgChips
-            summary={kgSummaries?.[String(h.sessionId)]}
-            onConceptOpen={onConceptOpen}
-          />
         </div>
       ))}
     </div>

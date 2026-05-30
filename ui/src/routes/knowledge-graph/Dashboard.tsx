@@ -1,37 +1,39 @@
-// Phase 1D Wave 1D.2 (`mb-j00j`, ADR 0052) -- read-only Knowledge
-// Graph dashboard.
+// Phase 1D Wave 1D.2 (`mb-j00j`, ADR 0052) -- Knowledge Graph
+// dashboard. Promoted by Wave 1D.3 (`mb-0gt6`) with a capture
+// surface; further extended by Wave 1D.4 (`mb-6hm2`, ADR 0052 D5)
+// to host the relocated KG retrieval surface (filter chips + per-
+// row chip strip + concept modal) and to gain a click-to-retry
+// affordance on the Flagged-for-review band.
 //
-// The brief from the phase doc:
-//   "The dashboard renders four sub-bands... 1. Counts (entity
-//    totals + filed-entry totals). 2. Recent activity (last 10
-//    filed entries with chip strips). 3. Queue state line. 4.
-//    Flagged for review (== state='failed' in v1). Plus upcoming
-//    due dates as an empty-state placeholder until Phase 1E."
+// Band layout (top to bottom):
+//   1. CaptureBand           -- audio/text note capture (1D.3).
+//   2. CountsBand            -- totals + entities-by-type (1D.2).
+//   3. QueueBand             -- pending/processing/failed/done (1D.2).
+//   4. Retrieval             -- filter chips + filtered list (1D.4).
+//   5. RecentActivityBand    -- last N done filings, chip strips
+//                               now interactive (1D.4).
+//   6. FlaggedBand           -- failed filings + Retry buttons (1D.4).
+//   7. UpcomingDueBand       -- placeholder, Phase 1E populates.
 //
-// One IPC: `kg_dashboard_snapshot()` returns the whole payload in
-// a single round-trip. The graph-off contract is honored on both
-// sides -- the route's guard short-circuits before mounting this
-// component, AND the Rust IPC returns an empty snapshot when the
-// toggle is off (belt-and-braces for stale bookmarks). So this
-// component can assume kgGraphEnabled === true.
+// The page mounts a single `ConceptModal` instance at the bottom
+// of the JSX tree; bands that surface chips (Retrieval +
+// RecentActivityBand) bubble chip clicks up via an `onConceptOpen`
+// prop so all entity/tag drill-down funnels through one modal.
+// This was the Phase 1C pattern on Dictations (Wave 1C.4); the
+// pattern moves wholesale to the dashboard in 1D.4.
 //
-// Bands are deliberately KEYBOARD-INERT this wave (1D.2). Row
-// clicks on recent-activity items are NOT wired; Wave 1D.4
-// relocates the concept modal here and wires it up. The chip
-// strips reuse `DictationKgChips` in its inert-span mode (no
-// `onConceptOpen` prop) so visually it matches the Dictations
-// list but doesn't trip the modal.
-//
-// Composition: <PageHeader> + four <Card> bands + an "upcoming
-// due" placeholder. Each band returns its own empty state when
-// the underlying slice is empty -- with the live DB purged
-// (kickoff context), the page should render entirely as empty
-// states until the user runs a dictation post-toggle-flip. That
-// is precisely the acceptance-gate condition.
+// One IPC for the read-only bands: `kg_dashboard_snapshot()`
+// returns the whole snapshot payload in a single round-trip. The
+// graph-off contract is honored on both sides -- the route's guard
+// short-circuits before mounting this component, AND the Rust IPC
+// returns an empty snapshot when the toggle is off (belt-and-braces
+// for stale bookmarks). So this component can assume
+// kgGraphEnabled === true.
 
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  Button,
   Card,
   EmptyState,
   PageHeader,
@@ -42,27 +44,38 @@ import { t } from "../../i18n";
 import { formatRelative, formatTimestamp } from "../../lib/format";
 import { api } from "../../lib/tauri";
 import type {
+  ActiveConcept,
   DashboardSnapshot,
   EntityTypeCount,
   FailedFiling,
   QueueStatus,
   RecentActivity,
 } from "../../lib/types";
-import { DictationKgChips } from "../../pages/DictationKgChips";
 
 import { CaptureBand } from "./CaptureBand";
+import { ConceptModal } from "./ConceptModal";
+import { EntryChips } from "./EntryChips";
+import { Retrieval } from "./Retrieval";
 import styles from "./Dashboard.module.css";
+
+// Transient toast lifetime for the FlaggedBand's retry feedback.
+// Mirrors the value SettingsKgFailedFilings used before relocating.
+const RETRY_TOAST_MS = 2500;
 
 export function KnowledgeGraphDashboard() {
   const [snap, setSnap] = useState<DashboardSnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Wave 1D.4 -- the single ConceptModal lives here; bands surface
+  // their chip clicks up via `onConceptOpen`.
+  const [activeConcept, setActiveConcept] = useState<ActiveConcept | null>(
+    null,
+  );
 
-  // Centralized refetch -- shared by the on-mount fetch and the
+  // Centralized refetch -- shared by the on-mount fetch, the
   // post-capture refresh hook the CaptureBand fires after an
-  // audio or text note files. Wave 1D.3 promotion: 1D.2 was
-  // mount-only because the page was read-only; now that the user
-  // can mutate from this same page, we need a way to refresh
-  // without forcing a full route nav.
+  // audio or text note files, and FlaggedBand's post-retry
+  // refresh. Wave 1D.3 promoted this to a named callback; Wave
+  // 1D.4 added the retry consumer.
   const refetch = useCallback(async () => {
     try {
       const data = await api.kg_dashboard_snapshot();
@@ -91,6 +104,21 @@ export function KnowledgeGraphDashboard() {
     };
   }, []);
 
+  const handleConceptOpen = useCallback((c: ActiveConcept) => {
+    setActiveConcept(c);
+  }, []);
+  const handleConceptClose = useCallback(() => {
+    setActiveConcept(null);
+  }, []);
+  // The modal's "click a recent-entry row" handler. On Dictations
+  // it selected the session in the right-hand detail pane; the KG
+  // dashboard has no detail pane, so we just close the modal here.
+  // Deep-linking to /dictations?selected=<id> is filed as a
+  // follow-up bead.
+  const handleConceptSelectEntry = useCallback((_entryId: number) => {
+    setActiveConcept(null);
+  }, []);
+
   return (
     <div className={styles.page}>
       <PageHeader
@@ -106,19 +134,29 @@ export function KnowledgeGraphDashboard() {
         <Spinner label={t("kg.dashboard.title")} />
       ) : (
         <div className={styles.bands}>
-          {/* CaptureBand is first so users immediately see the
-           * "capture a note" affordance; the read-only bands flow
-           * underneath. `onFiled` triggers a snapshot refetch so
-           * the new row appears in recent-activity without a
-           * page reload (Wave 1D.3 acceptance gate #1 + #2). */}
           <CaptureBand onFiled={() => void refetch()} />
           <CountsBand counts={snap.counts} />
           <QueueBand queue={snap.queueStatus} />
-          <RecentActivityBand rows={snap.recentActivity} />
-          <FlaggedBand rows={snap.flaggedForReview} />
+          <Retrieval onConceptOpen={handleConceptOpen} />
+          <RecentActivityBand
+            rows={snap.recentActivity}
+            onConceptOpen={handleConceptOpen}
+          />
+          <FlaggedBand rows={snap.flaggedForReview} onRetried={refetch} />
           <UpcomingDueBand />
         </div>
       )}
+
+      {/* Single ConceptModal instance at the page level. Stays
+       *  mounted with open=false (concept=null) between
+       *  invocations so successive opens don't flash a teardown
+       *  frame. Pattern carried over from Dictations.tsx (1C.4)
+       *  when the modal relocated here in 1D.4. */}
+      <ConceptModal
+        concept={activeConcept}
+        onClose={handleConceptClose}
+        onSelectEntry={handleConceptSelectEntry}
+      />
     </div>
   );
 }
@@ -214,7 +252,13 @@ function QueueBand({ queue }: { queue: QueueStatus }) {
 /* Recent activity band -- last N done filings with chip strips.      */
 /* ------------------------------------------------------------------ */
 
-function RecentActivityBand({ rows }: { rows: RecentActivity[] }) {
+function RecentActivityBand({
+  rows,
+  onConceptOpen,
+}: {
+  rows: RecentActivity[];
+  onConceptOpen: (concept: ActiveConcept) => void;
+}) {
   return (
     <Card title={t("kg.dashboard.recent.heading")}>
       {rows.length === 0 ? (
@@ -225,7 +269,11 @@ function RecentActivityBand({ rows }: { rows: RecentActivity[] }) {
           aria-label={t("kg.dashboard.recent.heading")}
         >
           {rows.map((row) => (
-            <RecentActivityRow key={row.entryId} row={row} />
+            <RecentActivityRow
+              key={row.entryId}
+              row={row}
+              onConceptOpen={onConceptOpen}
+            />
           ))}
         </ul>
       )}
@@ -233,12 +281,17 @@ function RecentActivityBand({ rows }: { rows: RecentActivity[] }) {
   );
 }
 
-function RecentActivityRow({ row }: { row: RecentActivity }) {
-  // Reuse DictationKgChips in inert mode (no onConceptOpen) for
-  // visual + ARIA parity with the Dictations list. The component
-  // takes an EntrySummary, so we shape one here. All rows in
-  // recent-activity are by-definition `state='done'` (server-side
-  // filter), so filingState is fixed.
+function RecentActivityRow({
+  row,
+  onConceptOpen,
+}: {
+  row: RecentActivity;
+  onConceptOpen: (concept: ActiveConcept) => void;
+}) {
+  // Wave 1D.4 -- chips are now interactive (the per-row strip
+  // gains `onConceptOpen`). All rows in recent-activity are
+  // by-definition `state='done'` (server-side filter), so
+  // filingState is fixed.
   const summary = {
     entities: row.entities,
     tags: row.tags,
@@ -252,16 +305,62 @@ function RecentActivityRow({ row }: { row: RecentActivity }) {
           {formatRelative(row.capturedIso)}
         </span>
       </div>
-      <DictationKgChips summary={summary} />
+      <EntryChips summary={summary} onConceptOpen={onConceptOpen} />
     </li>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* Flagged-for-review band -- failed filings.                         */
+/* Flagged-for-review band -- failed filings + click-to-retry.        */
 /* ------------------------------------------------------------------ */
 
-function FlaggedBand({ rows }: { rows: FailedFiling[] }) {
+function FlaggedBand({
+  rows,
+  onRetried,
+}: {
+  rows: FailedFiling[];
+  /** Called after a successful `kg_requeue_failed` so the parent
+   *  refetches the dashboard snapshot (which drops the retried
+   *  row out of the flagged set). */
+  onRetried: () => Promise<void>;
+}) {
+  // queueId currently being retried -- disables the button mid-
+  // flight so a fast double-click doesn't fire two IPCs. The Rust
+  // side IS idempotent (Wave 1C.5 J3 invariant) but the optimistic
+  // UX still benefits from one round-trip per click. Mirrors the
+  // pattern SettingsKgFailedFilings used pre-relocation.
+  const [retrying, setRetrying] = useState<number | null>(null);
+  const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(
+    null,
+  );
+
+  // Toast auto-dismiss. Keyed off the toast object identity so
+  // successive retries reset the clock.
+  useEffect(() => {
+    if (!toast) return;
+    const handle = window.setTimeout(() => setToast(null), RETRY_TOAST_MS);
+    return () => window.clearTimeout(handle);
+  }, [toast]);
+
+  const onRetry = useCallback(
+    async (queueId: number) => {
+      setRetrying(queueId);
+      try {
+        await api.kg_requeue_failed(queueId);
+        setToast({ kind: "ok", text: t("kg.failed.retry.success") });
+        await onRetried();
+      } catch (err) {
+        setToast({
+          kind: "err",
+          text: t("kg.failed.retry.error").replace("{error}", String(err)),
+        });
+      } finally {
+        setRetrying(null);
+      }
+    },
+    [onRetried],
+  );
+
   return (
     <Card title={t("kg.dashboard.flagged.heading")}>
       {rows.length === 0 ? (
@@ -272,40 +371,74 @@ function FlaggedBand({ rows }: { rows: FailedFiling[] }) {
           aria-label={t("kg.dashboard.flagged.heading")}
         >
           {rows.map((row) => (
-            <li key={row.queueId} className={styles.flaggedRow}>
-              <div className={styles.flaggedTopRow}>
-                <span className={styles.recentTitle}>
-                  {t("kg.dashboard.flagged.entry").replace(
-                    "{entryId}",
-                    String(row.entryId),
-                  )}
-                </span>
-                <Pill tone="status-error">
-                  {/* attempt count plus the most recent failure
-                      time gives the user enough to triage without
-                      opening the Settings -> KG retry surface.
-                      Click-to-retry stays in Settings -> KG this
-                      wave; relocating the retry button here is
-                      Wave 1D.4's call. */}
-                  {row.attemptCount === 1
-                    ? t("kg.failed.attempts.one")
-                    : t("kg.failed.attempts").replace(
-                        "{count}",
-                        String(row.attemptCount),
-                      )}
-                </Pill>
-              </div>
-              <span className={styles.recentWhen}>
-                {t("kg.failed.failedAt").replace(
-                  "{when}",
-                  formatTimestamp(row.failedIso),
-                )}
-              </span>
-            </li>
+            <FlaggedRow
+              key={row.queueId}
+              row={row}
+              isRetrying={retrying === row.queueId}
+              onRetry={onRetry}
+            />
           ))}
         </ul>
       )}
+
+      {toast ? (
+        <div
+          role={toast.kind === "err" ? "alert" : "status"}
+          aria-live="polite"
+          className={
+            toast.kind === "err" ? styles.toastError : styles.toastOk
+          }
+        >
+          {toast.text}
+        </div>
+      ) : null}
     </Card>
+  );
+}
+
+function FlaggedRow({
+  row,
+  isRetrying,
+  onRetry,
+}: {
+  row: FailedFiling;
+  isRetrying: boolean;
+  onRetry: (queueId: number) => void;
+}) {
+  const attemptsLabel =
+    row.attemptCount === 1
+      ? t("kg.failed.attempts.one")
+      : t("kg.failed.attempts").replace("{count}", String(row.attemptCount));
+  return (
+    <li className={styles.flaggedRow}>
+      <div className={styles.flaggedTopRow}>
+        <span className={styles.recentTitle}>
+          {t("kg.dashboard.flagged.entry").replace(
+            "{entryId}",
+            String(row.entryId),
+          )}
+        </span>
+        <Pill tone="status-error">{attemptsLabel}</Pill>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => onRetry(row.queueId)}
+          disabled={isRetrying}
+          ariaLabel={t("kg.failed.retry.aria").replace(
+            "{entryId}",
+            String(row.entryId),
+          )}
+        >
+          {t("kg.failed.retry")}
+        </Button>
+      </div>
+      <span className={styles.recentWhen}>
+        {t("kg.failed.failedAt").replace(
+          "{when}",
+          formatTimestamp(row.failedIso),
+        )}
+      </span>
+    </li>
   );
 }
 
@@ -314,11 +447,6 @@ function FlaggedBand({ rows }: { rows: FailedFiling[] }) {
 /* ------------------------------------------------------------------ */
 
 function UpcomingDueBand() {
-  // The server always returns an empty list in 1D.2 (see
-  // `kg::dashboard::UpcomingDue` docstring). We render a deliberate
-  // "coming later" empty-state so the band's spatial slot is
-  // visible in the dashboard and Phase 1E's data fill is a pure
-  // copy/state change rather than a layout change.
   return (
     <Card title={t("kg.dashboard.upcoming.heading")}>
       <EmptyState title={t("kg.dashboard.upcoming.empty")} />
