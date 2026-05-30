@@ -112,6 +112,19 @@ const MIGRATION_023: &str = include_str!("migrations/023_session_edit_free_send.
 // substituter pass for the leftover-token guard only.
 const MIGRATION_024: &str = include_str!("migrations/024_kg_phase_1b.sql");
 
+// 025 -- mb-pxzk / ADR 0052 (KG Phase 1D Wave 1D.1). Adds the
+// dictation-tail source-gate column `sessions.capture_kind`
+// (default 'dictation'; values 'dictation' | 'kg-note' |
+// 'kg-note-text'), the deferred `sessions.category` column
+// (consumes mb-oji5), and a composite index on
+// (capture_kind, started_at DESC) for the Wave 1D.2 dashboard.
+// Bundles the ADR 0052 §D6 purge step (kg_* tables empty +
+// kg_graph_enabled reset to false) inside the same transaction
+// so any DB that's seen 024-but-not-025 either upgrades fully or
+// not at all. No prompt bodies; substituter pass for the
+// leftover-token guard only.
+const MIGRATION_025: &str = include_str!("migrations/025_kg_phase_1d_source_gate.sql");
+
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
 ///
@@ -297,6 +310,15 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         // immutability triggers + one seed row. Substituter pass
         // for the leftover-token guard only -- no prompt bodies.
         let prepared = substitute_prompt_bodies(MIGRATION_024);
+        conn.execute_batch(&prepared)?;
+    }
+    if current < 25 {
+        // mb-pxzk / ADR 0052 (KG Phase 1D Wave 1D.1). Two additive
+        // sessions columns (capture_kind, category) + one index +
+        // the ADR 0052 §D6 purge of dev-test KG rows + the
+        // kg_graph_enabled reset, all inside one transaction.
+        // Substituter pass for the leftover-token guard.
+        let prepared = substitute_prompt_bodies(MIGRATION_025);
         conn.execute_batch(&prepared)?;
     }
     Ok(())
@@ -509,6 +531,213 @@ mod tests {
             )
             .expect("kg_graph_enabled seed row must land in settings");
         assert_eq!(seed, "false");
+    }
+
+    /// Migration 025 (mb-pxzk / ADR 0052 KG Phase 1D Wave 1D.1).
+    /// Verifies the four invariants that downstream waves depend on:
+    ///
+    ///   1. `sessions.capture_kind` + `sessions.category` columns
+    ///      land with the expected shape (capture_kind NOT NULL
+    ///      DEFAULT 'dictation'; category nullable).
+    ///   2. The composite index `idx_sessions_capture_kind` lands
+    ///      (it powers Wave 1D.2's "recent KG audio captures"
+    ///      filter — verifying its presence here means the dashboard
+    ///      author doesn't need to rebuild it).
+    ///   3. The purge step actually empties the four kg_* tables
+    ///      that 1D.0 found dev-test rows in. The test seeds rows
+    ///      BEFORE running the runner so we can prove the migration
+    ///      itself does the purge (not just "the fresh DB had no
+    ///      rows to begin with").
+    ///   4. `kg_graph_enabled` is reset to 'false' regardless of
+    ///      its prior value (same proof-by-pre-seed shape).
+    ///
+    /// Invariants 3+4 are what makes this migration the
+    /// kg-source-gate-purge-clean acceptance gate (ADR 0052 §D6).
+    #[test]
+    fn migration_025_ships_capture_kind_columns_and_purges_kg_drift() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+
+        // Walk the ladder 001..024 verbatim (NOT apply_all -- we need
+        // to halt at 024 so we can seed drift rows BEFORE 025 runs,
+        // proving the migration itself does the purge rather than
+        // "the fresh DB just had nothing in it"). ALTER TABLE ADD
+        // COLUMN is not idempotent in SQLite, so we can't simply
+        // re-run 025 after a full apply_all.
+        let through_024: [&str; 24] = [
+            MIGRATION_001,
+            MIGRATION_002,
+            &substitute_prompt_bodies(MIGRATION_003),
+            MIGRATION_004,
+            &substitute_prompt_bodies(MIGRATION_005),
+            &substitute_prompt_bodies(MIGRATION_006),
+            &substitute_prompt_bodies(MIGRATION_007),
+            &substitute_prompt_bodies(MIGRATION_008),
+            &substitute_prompt_bodies(MIGRATION_009),
+            &substitute_prompt_bodies(MIGRATION_010),
+            &substitute_prompt_bodies(MIGRATION_011),
+            &substitute_prompt_bodies(MIGRATION_012),
+            &substitute_prompt_bodies(MIGRATION_013),
+            &substitute_prompt_bodies(MIGRATION_014),
+            &substitute_prompt_bodies(MIGRATION_015),
+            &substitute_prompt_bodies(MIGRATION_016),
+            &substitute_prompt_bodies(MIGRATION_017),
+            &substitute_prompt_bodies(MIGRATION_018),
+            &substitute_prompt_bodies(MIGRATION_019),
+            &substitute_prompt_bodies(MIGRATION_020),
+            &substitute_prompt_bodies(MIGRATION_021),
+            &substitute_prompt_bodies(MIGRATION_022),
+            &substitute_prompt_bodies(MIGRATION_023),
+            &substitute_prompt_bodies(MIGRATION_024),
+        ];
+        for sql in &through_024 {
+            conn.execute_batch(sql)
+                .expect("walk migration ladder to 024");
+        }
+
+        // Confirm we're at 24 before seeding.
+        let pre: String = conn
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key='schema_version'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pre, "24", "test setup must halt at schema_version=24");
+
+        // Seed drift rows mimicking what Wave 1D.0 found on Dustin's
+        // box: a session row + an entity + an entity mention + a tag
+        // mention + a filing-queue row + kg_graph_enabled='true'.
+        conn.execute_batch(
+            "INSERT INTO sessions (id, uuid, mode_id, hotkey_pressed, started_at, \
+                 recording_ended_at, status, audio_duration_ms) \
+               VALUES (42, 'drift-uuid', 1, 'RCtrl+Space', \
+                       '2026-05-30T00:00:00Z', '2026-05-30T00:00:01Z', \
+                       'complete', 1000); \
+             INSERT INTO kg_entities (id, name, entity_type, created_at, updated_at) \
+               VALUES (999, 'DriftEntity', 'person', \
+                       '2026-05-30T00:00:00Z', '2026-05-30T00:00:00Z'); \
+             INSERT INTO kg_entity_mentions (entry_id, entity_id, segment_idx, \
+                 surface_form, created_at) \
+               VALUES (42, 999, 0, 'DriftEntity', '2026-05-30T00:00:00Z'); \
+             INSERT INTO kg_tag_mentions (entry_id, segment_idx, tag_slug, created_at) \
+               VALUES (42, 0, 'drift-tag', '2026-05-30T00:00:00Z'); \
+             INSERT INTO kg_filing_queue (entry_id, state, enqueued_at) \
+               VALUES (42, 'pending', '2026-05-30T00:00:00Z'); \
+             UPDATE settings SET value = 'true' WHERE key = 'kg_graph_enabled';",
+        )
+        .expect("seed drift rows");
+
+        // Now run apply_all -- only migration 025 fires (everything
+        // else is gated by current<N checks against schema_version=24).
+        // 025's transaction must purge the drift + reset the toggle.
+        apply_all(&conn).expect("apply migration 025");
+
+        // (1) Column shapes.
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(sessions)")
+            .expect("prepare table_info");
+        let cols: Vec<(String, String, i64, Option<String>)> = stmt
+            .query_map([], |row| {
+                Ok((row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+            })
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        let capture_kind = cols
+            .iter()
+            .find(|(n, _, _, _)| n == "capture_kind")
+            .expect("capture_kind column must exist after migration 025");
+        assert_eq!(capture_kind.1, "TEXT");
+        assert_eq!(capture_kind.2, 1, "capture_kind must be NOT NULL");
+        assert_eq!(
+            capture_kind.3.as_deref(),
+            Some("'dictation'"),
+            "capture_kind must default to 'dictation'"
+        );
+        let category = cols
+            .iter()
+            .find(|(n, _, _, _)| n == "category")
+            .expect("category column must exist after migration 025");
+        assert_eq!(category.1, "TEXT");
+        assert_eq!(category.2, 0, "category must be NULL-able");
+
+        // (2) Index shape.
+        let idx_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type='index' AND name='idx_sessions_capture_kind';",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            idx_count, 1,
+            "idx_sessions_capture_kind must exist after migration 025"
+        );
+
+        // (3) Purge: all four kg_* tables that the ADR 0052 §D6 step
+        // names must be empty. (kg_canonical_tags is intentionally
+        // NOT purged — migration 024 inserts zero rows into it; we
+        // also assert that here as a defensive check that the purge
+        // didn't accidentally widen.)
+        for table in [
+            "kg_entity_mentions",
+            "kg_tag_mentions",
+            "kg_filing_queue",
+            "kg_entities",
+        ] {
+            let n: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table};"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(
+                n, 0,
+                "migration 025 must purge {table}; found {n} surviving rows"
+            );
+        }
+        let canon: i64 = conn
+            .query_row("SELECT COUNT(*) FROM kg_canonical_tags;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            canon, 0,
+            "kg_canonical_tags should remain empty (v1.1 inert; not part of the purge set either way)"
+        );
+
+        // (4) Toggle reset.
+        let toggle: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key='kg_graph_enabled';",
+                [],
+                |r| r.get(0),
+            )
+            .expect("kg_graph_enabled row must still exist");
+        assert_eq!(
+            toggle, "false",
+            "migration 025 must reset kg_graph_enabled to false"
+        );
+
+        // schema_version bumps to 25.
+        let v: String = conn
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key='schema_version'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(v, "25");
+
+        // The drift session row (id=42) is intentionally PRESERVED.
+        // Sessions are user-meaningful raw data (Principle 1); only
+        // the kg_* derived rows referencing it are purged.
+        let session_survived: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions WHERE id = 42;", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            session_survived, 1,
+            "the session row backing the drift must survive the purge (Principle 1)"
+        );
     }
 
     /// Migration 023 (mb-v2fa / ADR 0047 §Wave 2.5) adds the

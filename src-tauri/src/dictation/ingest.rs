@@ -89,7 +89,7 @@ use crate::audio::vad::VoiceActivityDetector;
 use crate::audio::{trim_speech, TrimConfig};
 use crate::cleanup::Cleaner;
 use crate::db::sessions::{
-    self, NewSession, ProcessingCompletion, SessionSource, SessionStatus, StartMode,
+    self, CaptureKind, NewSession, ProcessingCompletion, SessionSource, SessionStatus, StartMode,
 };
 use crate::db::transcripts;
 use crate::dictation::events::SessionsEventBus;
@@ -411,6 +411,12 @@ fn persist_ingest(
         // foreground paste happened).
         start_mode: StartMode::InApp,
         source: p.provenance.source,
+        // ADR 0052 / mb-pxzk: headless ingest never originates from
+        // the KG screen — file-import sessions are always
+        // `Dictation` for KG source-gate purposes. The KG-note path
+        // is live-mic only (and the text-note path bypasses
+        // sessions entirely per ADR 0052 §D3).
+        capture_kind: CaptureKind::Dictation,
     };
 
     let id = sessions::insert(&conn, &new)?;
@@ -486,6 +492,8 @@ fn persist_ingest_error(
         example_set_id: p.example_set_id,
         start_mode: StartMode::InApp,
         source: p.provenance.source,
+        // ADR 0052 / mb-pxzk: see success path above.
+        capture_kind: CaptureKind::Dictation,
     };
 
     let id = sessions::insert(&conn, &new)?;

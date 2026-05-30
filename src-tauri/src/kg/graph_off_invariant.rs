@@ -35,6 +35,7 @@ use rusqlite::{params, Connection};
 use tempfile::NamedTempFile;
 
 use crate::db::migrations::apply_all;
+use crate::db::sessions::CaptureKind;
 use crate::dictation::try_enqueue_for_kg_filing;
 use crate::error::{AppError, AppResult};
 use crate::injection::InjectionOutcome;
@@ -82,7 +83,7 @@ pub fn run_graph_off_invariant_probe() -> i32 {
         Ok(()) => {
             println!();
             println!(
-                "✅ GRAPH-OFF INVARIANT GREEN: all 8 InjectionOutcome variants left every kg_* table empty + positive control flip filed correctly"
+                "✅ GRAPH-OFF INVARIANT GREEN: all 8 InjectionOutcome variants × (Dictation, KgNote) left every kg_* table empty + source-gate negative control + positive control flip filed correctly"
             );
             0
         }
@@ -155,27 +156,38 @@ fn run_inner() -> AppResult<()> {
     .map_err(|e| io_err(&format!("insert sessions row: {e}")))?;
 
     // ── Off-mode sweep ───────────────────────────────────────────
+    //
+    // Each variant is exercised TWICE -- once as a standard
+    // `Dictation` capture (which now gates out at the source-check
+    // in addition to the toggle-check) and once as a `KgNote`
+    // capture (which would enqueue with the toggle on, but must NOT
+    // enqueue with the toggle off). Both must leave all kg_* tables
+    // empty. ADR 0052 / Wave 1D.1 (`mb-pxzk`) tightens the original
+    // 8-variant invariant into a 16-call invariant; the 8/8 framing
+    // is preserved by reporting each outcome once with the
+    // strongest pair of capture_kinds.
     println!(
-        "  → sweeping {} InjectionOutcome variants × KgGraphEnabled=false",
+        "  → sweeping {} InjectionOutcome variants × KgGraphEnabled=false × (Dictation, KgNote)",
         ALL_OUTCOMES.len()
     );
     for outcome in ALL_OUTCOMES {
-        // The helper is ignore-error by design; if it ever returned
-        // an error directly to the caller, that would be the
-        // kg-graph-failure-non-regressing breach. Since the
-        // signature is `-> ()`, we instead assert (a) the call
-        // doesn't panic (it returns) and (b) row counts stay zero.
-        try_enqueue_for_kg_filing(&conn, 1, outcome, PROBE_CAPTURED_ISO);
+        for kind in [CaptureKind::Dictation, CaptureKind::KgNote] {
+            // The helper is ignore-error by design; the signature
+            // is `-> ()`, so we assert (a) the call doesn't panic
+            // (it returns) and (b) row counts stay zero. This is
+            // the kg-graph-failure-non-regressing analog.
+            try_enqueue_for_kg_filing(&conn, 1, outcome, kind, PROBE_CAPTURED_ISO);
 
-        for table in KG_TABLES {
-            let count = row_count(&conn, table)?;
-            if count != 0 {
-                return Err(io_err(&format!(
-                    "graph-off breach: outcome {outcome:?} produced {count} rows in {table} (wanted 0)"
-                )));
+            for table in KG_TABLES {
+                let count = row_count(&conn, table)?;
+                if count != 0 {
+                    return Err(io_err(&format!(
+                        "graph-off breach: outcome {outcome:?} + capture_kind {kind:?} produced {count} rows in {table} (wanted 0)"
+                    )));
+                }
             }
         }
-        println!("    ✓ {outcome:?}: all 5 kg_* tables empty");
+        println!("    ✓ {outcome:?}: all 5 kg_* tables empty across both capture_kinds");
     }
 
     // ── Positive control ─────────────────────────────────────────
@@ -195,12 +207,38 @@ fn run_inner() -> AppResult<()> {
         ));
     }
 
-    try_enqueue_for_kg_filing(&conn, 1, InjectionOutcome::Ok, PROBE_CAPTURED_ISO);
+    // ADR 0052 / Wave 1D.1: a `Dictation` capture even with toggle=on
+    // must remain a no-op (source-gate is the new principal
+    // discriminator). Re-fire it first as a negative control of the
+    // source-gate, then re-fire as `KgNote` to prove the helper IS
+    // structurally able to enqueue.
+    try_enqueue_for_kg_filing(
+        &conn,
+        1,
+        InjectionOutcome::Ok,
+        CaptureKind::Dictation,
+        PROBE_CAPTURED_ISO,
+    );
+    let dict_after_flip = row_count(&conn, "kg_filing_queue")?;
+    if dict_after_flip != 0 {
+        return Err(io_err(&format!(
+            "source-gate breach: KgGraphEnabled=true + Dictation + Ok produced {dict_after_flip} kg_filing_queue rows (wanted 0)"
+        )));
+    }
+    println!("  ✓ source-gate negative control: toggle on + Dictation + Ok did not enqueue");
+
+    try_enqueue_for_kg_filing(
+        &conn,
+        1,
+        InjectionOutcome::Ok,
+        CaptureKind::KgNote,
+        PROBE_CAPTURED_ISO,
+    );
 
     let queue_count = row_count(&conn, "kg_filing_queue")?;
     if queue_count != 1 {
         return Err(io_err(&format!(
-            "positive control failed: KgGraphEnabled=true + Ok outcome produced {queue_count} kg_filing_queue rows (wanted 1)"
+            "positive control failed: KgGraphEnabled=true + KgNote + Ok outcome produced {queue_count} kg_filing_queue rows (wanted 1)"
         )));
     }
     // Mention/entity tables still 0 — the helper only ENQUEUES;
@@ -214,7 +252,7 @@ fn run_inner() -> AppResult<()> {
             )));
         }
     }
-    println!("  ✓ positive control: KgGraphEnabled=true + Ok enqueued 1 row");
+    println!("  ✓ positive control: KgGraphEnabled=true + KgNote + Ok enqueued 1 row");
 
     Ok(())
 }

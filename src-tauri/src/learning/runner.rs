@@ -206,7 +206,9 @@ fn distinct_mode_slugs(conn: &Connection) -> AppResult<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::sessions::{self, NewSession, SessionSource, SessionStatus, StartMode};
+    use crate::db::sessions::{
+        self, CaptureKind, NewSession, SessionSource, SessionStatus, StartMode,
+    };
     use crate::db::Database;
     use crate::dictation::runtime::bootstrap_provenance_rows;
     use crate::learning::classifier::{Classification, HeuristicClassifier};
@@ -251,6 +253,7 @@ mod tests {
                 example_set_id: example_id,
                 start_mode: StartMode::Ptt,
                 source: SessionSource::Desktop,
+                capture_kind: CaptureKind::Dictation,
             },
         )
         .unwrap();

@@ -42,6 +42,84 @@ pub struct NewSession {
     /// but `DesktopImport` and `MobileInbox` are always `InApp`.
     /// Persisted as TEXT (migration 018), default 'desktop'.
     pub source: SessionSource,
+
+    /// ADR 0052 + mb-pxzk (KG Phase 1D Wave 1D.1) — WHAT kind of
+    /// capture this session represents. Orthogonal to both
+    /// `start_mode` (activation mechanism) and `source` (audio
+    /// origin); a `'kg-note'` capture is by definition `InApp`
+    /// `Desktop` (KG audio note button programmatically starts a
+    /// live-mic session, no headless ingest), but the converse
+    /// doesn't hold. Drives the dictation-tail KG filing source-
+    /// gate (only `KgNote` sessions enqueue when the graph is on).
+    /// Persisted as TEXT (migration 025), default 'dictation'.
+    ///
+    /// Note: `sessions.category` (ADR 0052 + mb-oji5) is
+    /// deliberately NOT exposed on `NewSession`. That column is
+    /// worker-write-only — the KG classify pass UPDATEs it
+    /// post-filing. Surfacing it here would invite callers to set
+    /// it at session creation, which would conflict with the
+    /// classify pass and bypass the provenance contract
+    /// (Principle 2 — the category, when present, must come from a
+    /// dated pass with a recorded model id).
+    pub capture_kind: CaptureKind,
+}
+
+/// What kind of capture this session represents.
+///
+/// Persisted to `sessions.capture_kind` (migration 025). Drives the
+/// dictation-tail KG filing source-gate: only `KgNote` sessions
+/// enqueue into `kg_filing_queue` when `KgGraphEnabled=true`. Note
+/// that `KgNoteText` is **never** persisted as a row in `sessions` —
+/// ADR 0052 §D3 routes text-only KG captures directly to
+/// `kg_filing_queue` with a synthetic entry id, bypassing the
+/// sessions/transcripts pipeline entirely. The variant is reserved
+/// here so the enum is the single source of truth for the canonical
+/// value set, even though no current writer emits it through this
+/// type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CaptureKind {
+    /// The pre-1D default; covers every existing session row and
+    /// every future PTT / in-app live-mic dictation that wasn't
+    /// initiated from the KG screen.
+    #[default]
+    Dictation,
+    /// Audio note initiated from the KG screen (Wave 1D.3). Dual-
+    /// writes: standard dictation row + transcripts AND enqueues
+    /// for KG filing via the source-gated dictation-tail hook.
+    KgNote,
+    /// Text-only KG note (ADR 0052 §D3). Reserved — text notes
+    /// bypass the sessions table entirely; no current code path
+    /// writes this value through `NewSession`. Kept here so a
+    /// future schema migration that decides to materialize text
+    /// notes as session rows has the canonical name pre-allocated.
+    KgNoteText,
+}
+
+impl CaptureKind {
+    /// Canonical DB string. UI / IPC code should round-trip through
+    /// this rather than hand-rolling string literals.
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Dictation => "dictation",
+            Self::KgNote => "kg-note",
+            Self::KgNoteText => "kg-note-text",
+        }
+    }
+
+    /// Parse a DB string. Unknown values fall back to `Dictation` —
+    /// the safe default (same defensive-parse rationale as
+    /// `StartMode::parse_db` / `SessionSource::parse_db`). A row that
+    /// mysteriously says `"foobar"` is at least not falsely promoted
+    /// to `KgNote` (which would cause the source-gate to enqueue it
+    /// into the KG filing queue when the toggle was flipped on).
+    pub fn parse_db(s: &str) -> Self {
+        match s {
+            "kg-note" => Self::KgNote,
+            "kg-note-text" => Self::KgNoteText,
+            _ => Self::Dictation,
+        }
+    }
 }
 
 /// Where the audio for a session originated.
@@ -196,6 +274,15 @@ pub struct Session {
     /// (migration 018). Same defensive-default-on-read pattern as
     /// `start_mode`.
     pub source: SessionSource,
+    /// ADR 0052 + mb-pxzk. NOT NULL with DEFAULT 'dictation' on disk
+    /// (migration 025). Same defensive-default-on-read pattern as
+    /// `start_mode` / `source` — unknown DB strings fall back to
+    /// `Dictation` to avoid false KG enqueues.
+    pub capture_kind: CaptureKind,
+    /// ADR 0052 + mb-oji5. NULL until the KG classify pass fills it
+    /// in (only for `KgNote` sessions). The Phase 1C retrieval-by-
+    /// category surface is its consumer.
+    pub category: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -220,9 +307,9 @@ pub fn insert(conn: &Connection, new: &NewSession) -> AppResult<i64> {
             uuid, mode_id, hotkey_pressed, started_at, recording_ended_at, \
             status, foreground_app, foreground_window_title, audio_duration_ms, \
             audio_blob_path, prompt_id, dictionary_snapshot_id, example_set_id, \
-            start_mode, source \
+            start_mode, source, capture_kind \
          ) VALUES \
-         (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+         (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             new.uuid,
             new.mode_id,
@@ -239,6 +326,12 @@ pub fn insert(conn: &Connection, new: &NewSession) -> AppResult<i64> {
             new.example_set_id,
             new.start_mode.as_db_str(),
             new.source.as_db_str(),
+            new.capture_kind.as_db_str(),
+            // NOTE: `category` intentionally NOT inserted here. The
+            // KG worker fills it via UPDATE after the classify pass
+            // completes; an explicit NULL at insert time leaves the
+            // column at the DB default (NULL) without coupling the
+            // dictation orchestrator to the KG classify result.
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -353,7 +446,7 @@ const SELECT_ALL: &str =
             foreground_window_title, audio_duration_ms, audio_blob_path, \
             prompt_id, dictionary_snapshot_id, example_set_id, \
             stt_latency_ms, cleanup_latency_ms, injection_latency_ms, \
-            injection_status, start_mode, source \
+            injection_status, start_mode, source, capture_kind, category \
      FROM sessions";
 
 fn fetch_one(
@@ -415,6 +508,13 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
                 .map(SessionSource::parse_db)
                 .unwrap_or_default()
         },
+        capture_kind: {
+            // NOT NULL on disk (migration 025 DEFAULT 'dictation'),
+            // same defensive-default rationale as start_mode/source.
+            let s: Option<String> = row.get(22)?;
+            s.as_deref().map(CaptureKind::parse_db).unwrap_or_default()
+        },
+        category: row.get(23)?,
     })
 }
 
@@ -467,7 +567,80 @@ mod tests {
             example_set_id,
             start_mode: StartMode::Ptt,
             source: SessionSource::Desktop,
+            capture_kind: CaptureKind::Dictation,
         }
+    }
+
+    #[test]
+    fn capture_kind_db_strings_are_stable() {
+        // These end up in sessions.capture_kind and become part of
+        // the persisted provenance + the dictation-tail KG source-
+        // gate's match arm — changing them is a schema break AND a
+        // behaviour break.
+        assert_eq!(CaptureKind::Dictation.as_db_str(), "dictation");
+        assert_eq!(CaptureKind::KgNote.as_db_str(), "kg-note");
+        assert_eq!(CaptureKind::KgNoteText.as_db_str(), "kg-note-text");
+        assert_eq!(CaptureKind::parse_db("dictation"), CaptureKind::Dictation);
+        assert_eq!(CaptureKind::parse_db("kg-note"), CaptureKind::KgNote);
+        assert_eq!(
+            CaptureKind::parse_db("kg-note-text"),
+            CaptureKind::KgNoteText
+        );
+        // Unknown values fall back to Dictation — the safe default
+        // (an unknown string MUST NOT be falsely promoted to KgNote,
+        // which would trigger KG enqueue when the toggle was on).
+        assert_eq!(CaptureKind::parse_db("bogus"), CaptureKind::Dictation);
+        // Default trait yields Dictation.
+        assert_eq!(CaptureKind::default(), CaptureKind::Dictation);
+    }
+
+    #[test]
+    fn insert_and_read_kg_note_capture_kind() {
+        let db = Database::open_in_memory().unwrap();
+        let mut new = fresh_new_session(&db.conn);
+        new.capture_kind = CaptureKind::KgNote;
+        let id = insert(&db.conn, &new).unwrap();
+        let got = get_by_id(&db.conn, id).unwrap().unwrap();
+        assert_eq!(got.capture_kind, CaptureKind::KgNote);
+        // category is NULL at insert time (worker fills it post-classify).
+        assert!(got.category.is_none(), "category must be NULL at insert");
+    }
+
+    #[test]
+    fn capture_kind_defaults_to_dictation_on_legacy_rows() {
+        // Simulate pre-migration-025 rows: bypass the NewSession API
+        // and INSERT manually omitting capture_kind. The column's
+        // DEFAULT 'dictation' must produce CaptureKind::Dictation on
+        // read. Mirrors the source_defaults_to_desktop_on_legacy_rows
+        // pattern above.
+        let db = Database::open_in_memory().unwrap();
+        let new = fresh_new_session(&db.conn);
+        db.conn
+            .execute(
+                "INSERT INTO sessions ( \
+                    uuid, mode_id, hotkey_pressed, started_at, recording_ended_at, \
+                    status, foreground_app, audio_duration_ms, \
+                    prompt_id, dictionary_snapshot_id, example_set_id \
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    "legacy-capture-kind-uuid",
+                    new.mode_id,
+                    new.hotkey_pressed,
+                    new.started_at,
+                    new.recording_ended_at,
+                    new.status.as_str(),
+                    new.foreground_app,
+                    new.audio_duration_ms,
+                    new.prompt_id,
+                    new.dictionary_snapshot_id,
+                    new.example_set_id,
+                ],
+            )
+            .unwrap();
+        let id = db.conn.last_insert_rowid();
+        let got = get_by_id(&db.conn, id).unwrap().unwrap();
+        assert_eq!(got.capture_kind, CaptureKind::Dictation);
+        assert!(got.category.is_none());
     }
 
     #[test]

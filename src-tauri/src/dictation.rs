@@ -75,7 +75,7 @@ use crate::audio::vad::VoiceActivityDetector;
 use crate::audio::{trim_speech, AudioCapture, TrimConfig};
 use crate::cleanup::Cleaner;
 use crate::db::sessions::{
-    self, NewSession, ProcessingCompletion, SessionSource, SessionStatus, StartMode,
+    self, CaptureKind, NewSession, ProcessingCompletion, SessionSource, SessionStatus, StartMode,
 };
 use crate::db::transcripts;
 use crate::error::{AppError, AppResult};
@@ -190,6 +190,10 @@ struct PersistCompleteParams<'a> {
     injected_text: Option<&'a str>,
     /// Cleanup model identifier for `transcripts.model_used`.
     cleanup_model: &'a str,
+    /// ADR 0052 + mb-pxzk (Wave 1D.1) — drives the dictation-tail KG
+    /// source-gate. Sourced from `SessionState::capture_kind`; lives
+    /// here too so the param struct is self-contained.
+    capture_kind: CaptureKind,
 }
 
 #[derive(Default)]
@@ -214,6 +218,13 @@ struct SessionState {
     /// `sessions.start_mode` DB column, (d) the `dictation:state`
     /// event payload's `startMode` field.
     start_mode: StartMode,
+    /// ADR 0052 + mb-pxzk (Wave 1D.1) — pinned at `start_capture`
+    /// and threaded into both the `sessions.capture_kind` column AND
+    /// the dictation-tail KG source-gate. Defaults to
+    /// `CaptureKind::Dictation`; Wave 1D.3 lands the path that
+    /// promotes this to `CaptureKind::KgNote` for KG-screen audio
+    /// captures.
+    capture_kind: CaptureKind,
 }
 
 /// The mode identifiers a single dictation session uses end-to-end:
@@ -312,33 +323,47 @@ pub(crate) fn resolve_active_mode_from_db(
 /// surface area authorized by ADR 0050 §"Dictation-surface
 /// authorization clause" is unchanged.
 ///
-/// ## Outcome gate (Decision B)
+/// ## Three-gate cascade
 ///
-/// Enqueues iff `outcome` is one of:
-/// - [`InjectionOutcome::Ok`]
-/// - [`InjectionOutcome::OkClipboardNotRestored`]
-/// - [`InjectionOutcome::InAppNoInject`] (ADR 0045 — text exists in
-///   the Dictations list; the no-inject is intentional, not defensive)
+/// As of ADR 0052 / Wave 1D.1 (`mb-pxzk`) the helper enforces THREE
+/// independent gates in this order:
 ///
-/// The five abort/failure variants intentionally do NOT enqueue:
-/// `AbortedSecure`, `AbortedUserOptOut`, `AbortedFocusChanged`,
-/// `FailedClipboardLocked`, `FailedSendInput`.
+///   1. **Outcome gate** (ADR 0050 Decision B). Enqueues iff `outcome`
+///      is one of [`InjectionOutcome::Ok`],
+///      [`InjectionOutcome::OkClipboardNotRestored`], or
+///      [`InjectionOutcome::InAppNoInject`] (ADR 0045 — text exists in
+///      the Dictations list; the no-inject is intentional, not
+///      defensive). The five abort/failure variants intentionally do
+///      NOT enqueue.
 ///
-/// ## Gate location (Decision A)
+///   2. **Source gate** (ADR 0052 Decision D1, NEW in 1D.1). Enqueues
+///      iff `capture_kind == CaptureKind::KgNote`. Standard
+///      `Dictation` sessions never enqueue regardless of the toggle
+///      state — this is what reverses the Phase 1B trigger direction
+///      so the user opts in per-capture rather than globally. The
+///      reserved `KgNoteText` variant is rejected here too (it can't
+///      reach this code path today; text notes bypass the sessions
+///      table per ADR 0052 §D3, but enumerating the match exhaustively
+///      makes the contract explicit).
 ///
-/// The `KgGraphEnabled` check lives at this call site rather than
-/// inside [`kg::enqueue_for_filing`] so the Phase 1D backfill
-/// (a separate explicit consumer that must bypass the toggle) can
-/// reuse the same store function without a parallel path.
+///   3. **Toggle gate** (ADR 0050 Decision A). Enqueues iff
+///      `SettingKey::KgGraphEnabled` reads true. Kept as the LAST
+///      check so a flipped toggle alone can never re-activate stale
+///      drift from the other two gates. Lives at this call site (not
+///      inside [`kg::enqueue_for_filing`]) so the Phase 1E backfill
+///      can reuse the same store function without a parallel path.
+///
 /// `pub(crate)` so the Chunk 5 graph-off invariant probe
-/// (`kg::graph_off_invariant`) can exercise this exact gate without
+/// (`kg::graph_off_invariant`) can exercise these gates without
 /// instantiating the orchestrator. The probe asserts the
 /// `kg-graph-off-untouched` principal invariant (ADR 0050 §"Invariants")
-/// across all eight `InjectionOutcome` variants.
+/// across all eight `InjectionOutcome` variants under the new
+/// three-gate cascade.
 pub(crate) fn try_enqueue_for_kg_filing(
     conn: &Connection,
     session_id: i64,
     outcome: InjectionOutcome,
+    capture_kind: CaptureKind,
     captured_iso: &str,
 ) {
     if !matches!(
@@ -347,6 +372,13 @@ pub(crate) fn try_enqueue_for_kg_filing(
             | InjectionOutcome::OkClipboardNotRestored
             | InjectionOutcome::InAppNoInject
     ) {
+        return;
+    }
+    // Source gate (1D.1): only KG-screen audio notes enqueue. Every
+    // other capture_kind value -- including the reserved KgNoteText
+    // (which bypasses sessions today, but match exhaustively for
+    // defensiveness) -- is a no-op here.
+    if !matches!(capture_kind, CaptureKind::KgNote) {
         return;
     }
     let kg_enabled = Settings::new(conn)
@@ -360,6 +392,156 @@ pub(crate) fn try_enqueue_for_kg_filing(
             error = ?e,
             session_id,
             "KG enqueue failed; dictation tail continues (kg-graph-failure-non-regressing)"
+        );
+    }
+}
+
+#[cfg(test)]
+mod kg_source_gate_tests {
+    //! Unit coverage for the Wave 1D.1 source-gate (ADR 0052 §D1).
+    //!
+    //! These three tests are the explicit acceptance contract from
+    //! the Wave 1D.1 kickoff: every combination of
+    //! (standard dictation, kg-note) × (toggle off, toggle on) must
+    //! produce the right enqueue / no-enqueue decision. The fourth
+    //! cell (standard dictation + toggle off) is covered exhaustively
+    //! by the existing `kg_graph_off_invariant` probe across all 8
+    //! `InjectionOutcome` variants and is intentionally not duplicated
+    //! here.
+    //!
+    //! Lives under `#[cfg(test)]` in this module so the function-under-
+    //! test (`try_enqueue_for_kg_filing`, `pub(crate)`) is reachable
+    //! without widening any module boundary.
+    use rusqlite::Connection;
+
+    use super::try_enqueue_for_kg_filing;
+    use crate::db::migrations::apply_all;
+    use crate::db::sessions::CaptureKind;
+    use crate::injection::InjectionOutcome;
+    use crate::settings::model::SettingKey;
+    use crate::settings::Settings;
+
+    fn fresh_db_with_session() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).expect("apply migrations");
+        conn.execute(
+            "INSERT INTO sessions (id, uuid, mode_id, hotkey_pressed, started_at,
+                recording_ended_at, status, audio_duration_ms)
+             VALUES (1, 'source-gate-test', 1, 'RCtrl+Space',
+                     '2026-06-03T08:00:00Z', '2026-06-03T08:00:01Z',
+                     'complete', 1000)",
+            [],
+        )
+        .unwrap();
+        conn
+    }
+
+    fn queue_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM kg_filing_queue", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn standard_dictation_with_toggle_on_does_not_enqueue() {
+        // The 1D.1 invariant: even with KG filing globally enabled,
+        // a plain `Dictation` capture must not enqueue. This is the
+        // reversal of the Phase 1B trigger direction.
+        let conn = fresh_db_with_session();
+        Settings::new(&conn)
+            .set(SettingKey::KgGraphEnabled, &true)
+            .unwrap();
+
+        try_enqueue_for_kg_filing(
+            &conn,
+            1,
+            InjectionOutcome::Ok,
+            CaptureKind::Dictation,
+            "2026-06-03T08:00:02Z",
+        );
+
+        assert_eq!(
+            queue_count(&conn),
+            0,
+            "Dictation captures must NOT enqueue even with toggle on"
+        );
+    }
+
+    #[test]
+    fn kg_note_with_toggle_on_enqueues() {
+        // The 1D.3 happy path proven at the gate layer: kg-note +
+        // toggle on + Ok outcome must produce exactly one queue row.
+        let conn = fresh_db_with_session();
+        Settings::new(&conn)
+            .set(SettingKey::KgGraphEnabled, &true)
+            .unwrap();
+
+        try_enqueue_for_kg_filing(
+            &conn,
+            1,
+            InjectionOutcome::Ok,
+            CaptureKind::KgNote,
+            "2026-06-03T08:00:02Z",
+        );
+
+        assert_eq!(
+            queue_count(&conn),
+            1,
+            "KgNote + toggle on + Ok outcome must enqueue exactly one row"
+        );
+    }
+
+    #[test]
+    fn kg_note_with_toggle_off_does_not_enqueue() {
+        // The defense-in-depth invariant: even a kg-note must not
+        // enqueue if the global toggle is off. (The migration 024
+        // seed defaults the toggle to false; we don't flip it.)
+        let conn = fresh_db_with_session();
+        let toggle: bool = Settings::new(&conn)
+            .get(SettingKey::KgGraphEnabled)
+            .unwrap();
+        assert!(!toggle, "test precondition: toggle must default to false");
+
+        try_enqueue_for_kg_filing(
+            &conn,
+            1,
+            InjectionOutcome::Ok,
+            CaptureKind::KgNote,
+            "2026-06-03T08:00:02Z",
+        );
+
+        assert_eq!(
+            queue_count(&conn),
+            0,
+            "KgNote + toggle off must NOT enqueue (defense in depth)"
+        );
+    }
+
+    #[test]
+    fn kg_note_text_does_not_enqueue_through_dictation_path() {
+        // ADR 0052 §D3: text notes bypass the sessions table
+        // entirely. They reach kg_filing_queue via a separate
+        // synthetic-entry_id path in Wave 1D.3, NOT through the
+        // dictation tail. If a kg-note-text value ever reached this
+        // helper (which it shouldn't), the gate must treat it as
+        // non-enqueue — only KgNote enqueues here.
+        let conn = fresh_db_with_session();
+        Settings::new(&conn)
+            .set(SettingKey::KgGraphEnabled, &true)
+            .unwrap();
+
+        try_enqueue_for_kg_filing(
+            &conn,
+            1,
+            InjectionOutcome::Ok,
+            CaptureKind::KgNoteText,
+            "2026-06-03T08:00:02Z",
+        );
+
+        assert_eq!(
+            queue_count(&conn),
+            0,
+            "KgNoteText must not reach kg_filing_queue through the dictation tail"
         );
     }
 }
@@ -929,6 +1111,7 @@ impl DictationOrchestrator {
             cleaned_text: &cleaned_text,
             injected_text,
             cleanup_model: self.cleaner.model_name(),
+            capture_kind: self.state.capture_kind,
         })?;
 
         // Brief "done" flash before the window vanishes. The 200ms
@@ -1022,7 +1205,7 @@ impl DictationOrchestrator {
         // tail to the KG filing queue (default-off; gated by
         // SettingKey::KgGraphEnabled). All gating logic + the
         // ignore-error contract live in the helper — see its docs.
-        try_enqueue_for_kg_filing(&conn, id, p.outcome, &p.recording_ended_iso);
+        try_enqueue_for_kg_filing(&conn, id, p.outcome, p.capture_kind, &p.recording_ended_iso);
 
         // Drop the DB lock before emitting so the frontend's
         // refetch (which goes through `list_sessions` -> DB) doesn't
@@ -1108,6 +1291,11 @@ impl DictationOrchestrator {
             // 'mobile-inbox' are written by the headless ingest path
             // (dictation/ingest.rs), never by the orchestrator.
             source: SessionSource::Desktop,
+            // ADR 0052 / mb-pxzk: pinned at start_capture. Default
+            // `Dictation` for PTT + the in-app Dictations Start
+            // button; Wave 1D.3 wires the KG audio-note button to
+            // promote this to `KgNote` before start_capture runs.
+            capture_kind: self.state.capture_kind,
         };
         sessions::insert(conn, &new)
     }
@@ -1136,6 +1324,8 @@ impl DictationOrchestrator {
             start_mode: self.state.start_mode,
             // ADR 0046 / mb-jqhw: same rationale as insert_session_row.
             source: SessionSource::Desktop,
+            // ADR 0052 / mb-pxzk: same rationale as insert_session_row.
+            capture_kind: self.state.capture_kind,
         };
         sessions::insert(conn, &new)
     }
