@@ -266,6 +266,22 @@ pub enum SettingKey {
     /// the 6 GB threshold; on this dev box (RTX 2060, 6144 MiB) the
     /// probe reports exactly the threshold, so opt-in stays manual.
     PreferQ5Models,
+
+    // ----- ADR 0050 (KG Phase 1B) -- knowledge-graph filing toggle. -----
+    //
+    /// Master gate for the KG subsystem. When `false` (the default)
+    /// the dictation orchestrator does NOT enqueue entries for filing
+    /// and the boot path does NOT spawn the filing worker thread;
+    /// the dictation outcome is byte-identical to the pre-1B baseline
+    /// (`kg-graph-off-untouched` invariant). When `true`, the
+    /// orchestrator's tail call site enqueues via
+    /// [`crate::kg::enqueue_for_filing`] and the worker drains the
+    /// queue in the background. The seed row in migration 024
+    /// mirrors this default so the Settings UI in Phase 1C has
+    /// something to bind to before the user toggles. Chunk 3 wires
+    /// the boot-time worker-spawn check; Chunk 4 wires the dictation
+    /// hook.
+    KgGraphEnabled,
 }
 
 impl SettingKey {
@@ -320,6 +336,8 @@ impl SettingKey {
             Self::DictationCleanupLevel => "dictation_cleanup_level",
             // ADR 0047 Wave 2.4.
             Self::PreferQ5Models => "prefer_q5_models",
+            // ADR 0050 (KG Phase 1B).
+            Self::KgGraphEnabled => "kg_graph_enabled",
         }
     }
 
@@ -374,6 +392,8 @@ impl SettingKey {
             "dictation_cleanup_level" => Ok(Self::DictationCleanupLevel),
             // ADR 0047 Wave 2.4.
             "prefer_q5_models" => Ok(Self::PreferQ5Models),
+            // ADR 0050 (KG Phase 1B).
+            "kg_graph_enabled" => Ok(Self::KgGraphEnabled),
             other => Err(AppError::Other(format!("unknown setting key: {other:?}"))),
         }
     }
@@ -474,6 +494,12 @@ impl SettingKey {
             // posture per ADR §Risks #3 -- a silent upgrade onto a
             // heavier model could blow VRAM on 6 GB cards.
             Self::PreferQ5Models => serde_json::json!(false),
+            // ADR 0050 (KG Phase 1B) -- OFF by default. Activating the
+            // KG subsystem requires explicit opt-in; the worker thread
+            // is not spawned at boot when this is false (Chunk 3) and
+            // the dictation hook is a no-op (Chunk 4). Mirrors the seed
+            // row written by migration 024.
+            Self::KgGraphEnabled => serde_json::json!(false),
         }
     }
 
@@ -530,6 +556,8 @@ impl SettingKey {
             Self::DictationCleanupLevel,
             // ADR 0047 Wave 2.4.
             Self::PreferQ5Models,
+            // ADR 0050 (KG Phase 1B).
+            Self::KgGraphEnabled,
         ]
     }
 }
@@ -637,8 +665,9 @@ mod tests {
         //   + 1 ADR 0047 Wave 1.2 (LlmShrinkFallbackThreshold)
         //   + 1 ADR 0047 Wave 2.2 (LlmSkipWordThreshold)
         //   + 1 ADR 0047 Wave 2.1 (DictationCleanupLevel)
-        //   + 1 ADR 0047 Wave 2.4 (PreferQ5Models) = 40.
-        assert_eq!(SettingKey::all().len(), 40);
+        //   + 1 ADR 0047 Wave 2.4 (PreferQ5Models)
+        //   + 1 ADR 0050 (KgGraphEnabled) = 41.
+        assert_eq!(SettingKey::all().len(), 41);
     }
 
     /// ADR 0046 Iter 2 defaults must match §10 ("opt-in by default";
