@@ -5100,6 +5100,30 @@ Whisper) closed via ADR 0029 as its architectural closer.
   $f`.
 
 
+## 2026-05-30 [kg-phase-1c-wave-1c.3 / mb-5ly5] Four-finding bundle from the wave-end qa-spec + backend authoring
+
+Four small things that bit during 1C.3 backend authoring + qa-spec authoring (qa-kitten bowed out — no filesystem tools — so code-puppy authored `ui/tests/kg-dictations-retrieval.spec.ts` per the kickoff fallback clause).
+
+1. **`include!` macro doesn't allow inner doc comments (`//!`) — use `#[path = "..."] mod foo;`.** Throwaway-crate harness for `src-tauri/src/kg/store/search.rs` first try used `pub mod search { include!("..."); }`; rustc errored with E0753 on every `//!` in the included file. Switched to `#[path = "<abs path>"] pub mod search;` and it Just Worked. Reason: `include!` splices content INTO the surrounding module, so inner doc comments aren't at item-position; `#[path]` makes the file ITS OWN module so `//!` is valid module-level doc. Update LESSONS P2's throwaway-crate recipe in any future revision.
+
+2. **`<span aria-label="X">` is NOT findable via Playwright's `getByRole("generic", ...)`.** `<span>` has no implicit ARIA role; even with `aria-label` set, the accessibility tree leaves it out of role-based queries. Use `getByLabel(/X/i)` instead. Two assertions in the 1C.3 spec needed this fix.
+
+3. **"Clear filters" button collision — same i18n string, two distinct locations.** Both `DictationsFilterBar.tsx` (header) and the empty-state `EmptyState` action in `Dictations.tsx` render a button with `aria-label="Clear filters"`. Playwright's strict-mode locator surfaced this immediately as a 2-element resolve. Workaround: scope to the EmptyState's `role="status"` container. Worth a P3 follow-up to either rename one (`kg.filter.clearAll` vs `kg.filter.empty.clear`) or accept it as a duplicate-affordance design choice — filed as `mb-bbl2`-adjacent thinking, not as a new bead.
+
+4. **HashRouter same-URL navigation does NOT remount.** `await page.goto("/#/dictations")` when already at that hash is a no-op for React state; `kg_settings_get_all` won't re-fire so `kgEnabled` stays at its first-mount value. For tests that need to flip mount-time state, use `page.reload()` (combined with `page.addInitScript()` if the fixture must be present at the FIRST `kg_settings_get_all` call). The 1C.2 failed-filings spec didn't hit this because it had an in-app UI toggle (Settings tab's switch); Dictations has no such toggle so the test needs a remount.
+
+- Tag: kg, ui, qa, throwaway-crate, playwright
+
+
+## 2026-05-30 [kg-phase-1c-wave-1c.3 / mb-5ly5 / mb-oji5] Category retrieval axis dropped this wave — Entry.category isn't persisted in 1B
+
+- Context: kickoff brief for 1C.3 specified a 4-axis `SearchFilter { entities, tags, categories, query }` with chip-group UI for Personal/Professional/Objective.
+- Finding: there is NO queryable `category` column anywhere in 1B schema. `kg_canonical_tags.category` exists but the table is inert. `kg::schema::Entry.category` is in-memory only; `apply_filed_outcome` in the worker writes ONLY entity + tag mention rows. Filtering by category would have required either (a) fabricating data or (b) a migration + worker change that's well outside the wave's scope.
+- Action: shipped 3 of 4 axes (entities + tags + query). Filed `mb-oji5` for the persistence work (P2). When that ships, the SearchFilter wire shape can be extended additively — no breaking change to 1C.3 callers because the field defaults to empty.
+- Bigger picture for future agents: when a kickoff brief specifies an axis whose data isn't on disk, the right move is (i) ship the axes that DO have data, (ii) file a bead for the missing persistence, (iii) document the deferral in the wave's commit + LESSONS so the next planning pass doesn't re-spec the same axis blindly. Don't fabricate; don't ship a control that always returns empty results.
+- Tag: kg, schema, planning
+
+
 ## 2026-05-30 [kg-phase-1c-wave-1c.3 ui] noUncheckedIndexedAccess makes CSS-module class lookups string|undefined - declare it through
 
 - Context: building the FilingPill component in DictationKgChips.tsx, I declared a centralised mapping table returning `{ ariaKey: string; toneClass: string; title?: string } | null`. TS rejected `styles.pillPending` for `toneClass` with "string|undefined not assignable to string".
