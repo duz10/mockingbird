@@ -59,7 +59,7 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**Nothing in flight.** Phase 1B KG persistence sealed 2026-06-03 (ADR 0050 Accepted; lateral epic under ADR 0049 §"Sandbox isolation"). Phase 1C (Retrieval UX v1 + Settings toggle for `KgGraphEnabled` + failed-filings surface) awaits Dustin kickoff.
+**KG Phase 1C in flight** — 6-wave ADR-chartered lateral epic (`mb-j368`) under ADR 0051 (Proposed 2026-05-30). Wave 1C.0 (charter) shipped: ADR 0051 + `docs/knowledge-graph/phase-1c-brief.md` + per-pass `PassTimings` instrumentation in `kg::pipeline` (parity-safe additive field; 32/32 re-verified default + `--persist`) + worker structured tracing for filing latency + `kg_latency_bench` bin + `docs/knowledge-graph/phase-1c-latency-baseline.md` (empirical p95 = 59s for a 5-segment dictation, sits right at the ADR 0049 §6 ~1 min budget). Closes `mb-b3jy`. Wave 1C.5's principal invariant pinned for seal: **`kg-graph-off-ui-untouched`** (with `KgGraphEnabled=false`, every KG UI element except the Settings tab itself stays hidden; no KG IPC invoked from UI). Remaining waves: 1C.1 Settings tab + activation toggle + boot-vs-poll promotion (`mb-ucmx`); 1C.2 failed-filings UX + `requeue_failed` (`mb-9ufg`); 1C.3 Dictations filter chips + per-row entity/tag display (`mb-5ly5`); 1C.4 concept modal (`mb-sx6p`); 1C.5 3-judge deterministic gate + ADR Accepted + epic seal (`mb-f4gn`).
 
 ### Phase 1C kickoff notes (from the Phase 1B seal)
 

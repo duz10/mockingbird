@@ -4977,3 +4977,100 @@ Whisper) closed via ADR 0029 as its architectural closer.
   throwaway BOM-check on any such writer:
   `[byte[]](Get-Content $f -Encoding Byte -TotalCount 5) | ForEach-Object { '{0:X2}' -f $_ }`
   — first three bytes must NOT be `EF BB BF`.
+
+## 2026-05-30 [kg-phase-1c-wave-0] Additive `PassTimings` field on `PipelineResult` is parity-safe by construction (re-confirmed)
+
+- Context: Phase 1C.0 needed per-pass wall-clock timings threaded out
+  of `kg::run_pipeline` so the new `kg_latency_bench` bin + the
+  worker's structured-tracing emission both have a single source of
+  truth. Risk: adding a field to `PipelineResult` could disturb the
+  32/32 parity gate (`kg_parity`).
+- Finding: same pattern Chunk 3 used for `segment_entities` works
+  again — `kg::parity::pipeline_result_to_value` manually builds the
+  assertion JSON from the original three keys (`entries`,
+  `per_pass_errors`, `new_tag_requests`) and ignores everything else
+  on `PipelineResult` by construction. After landing `pass_timings:
+  PassTimings` on `PipelineResult` + threading through every
+  early-return + the `for (idx, seg_text)` per-segment loop, both
+  `kg_parity` and `kg_parity --persist` came back GREEN 32/32 first
+  try. No assertion drift, no surprise re-snapshots.
+- Action: the additive-field hypothesis is now load-bearing for KG
+  iteration cadence. Future fields on `PipelineResult` that are
+  observability-only (timings, attribution, telemetry-shaped data)
+  can land additively without touching the fixture set, **provided**
+  they're not threaded into the `pipeline_result_to_value` JSON.
+  Re-verify with both modes every time — it's a 4-minute gate (3 min
+  default, 6 sec for `--persist`) and catches anything sneaky like a
+  `#[derive(Serialize)]` change that would balloon the asserted JSON.
+
+## 2026-05-30 [kg-phase-1c-wave-0] Real-Ollama bench harness: graceful Ollama-down + tempfile SQLite is the right shape
+
+- Context: `kg_latency_bench` is the first in-tree binary that talks
+  to a real local Ollama daemon (vs. the parity probe's `MockOllama`
+  fixture playback). Two design questions: (a) what happens when the
+  daemon isn't running? (b) should the bench own its own SQLite or
+  share one with the parity probe?
+- Finding: (a) a pre-flight `generate("ok")` ping against the daemon
+  — using a tiny prompt with `num_ctx=256` so model-load latency
+  isn't billed to it — cleanly distinguishes "daemon up" from
+  "daemon down". `OllamaError::Transport { url, source }` is the
+  structural signal; print a single `# ollama-unreachable` line to
+  stdout (so the CSV consumer can detect it programmatically) + a
+  friendly hint to stderr + exit code 2. Other `OllamaError`
+  variants (BadStatus, missing field) are daemon-side problems we
+  can't fix from here — exit 1. (b) tempfile SQLite + `apply_all` +
+  `PRAGMA foreign_keys = ON` is the same recipe
+  `kg::parity::run_persist_round_trip` uses; trivial to copy + 100%
+  isolated from any other process holding the production DB open.
+  Don't share state with the parity probe — each bin owns its own
+  scratch DB.
+- Action: future bench-style bins (e.g. throughput, backfill-cost)
+  should reuse this skeleton: pre-flight ping w/ tiny prompt →
+  tempfile SQLite + migrations → fixture loop → CSV stdout + summary
+  block. Exit code conventions: 0 clean, 1 fatal setup error, 2
+  external-service unavailable. The model-warm-up step (first real
+  `run_pipeline` call after the ping) DOES pay the cold-load cost —
+  call it out in the baseline doc so future reviewers don't read the
+  1st-fixture spike as a regression.
+
+## 2026-05-30 [kg-phase-1c-wave-0] Empirical KG filing-pipeline budget (5 fixtures, qwen2.5:7b)
+
+- Context: ADR 0049 §6 pinned a "~1 min per dictation" intake budget
+  for the KG filing pipeline, but it was unmeasured. Wave 1C.0
+  produced the first real numbers via `kg_latency_bench` against
+  `qwen2.5:7b-instruct-q4_K_M` on the dev box.
+- Finding: mean 34.6s, p50 33.1s, p95 = max = 59.0s across 5
+  fixtures (1/2/3/4/5 segments). Cost decomposition (mean of total):
+  `extract` 52%, `extract_entities` 30%, `segment` 9%, `classify`
+  9%, `normalize` 0%, `store_apply` 0%. The 5-segment worst case
+  (59s) sits within ~2% of the budget — meets spec but no margin.
+  `store_apply_ms = 0` across all fixtures means SQLite writes are
+  sub-millisecond; persistence is not the bottleneck.
+- Action: (1) UX implication codified in ADR 0051 D2 + D3 (Settings
+  activation needs an "indexing in progress" indicator; fire-and-forget
+  would be poor UX for 5-segment dictations). (2) Optimization
+  priority for Phase 1D+ is **prompt tuning on `extract`** — even a
+  30% reduction moves p95 from 59s to ~50s. Normalize-pipeline
+  optimization has zero upside (already 0ms). (3) Re-measurement
+  policy in `phase-1c-latency-baseline.md` §6 is binding — re-run
+  the bench on any model swap, prompt overhaul, or hardware change.
+  Numbers don't carry across.
+
+## 2026-05-30 [kg-phase-1c-wave-0] Tee-Object + cargo run mixes compile noise into stdout — strip with a regex filter
+
+- Context: tried to capture the bench's clean CSV to disk in one
+  shot via `Tee-Object`. Got the CSV plus three lines of cargo
+  "Finished … Running …" noise at the top.
+- Finding: `cargo run` writes its compile-progress lines to STDOUT,
+  not stderr, so a naive redirect or Tee captures them too. A second
+  attempt to filter the file in place via
+  `Get-Content … | Where-Object … | Set-Content …` deadlocks because
+  the file is open on both ends of the pipe simultaneously
+  (`IOException: file is being used by another process`).
+- Action: two-step it: materialize the filtered content to a
+  variable, **then** `Set-Content`. Or pre-build the release binary
+  in a separate invocation so the next `cargo run` produces nothing
+  but the binary's own output. The two-step pattern:
+  `$clean = Get-Content $f | Where-Object …; $clean | Set-Content
+  $f`.
+
