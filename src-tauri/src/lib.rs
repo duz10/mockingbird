@@ -355,6 +355,45 @@ pub fn run() {
             crate::activity::retention::spawn_daemon(shared_conn.clone());
             tracing::info!("\u{1f9f9} activity retention daemon started");
 
+            // Phase 1B Chunk 3 (`mb-eke8`, ADR 0050) — KG filing worker.
+            // Read-once-at-boot per Decision C: if KgGraphEnabled is
+            // false (the default, per migration 024 seed +
+            // SettingKey::KgGraphEnabled::default_value), the worker
+            // does NOT spawn at all and the dictation hook (Chunk 4)
+            // sees a no-op enqueue path. Runtime toggle requires an
+            // app restart; Phase 1C can promote to per-tick polling
+            // if the Settings UX needs it.
+            //
+            // Wrapped in cfg(target_os = "windows") to match the rest
+            // of the v1 surface; the Settings table + queue tables
+            // exist cross-platform, but the dictation hook that fills
+            // the queue is Windows-only in v1 (ADR 0050 §1).
+            #[cfg(target_os = "windows")]
+            {
+                let kg_graph_enabled = {
+                    let guard = shared_conn
+                        .lock()
+                        .expect("shared_conn must be unpoisoned at startup");
+                    crate::settings::Settings::new(&guard)
+                        .get::<bool>(crate::settings::model::SettingKey::KgGraphEnabled)
+                        .unwrap_or(false)
+                };
+                if kg_graph_enabled {
+                    let kg_runtime =
+                        crate::kg::worker::KgFilingRuntime::spawn(shared_conn.clone());
+                    // Managed so Tauri's drop-on-shutdown fires the
+                    // worker's Drop (flips the shutdown AtomicBool).
+                    app.manage(kg_runtime);
+                    tracing::info!(
+                        "\u{1f9e0} KG filing worker spawned (KgGraphEnabled = true)"
+                    );
+                } else {
+                    tracing::debug!(
+                        "KG filing worker NOT spawned (KgGraphEnabled = false; default)"
+                    );
+                }
+            }
+
             // Phase 10 Wave 1A — spin up the Command Center after the
             // dictation + meeting runtimes are registered, so the
             // chord-fire → dispatch path can resolve them via managed
