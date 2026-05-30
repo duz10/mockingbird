@@ -426,6 +426,16 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 ---
 
+## 2026-05-30 [KG Phase 1C Wave 1C.2 / mb-9ufg / ADR 0051] Two small UI-author findings from the failed-filings wave
+
+- **Context:** Wave 1C.2 added the failed-filings + queue-status UX to the Settings KG tab via three new IPCs (`kg_list_failed_filings`, `kg_requeue_failed`, `kg_queue_status`). One iteration, all gates green, 124/124 vitest (+6 in `SettingsKgTab.test.ts`). Two findings worth keeping:
+
+- **Finding 1 — The 400-LoC extraction pre-flight is a *measured* check, not an estimate; my single-file draft landed at 510 LoC even though my mental model said "~330".** The brief said "extract iff SettingsKgTab.tsx would exceed 400 LoC; pre-flight by counting". I counted the existing tab at 163, estimated +~150 for the additions, and authored everything inline. The actual landed inline draft was 510 LoC. The miss came from per-row markup being more verbose than I model in my head (status line + row + button + tooltip + Pill + spinner + toast = a lot of small JSX nodes). **Action:** when the brief gives a LoC threshold for extraction, write the inline draft and re-count BEFORE deciding to keep it inline. The cost of a second-pass extraction is low when state-ownership is already clean (the entire feature lifts cleanly into one child component with zero prop-drilling — parent only knows about `enabled`); the cost of a sloppy inline draft past threshold is propagating tech debt into other authors' diffs.
+
+- **Finding 2 — `--status-bad` is a legacy token name that doesn't exist in `tokens-v2.css`; the existing `Settings.module.css §errorBanner` reaches it via a `#d33` CSS fallback.** Grepping for it: `--status-bad-soft, rgba(255, 80, 80, 0.12)` and `--status-bad, #d33` both appear in the legacy errorBanner rule. The canonical token in `tokens-v2.css` is `--status-error` (mapped to `var(--md-sys-error)`). The legacy rule has been silently rendering at the hex fallback for design-v1 + design-v2 builds; no judge flagged it because the fallback value happens to be visually close enough. **Action:** new code uses `--status-error`. Future cleanup pass should sweep `Settings.module.css` to use `--status-error` directly (no fallback needed); existing rule shouldn't break anything since the rendered color is essentially unchanged. Not gating this wave on it — it's a pre-existing seam, not a 1C.2 regression. Flagging here so a future design-tokens audit catches the full sweep.
+
+---
+
 ## 2026-05-30 [KG Phase 1C Wave 1C.1 / mb-ucmx / ADR 0051] Three small structural findings from the first KG UI wave
 
 - **Context:** Wave 1C.1 added the Settings KG tab + activation toggle + boot-vs-poll worker promotion. First wave in the KG epic touching `ui/**`. Five commits, all gates green first try, parity 32/32 in both modes, Playwright single-judge sweep green. Three findings worth keeping:

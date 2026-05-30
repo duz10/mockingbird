@@ -366,6 +366,33 @@ export interface KgSettings {
   kgGraphEnabled: boolean;
 }
 
+/** Phase 1C Wave 1C.2 — one row from `kg_filing_queue` projected for
+ *  the Settings "Filing status" UX (ADR 0051 D1). Mirrors
+ *  `FailedFiling` in `src-tauri/src/kg/store/queue.rs`, serialized
+ *  to camelCase by the IPC layer. `lastError` is always a string
+ *  (the Rust side COALESCEs NULL to an empty string) so the UI can
+ *  render it unconditionally. */
+export interface FailedFiling {
+  queueId: number;
+  entryId: number;
+  attemptCount: number;
+  lastError: string;
+  enqueuedIso: string;
+  failedIso: string;
+}
+
+/** Phase 1C Wave 1C.2 — per-state queue counts + the most recent
+ *  successful filing's timestamp. Drives the status line above the
+ *  failed-filings list. Mirror of `QueueStatus` in
+ *  `src-tauri/src/kg/store/queue.rs`. `lastDoneIso` is null when
+ *  the queue has never produced a success. */
+export interface QueueStatus {
+  pending: number;
+  processing: number;
+  failed: number;
+  lastDoneIso: string | null;
+}
+
 /** Phase MC Wave 5 — typed snapshot of the meeting-side `SettingKey`
  *  registry. Mirrors `MeetingSettingsSnapshot` in
  *  `src-tauri/src/commands/settings.rs`. Read via

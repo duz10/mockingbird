@@ -100,6 +100,10 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         // Phase 1C Wave 1C.1 — typed KG-settings IPC (ADR 0051).
         kg::kg_settings_get_all,
         kg::kg_settings_set,
+        // Phase 1C Wave 1C.2 — failed-filings UX + manual retry (ADR 0051).
+        kg::kg_list_failed_filings,
+        kg::kg_requeue_failed,
+        kg::kg_queue_status,
         // Learning
         learning::list_learning_runs,
         learning::trigger_learning_run,

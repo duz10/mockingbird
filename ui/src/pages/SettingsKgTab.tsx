@@ -1,4 +1,4 @@
-// Phase 1C Wave 1C.1 — Knowledge Graph settings tab.
+// Phase 1C Wave 1C.1 + 1C.2 — Knowledge Graph settings tab.
 //
 // Surfaces the `KgGraphEnabled` activation toggle (ADR 0051 D2 +
 // `mb-s6a8`). Default off; once enabled, newly recorded dictations
@@ -11,8 +11,13 @@
 // within ~5s of the next worker tick — no restart required, no
 // confirmation modal (D2 calls for single-tap reversible).
 //
+// Wave 1C.2 (`mb-9ufg`) adds a second card below the toggle:
+// "Filing status" + failed-filings list with per-row Retry button.
+// The card itself lives in `SettingsKgFailedFilings.tsx`; we keep
+// the tab file focused on the activation toggle + post-enable
+// notice so each file stays well under the reviewability ceiling.
+//
 // Scope NOT in this file (deferred per ADR 0051 wave plan):
-//   * Failed-filings list + retry button — Wave 1C.2 (`mb-9ufg`).
 //   * Concept-page modal trigger — Wave 1C.4 (`mb-sx6p`).
 //   * Filter-chip authoring — lives on Dictations page (Wave 1C.3).
 //   * Advanced settings (model picker, IDLE_SLEEP) — never
@@ -30,6 +35,7 @@ import { t } from "../i18n";
 import { api } from "../lib/tauri";
 import type { KgSettings } from "../lib/types";
 
+import { SettingsKgFailedFilings } from "./SettingsKgFailedFilings";
 import styles from "./Settings.module.css";
 
 export function SettingsKgTab() {
@@ -146,6 +152,15 @@ export function SettingsKgTab() {
           </div>
         ) : null}
       </Card>
+
+      {/* Wave 1C.2 — Filing status + failed-filings card. Gated on
+          the toggle so we neither query the DB nor expose plumbing
+          UI when the user hasn't opted in (ADR 0049 sandbox-isolation
+          aligns: no KG surface visible without explicit consent).
+          Mount/unmount tracks the toggle so the child's `useEffect`
+          re-fetches on every off→on flip — guaranteeing the user
+          sees the clean post-enable state. */}
+      {enabled ? <SettingsKgFailedFilings /> : null}
     </div>
   );
 }

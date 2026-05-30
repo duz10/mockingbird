@@ -16,6 +16,7 @@
 import type {
   ActiveMode,
   DictionaryEntry,
+  FailedFiling,
   InboxRuntimeStatus,
   InsightsSnapshot,
   KgSettings,
@@ -24,6 +25,7 @@ import type {
   LlmPassResult,
   MeetingSettingsSnapshot,
   ModeRow,
+  QueueStatus,
   SessionDetail,
   SessionImportSummary,
   SessionSummary,
@@ -169,6 +171,24 @@ export const api = {
   kg_settings_set: (key: string, value: unknown) =>
     invoke<void>("kg_settings_set", { key, value }),
 
+  // Phase 1C Wave 1C.2 — failed-filings UX (ADR 0051 D1).
+  /** Newest-first list of `state='failed'` rows from
+   *  `kg_filing_queue`. The Rust side caps at 50 when `limit` is
+   *  omitted; pass an explicit cap for tests / pagination if ever
+   *  needed. Returns `[]` when the queue is clean. */
+  kg_list_failed_filings: (limit?: number) =>
+    invoke<FailedFiling[]>("kg_list_failed_filings", { limit }),
+  /** Idempotently flip one `state='failed'` row back to `pending`
+   *  (resets `attempt_count`, clears `last_error`). No-op on an
+   *  already-pending row — single-click safe, no confirmation
+   *  modal needed (D1 calls for optimistic UX). */
+  kg_requeue_failed: (queueId: number) =>
+    invoke<void>("kg_requeue_failed", { queueId }),
+  /** Per-state counts + last successful filing's ISO timestamp.
+   *  Cheap to compute (4 indexed SELECTs); the Settings tab calls
+   *  this on mount + after each successful retry. NO polling. */
+  kg_queue_status: () => invoke<QueueStatus>("kg_queue_status"),
+
   // Learning loop
   list_learning_runs: (limit: number) =>
     invoke<LearningRun[]>("list_learning_runs", { limit }),
@@ -312,6 +332,22 @@ function fixtureFor<T>(command: string, args?: object): T {
       return fixture(command, undefined) as T;
     case "kg_settings_get_all":
       return fixture(command, { kgGraphEnabled: false } as KgSettings) as T;
+    case "kg_list_failed_filings":
+      // Phase 1C Wave 1C.2 — default fixture is an empty list so
+      // the "all good!" empty state renders in browser preview.
+      // Playwright specs that want to see failed rows override via
+      // `window.__MOCKINGBIRD_FIXTURES__`.
+      return fixture(command, [] as FailedFiling[]) as T;
+    case "kg_queue_status":
+      // Matches the clean-queue fixture above: no work in flight,
+      // no successful filings yet (consistent with kgGraphEnabled=
+      // false default).
+      return fixture(command, {
+        pending: 0,
+        processing: 0,
+        failed: 0,
+        lastDoneIso: null,
+      } as QueueStatus) as T;
     case "meeting_settings_get_all":
       return fixture(command, {
         hotkeyModifier: "VK_RCONTROL",
@@ -544,6 +580,7 @@ function fixtureFor<T>(command: string, args?: object): T {
     case "update_setting":
     case "meeting_settings_set":
     case "kg_settings_set":
+    case "kg_requeue_failed":
     case "vault_settings_set":
     case "report_correction":
     case "trigger_learning_run":
