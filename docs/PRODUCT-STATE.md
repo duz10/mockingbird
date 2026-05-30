@@ -575,17 +575,23 @@ the next graduation window per ADR 0049 §"Sandbox isolation".
 
 ---
 
-### 3.19 `src-tauri/src/kg/` — Knowledge Graph library (Phase 1A graduation)
+### 3.19 `src-tauri/src/kg/` — Knowledge Graph library (Phase 1A graduation + Phase 1B persistence/worker/dictation hook)
 
-**Status:** callable library, **no consumers wired yet.** The
-dictation orchestrator, command center, and UI do not yet call any
-`kg::` function — that's Phase 1C. Phase 1A delivered the library
-subset only.
+**Status:** library + storage + async filing worker + dictation-tail
+hook in place. **Default-off** via `SettingKey::KgGraphEnabled = false`
+(migration 024 seed). The dictation runtime now enqueues per-session
+filing jobs only when the toggle is on; the worker drains them in
+the background. **No retrieval UX yet** — that's Phase 1C, along with
+the Settings UX for the toggle.
 
-**Charter ADR:** [ADR 0049](adr/0049-knowledge-graph-phase-0-5-and-v1-architectural-pivot.md)
-(Phase 0.5 + v1 architectural pivot — same ADR; Phase 1A graduation
-sealed under it as a scoped exception window). Wave brief at
-[`docs/knowledge-graph/phase-1a-brief.md`](knowledge-graph/phase-1a-brief.md).
+**Charter ADRs:** [ADR 0049](adr/0049-knowledge-graph-phase-0-5-and-v1-architectural-pivot.md)
+(parent epic; Phase 0.5 + v1 architectural pivot) +
+[ADR 0050](adr/0050-kg-phase-1b-persistence-and-dictation-hook.md)
+(Phase 1B sub-charter for persistence + worker + dictation hook;
+Accepted 2026-06-03). Wave briefs at
+[`docs/knowledge-graph/phase-1a-brief.md`](knowledge-graph/phase-1a-brief.md)
+and
+[`docs/knowledge-graph/phase-1b-brief.md`](knowledge-graph/phase-1b-brief.md).
 
 **Public surface (D6 minimum):** `kg::run_pipeline`, `kg::PipelineResult`,
 `kg::Entry` / `Category` / `EntryType` / `EntityType` / `Status` /
@@ -605,25 +611,121 @@ activation is one `#### Vocabulary list` re-introduction away (via
 `MOCKINGBIRD_KG_SCHEMA_DIR` env override; tested by
 `schema_loader::tests::closed_vocab_path_still_active_via_env_override`).
 
-**Pipeline shape (unchanged from sandbox Wave 0.5.4):** segment →
-classify → extract → normalize → extract_entities. Five LLM passes
+**Pipeline shape (Phase 1B Chunk 3 closed the 4-pass gap):** segment →
+classify → extract → normalize → **extract_entities**. Five LLM passes
 driven by `SCHEMA.md` + per-model-class calibration profiles. `kg::ollama`
 speaks Ollama HTTP via `ureq::Agent` (no `reqwest`, per binding
 parameter D1). All passes return `Result<T, PassError>` with typed
-error variants (`thiserror`, no `anyhow`).
+error variants (`thiserror`, no `anyhow`). The 5th pass was authored
+in Phase 0.5 (Wave 0.5.4) but had been silently absent from
+`run_pipeline` in production until Phase 1B Chunk 3 — the discovery
+adds an additive `PipelineResult.segment_entities: Vec<Vec<ExtractedEntity>>`
+field without breaking the parity probe's structural JSON
+comparison (additive-field-invisibility pattern; LESSONS body
+2026-06-02).
 
-**Parity gate:** `target\release\kg_parity.exe`
+**Storage (Phase 1B Chunk 2 / migration 024):** SQLite schema lives
+at `db/migrations/024_kg_phase_1b.sql`.
+
+- `kg_entities` — canonical entity rows. `(name, entity_type)` UNIQUE.
+  `entity_type` is the 5-bucket taxonomy `person|organization|object|place|project`
+  (Rust truth at `EntityType::as_str()`; the ADR 0050 DDL docstring
+  was fixed at Chunk 5 seal after Chunk 2 flagged the drift).
+- `kg_canonical_tags` — v1.1 inert scaffold (closed-vocab path stays
+  shipped per ADR 0049 amendment A2). No INSERTs from the v1 worker.
+- `kg_entity_mentions` + `kg_tag_mentions` — per-segment provenance
+  rows. `(entry_id, segment_idx, entity_id|tag_slug, surface_form)`
+  UNIQUE. **Write-once** via `BEFORE UPDATE` triggers (DELETE allowed
+  to flow through Phase 1D's re-file path + the FK CASCADE from
+  sessions; UPDATE raises `... is write-once (Principle 2; ADR 0050)`).
+- `kg_filing_queue` — FIFO of `(entry_id, captured_iso, state,
+  attempts, last_error)`. `state` is `'pending'|'in_progress'|'done'|'failed'`.
+  UNIQUE(entry_id) collapses duplicate enqueues idempotently.
+- Two `concept_page_*` VIEWs join the mention rows back to the
+  underlying sessions + the two-field schema for Phase 1C retrieval.
+
+**Store layer (`kg::store`):** typed wrappers around the migration
+024 surface — `enqueue_for_filing(conn, entry_id, captured_iso)`,
+`apply_filed_outcome(conn, entry_id, &segments, captured_iso)`
+(materializes a `Vec<SegmentOutput>` into the four mention/entity
+tables + flips the queue row to `done`), plus the FIFO drain helpers
+`pop_next_pending`, `mark_done`, `mark_failed`, `requeue_for_retry`,
+`reap_done_older_than`. `SegmentOutput { segment_idx, entities,
+tag_slugs }` is the single source of truth carrier produced by
+`kg::worker::build_segment_outputs(&PipelineResult)`. All mutations
+are idempotent under UNIQUE constraints — same `apply_filed_outcome`
+call twice produces identical row counts (Chunk 5 `--persist` mode
+asserts this on all 32 fixtures).
+
+**Async filing worker (`kg::worker::KgFilingRuntime`, Phase 1B Chunk 3):**
+Spawned at app boot from `lib.rs::run()` under
+`cfg(target_os = "windows")` iff `SettingKey::KgGraphEnabled = true`
+at boot time (Chunk 3 Decision C: boot-vs-poll choice was "once at
+boot" — standing bead `mb-7w5f` surfaces the promotion to per-tick
+if runtime-toggle UX in 1C demands it). The runtime owns a
+`tokio::task` that:
+
+1. Sweeps `kg_filing_queue` for `state='in_progress'` rows that
+   crash-recovered from a prior boot (re-flips them to `'pending'`).
+2. Loops `pop_next_pending` → `kg::run_pipeline` (the 5-pass
+   pipeline) → `apply_filed_outcome`. Failures bump `attempts` and
+   set `state='failed'` after `MAX_FILING_ATTEMPTS`.
+3. Reaps `state='done'` rows older than 30 days on a daily cadence.
+
+No retrieval surface yet — the worker writes mentions; reading
+is Phase 1C's job.
+
+**Dictation-tail hook (`kg::worker::try_enqueue_for_kg_filing`,
+Phase 1B Chunk 4):** ONE free-fn helper called from
+`dictation.rs::persist_complete`, the moment after the edit-free
+fast-path event fires. Outcome gate: enqueues iff
+`matches!(outcome, Ok | OkClipboardNotRestored | InAppNoInject)`
+(Chunk 4 Decision B; ADR 0045 in-app dictations DO enqueue, since
+the `InAppNoInject` outcome means "text exists, just wasn't pasted").
+Reads `SettingKey::KgGraphEnabled` directly from `Settings::new(&conn).get()`,
+short-circuits with `.unwrap_or(false)` fallback. **Ignore-error**
+semantics: any failure (settings probe, enqueue write) logs
+`tracing::warn!` and discards — the kg hook never propagates an
+error back to the dictation persist path (ADR 0050 invariant
+`kg-graph-failure-non-regressing`).
+
+**Default-off binding holds.** Phase 1B Chunk 5's
+`kg_graph_off_invariant` probe (binary at
+`src-tauri/src/bin/kg_graph_off_invariant.rs`) sweeps all 8
+`InjectionOutcome` variants with `KgGraphEnabled = false` and
+asserts every `kg_*` table row count is `0`; a positive-control
+flip at the end confirms the helper IS structurally able to write
+when the toggle is on (catches vacuous-pass regressions).
+
+**Parity gate (two modes):** `target\release\kg_parity.exe`
 (`src-tauri/src/bin/kg_parity.rs`) re-runs the full pipeline against
 the Wave 0.5.4 seed-42 fixture (`docs/knowledge-graph/parity/`) via a
-fixture-scripted `OllamaDispatcher` impl, asserting 32/32 bit-identical
-reproduction. Binary-only (no `#[test]`) per LESSONS PINNED P2.
-Invocation: `powershell -File scripts\cargo-with-cuda.ps1 run --release --bin kg_parity`.
+fixture-scripted `OllamaDispatcher` impl, asserting 32/32
+bit-identical reproduction. Binary-only (no `#[test]`) per LESSONS
+PINNED P2. Invocations:
 
-**Phase 1B+ to come:** SQLite entity/tag/edge tables (1B), retrieval
-UX with six axes (1C), migration backfill over existing transcripts
-(1D), v1 beta tag (1E). Each opens its own ADR-0049 §"Sandbox
-isolation" window — the Phase 1A close-out does NOT lift `ui/**` /
-`migrations/**` isolation.
+- Default: `... cargo-with-cuda.ps1 run --release --bin kg_parity`
+  — Phase 1A graduation gate; still 32/32 green.
+- `--persist` (Phase 1B Chunk 5 / ADR 0050 §D8 gate 1):
+  `... cargo-with-cuda.ps1 run --release --bin kg_parity -- --persist`
+  — ALSO round-trips every fixture through `kg::store::apply_filed_outcome`
+  against a tempfile-backed SQLite with all 24 migrations applied +
+  `PRAGMA foreign_keys = ON`. Asserts row counts derived from the
+  PipelineResult itself, idempotency under re-application, and
+  fires the migration 024 immutability triggers once at end-of-run.
+  32/32 green.
+- `kg_graph_off_invariant` (Phase 1B Chunk 5 / ADR 0050 §D8 gate 2):
+  `... cargo-with-cuda.ps1 run --release --bin kg_graph_off_invariant`
+  — graph-off principal invariant probe (see worker section above).
+  8/8 + positive control green.
+
+**Phase 1C+ to come:** retrieval UX with six axes + Settings UX for
+`KgGraphEnabled` + failed-filings surface (1C), migration backfill
+over existing transcripts (1D), v1 beta tag (1E). Each opens its
+own ADR-0049 §"Sandbox isolation" window — the Phase 1B close-out
+does NOT lift `ui/**` / Settings UX isolation; Chunk 5 only opened
+`src-tauri/**` + `migrations/**` for the storage / worker / hook
+slice.
 
 ---
 

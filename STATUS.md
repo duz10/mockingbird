@@ -10,7 +10,7 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-05-29 (ADR 0049 KG Phase 0.5 + v1 architectural pivot SEALED — six waves 0.5.1–0.5.6; PHASE-0-5-REPORT.md landed; v1 architecture binding; lateral epic, no `phase-*-complete` tag per LESSONS P5). Prior anchor: 2026-05-25 (ADR 0047 Cleanup pipeline refinement).
+**Last consolidated:** 2026-06-03 (ADR 0050 KG Phase 1B SEALED — persistence + async filing worker + dictation-tail hook, lateral epic under ADR 0049 §"Sandbox isolation"; no new `phase-*-complete` tag per LESSONS P5). Prior anchor: 2026-05-29 (ADR 0049 KG Phase 0.5 + v1 architectural pivot).
 
 ## ✅ Sealed (do not re-execute)
 
@@ -45,6 +45,7 @@
 - ADR 0042 — Activity Capture retention cascade (Accepted, sealed in `phase-10-complete`)
 - ADR 0043 — Activity Capture exclusion list + built-in rules (Accepted, sealed in `phase-10-complete`)
 - ADR 0044 — Activity Capture PDF export via `printpdf` (Accepted, sealed in `phase-10-complete`)
+- **ADR 0050 — KG Phase 1B persistence + async filing worker + dictation-tail hook** (sealed 2026-06-03 as lateral epic under ADR 0049 §"Sandbox isolation"). KG library now persists entity + tag mentions per-segment to SQLite (migration 024: `kg_entities`, `kg_canonical_tags` (v1.1 inert), `kg_entity_mentions`, `kg_tag_mentions`, `kg_filing_queue`, two concept-page VIEWs, two `BEFORE UPDATE` immutability triggers on the mention tables, `kg_graph_enabled=false` seed). Async filing worker (`kg::worker::KgFilingRuntime`) spawns at app boot when `SettingKey::KgGraphEnabled=true` (default `false`); drains FIFO with crash-recovery sweep + 30-day done-row reap. Single dictation-tail enqueue point at `dictation.rs::persist_complete` outcome-gated (`Ok` / `OkClipboardNotRestored` / `InAppNoInject`) with ignore-error semantics. `extract_entities` wired as the 5th pipeline pass in Chunk 3 (the kickoff discovered ADR 0049 §6 had been silently violated — production was 4-pass-only; closed the gap with an additive `PipelineResult.segment_entities` field). Acceptance gates: **`kg_parity` default 32/32 + `kg_parity --persist` 32/32 + `kg_graph_off_invariant` 8/8** (every InjectionOutcome variant + positive control). Wave brief: `docs/knowledge-graph/phase-1b-brief.md`. Charter: `docs/adr/0050-kg-phase-1b-persistence-and-dictation-hook.md` (Accepted 2026-06-03, §"Phase 1B SEALED" carries the close-out paragraph). Commit chain `0fed8e3..<seal-hash>`. Beads closed: `mb-bjni` (epic) + `mb-go9l` + `mb-geds` + `mb-eke8` + `mb-ryq4` + `mb-k17a`. **No new `phase-*-complete` tag** — lateral epic per LESSONS P5.
 - **ADR 0049 — KG Phase 1A graduation** (sealed 2026-05-31 under the same ADR 0049 charter). Schema-driven KG pipeline graduated from `experimental/kg-validation/` to `src-tauri/src/kg/` as a callable library (no consumers wired yet — that's Phase 1C). Wave brief: `docs/knowledge-graph/phase-1a-brief.md`. Parity gate: **32/32 bit-identical** vs the Wave 0.5.4 seed-42 fixture via `src-tauri/src/bin/kg_parity.rs`. Commit chain `75485de..<seal-hash>` — Chunk 1 scaffold + fixture, Chunk 2 library translation (six commits), Chunk 3 probe + v1-slice fix to bundled SCHEMA.md (closed-vocab Move 3 list stripped per amendment A2; closed-vocab Rust wiring stays as v1.1 starting point, guarded by `closed_vocab_path_still_active_via_env_override`). Beads closed: `mb-2mc9`, `mb-qdgn`, `mb-cskk`. Per ADR 0049 §"Sandbox isolation" close-out: the graduation window for `src-tauri/**` + `migrations/**` is now closed for this epic; Phase 1B/1C/1D/1E each charter their own. No new `phase-*-complete` tag (lateral epic per LESSONS P5).
 - ADR 0049 — Knowledge Graph Phase 0.5 + v1 architectural pivot (Accepted 2026-05-29). Phase 0.5 sealed across six waves on the `experimental/kg-validation/` sandbox. Two architectural keepers: SCHEMA.md as portable contract with per-model-class calibration profiles (Move 1; LESSONS P10) and entity extraction as a 5th pipeline pass (Move 4; Wave 0.5.4 ACCEPT at 54.83% / 53.40% strict Jaccard, 97.08% stability, ≥ 50% bar). Two architectural falsifications: embeddings nearest-neighbour classification (Move 2; amendment A1 — preserved as a similarity tool for entity disambiguation, retired as a classifier) and closed-vocab Move 3 (DEFERRED to v1.1 — wiring on `main` commit `8fdc7fb` is architecturally correct but blocked on two-field corpus re-labeling per LESSONS P11 "tags ≠ entities"). v1 architecture binding (amendments A1/A2/A3): pipeline segment → classify → extract → **extract_entities** → normalize, two-field entry schema (`tags:` open-vocab in v1 + `entities:` typed references), SCHEMA.md drives all passes, qwen2.5:7b-instruct-q4_K_M pinned for entity-aware operation (3b = documented tags-only degraded mode), opt-in graph guarantee, ~1 min intake latency budget. REPORT at `docs/knowledge-graph/PHASE-0-5-REPORT.md`. Beads sealed: `mb-symi` (epic), `mb-xmgs`, `mb-4xtd`, `mb-yfzy`, `mb-hnb4`, `mb-rzpd`, `mb-e10v`, `mb-o4ni`, `mb-5r1b`, `mb-qogz`. **No `phase-*-complete` tag** — lateral epic. Phase 1A (schema-driven pipeline graduates to production) awaits Dustin kickoff.
 - ADR 0048 — Knowledge Graph Phase 0 validation methodology (Accepted — sealed 2026-05-29 with `docs/knowledge-graph/REPORT.md`). Seven waves shipped: Wave 0 charter + scaffold; Wave 1 corpus (32 fixtures, full taxonomy coverage); Wave 2 4-pass pipeline + run-corpus harness; Wave 3 scorer (3 sub-iterations sealing on §G7 deterministic synonym-map metric per Option E); Wave 4 6 invariant judges + run-judges rig (`phase-0-kg-start` anchor at `aad06a6`); Wave 5 IAP Wiggum loop (cap 5; 0 accepted; documented the structural ceiling); Wave 6 REPORT.md + go/no-go (§G6 strict NO-GO; defensible GO-WITH-LIMITATIONS for an assisted-filing v1 UX). Final scorecard: hard-gate `invented_dates_count=0` PASS, junk-bucket 100% PASS, segmentation 86.7% PASS, category 67.3% FAIL, entry-type 78.2% FAIL, clean-single 6.7% FAIL, tag-collapse 9.1% FAIL. Synonym map v1.1. Stability ≥95% structural agreement. v1 recommendation: lighter spec scope PART B §9 with per-entry user confirmation; draft-review pane converting filling-quality errors into 1-tap corrections; raw transcript preserved per spec §10 dual-write. **No `phase-*-complete` tag** — lateral epic. Future v1 charter ADR (provisionally 0049) inherits Q1/Q2/Q3 decisions from ADR 0048 §3 + assisted-filing-UX contract from REPORT §8. Beads sealed: `mb-4wxw`, `mb-w1lw`, `mb-i9l1`, `mb-t7w5`, `mb-901u`, `mb-i4us`, `mb-nbel`, `mb-57a1`, `mb-jz5r`, `mb-he98`, `mb-ojm5`, `mb-0baz`.
@@ -58,106 +59,14 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**KG Phase 1B in flight (lateral epic under ADR 0049 § "Sandbox isolation").**
-Dustin kickoff received 2026-06-02. Chartered by
-[ADR 0050](docs/adr/0050-kg-phase-1b-persistence-and-dictation-hook.md)
-(Proposed; flips Accepted at Chunk 5 seal). Wave brief at
-[`docs/knowledge-graph/phase-1b-brief.md`](docs/knowledge-graph/phase-1b-brief.md).
-Epic bead `mb-bjni` with five sub-beads (`mb-go9l` charter, `mb-geds`
-migration + store + SettingKey, `mb-eke8` worker thread, `mb-ryq4`
-dictation tail surgical edit, `mb-k17a` extended parity probe + graph-off
-judge + seal). D1–D8 binding parameters pre-approved by Dustin at
-kickoff (full rationale in ADR 0050 §"Decision"; one-line table in
-the brief §4). Per-segment provenance shape (D1) resolved per Phase
-1A seal note + `docs/knowledge-graph/parity/README.md` §3:
-`kg_entity_mentions` + `kg_tag_mentions` carry `(entry_id, segment_idx,
-...)` UNIQUE; per-dictation rollups via GROUP BY in concept-page
-views. Principal invariant `kg-graph-off-untouched` (default-off
-`SettingKey::KgGraphEnabled` → dictation byte-identical to pre-1B
-baseline) gates Chunk 5 under strict IAP. No new `phase-*-complete`
-tag — seals via ADR Accepted + this STATUS update + epic close
-(LESSONS P5).
+**Nothing in flight.** Phase 1B KG persistence sealed 2026-06-03 (ADR 0050 Accepted; lateral epic under ADR 0049 §"Sandbox isolation"). Phase 1C (Retrieval UX v1 + Settings toggle for `KgGraphEnabled` + failed-filings surface) awaits Dustin kickoff.
 
-**Chunk progress (most-recent first):**
-- **Chunk 4 SEALED** 2026-06-02 (`mb-ryq4`; commit pending below — see
-  `git log -1`). Surgical edit landed in `src-tauri/src/dictation.rs`
-  per ADR 0050 §"Dictation-surface authorization clause": one
-  free-fn `try_enqueue_for_kg_filing` at module level (helper —
-  explicitly authorized by the kickoff for testability without
-  instantiating the orchestrator) + one call-site insertion inside
-  `persist_complete`, immediately after the edit-free-send arm.
-  Outcome gate enqueues iff `matches!(outcome, Ok |
-  OkClipboardNotRestored | InAppNoInject)` (Decision B; ADR 0045
-  recommendation honored — InAppNoInject DOES enqueue). Gate read
-  uses `Settings::new(&conn).get::<bool>(SettingKey::KgGraphEnabled)`
-  with `.unwrap_or(false)` fallback. Ignore-error wrapper logs
-  `tracing::warn!` on Err and discards (Decision C / invariant
-  `kg-graph-failure-non-regressing`). Default-off binding holds: with
-  `KgGraphEnabled = false`, the helper short-circuits before any DB
-  read beyond the settings probe. **Cargo gate:** `check`, `clippy
-  --release -- -D warnings`, `fmt --check`, `test --release --no-run`
-  all GREEN. **Parity:** `kg_parity` 32/32 GREEN (no regression from
-  the dictation edit, as expected — `kg::run_pipeline` untouched).
-  **Throwaway-crate invariant tests:** `$env:TEMP\mb_ryq4_tests` —
-  15/15 GREEN covering: graph-off no-op × 8 InjectionOutcome variants,
-  explicit-false no-op, graph-on enqueue × 3 success variants,
-  outcome-gate parameterized sweep, ignore-error closure, plus
-  idempotency bonus (UNIQUE(entry_id) collapse on re-enqueue). **Stray
-  fmt regression swept up:** `45ac718` (Chunk 3 pipeline.rs commit)
-  introduced `use super::passes::{Classification, Extraction,
-  ExtractedEntity, ...}` out of alphabetical order — `fmt --check`
-  caught it on this iteration's gate. One-line fix included in this
-  commit. LESSONS body entry appended (cargo gate must include
-  `fmt --check` even when the iteration's edits don't touch the
-  offending file). Open for Chunk 5: extended parity `--persist`
-  mode, `kg-graph-off-untouched` invariant judge, ADR 0050 acceptance
-  + epic close + STATUS update.
-- **Chunk 3 SEALED** 2026-06-02 (`mb-eke8`; commits `45ac718` pipeline
-  5th-pass wiring + additive `PipelineResult.segment_entities`, `082aee2`
-  `kg::worker::KgFilingRuntime` filing thread + crash-recovery sweep +
-  30-day done-row reap, `11f0185` `lib.rs::run()` boot wiring gated on
-  `KgGraphEnabled`, `17fd2a0` brief amendment). Cargo gate green;
-  `kg_parity` 32/32 GREEN re-confirmed post-pipeline-change (additive
-  field invisibility hypothesis EMPIRICALLY HELD); throwaway-crate live
-  tests 11/11 (date math, `requeue_for_retry`, `load_dictation_text`,
-  `is_leap_year`); pipeline tests now exercise the 5th pass (success +
-  failure-isolation paths). **Scope expansion vs original Chunk 3 brief:**
-  the kickoff authorized wiring `extract_entities` into `run_pipeline` as
-  the 5th pass on discovering production was still 4-pass-only (the
-  parity probe was calling `extract_entities` standalone). Without this,
-  Chunk 2's `kg_entity_mentions` table would be dead-on-arrival. R3 is
-  now closed in the brief's risk register. Boot wiring is
-  `cfg(target_os = "windows")`; default `KgGraphEnabled = false` keeps
-  the worker dormant. Open for Chunk 4: which `dictation/runtime.rs`
-  tail locus enqueues + whether `InjectionOutcome::Pasted` AND
-  `InjectionOutcome::InAppNoInject` should both enqueue (ADR 0045
-  split-mode question — recommend BOTH so in-app dictations still get
-  filed, since the InAppNoInject outcome means "text exists, just
-  didn't paste").
-- **Chunk 2 SEALED** 2026-06-01 (`mb-geds`; commits `6e90f30` migration
-  024, `66cc9d9` `kg::store::*` + `enqueue_for_filing` surface, `0d37c0b`
-  `SettingKey::KgGraphEnabled`). Cargo gate green; `kg_parity` 32/32;
-  throwaway-crate live tests 19/19 (15 unit + 4 integration, all
-  idempotency on `apply_filed_outcome`). R3 resolved as option (c)
-  store-layer-only `SegmentOutput` (production pipeline does not yet
-  wire `extract_entities`, so a `PipelineResult.segment_outputs` field
-  would be dead code in Chunk 2 — Chunk 3 decides population locus).
-  Parity-risk concern moot regardless: `parity.rs` builds the JSON
-  manually from three named fields (LESSONS body 2026-06-01). ADR 0050
-  docstring drift flagged for Chunk 5 amendment (entity types: ADR
-  text says `person|organization|project|location|thing`; Rust truth
-  is `person|organization|object|place|project` per
-  `EntityType::as_str()`).
-- **Chunk 1 SEALED** 2026-05-31 (`mb-go9l`; commit `0fed8e3`).
-- **Chunk 3 (next; `mb-eke8`):** boot-wired filing worker thread. Open
-  questions documented in Chunk 2's report-back: where in `lib.rs::run()`
-  to spawn (recommend immediately after `Database::open` returns and
-  before the Tauri builder hands over, mirroring the activity worker)
-  and whether `KgGraphEnabled` is read once at boot (worker doesn't
-  start when false; runtime toggle requires restart — simpler, matches
-  current `AutostartEnabled` semantics) or polled per-iteration (toggle
-  takes effect without restart — costs a settings read per tick).
-  Chunk 3 picks; both are defensible.
+### Phase 1C kickoff notes (from the Phase 1B seal)
+
+- **`KgGraphEnabled` toggle is on disk** (default `false` per migration 024 seed). 1C surfaces it in Settings UX + builds the retrieval surface (entity / tag concept pages backed by the two `concept_page_*` VIEWs Chunk 2 shipped).
+- **Worker reads `KgGraphEnabled` once at boot** (Chunk 3 Decision C). 1C may want to promote to per-tick polling if runtime-toggle UX matters — standing bead surfaced (P3 candidate).
+- **Failed-filings (`state='failed'` in `kg_filing_queue`)** need a user-visible surface + a manual retry button. Standing bead surfaced (P2).
+- **Latency budget (ADR 0049 §6 ~1 min target)** is unmeasured. 1C/1D should capture empirics from real hardware. Standing bead surfaced (P2).
 
 **KG Phase 0.5 narrative archived:** the full wave-by-wave in-flight
 state that lived here through 0.5.1–0.5.5 is now in

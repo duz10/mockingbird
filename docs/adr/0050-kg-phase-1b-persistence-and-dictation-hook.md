@@ -1,7 +1,7 @@
 # ADR-0050: Knowledge Graph Phase 1B — SQLite persistence + async filing queue + dictation-tail hook (default-off)
 
-- **Status:** **Proposed** (flips to **Accepted** at Chunk 5 seal, per §"Acceptance criteria" below)
-- **Date:** 2026-06-02 (Proposed)
+- **Status:** **Accepted (2026-06-03)** — see §"Phase 1B SEALED" close-out at the end of this ADR.
+- **Date:** 2026-06-02 (Proposed) → 2026-06-03 (Accepted, sealed via Chunk 5)
 - **Deciders:** Dustin (project lead), Bernard / code-puppy (chartering)
 - **Charter for:** ADR-chartered lateral epic — Knowledge Graph Phase 1B
   (epic bead `mb-bjni`). Five chunks: `mb-go9l` (this charter),
@@ -368,7 +368,7 @@ BEGIN TRANSACTION;
 CREATE TABLE kg_entities (
   id            INTEGER PRIMARY KEY,
   name          TEXT NOT NULL,                    -- canonical surface form
-  entity_type   TEXT NOT NULL,                    -- 'person'|'organization'|'project'|'location'|'thing'
+  entity_type   TEXT NOT NULL,                    -- 'person'|'organization'|'object'|'place'|'project' (Rust truth per EntityType::as_str(); Chunk 2 docstring drift fixed at Chunk 5 seal)
   aliases_json  TEXT NOT NULL DEFAULT '[]',       -- JSON array of alternate surfaces
   created_at    TEXT NOT NULL,
   updated_at    TEXT NOT NULL,
@@ -682,6 +682,95 @@ P5. Seals via ADR Accepted + STATUS update + epic bead close.
 - ADR 0049 — Phase 0.5 + v1 architectural pivot (parent epic)
 - ADR 0037 — Unified Recording Command Center (sealed-surface authorization pattern precedent)
 - ADR 0036 + ADR 0040 — sub-charter ADR under parent epic pattern
+
+---
+
+## Phase 1B SEALED (2026-06-03)
+
+Phase 1B sealed via Chunk 5 (`mb-k17a`). All eleven acceptance
+criteria above are satisfied:
+
+**Gates:**
+
+- `kg_parity` default mode: **32/32 GREEN** (no regression from the
+  1A graduation gate — the additive `PipelineResult.segment_entities`
+  field landed in Chunk 3 stayed invisible to the existing structural
+  JSON comparison, as predicted by the additive-field-invisibility
+  hypothesis introduced in Chunk 2's LESSONS body entry).
+- `kg_parity --persist` mode: **32/32 GREEN**. Every fixture
+  dictation round-tripped through `kg::store::apply_filed_outcome`
+  against a tempfile-backed SQLite with all 24 migrations applied and
+  `PRAGMA foreign_keys = ON`. Idempotency assertion (re-applying with
+  the same args leaves row counts stable) held across all 32.
+  Migration 024's `BEFORE UPDATE` immutability triggers fired with
+  the expected `kg_entity_mentions is write-once (Principle 2; ADR
+  0050)` / `kg_tag_mentions is write-once (Principle 2; ADR 0050)`
+  RAISE messages on both mention tables.
+- `kg_graph_off_invariant` probe: **8/8 GREEN** (the
+  `kg-graph-off-untouched` principal invariant). All eight
+  `InjectionOutcome` variants left every `kg_*` table empty with
+  `KgGraphEnabled = false`; positive-control flip filed exactly
+  one row to `kg_filing_queue` with `KgGraphEnabled = true` (catches
+  vacuous-pass regressions).
+- Cargo gate via the Windows wrapper: `check`, `fmt --check`,
+  `clippy --release -- -D warnings`, `test --release --no-run` all
+  GREEN (per LESSONS P2 fallback for the test runner).
+
+**Commit chain (Phase 1B end-to-end):**
+
+- `0fed8e3` — Chunk 1: ADR 0050 Proposed + wave brief.
+- `6e90f30..c83fdef` — Chunk 2: migration 024 + `kg::store::*` +
+  `SettingKey::KgGraphEnabled`.
+- `45ac718..46f9188` — Chunk 3: 5th pipeline pass +
+  `kg::worker::KgFilingRuntime` + boot wiring. Closed the 4-pass
+  gap (ADR 0049 §6 was silently violated in production until this
+  chunk).
+- `e22404c..1e4500d` — Chunk 4: dictation-tail surgical hook.
+- `39d3c4d` + `e6292b2` + this seal commit — Chunk 5: extended
+  parity probe (`--persist`) + graph-off invariant judge + the seal
+  itself.
+
+**Key in-flight findings (full body entries in `docs/LESSONS.md`):**
+
+- **ADR 0049 §6 4-pass gap (Chunk 3).** Production was silently
+  running 4 passes, not 5; the entity-extraction pass committed in
+  Phase 0.5 had never been wired into `run_pipeline`. Chunk 3
+  closed it with an additive `PipelineResult.segment_entities` field.
+  Without that, the Chunk 2 `kg_entity_mentions` table would have
+  been dead-on-arrival.
+- **Additive-field-invisibility pattern (Chunks 2–3).** Adding new
+  fields to `PipelineResult` doesn't regress the parity probe
+  because the structural JSON comparison ignores keys absent from
+  the fixture side. Hypothesis introduced in Chunk 2's LESSONS,
+  empirically confirmed in Chunks 3 + 5.
+- **fmt-regression-escape (Chunk 4).** A Chunk 3 import ordering
+  drift in `pipeline.rs` evaded that chunk's gate because that
+  iteration's edits didn't touch the offending file; Chunk 4's
+  `fmt --check` caught it. Lesson: the cargo gate must include
+  `fmt --check` every iteration even when the iteration's edits
+  don't include the file the regression lives in.
+- **Docstring drift (Chunk 2 surfaced, sealed here).** The ADR
+  DDL block originally listed entity types as
+  `'person'|'organization'|'project'|'location'|'thing'`; the Rust
+  source of truth (`EntityType::as_str()`) is
+  `person|organization|object|place|project`. Fixed in this seal
+  commit.
+
+**Phase 1C kickoff handoff:**
+
+1. `KgGraphEnabled` toggle is on disk (default `false`); 1C
+   surfaces it in Settings UX + builds the retrieval surface.
+2. Worker reads `KgGraphEnabled` once at boot (Chunk 3 Decision C);
+   1C may want to promote to per-tick polling if runtime-toggle UX
+   matters. Standing bead surfaced at seal.
+3. Failed-filings (`state='failed'` in `kg_filing_queue`) need a
+   user-visible surface. Standing bead surfaced.
+4. Latency budget (ADR 0049 §6 ~1 min) is unmeasured. Standing
+   bead surfaced for 1C/1D to capture empirics from real hardware.
+
+**No new `phase-*-complete` tag** — lateral epic per LESSONS
+PINNED P5. Epic bead `mb-bjni` + sub-bead `mb-k17a` closed in the
+seal commit.
 - ADR 0010 — raw transcript immutability (Principle 1 enforcement model)
 - LESSONS PINNED **P4** — session-start ritual (kickoff anchoring discipline)
 - LESSONS PINNED **P5** — lateral epics seal via ADR + STATUS, NOT via `phase-*-complete` tags
