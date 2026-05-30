@@ -102,6 +102,16 @@ const MIGRATION_022: &str = include_str!("migrations/022_q5_model_opt_in.sql");
 // machine + the call sites that flip it.
 const MIGRATION_023: &str = include_str!("migrations/023_session_edit_free_send.sql");
 
+// 024 -- mb-geds / ADR 0050 (KG Phase 1B Chunk 2). Adds the KG
+// persistence half: kg_entities, kg_canonical_tags (v1.1 inert),
+// kg_entity_mentions + kg_tag_mentions (per-segment provenance, D1),
+// kg_filing_queue (async filing queue, D3), two concept-page VIEWs
+// (D7), immutability triggers on the two mention tables (Principle
+// 2 analog), and the seed row for kg_graph_enabled = false (D4).
+// FK target: sessions(id) ON DELETE CASCADE. No prompt bodies;
+// substituter pass for the leftover-token guard only.
+const MIGRATION_024: &str = include_str!("migrations/024_kg_phase_1b.sql");
+
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
 ///
@@ -281,6 +291,14 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         let prepared = substitute_prompt_bodies(MIGRATION_023);
         conn.execute_batch(&prepared)?;
     }
+    if current < 24 {
+        // mb-geds / ADR 0050 (KG Phase 1B Chunk 2): the KG
+        // persistence half. Five tables + two VIEWs + two
+        // immutability triggers + one seed row. Substituter pass
+        // for the leftover-token guard only -- no prompt bodies.
+        let prepared = substitute_prompt_bodies(MIGRATION_024);
+        conn.execute_batch(&prepared)?;
+    }
     Ok(())
 }
 
@@ -339,7 +357,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "23");
+        assert_eq!(v, "24");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -358,7 +376,139 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "23");
+        assert_eq!(v, "24");
+    }
+
+    /// Migration 024 (mb-geds / ADR 0050 KG Phase 1B Chunk 2) ships
+    /// the KG persistence half. Verify each invariant the rest of
+    /// the chunk (and Chunks 3/4) depends on:
+    ///   * Five tables exist with the right columns + UNIQUE constraints.
+    ///   * Two VIEWs exist and are SELECT-able (empty result is fine).
+    ///   * Immutability triggers fire on UPDATE against mention tables.
+    ///   * Seed row 'kg_graph_enabled' = 'false' lands in settings.
+    ///   * FK target = sessions(id) ON DELETE CASCADE (verified via
+    ///     PRAGMA foreign_key_list on each mention/queue table).
+    #[test]
+    fn migration_024_ships_kg_phase_1b_schema() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+
+        // ── Tables exist. ─────────────────────────────────────────
+        let table_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type='table' AND name IN \
+                   ('kg_entities','kg_canonical_tags','kg_entity_mentions',\
+                    'kg_tag_mentions','kg_filing_queue');",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            table_count, 5,
+            "all five KG tables must exist after migration 024"
+        );
+
+        // ── Views exist. ──────────────────────────────────────────
+        let view_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type='view' AND name IN \
+                   ('kg_concept_entities_view','kg_concept_tags_view');",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(view_count, 2, "both concept-page VIEWs must exist");
+        // Views must be SELECT-able (empty result is fine on a fresh DB).
+        conn.query_row("SELECT COUNT(*) FROM kg_concept_entities_view;", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .expect("kg_concept_entities_view must be queryable");
+        conn.query_row("SELECT COUNT(*) FROM kg_concept_tags_view;", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .expect("kg_concept_tags_view must be queryable");
+
+        // ── Immutability triggers fire on UPDATE. ─────────────────
+        // Seed a session row (modes are already seeded by migration 003;
+        // we just need to use one of the existing mode IDs). Sessions
+        // columns per migration 001: uuid + hotkey_pressed + started_at
+        // + recording_ended_at + status + audio_duration_ms are NOT NULL.
+        conn.execute_batch(
+            "INSERT INTO sessions (id, uuid, mode_id, hotkey_pressed, started_at, \
+                 recording_ended_at, status, audio_duration_ms) \
+               VALUES (1, 'test-uuid-1', 1, 'RCtrl+Space', \
+                       '2026-05-30T00:00:00Z', '2026-05-30T00:00:01Z', \
+                       'completed', 1000); \
+             INSERT INTO kg_entities (id, name, entity_type, created_at, updated_at) \
+               VALUES (1, 'Mom', 'person', '2026-05-30T00:00:00Z', '2026-05-30T00:00:00Z'); \
+             INSERT INTO kg_entity_mentions (entry_id, entity_id, segment_idx, \
+                 surface_form, created_at) \
+               VALUES (1, 1, 0, 'Mom', '2026-05-30T00:00:00Z'); \
+             INSERT INTO kg_tag_mentions (entry_id, segment_idx, tag_slug, created_at) \
+               VALUES (1, 0, 'family', '2026-05-30T00:00:00Z');",
+        )
+        .expect("seed rows must apply");
+
+        let entity_update = conn.execute(
+            "UPDATE kg_entity_mentions SET surface_form = 'mom' WHERE id = 1;",
+            [],
+        );
+        assert!(
+            entity_update.is_err(),
+            "kg_entity_mentions UPDATE must be blocked by the no_update trigger"
+        );
+
+        let tag_update = conn.execute(
+            "UPDATE kg_tag_mentions SET tag_slug = 'kids' WHERE id = 1;",
+            [],
+        );
+        assert!(
+            tag_update.is_err(),
+            "kg_tag_mentions UPDATE must be blocked by the no_update trigger"
+        );
+
+        // ── UNIQUE constraint on mentions enforces idempotency. ──
+        let dup_mention = conn.execute(
+            "INSERT INTO kg_entity_mentions (entry_id, entity_id, segment_idx, \
+                 surface_form, created_at) \
+               VALUES (1, 1, 0, 'Mom', '2026-05-30T00:00:00Z');",
+            [],
+        );
+        assert!(
+            dup_mention.is_err(),
+            "duplicate (entry_id, segment_idx, entity_id) must be rejected"
+        );
+
+        // ── FK CASCADE: deleting the session row wipes mentions. ──
+        conn.execute("DELETE FROM sessions WHERE id = 1;", [])
+            .expect("session delete must succeed");
+        let remaining_entity_mentions: i64 = conn
+            .query_row("SELECT COUNT(*) FROM kg_entity_mentions;", [], |r| r.get(0))
+            .unwrap();
+        let remaining_tag_mentions: i64 = conn
+            .query_row("SELECT COUNT(*) FROM kg_tag_mentions;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            remaining_entity_mentions, 0,
+            "session DELETE must CASCADE into kg_entity_mentions"
+        );
+        assert_eq!(
+            remaining_tag_mentions, 0,
+            "session DELETE must CASCADE into kg_tag_mentions"
+        );
+
+        // ── Seed row: kg_graph_enabled = 'false'. ─────────────────
+        let seed: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key='kg_graph_enabled';",
+                [],
+                |r| r.get(0),
+            )
+            .expect("kg_graph_enabled seed row must land in settings");
+        assert_eq!(seed, "false");
     }
 
     /// Migration 023 (mb-v2fa / ADR 0047 §Wave 2.5) adds the
