@@ -466,6 +466,67 @@ export interface EntrySummary {
   filingState: FilingState;
 }
 
+/** Phase 1C Wave 1C.4 — one row inside [`EntityDetail.recentEntries`] /
+ *  [`TagDetail.recentEntries`]. Mirror of `EntryRef` in
+ *  `kg::store::mod`. `title` is server-truncated to ≤80 chars
+ *  (matches the modal row width so no extra UI trimming is needed).
+ *  `capturedIso` is RFC-3339 from `sessions.started_at`. `category`
+ *  is **always `null` in 1C.4** — the wire field is reserved for
+ *  `mb-oji5` (sessions-table column + worker write) so a future
+ *  wave can add a category badge to the row without changing the
+ *  IPC surface. */
+export interface EntryRef {
+  entryId: number;
+  title: string;
+  capturedIso: string;
+  category: string | null;
+}
+
+/** Phase 1C Wave 1C.4 — drill-down payload for the concept modal's
+ *  entity mode. Mirror of `EntityDetail` in `kg::store::entities`,
+ *  serialized to camelCase by the IPC layer. `mentionCount` counts
+ *  individual mention rows; `totalEntries` counts DISTINCT entries
+ *  containing at least one mention. `recentEntries` is server-
+ *  ordered DESC by `sessions.started_at` (tie-broken by `id` DESC)
+ *  and capped at the caller-supplied `recentLimit` (default 50). */
+export interface EntityDetail {
+  entityId: number;
+  canonicalName: string;
+  /** One of `"person" | "organization" | "object" | "place" | "project"`
+   *  — lowercase wire form per `kg::passes::EntityType`. Kept as a
+   *  bare `string` here so a future v1.1+ taxonomy expansion doesn't
+   *  require a UI churn. */
+  entityType: string;
+  aliases: string[];
+  mentionCount: number;
+  totalEntries: number;
+  recentEntries: EntryRef[];
+}
+
+/** Phase 1C Wave 1C.4 — drill-down payload for the concept modal's
+ *  tag mode. Mirror of `TagDetail` in `kg::store::search`.
+ *
+ *  Keyed by `tagSlug` (not a synthetic `tagId`) — see
+ *  `commands/kg.rs::kg_tag_detail`'s docstring + LESSONS P11 for
+ *  rationale (`kg_canonical_tags` is inert in 1B; the slug is the
+ *  wire identifier across the rest of 1C). When the 1B canonical-
+ *  vocab table activates in v1.1+ a successor wave may add an
+ *  optional `canonicalTagId` without breaking the current shape. */
+export interface TagDetail {
+  tagSlug: string;
+  mentionCount: number;
+  totalEntries: number;
+  recentEntries: EntryRef[];
+}
+
+/** Phase 1C Wave 1C.4 — page-level "which concept is the modal
+ *  showing?" state. `tag` mode is keyed off the open-vocab
+ *  `tagSlug: string` (not a numeric id) — mirrors the Rust-side
+ *  IPC deviation documented in `commands/kg.rs::kg_tag_detail`. */
+export type ActiveConcept =
+  | { kind: "entity"; entityId: number }
+  | { kind: "tag"; tagSlug: string };
+
 /** Phase MC Wave 5 — typed snapshot of the meeting-side `SettingKey`
  *  registry. Mirrors `MeetingSettingsSnapshot` in
  *  `src-tauri/src/commands/settings.rs`. Read via

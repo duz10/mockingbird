@@ -25,6 +25,7 @@ import {
   truncate,
 } from "../lib/format";
 import type {
+  ActiveConcept,
   EntrySummary,
   SessionSummary,
   TranscriptSearchHit,
@@ -79,6 +80,7 @@ export function SessionList({
   selectedId,
   onSelect,
   kgSummaries,
+  onConceptOpen,
 }: {
   sessions: SessionSummary[];
   selectedId: number | null;
@@ -87,6 +89,10 @@ export function SessionList({
    *  under each row. The parent gates this on
    *  `kgGraphEnabled === true`. */
   kgSummaries?: KgSummaryMap;
+  /** Phase 1C Wave 1C.4 -- forwarded into each row's chip strip.
+   *  Optional; when omitted, chips render as inert spans (the
+   *  Wave 1C.3 behaviour). */
+  onConceptOpen?: (concept: ActiveConcept) => void;
 }) {
   return (
     <div className={styles.list} role="listbox" aria-label="Sessions">
@@ -97,6 +103,7 @@ export function SessionList({
           active={s.id === selectedId}
           onClick={() => onSelect(s.id)}
           kgSummary={kgSummaries?.[String(s.id)]}
+          onConceptOpen={onConceptOpen}
         />
       ))}
     </div>
@@ -108,11 +115,13 @@ function SessionRow({
   active,
   onClick,
   kgSummary,
+  onConceptOpen,
 }: {
   session: SessionSummary;
   active: boolean;
   onClick: () => void;
   kgSummary?: EntrySummary;
+  onConceptOpen?: (concept: ActiveConcept) => void;
 }) {
   return (
     <div
@@ -145,7 +154,7 @@ function SessionRow({
           empty, or filing-state silent (done/not_enqueued + no
           chips), so the row layout is unchanged when KG is off
           OR when the row has no KG content. */}
-      <DictationKgChips summary={kgSummary} />
+      <DictationKgChips summary={kgSummary} onConceptOpen={onConceptOpen} />
     </div>
   );
 }
@@ -159,11 +168,13 @@ export function SearchHitsList({
   selectedId,
   onSelect,
   kgSummaries,
+  onConceptOpen,
 }: {
   hits: TranscriptSearchHit[];
   selectedId: number | null;
   onSelect: (id: number) => void;
   kgSummaries?: KgSummaryMap;
+  onConceptOpen?: (concept: ActiveConcept) => void;
 }) {
   if (hits.length === 0) {
     return (
@@ -206,7 +217,10 @@ export function SearchHitsList({
           <div className={styles.rowMeta}>
             <span>stage: {h.stage}</span>
           </div>
-          <DictationKgChips summary={kgSummaries?.[String(h.sessionId)]} />
+          <DictationKgChips
+            summary={kgSummaries?.[String(h.sessionId)]}
+            onConceptOpen={onConceptOpen}
+          />
         </div>
       ))}
     </div>

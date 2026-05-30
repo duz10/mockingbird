@@ -16,6 +16,7 @@
 import type {
   ActiveMode,
   DictionaryEntry,
+  EntityDetail,
   EntitySuggestion,
   EntrySummary,
   FailedFiling,
@@ -34,6 +35,7 @@ import type {
   SessionImportSummary,
   SessionSummary,
   SettingsSnapshot,
+  TagDetail,
   TranscriptSearchHit,
   VaultExportSummary,
   VaultPathCheck,
@@ -220,6 +222,29 @@ export const api = {
   kg_entries_summary: (entryIds: number[]) =>
     invoke<Record<string, EntrySummary>>("kg_entries_summary", { entryIds }),
 
+  // Phase 1C Wave 1C.4 — concept modal drill-down (ADR 0051 D4).
+  /** Resolve one entity to its modal payload: header (canonical
+   *  name + type + aliases), counters, and the most-recent N
+   *  entries. `recentLimit` defaults to 50 server-side; omit unless
+   *  a test wants to pin a smaller cap.
+   *
+   *  An unknown `entityId` is an **error** (Rust returns
+   *  `"entity not found: <id>"`) — the modal surfaces it as a
+   *  sonner toast and stays open in its loading state. */
+  kg_entity_detail: (entityId: number, recentLimit?: number) =>
+    invoke<EntityDetail>("kg_entity_detail", { entityId, recentLimit }),
+  /** Resolve one tag slug to its modal payload. Keyed by
+   *  `tagSlug: string` (not a numeric id) per the deviation in
+   *  `commands/kg.rs::kg_tag_detail` — the canonical-vocab table
+   *  is inert in 1B (LESSONS P11) so the slug IS the wire id.
+   *
+   *  An unknown slug is **not** an error — it yields zero counts +
+   *  empty `recentEntries`. Opening the modal for a freshly-typed
+   *  filter-bar slug before any dictation has been filed against it
+   *  is a legitimate state. */
+  kg_tag_detail: (tagSlug: string, recentLimit?: number) =>
+    invoke<TagDetail>("kg_tag_detail", { tagSlug, recentLimit }),
+
   // Learning loop
   list_learning_runs: (limit: number) =>
     invoke<LearningRun[]>("list_learning_runs", { limit }),
@@ -392,6 +417,27 @@ function fixtureFor<T>(command: string, args?: object): T {
       return fixture(command, [] as TagSuggestion[]) as T;
     case "kg_entries_summary":
       return fixture(command, {} as Record<string, EntrySummary>) as T;
+    // Phase 1C Wave 1C.4 — concept modal fixtures. Defaults match
+    // "no data yet" / open-vocab-slug-with-no-mentions states.
+    // Playwright + vitest specs override via
+    // `window.__MOCKINGBIRD_FIXTURES__` for non-empty cases.
+    case "kg_entity_detail":
+      return fixture(command, {
+        entityId: 0,
+        canonicalName: "",
+        entityType: "object",
+        aliases: [],
+        mentionCount: 0,
+        totalEntries: 0,
+        recentEntries: [],
+      } as EntityDetail) as T;
+    case "kg_tag_detail":
+      return fixture(command, {
+        tagSlug: "",
+        mentionCount: 0,
+        totalEntries: 0,
+        recentEntries: [],
+      } as TagDetail) as T;
     case "meeting_settings_get_all":
       return fixture(command, {
         hotkeyModifier: "VK_RCONTROL",

@@ -63,12 +63,14 @@ import { t } from "../i18n";
 import { useAppStore } from "../lib/store";
 import { api, isTauri } from "../lib/tauri";
 import type {
+  ActiveConcept,
   SearchFilter,
   SessionDetail,
   SessionSummary,
   TranscriptSearchHit,
 } from "../lib/types";
 
+import { ConceptModal } from "./ConceptModal";
 import { DictationsDetailPane } from "./DictationsDetailPane";
 import {
   DictationsFilterBar,
@@ -115,6 +117,12 @@ export function DictationsPage() {
   // Refresh nonce for the summary effect -- bumped on tab focus
   // (D8 refresh strategy: no polling, no Tauri events).
   const [summaryNonce, setSummaryNonce] = useState(0);
+  // Phase 1C Wave 1C.4 / mb-sx6p -- concept modal target. `null`
+  // when closed; the page mounts a single ConceptModal instance
+  // that switches between entity + tag modes based on this state.
+  const [activeConcept, setActiveConcept] = useState<ActiveConcept | null>(
+    null,
+  );
 
   const setSelectedSession = useAppStore((s) => s.setSelectedSession);
 
@@ -420,6 +428,19 @@ export function DictationsPage() {
     setQuery("");
   }, []);
 
+  // Concept-modal handlers. `onSelectEntry` is fired from inside
+  // the modal when the user clicks a recent-entries row -- close
+  // the modal AND select that session in the detail pane.
+  const handleConceptOpen = useCallback((c: ActiveConcept) => {
+    setActiveConcept(c);
+  }, []);
+  const handleConceptClose = useCallback(() => {
+    setActiveConcept(null);
+  }, []);
+  const handleConceptSelectEntry = useCallback((entryId: number) => {
+    setSelectedId(entryId);
+  }, []);
+
   // Decide what to render in the list pane. Mirrors the pre-1C
   // priority order with the new filter-active empty state taking
   // precedence over the FTS-search "No results" empty state.
@@ -472,6 +493,7 @@ export function DictationsPage() {
           selectedId={selectedId}
           onSelect={setSelectedId}
           kgSummaries={kgEnabled ? kgSummaries : undefined}
+          onConceptOpen={kgEnabled ? handleConceptOpen : undefined}
         />
       );
     }
@@ -481,6 +503,7 @@ export function DictationsPage() {
         selectedId={selectedId}
         onSelect={setSelectedId}
         kgSummaries={kgEnabled ? kgSummaries : undefined}
+        onConceptOpen={kgEnabled ? handleConceptOpen : undefined}
       />
     );
   }, [
@@ -493,6 +516,7 @@ export function DictationsPage() {
     filterEntities.length,
     filterTags.length,
     clearAllFilters,
+    handleConceptOpen,
   ]);
 
   return (
@@ -555,6 +579,19 @@ export function DictationsPage() {
       </div>
 
       {toast ? <div className={styles.toast}>{toast}</div> : null}
+
+      {/* Phase 1C Wave 1C.4 / mb-sx6p -- single ConceptModal
+          instance at the page level. Stays mounted with
+          open=false (concept=null) between invocations so
+          successive opens don't flash a teardown frame. Gated on
+          kgEnabled at the chip layer (the modal's open state can
+          only flip via a chip click, which requires onConceptOpen,
+          which we only pass when kgEnabled). */}
+      <ConceptModal
+        concept={activeConcept}
+        onClose={handleConceptClose}
+        onSelectEntry={handleConceptSelectEntry}
+      />
     </>
   );
 }

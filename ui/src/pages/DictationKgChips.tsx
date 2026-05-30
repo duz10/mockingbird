@@ -17,8 +17,10 @@
 // signal. The component returns `null` in that case so the row
 // height stays unchanged.
 
+import type { MouseEvent } from "react";
+
 import { t } from "../i18n";
-import type { EntrySummary, FilingState } from "../lib/types";
+import type { ActiveConcept, EntrySummary, FilingState } from "../lib/types";
 
 import styles from "./DictationKgChips.module.css";
 
@@ -33,9 +35,18 @@ interface Props {
    *  when the row isn't in the summary map (legacy / never-filed
    *  session) -- we render `null` in that case. */
   summary: EntrySummary | undefined;
+  /** Phase 1C Wave 1C.4 / mb-sx6p -- dispatched when a chip is
+   *  clicked. Optional so existing call sites without modal
+   *  plumbing (none today, but future surfaces e.g. MeetingDetail)
+   *  can opt out and keep the chips visually inert. When omitted,
+   *  chips render as inert spans (Wave 1C.3 behaviour). When
+   *  present, chips render as native <button>s with
+   *  click-to-open-concept + stopPropagation so the row's
+   *  select-on-click doesn't fire underneath. */
+  onConceptOpen?: (concept: ActiveConcept) => void;
 }
 
-export function DictationKgChips({ summary }: Props) {
+export function DictationKgChips({ summary, onConceptOpen }: Props) {
   // Legacy / never-filed row: render nothing so the row height
   // doesn't shift between summary-present and summary-absent
   // states. A future wave may surface a "not yet indexed" pill;
@@ -63,23 +74,58 @@ export function DictationKgChips({ summary }: Props) {
     <div className={styles.strip} aria-label={t("kg.filter.heading")}>
       {hasEntities ? (
         <div className={styles.group}>
-          {entitiesShown.map((e) => (
-            <span
-              key={`e-${e.entityId}`}
-              className={styles.entity}
-              aria-label={t("kg.chip.entityAria").replace(
-                "{name}",
-                e.canonicalName,
-              )}
-              // Use native title= for the entity type so a hover
-              // surfaces person/place/thing without a custom
-              // tooltip primitive. Matches the failed-filings
-              // pattern in SettingsKgFailedFilings.
-              title={e.entityType}
-            >
-              {e.canonicalName}
-            </span>
-          ))}
+          {entitiesShown.map((e) =>
+            onConceptOpen ? (
+              <button
+                key={`e-${e.entityId}`}
+                type="button"
+                className={styles.entity}
+                aria-label={t("kg.chip.entityOpenAria").replace(
+                  "{name}",
+                  e.canonicalName,
+                )}
+                title={e.entityType}
+                onClick={(ev: MouseEvent<HTMLButtonElement>) => {
+                  // stopPropagation so the parent row's
+                  // onClick (select-this-session) doesn't fire
+                  // under the chip click. Mirrors the kickoff's
+                  // explicit guidance for 1C.4.
+                  ev.stopPropagation();
+                  onConceptOpen({
+                    kind: "entity",
+                    entityId: e.entityId,
+                  });
+                }}
+                onKeyDown={(ev) => {
+                  // The row swallows space + enter to trigger
+                  // select-this-session; stop those keys before
+                  // they bubble so the chip's native button
+                  // activation wins inside its own focus scope.
+                  if (ev.key === "Enter" || ev.key === " ") {
+                    ev.stopPropagation();
+                  }
+                }}
+              >
+                {e.canonicalName}
+              </button>
+            ) : (
+              <span
+                key={`e-${e.entityId}`}
+                className={styles.entity}
+                aria-label={t("kg.chip.entityAria").replace(
+                  "{name}",
+                  e.canonicalName,
+                )}
+                // Use native title= for the entity type so a hover
+                // surfaces person/place/thing without a custom
+                // tooltip primitive. Matches the failed-filings
+                // pattern in SettingsKgFailedFilings.
+                title={e.entityType}
+              >
+                {e.canonicalName}
+              </span>
+            ),
+          )}
           {entitiesOverflow > 0 ? (
             <span className={styles.overflow}>
               {t("kg.chip.more").replace("{count}", String(entitiesOverflow))}
@@ -90,19 +136,46 @@ export function DictationKgChips({ summary }: Props) {
 
       {hasTags ? (
         <div className={styles.group}>
-          {tagsShown.map((tag) => (
-            <span
-              key={`t-${tag.tagSlug}`}
-              className={styles.tag}
-              aria-label={t("kg.chip.tagAria").replace(
-                "{slug}",
-                tag.tagSlug,
-              )}
-            >
-              {t("kg.chip.tagPrefix")}
-              {tag.tagSlug}
-            </span>
-          ))}
+          {tagsShown.map((tag) =>
+            onConceptOpen ? (
+              <button
+                key={`t-${tag.tagSlug}`}
+                type="button"
+                className={styles.tag}
+                aria-label={t("kg.chip.tagOpenAria").replace(
+                  "{slug}",
+                  tag.tagSlug,
+                )}
+                onClick={(ev: MouseEvent<HTMLButtonElement>) => {
+                  ev.stopPropagation();
+                  onConceptOpen({
+                    kind: "tag",
+                    tagSlug: tag.tagSlug,
+                  });
+                }}
+                onKeyDown={(ev) => {
+                  if (ev.key === "Enter" || ev.key === " ") {
+                    ev.stopPropagation();
+                  }
+                }}
+              >
+                {t("kg.chip.tagPrefix")}
+                {tag.tagSlug}
+              </button>
+            ) : (
+              <span
+                key={`t-${tag.tagSlug}`}
+                className={styles.tag}
+                aria-label={t("kg.chip.tagAria").replace(
+                  "{slug}",
+                  tag.tagSlug,
+                )}
+              >
+                {t("kg.chip.tagPrefix")}
+                {tag.tagSlug}
+              </span>
+            ),
+          )}
           {tagsOverflow > 0 ? (
             <span className={styles.overflow}>
               {t("kg.chip.more").replace("{count}", String(tagsOverflow))}

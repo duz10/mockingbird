@@ -10,9 +10,11 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { api } from "../lib/tauri";
 import type {
+  EntityDetail,
   EntitySuggestion,
   EntrySummary,
   SearchFilter,
+  TagDetail,
   TagSuggestion,
 } from "../lib/types";
 
@@ -108,6 +110,85 @@ describe("api.kg_list_tags (fixture mode)", () => {
     if (!head) throw new Error("unreachable: asserted length above");
     expect(typeof head.tagSlug).toBe("string");
     expect(typeof head.mentionCount).toBe("number");
+  });
+});
+
+describe("api.kg_entity_detail (fixture mode, Wave 1C.4)", () => {
+  it("defaults to an empty entity payload (loading-state shape)", async () => {
+    const d = await api.kg_entity_detail(0);
+    expect(d.entityId).toBe(0);
+    expect(d.canonicalName).toBe("");
+    expect(d.aliases).toEqual([]);
+    expect(d.mentionCount).toBe(0);
+    expect(d.totalEntries).toBe(0);
+    expect(d.recentEntries).toEqual([]);
+  });
+
+  it("accepts recentLimit override without throwing", async () => {
+    await expect(api.kg_entity_detail(42, 10)).resolves.toBeDefined();
+    await expect(api.kg_entity_detail(42, undefined)).resolves.toBeDefined();
+  });
+
+  it("surfaces the full EntityDetail shape under override", async () => {
+    const override: EntityDetail = {
+      entityId: 7,
+      canonicalName: "Mrs. Chen",
+      entityType: "person",
+      aliases: ["Chen", "Mrs Chen"],
+      mentionCount: 12,
+      totalEntries: 4,
+      recentEntries: [
+        {
+          entryId: 100,
+          title: "Talked with Mrs. Chen about the calculus assignment",
+          capturedIso: "2026-05-30T10:00:00Z",
+          category: null,
+        },
+      ],
+    };
+    window.__MOCKINGBIRD_FIXTURES__ = { kg_entity_detail: override };
+    const d = await api.kg_entity_detail(7);
+    expect(d).toEqual(override);
+    // `category` is reserved null per the 1C.4 wire contract
+    // (mb-oji5 parking lot). Assert here so a future un-reserve
+    // (entity-side category badge) flags this test for review.
+    expect(d.recentEntries[0]?.category).toBeNull();
+  });
+});
+
+describe("api.kg_tag_detail (fixture mode, Wave 1C.4)", () => {
+  it("defaults to an empty tag payload (open-vocab unknown-slug shape)", async () => {
+    // Open-vocab semantics: an unknown slug is NOT an error; it
+    // resolves to zero counts + empty recentEntries. The default
+    // fixture mirrors that.
+    const d = await api.kg_tag_detail("never-seen-slug");
+    expect(d.tagSlug).toBe("");
+    expect(d.mentionCount).toBe(0);
+    expect(d.totalEntries).toBe(0);
+    expect(d.recentEntries).toEqual([]);
+  });
+
+  it("keyed by tagSlug (string), NOT a synthetic tagId -- ADR 0051 deviation", async () => {
+    // The kickoff prescribed `tag_id: i64` but the Rust side ships
+    // `tag_slug: String`. This test pins the wire shape so a
+    // future refactor toward synthetic ids fails loudly.
+    const override: TagDetail = {
+      tagSlug: "calculus",
+      mentionCount: 5,
+      totalEntries: 2,
+      recentEntries: [
+        {
+          entryId: 50,
+          title: "Calculus homework due Tuesday",
+          capturedIso: "2026-05-28T09:15:00Z",
+          category: null,
+        },
+      ],
+    };
+    window.__MOCKINGBIRD_FIXTURES__ = { kg_tag_detail: override };
+    const d = await api.kg_tag_detail("calculus", 50);
+    expect(d).toEqual(override);
+    expect(typeof d.tagSlug).toBe("string");
   });
 });
 

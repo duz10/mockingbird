@@ -1,0 +1,216 @@
+/* Concept modal — entity + tag drill-down sheet.
+ *
+ * Phase 1C Wave 1C.4 / ADR 0051 D4 (`mb-sx6p`). Composes the
+ * design-system `Dialog` primitive, which handles the native
+ * <dialog> chrome (focus trap, Escape, backdrop click). This
+ * stylesheet styles the *interior* layout only — the dialog frame
+ * + backdrop come from `Dialog.module.css`.
+ *
+ * Tokens-only — no hex/rgb/hsl literals. Dimensions sized to slot
+ * inside the design-system Dialog's `max-width: 440px`, with a
+ * widened cap below for the recent-entries list. */
+
+/* The dialog primitive caps width at 440px; the modal frequently
+ * needs to render a 50-row list, so we override on a wrapping
+ * class that the parent applies via the Dialog `className` slot.
+ * (The Dialog primitive doesn't expose className, so we use a
+ * scoped wrapper inside its `children` slot instead — see TSX.) */
+.shell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  align-items: stretch;
+  text-align: left;
+  min-width: 0;
+  /* Cap the modal at ~640px wide on roomy screens while still
+   * respecting the 90vw safety guard the Dialog primitive sets.
+   * On narrow viewports the Dialog primitive's `width: 90vw`
+   * dominates this. */
+  width: min(640px, 90vw);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.title {
+  margin: 0;
+  font: var(--type-lg);
+  color: var(--on-surf);
+  /* Truncate long entity names so a freakish canonical_name
+   * doesn't blow out the modal frame. Native title= surfaces the
+   * full string on hover. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.entityTypeBadge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 1px var(--s-2);
+  font: var(--type-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--on-surf-muted);
+  background: var(--surf-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+}
+
+.counters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-3);
+  font: var(--type-sm);
+  color: var(--on-surf-muted);
+}
+
+.aliasesGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.aliasesLabel {
+  font: var(--type-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--on-surf-muted);
+}
+
+.aliasesList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+}
+
+.aliasChip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--s-2);
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  background: var(--surf-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+}
+
+/* Recent-entries section ------------------------------------- */
+
+.recentSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  /* Cap the list height so a 50-row payload doesn't push the
+   * footer off-screen. The list itself becomes the inner
+   * scroller (single-page-scroller convention does not apply
+   * inside a modal — the modal IS the page from the user's
+   * perspective). */
+  min-height: 0;
+}
+
+.recentHeading {
+  font: var(--type-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--on-surf-muted);
+  margin: 0;
+}
+
+.recentList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+  /* Stable gutter so scroll-vs-no-scroll doesn't reflow the row
+   * widths. Matches the page-level convention in
+   * docs/design/conventions.md §2. */
+  scrollbar-gutter: stable;
+  padding-right: var(--s-1);
+}
+
+.recentRow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: var(--s-2) var(--s-3);
+  background: var(--surf-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  color: var(--on-surf);
+  font: var(--type-sm);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.recentRow:hover,
+.recentRow:focus-visible {
+  background: var(--surf-3);
+  border-color: var(--on-surf-faint);
+}
+/* The global focus-visible rule in design/global.css applies a
+ * 2px primary-toned outline to every interactive element via the
+ * `button` selector — no per-component override needed. Hover
+ * state above gives a subtle background hint for mouse users. */
+
+.recentRowTitle {
+  font: var(--type-sm);
+  color: var(--on-surf);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.recentRowMeta {
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+}
+
+.recentEmpty {
+  font: var(--type-sm);
+  color: var(--on-surf-muted);
+  font-style: italic;
+}
+
+/* Footer --------------------------------------------------------- */
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s-3);
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--border);
+}
+
+.footerStat {
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+}
+
+.loadingRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-4);
+}
+
+.errorRow {
+  padding: var(--s-3);
+  background: oklch(from var(--status-error) l c h / 0.12);
+  border: 1px solid oklch(from var(--status-error) l c h / 0.35);
+  border-radius: var(--r-2);
+  color: var(--on-surf);
+  font: var(--type-sm);
+}
