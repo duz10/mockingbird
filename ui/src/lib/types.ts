@@ -393,6 +393,79 @@ export interface QueueStatus {
   lastDoneIso: string | null;
 }
 
+/** Phase 1C Wave 1C.3 — combinable retrieval filter sent to
+ *  `kg_search_entries`. Mirror of `SearchFilterArg` in
+ *  `src-tauri/src/commands/kg.rs` (which maps onto the store-layer
+ *  `SearchFilter` in `kg::store::search`). Semantics:
+ *    * within-axis OR (any entity in `entities` matches; any tag
+ *      in `tags` matches; the free-text `query` runs against
+ *      entity canonical_name + tag_slug)
+ *    * across-axis AND (entity AND tag AND query, when set)
+ *  Empty filter is short-circuited UI-side — never sent on the wire. */
+export interface SearchFilter {
+  entities: number[];
+  tags: string[];
+  query?: string;
+}
+
+/** Phase 1C Wave 1C.3 — entity-chip autocomplete row.
+ *  Mirror of `EntitySuggestion` in `kg::store::search`. Ordered
+ *  DESC by `mentionCount` server-side, so the UI can render the
+ *  list as-is for the "most-used first" autocomplete UX. */
+export interface EntitySuggestion {
+  entityId: number;
+  canonicalName: string;
+  entityType: string;
+  mentionCount: number;
+}
+
+/** Phase 1C Wave 1C.3 — tag-chip autocomplete row.
+ *  Mirror of `TagSuggestion` in `kg::store::search`. Tags in 1B are
+ *  open-vocab and keyed by `tag_slug` (no synthesised `tagId`). */
+export interface TagSuggestion {
+  tagSlug: string;
+  mentionCount: number;
+}
+
+/** Phase 1C Wave 1C.3 — per-row entity chip rendered in the
+ *  Dictations list KG strip. Mirror of `EntityRef` in
+ *  `kg::store::search`. */
+export interface EntityRef {
+  entityId: number;
+  canonicalName: string;
+  entityType: string;
+}
+
+/** Phase 1C Wave 1C.3 — per-row tag chip. Mirror of `TagRef` in
+ *  `kg::store::search`. Slug doubles as identifier + display label
+ *  in 1B. */
+export interface TagRef {
+  tagSlug: string;
+}
+
+/** Phase 1C Wave 1C.3 — per-row filing-state pill.
+ *  Mirror of `FilingState` in `kg::store::search`. Wire form is
+ *  snake_case (serde `rename_all = "snake_case"`). `not_enqueued`
+ *  + `done` both render "no pill" — they're distinct on the wire
+ *  so legacy / never-filed rows don't misleadingly claim success. */
+export type FilingState =
+  | "not_enqueued"
+  | "pending"
+  | "processing"
+  | "done"
+  | "failed";
+
+/** Phase 1C Wave 1C.3 — batched per-row chip + filing-state
+ *  payload returned by `kg_entries_summary`. Mirror of
+ *  `EntrySummary` in `kg::store::search`. Server orders
+ *  `entities` by mention rank DESC so callers can slice off the
+ *  top-5 without re-sorting. */
+export interface EntrySummary {
+  entities: EntityRef[];
+  tags: TagRef[];
+  filingState: FilingState;
+}
+
 /** Phase MC Wave 5 — typed snapshot of the meeting-side `SettingKey`
  *  registry. Mirrors `MeetingSettingsSnapshot` in
  *  `src-tauri/src/commands/settings.rs`. Read via

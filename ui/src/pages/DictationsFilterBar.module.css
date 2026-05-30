@@ -1,0 +1,175 @@
+/* Filter bar above the search input on the Dictations page.
+ * Phase 1C Wave 1C.3 / ADR 0051. */
+
+.bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  background: var(--surf-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.heading {
+  font: var(--type-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--on-surf-muted);
+  letter-spacing: 0.04em;
+}
+
+.picker {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.pickerLabel {
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+}
+
+/* Row that hosts the selected chips + the input. Chips wrap, the
+ * input claims the rest of the row width via `flex: 1` so the
+ * caret sits naturally after the last chip. */
+.chipsRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-1);
+  padding: var(--s-1) var(--s-2);
+  background: var(--surf-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+}
+
+.chipsRow:focus-within {
+  outline: 2px solid var(--mode-normal);
+  outline-offset: 1px;
+  border-color: var(--mode-normal);
+}
+
+.selectedChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: 2px var(--s-2);
+  background: oklch(from var(--mode-normal) l c h / 0.18);
+  border: 1px solid oklch(from var(--mode-normal) l c h / 0.35);
+  border-radius: var(--r-pill);
+  font: var(--type-xs);
+  color: var(--on-surf);
+}
+
+.selectedChipText {
+  max-width: 18ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.removeBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-pill);
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.removeBtn:hover { opacity: 1; background: oklch(from var(--mode-normal) l c h / 0.25); }
+.removeBtn:focus-visible {
+  outline: 2px solid var(--mode-normal);
+  outline-offset: 1px;
+  opacity: 1;
+}
+
+.input {
+  flex: 1;
+  min-width: 6ch;
+  padding: 2px 0;
+  background: transparent;
+  border: 0;
+  font: var(--type-sm);
+  font-family: inherit;
+  color: var(--on-surf);
+}
+.input:focus { outline: none; }
+.input::placeholder { color: var(--on-surf-faint); }
+
+/* Suggestions popover. Positioned over the column rather than the
+ * full page width so it doesn't escape the sidebar. max-height +
+ * overflow auto so a 50-row autocomplete stays bounded. */
+.popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  list-style: none;
+  margin: var(--s-1) 0 0 0;
+  padding: var(--s-1) 0;
+  background: var(--surf-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  box-shadow: var(--shadow-2);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.popoverRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-1) var(--s-3);
+  cursor: pointer;
+}
+.popoverRow:hover { background: var(--surf-3); }
+
+.popoverRowName {
+  font: var(--type-sm);
+  color: var(--on-surf);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popoverRowMeta {
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.popoverEmpty {
+  padding: var(--s-2) var(--s-3);
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+}
+
+.popoverError {
+  padding: var(--s-2) var(--s-3);
+  font: var(--type-xs);
+  color: var(--on-surf);
+  background: oklch(from var(--status-error) l c h / 0.16);
+  border-radius: var(--r-2);
+  margin: var(--s-1);
+}

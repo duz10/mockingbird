@@ -5099,3 +5099,24 @@ Whisper) closed via ADR 0029 as its architectural closer.
   `$clean = Get-Content $f | Where-Object …; $clean | Set-Content
   $f`.
 
+
+## 2026-05-30 [kg-phase-1c-wave-1c.3 ui] noUncheckedIndexedAccess makes CSS-module class lookups string|undefined - declare it through
+
+- Context: building the FilingPill component in DictationKgChips.tsx, I declared a centralised mapping table returning `{ ariaKey: string; toneClass: string; title?: string } | null`. TS rejected `styles.pillPending` for `toneClass` with "string|undefined not assignable to string".
+- Finding: ui/tsconfig.json sets `noUncheckedIndexedAccess: true`. CSS-module `styles.foo` lookups go through the index signature and widen to `string | undefined`. The existing codebase mostly sidesteps this by passing `styles.foo` straight into `className=` (which accepts undefined). Builders of intermediate mapping tables / variant maps need to declare the toneClass slot as `string | undefined` and rely on `className=` swallowing the undefined.
+- Action: when introducing a CSS-module-keyed mapping table, type the class slot as `string | undefined` from the start. Alternative: switch the field to `keyof typeof styles` if you want compile-time class-name validation, but that's heavier and overkill for one-shot tables.
+- Tag: ui, tokens-adjacent
+
+## 2026-05-30 [kg-phase-1c-wave-1c.3 ui] Three-way component extraction from Dictations.tsx hit the 600-LoC ceiling on the second pass
+
+- Context: Dictations.tsx was 830 lines BEFORE wave 1C.3 even started touching it. Kickoff "Pre-flight finding" warned this would happen. I extracted DictationsLlmPassCard (~225 lines saved) and DictationsList (SessionList + SearchHitsList + renderStatusPill, ~135 lines saved) -- got to 721. Still over. Had to extract DictationsDetailPane (~180 lines saved) on a second pass to land at 549.
+- Finding: when a file is already over the ceiling AND the wave adds 100+ lines of new orchestration code, two extractions are not enough. The DetailView/Stage pair was the third natural seam (~180 lines together) and the right one to extract because the detail pane is the next likely place to grow (Wave 1C.4 concept-modal entry point lives there).
+- Action: when a kickoff flags a file as over-ceiling, plan THREE extractions up front, not two. Each extraction has setup/import-rewiring cost (~10 LoC overhead per file), so the math is "raw saved LoC - 30 + new LoC added". Budget accordingly.
+- Tag: ui, file-size
+
+## 2026-05-30 [kg-phase-1c-wave-1c.3 ui] Backend HashMap<i64, EntrySummary> serializes as Record<string, T> at the IPC boundary
+
+- Context: `kg_entries_summary(entry_ids) -> HashMap<i64, EntrySummary>` looks like a numeric-keyed map in Rust. After it crosses the Tauri/serde JSON boundary, the keys are strings (JSON object keys are always strings). Tried `summary[1]` in the consumer first, got `undefined`.
+- Finding: typed the IPC wrapper as `Record<string, EntrySummary>` and made consumers stringify the lookup (`summaries[String(sessionId)]`). Added an explicit test asserting `Object.keys(map)[0]` is a string so a future migration to `Vec<(i64, EntrySummary)>` (which WOULD preserve numeric keys via array-of-tuples) breaks the test instead of silently flipping the indexing pattern.
+- Action: for any Rust `HashMap<i64|u64|i32, T>` IPC return, default the TS shape to `Record<string, T>` and document the stringify-the-key contract at the type definition + assert it in a test. If a future caller wants real i64 keys (e.g. iteration ordering matters), promote the Rust signature to `Vec<(i64, T)>` -- that's a deliberate choice, not a silent drift.
+- Tag: ui, ipc

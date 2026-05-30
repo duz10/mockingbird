@@ -1,58 +1,84 @@
-// Dictations page — list + detail in a two-pane layout. Shows the
+// Dictations page -- list + detail in a two-pane layout. Shows the
 // history of past dictation sessions (Right-Alt push-to-talk).
 // Sibling to the Meetings page; *not* the same thing as meeting
 // recordings.
 //
 // **Renamed from "History" 2026-05-21.** Internal Rust event names
-// (`history:session-saved`) are left alone — sealed Phase 4 code,
+// (`history:session-saved`) are left alone -- sealed Phase 4 code,
 // and the wire-name has no user impact. The i18n keys, route, and
 // component names all moved to `dictations.*` / `/dictations` /
 // `DictationsPage` so the new naming is consistent from the source
 // down.
 //
-// Why no virtual scrolling: the session list is bounded (we'll add a
-// "Load more" affordance when the user hits the bottom). Real users
-// hit 40-200 sessions per week; a virtualized list would be a YAGNI
-// dep until someone shows up with 50k rows. If/when that happens,
-// promote the .list scroll container to react-window without changing
-// any other prop.
+// Why no virtual scrolling: the session list is bounded (we'll add
+// a "Load more" affordance when the user hits the bottom). Real
+// users hit 40-200 sessions per week; a virtualized list would be
+// a YAGNI dep until someone shows up with 50k rows. If/when that
+// happens, promote the .list scroll container to react-window
+// without changing any other prop.
 //
-// Search uses the FTS5 endpoint when the query is non-empty (debounced
-// 200 ms). Empty query => normal `list_sessions` paged from offset 0.
-// Selecting a hit jumps to that session's detail view.
+// Search uses the FTS5 endpoint when the query is non-empty
+// (debounced 200 ms). Empty query => normal `list_sessions` paged
+// from offset 0. Selecting a hit jumps to that session's detail
+// view.
+//
+// Phase 1C Wave 1C.3 / ADR 0051 (`mb-5ly5`) -- Knowledge Graph
+// retrieval surfaces. When `KgGraphEnabled === true`:
+//   * `DictationsFilterBar` mounts above the search input with
+//     entity + tag multi-select chips.
+//   * Per-row `DictationKgChips` strip renders under each session
+//     row in the list (top-5 entity chips + top-5 tag chips + a
+//     filing-state pill when not silent).
+//   * When any chip is selected, the visible session list is
+//     intersected with `kgSearchEntries(filter)`. The free-text
+//     search box ALSO threads into the filter's `query` field
+//     (UNION-style: result list = entity/tag-name hits OR the
+//     existing FTS hits) per Wave brief D6.
+//   * Per-row chip + filing-state data is fetched in ONE batched
+//     `kgEntriesSummary(visibleIds)` call (per-row firing is a
+//     stop condition).
+// When `KgGraphEnabled === false`, every KG surface stays hidden
+// -- behavior is identical to the pre-1C Dictations page, which
+// is the `kg-graph-off-ui-untouched` invariant pinned for the
+// 1C.5 judge bundle.
+//
+// Sub-component layout:
+//   * `DictationsFilterBar`        -- KG retrieval filter chips
+//   * `DictationsList` /
+//     `SessionList`+`SearchHitsList` -- list-pane rendering
+//   * `DictationsLlmPassCard`      -- on-demand LLM pass card
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast as sonnerToast } from "sonner";
 
 import {
   Button,
-  Card,
   EmptyState,
   PageHeader,
-  Pill,
   Spinner,
 } from "../components/primitives";
-import { LlmRunButton } from "../components/LlmRunButton";
 import { DictationRecordButton } from "./DictationRecordButton";
-import {
-  CheckIcon,
-  CopyIcon,
-  HistoryIcon,
-  PlusIcon,
-  SearchIcon,
-  TrashIcon,
-} from "../design/Icon";
+import { HistoryIcon, PlusIcon, SearchIcon } from "../design/Icon";
 import { t } from "../i18n";
-import {
-  formatDuration,
-  formatRelative,
-  formatTimestamp,
-  prettyAppName,
-  truncate,
-} from "../lib/format";
 import { useAppStore } from "../lib/store";
 import { api, isTauri } from "../lib/tauri";
-import type { SessionDetail, SessionSummary, TranscriptSearchHit } from "../lib/types";
+import type {
+  SearchFilter,
+  SessionDetail,
+  SessionSummary,
+  TranscriptSearchHit,
+} from "../lib/types";
 
+import { DictationsDetailPane } from "./DictationsDetailPane";
+import {
+  DictationsFilterBar,
+  type SelectedEntity,
+} from "./DictationsFilterBar";
+import {
+  SearchHitsList,
+  SessionList,
+  type KgSummaryMap,
+} from "./DictationsList";
 import styles from "./Dictations.module.css";
 
 const PAGE_SIZE = 50;
@@ -60,18 +86,53 @@ const SEARCH_DEBOUNCE_MS = 200;
 
 export function DictationsPage() {
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
-  const [searchHits, setSearchHits] = useState<TranscriptSearchHit[] | null>(null);
+  const [searchHits, setSearchHits] = useState<TranscriptSearchHit[] | null>(
+    null,
+  );
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  // ADR 0046 §3.2 / mb-7vyz — "+ Audio file" import in-flight flag.
-  // Disables the button + swaps the label so a slow whisper-rs pass
-  // (~real-time on Voice-Memo-grade clips) can't be retriggered by an
-  // impatient double-click.
   const [isImporting, setIsImporting] = useState(false);
 
+  // ── Phase 1C Wave 1C.3 KG state ────────────────────────────────
+  //
+  // The toggle is read once on mount. The Wave 1C.1 worker promotion
+  // means a flip in Settings takes effect within ~5s for the
+  // BACKEND, but the UI surface is decided at mount and stays
+  // stable for the lifetime of the Dictations page (it'd be
+  // jarring to have the filter bar appear / disappear under the
+  // user mid-session). A future wave can promote to a live store
+  // subscription if real users hit the seam.
+  const [kgEnabled, setKgEnabled] = useState(false);
+  const [filterEntities, setFilterEntities] = useState<SelectedEntity[]>([]);
+  const [filterTags, setFilterTags] = useState<string[]>([]);
+  // Result of `kg_search_entries(filter)`. `null` = no filter
+  // active (use the base list); array (possibly empty) = filter
+  // active.
+  const [kgMatchIds, setKgMatchIds] = useState<Set<number> | null>(null);
+  const [kgSummaries, setKgSummaries] = useState<KgSummaryMap>({});
+  // Refresh nonce for the summary effect -- bumped on tab focus
+  // (D8 refresh strategy: no polling, no Tauri events).
+  const [summaryNonce, setSummaryNonce] = useState(0);
+
   const setSelectedSession = useAppStore((s) => s.setSelectedSession);
+
+  // Initial KG-enabled fetch. Independent of the list fetch so a
+  // slow KG settings read can't block the page render.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const s = await api.kg_settings_get_all();
+        setKgEnabled(s.kgGraphEnabled);
+      } catch {
+        // Silent fall-through: if the IPC fails we treat KG as
+        // disabled. Matches the `kg-graph-off-ui-untouched`
+        // invariant default.
+        setKgEnabled(false);
+      }
+    })();
+  }, []);
 
   // Initial list fetch.
   useEffect(() => {
@@ -80,19 +141,17 @@ export function DictationsPage() {
       setSessions(list);
       if (list[0] && selectedId === null) setSelectedId(list[0].id);
     })();
-    // selectedId intentionally omitted — we only auto-pick on first load.
+    // selectedId intentionally omitted -- we only auto-pick on
+    // first load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Live-refresh: the Rust orchestrator emits `history:session-saved`
-  // after each new row (Complete or Error) is committed to the DB.
-  // We refetch the list silently — preserving the user's current
-  // `selectedId` so they aren't yanked away from an old session
-  // they're reading. The new row simply appears at the top.
-  //
-  // Deliberately does NOT auto-select the new row, because the user
-  // may be triaging an older one. If they want the freshly-dictated
-  // session, the list's top entry is one click away.
+  // Live-refresh: the Rust orchestrator emits
+  // `history:session-saved` after each new row (Complete or Error)
+  // is committed to the DB. We refetch the list silently --
+  // preserving the user's current `selectedId` so they aren't
+  // yanked away from an old session they're reading. The new row
+  // simply appears at the top.
   //
   // Dynamic import keeps `@tauri-apps/api/event` out of the
   // fixture/preview bundle (same pattern RecordingWindow uses).
@@ -105,16 +164,11 @@ export function DictationsPage() {
       unlisten = await listen<{ sessionId: number }>(
         "history:session-saved",
         () => {
-          // Don't refetch on a stale listener if the component
-          // unmounted between event fire and async resolution.
           if (cancelled) return;
           void (async () => {
             const list = await api.list_sessions(PAGE_SIZE, 0);
             if (cancelled) return;
             setSessions(list);
-            // If nothing was selected yet (e.g. very first dictation
-            // since app launch with empty history), pick the new row.
-            // Otherwise keep the current selection untouched.
             setSelectedId((prev) => prev ?? list[0]?.id ?? null);
           })();
         },
@@ -126,7 +180,7 @@ export function DictationsPage() {
     };
   }, []);
 
-  // Debounced search.
+  // Debounced FTS5 search. Unchanged from pre-1C behaviour.
   useEffect(() => {
     if (query.trim().length === 0) {
       setSearchHits(null);
@@ -140,6 +194,64 @@ export function DictationsPage() {
     }, SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(handle);
   }, [query]);
+
+  // ── KG filter resolution ──────────────────────────────────────
+  //
+  // Build the wire filter from local state. When KG is off OR all
+  // axes are empty (no chips AND no query) we set `kgMatchIds` to
+  // null and short-circuit -- saves a no-op IPC and matches the
+  // server's `SearchFilter::is_empty()` semantics.
+  //
+  // D6 (search-box extension): when KG is ON, the existing query
+  // string ALSO goes into the filter's `query` axis. The result
+  // list is therefore "entity/tag-name hits OR FTS hits" -- the
+  // server-side filter contributes one set; the FTS path
+  // contributes the other; the final visible list is the union
+  // computed below in `leftPaneContent`.
+  const filterIsActive =
+    kgEnabled &&
+    (filterEntities.length > 0 ||
+      filterTags.length > 0 ||
+      query.trim().length > 0);
+
+  useEffect(() => {
+    if (!filterIsActive) {
+      setKgMatchIds(null);
+      return;
+    }
+    const filter: SearchFilter = {
+      entities: filterEntities.map((e) => e.entityId),
+      tags: filterTags,
+      query: query.trim().length > 0 ? query.trim() : undefined,
+    };
+    // 200 ms debounce -- chip-add fires synchronously but a fast
+    // typist hitting the search box benefits from the same window
+    // the FTS path uses.
+    const handle = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const ids = await api.kg_search_entries(filter);
+          setKgMatchIds(new Set(ids));
+        } catch (err) {
+          // Surface as a sonner toast (per kickoff brief: reuse the
+          // app-wide Toaster mounted in main.tsx instead of
+          // reinventing inline state). Treat the failure as
+          // "empty match set" so the empty-state CTA gives the
+          // user a way out.
+          setKgMatchIds(new Set());
+          sonnerToast.error(
+            t("kg.filter.loadError").replace("{error}", String(err)),
+          );
+        }
+      })();
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(handle);
+  }, [
+    filterIsActive,
+    filterEntities,
+    filterTags,
+    query,
+  ]);
 
   // Fetch detail when selection changes.
   useEffect(() => {
@@ -161,8 +273,9 @@ export function DictationsPage() {
     window.setTimeout(() => setToast(null), 1600);
   }, []);
 
-  // Action handlers — close over the current detail. They re-resolve
-  // session list after destructive ops so the UI stays consistent.
+  // Action handlers -- close over the current detail. They
+  // re-resolve session list after destructive ops so the UI stays
+  // consistent.
   const handleDelete = useCallback(async () => {
     if (!detail) return;
     if (!window.confirm(t("dictations.action.delete") + "?")) return;
@@ -181,12 +294,11 @@ export function DictationsPage() {
 
   const handleCopy = useCallback(async () => {
     if (!detail) return;
-    await navigator.clipboard.writeText(detail.final || detail.cleaned || detail.raw);
+    await navigator.clipboard.writeText(
+      detail.final || detail.cleaned || detail.raw,
+    );
     // ADR 0047 §Wave 2.5 / mb-v2fa -- manual Copy is an
-    // edit-equivalent action: the user is moving the text by hand,
-    // which usually means the auto-injection didn't land where it
-    // needed to or they want it somewhere else. Fire-and-forget;
-    // backend conditionally no-ops outside the 5-min window.
+    // edit-equivalent action.
     void api
       .dictation_mark_edit_observed(detail.session.id)
       .catch(() => {
@@ -195,13 +307,7 @@ export function DictationsPage() {
     showToast(t("dictations.copied"));
   }, [detail, showToast]);
 
-  // ADR 0046 §3.2 / mb-7vyz — desktop audio-file import. User picks
-  // a .m4a / .mp3 / .wav / etc; the orchestrator decodes + runs the
-  // full pipeline (VAD trim → STT → cleanup → DB persist). On
-  // success the SessionsEventBus event already triggers a refetch via
-  // the listen() effect above, so the explicit setSessions here is
-  // belt-and-suspenders (and ensures the new row appears even in
-  // browser-preview where there's no event bus).
+  // ADR 0046 §3.2 / mb-7vyz -- desktop audio-file import.
   const handleImport = useCallback(async () => {
     setIsImporting(true);
     try {
@@ -210,12 +316,11 @@ export function DictationsPage() {
       setSessions(list);
       setSelectedId(summary.sessionId);
       const preview = summary.transcriptPreview.trim();
-      showToast(preview.length > 0 ? `Imported: ${preview}` : "Imported audio file");
+      showToast(
+        preview.length > 0 ? `Imported: ${preview}` : "Imported audio file",
+      );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      // The Rust side returns the literal string `"cancelled"` on
-      // user-dismissed picker — that's not a failure, just suppress
-      // the toast. Anything else is real and worth surfacing.
       if (msg !== "cancelled") {
         showToast(`Import failed: ${msg}`);
       }
@@ -224,10 +329,105 @@ export function DictationsPage() {
     }
   }, [showToast]);
 
-  // Decide what to render in the list pane.
+  // ── Visible-id resolution & batched summary fetch ─────────────
+  //
+  // The visible set is whatever the list pane will render below.
+  // We compute it here (once) and feed both into the rendered
+  // sublist AND into the summary effect.
+  //
+  // When KG is OFF: identical to pre-1C -- whichever of
+  // `searchHits` / `sessions` is the active source. `visibleSessions`
+  // / `visibleHits` are derived references; the rendering path
+  // below switches on `searchHits` non-null exactly as before.
+  //
+  // When KG is ON + filter active: intersect the active source
+  // with `kgMatchIds`. When KG is ON but filter empty: identical
+  // to the off path (no IPC fired).
+  const visibleSessions = useMemo(() => {
+    if (!sessions) return null;
+    if (kgEnabled && kgMatchIds !== null) {
+      return sessions.filter((s) => kgMatchIds.has(s.id));
+    }
+    return sessions;
+  }, [sessions, kgEnabled, kgMatchIds]);
+
+  const visibleHits = useMemo(() => {
+    if (!searchHits) return null;
+    if (kgEnabled && kgMatchIds !== null) {
+      return searchHits.filter((h) => kgMatchIds.has(h.sessionId));
+    }
+    return searchHits;
+  }, [searchHits, kgEnabled, kgMatchIds]);
+
+  // Batched per-row chip + filing-state fetch. Single IPC for the
+  // entire visible list -- per-row firing is the kickoff stop
+  // condition. Refreshes on filter change (implicit via deps) and
+  // on tab focus (`summaryNonce` bump below).
+  useEffect(() => {
+    if (!kgEnabled) {
+      setKgSummaries({});
+      return;
+    }
+    const ids = visibleHits
+      ? Array.from(new Set(visibleHits.map((h) => h.sessionId)))
+      : visibleSessions
+        ? visibleSessions.map((s) => s.id)
+        : [];
+    if (ids.length === 0) {
+      setKgSummaries({});
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const map = await api.kg_entries_summary(ids);
+        if (!cancelled) setKgSummaries(map);
+      } catch {
+        if (!cancelled) setKgSummaries({});
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [kgEnabled, visibleSessions, visibleHits, summaryNonce]);
+
+  // D8 refresh-on-focus. No polling, no Tauri event subscription
+  // this wave -- the wave brief explicitly forbids both. We bump
+  // the summary nonce so the batched-fetch effect re-runs with
+  // the same id set.
+  useEffect(() => {
+    if (!kgEnabled) return;
+    const onFocus = () => setSummaryNonce((n) => n + 1);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        setSummaryNonce((n) => n + 1);
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [kgEnabled]);
+
+  // Clear-all helper for the FilterBar's "Clear filters" button.
+  // Resets every axis (chips + query) so the empty-state CTA
+  // brings the user back to the base list in one click.
+  const clearAllFilters = useCallback(() => {
+    setFilterEntities([]);
+    setFilterTags([]);
+    setQuery("");
+  }, []);
+
+  // Decide what to render in the list pane. Mirrors the pre-1C
+  // priority order with the new filter-active empty state taking
+  // precedence over the FTS-search "No results" empty state.
   const leftPaneContent = useMemo(() => {
-    if (sessions === null) return <Spinner />;
-    if (sessions.length === 0) {
+    if (visibleSessions === null) return <Spinner />;
+    if (sessions !== null && sessions.length === 0) {
+      // True base-state empty: no sessions exist at all. The
+      // historical empty state (not a filter-driven one).
       return (
         <EmptyState
           icon={<HistoryIcon size={28} />}
@@ -236,23 +436,64 @@ export function DictationsPage() {
         />
       );
     }
-    if (searchHits !== null) {
+    // Filter-active empty state. Distinct from the "no sessions"
+    // state above so the CTA differs ("Clear filters" vs "press
+    // Right Alt to dictate").
+    const anyActive =
+      kgEnabled &&
+      (filterEntities.length > 0 || filterTags.length > 0);
+    const filterActiveNoMatches =
+      anyActive &&
+      ((visibleHits !== null && visibleHits.length === 0) ||
+        (visibleHits === null && visibleSessions.length === 0));
+    if (filterActiveNoMatches) {
+      return (
+        <EmptyState
+          icon={<SearchIcon size={28} />}
+          title={t("kg.filter.empty.title")}
+          subtitle={t("kg.filter.empty.subtitle")}
+          action={
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearAllFilters}
+              ariaLabel={t("kg.filter.clear")}
+            >
+              {t("kg.filter.clear")}
+            </Button>
+          }
+        />
+      );
+    }
+    if (visibleHits !== null) {
       return (
         <SearchHitsList
-          hits={searchHits}
+          hits={visibleHits}
           selectedId={selectedId}
           onSelect={setSelectedId}
+          kgSummaries={kgEnabled ? kgSummaries : undefined}
         />
       );
     }
     return (
       <SessionList
-        sessions={sessions}
+        sessions={visibleSessions}
         selectedId={selectedId}
         onSelect={setSelectedId}
+        kgSummaries={kgEnabled ? kgSummaries : undefined}
       />
     );
-  }, [sessions, searchHits, selectedId]);
+  }, [
+    sessions,
+    visibleSessions,
+    visibleHits,
+    selectedId,
+    kgEnabled,
+    kgSummaries,
+    filterEntities.length,
+    filterTags.length,
+    clearAllFilters,
+  ]);
 
   return (
     <>
@@ -276,19 +517,36 @@ export function DictationsPage() {
       <div className={styles.shell}>
         <div className={styles.leftPane}>
           {/* ADR 0045: programmatic start/stop, sibling to Right-Alt
-              PTT. Self-contained — owns its own dictation:state sub. */}
+              PTT. Self-contained -- owns its own dictation:state
+              subscription. */}
           <DictationRecordButton />
+
+          {/* Phase 1C Wave 1C.3 -- KG filter bar. Gated on the
+              activation toggle (kg-graph-off-ui-untouched invariant). */}
+          {kgEnabled ? (
+            <DictationsFilterBar
+              entities={filterEntities}
+              tags={filterTags}
+              onEntitiesChange={setFilterEntities}
+              onTagsChange={setFilterTags}
+              onClearAll={clearAllFilters}
+            />
+          ) : null}
+
           <SearchInput value={query} onChange={setQuery} />
           {leftPaneContent}
         </div>
 
         <div className={styles.rightPane}>
           {detail ? (
-            <DetailView
+            <DictationsDetailPane
               detail={detail}
               onDelete={handleDelete}
               onMarkExample={handleMark}
               onCopy={handleCopy}
+              kgSummary={
+                kgEnabled ? kgSummaries[String(detail.session.id)] : undefined
+              }
             />
           ) : sessions && sessions.length === 0 ? null : (
             <Spinner />
@@ -302,7 +560,7 @@ export function DictationsPage() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Search input                                                         */
+/* Search input                                                       */
 /* ------------------------------------------------------------------ */
 
 function SearchInput({
@@ -329,502 +587,4 @@ function SearchInput({
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* List variants                                                        */
-/* ------------------------------------------------------------------ */
 
-function SessionList({
-  sessions,
-  selectedId,
-  onSelect,
-}: {
-  sessions: SessionSummary[];
-  selectedId: number | null;
-  onSelect: (id: number) => void;
-}) {
-  return (
-    <div className={styles.list} role="listbox" aria-label="Sessions">
-      {sessions.map((s) => (
-        <SessionRow
-          key={s.id}
-          session={s}
-          active={s.id === selectedId}
-          onClick={() => onSelect(s.id)}
-        />
-      ))}
-    </div>
-  );
-}
-
-/* ADR 0045 + mb-tfyp — list-pill semantics.
- *
- * Priority order (highest wins):
- *   1. `startMode === 'in_app'` → render `IN_APP` (neutral, glass-faint).
- *      In-app sessions don't have a target app, so the legacy abort
- *      heuristic doesn't apply and the row should never wear the red
- *      `ABORTED_FOCUS_CHANGED` pill — even if the underlying
- *      injection_status string still happens to read "aborted" on
- *      legacy rows. The semantic is "captured a transcript, no
- *      injection by design."
- *   2. `injectionStatus === 'ok'` → no pill (the happy path is silent).
- *   3. anything else → red error pill with the verbatim status.
- */
-function renderStatusPill(session: SessionSummary) {
-  if (session.startMode === "in_app") {
-    return (
-      <>
-        <span>·</span>
-        {/* `status-info` matches the rest of the app's "informational,
-            not an error" pill convention (ActivityBlocks "edited",
-            Meetings search channel chips). Critically NOT
-            `status-error` — in-app sessions are by design, not a
-            failure. */}
-        <Pill tone="status-info">IN_APP</Pill>
-      </>
-    );
-  }
-  if (session.injectionStatus === "ok") return null;
-  return (
-    <>
-      <span>·</span>
-      <Pill tone="status-error">{session.injectionStatus}</Pill>
-    </>
-  );
-}
-
-function SessionRow({
-  session,
-  active,
-  onClick,
-}: {
-  session: SessionSummary;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <div
-      className={`${styles.row} ${active ? styles.rowActive : ""}`}
-      onClick={onClick}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onClick();
-        }
-      }}
-      role="option"
-      aria-selected={active}
-      tabIndex={0}
-    >
-      <div className={styles.rowHeader}>
-        <Pill tone={`mode-${session.modeSlug}`}>{session.modeSlug}</Pill>
-        <span className={styles.rowTime}>
-          {formatTimestamp(session.startedAt)}
-        </span>
-      </div>
-      <div className={styles.rowText}>{truncate(session.finalText, 160)}</div>
-      <div className={styles.rowMeta}>
-        <span>{prettyAppName(session.foregroundApp)}</span>
-        <span>·</span>
-        <span>{formatDuration(session.durationMs)}</span>
-        {renderStatusPill(session)}
-      </div>
-    </div>
-  );
-}
-
-function SearchHitsList({
-  hits,
-  selectedId,
-  onSelect,
-}: {
-  hits: TranscriptSearchHit[];
-  selectedId: number | null;
-  onSelect: (id: number) => void;
-}) {
-  if (hits.length === 0) {
-    return (
-      <EmptyState
-        icon={<SearchIcon size={28} />}
-        title={t("dictations.search.noResults")}
-      />
-    );
-  }
-  return (
-    <div className={styles.list} role="listbox" aria-label="Search results">
-      {hits.map((h) => (
-        <div
-          key={`${h.sessionId}-${h.stage}`}
-          className={`${styles.row} ${h.sessionId === selectedId ? styles.rowActive : ""}`}
-          onClick={() => onSelect(h.sessionId)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              onSelect(h.sessionId);
-            }
-          }}
-          role="option"
-          aria-selected={h.sessionId === selectedId}
-          tabIndex={0}
-        >
-          <div className={styles.rowHeader}>
-            <Pill tone={`mode-${h.modeSlug}`}>{h.modeSlug}</Pill>
-            <span className={styles.rowTime}>
-              {formatTimestamp(h.startedAt)}
-            </span>
-          </div>
-          {/* FTS5 snippet is server-trusted (no user HTML can reach
-              it — it comes from our own SQL `snippet()` call wrapping
-              `<mark>` around the match). Safe to render. */}
-          <div
-            className={styles.rowText}
-            dangerouslySetInnerHTML={{ __html: h.snippet }}
-          />
-          <div className={styles.rowMeta}>
-            <span>stage: {h.stage}</span>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Detail view                                                          */
-/* ------------------------------------------------------------------ */
-
-function DetailView({
-  detail,
-  onDelete,
-  onMarkExample,
-  onCopy,
-}: {
-  detail: SessionDetail;
-  onDelete: () => void;
-  onMarkExample: () => void;
-  onCopy: () => void;
-}) {
-  const s = detail.session;
-  const latencyTotal =
-    (detail.latency.sttMs ?? 0) +
-    (detail.latency.cleanupMs ?? 0) +
-    (detail.latency.injectMs ?? 0);
-
-  // "Copy" affordance shows a check for ~1s after click — implemented
-  // here (not in the parent toast) so the icon swap reads as the
-  // confirmation. The toast still fires for screen-reader users.
-  const [copied, setCopied] = useState(false);
-  const copyTimer = useRef<number | null>(null);
-  function fireCopy() {
-    onCopy();
-    setCopied(true);
-    if (copyTimer.current) window.clearTimeout(copyTimer.current);
-    copyTimer.current = window.setTimeout(() => setCopied(false), 1000);
-  }
-  useEffect(() => {
-    return () => {
-      if (copyTimer.current) window.clearTimeout(copyTimer.current);
-    };
-  }, []);
-
-  return (
-    <>
-      <div className={styles.detailHeader}>
-        <div className={styles.detailMeta}>
-          <h2 style={{ margin: 0, font: "var(--type-lg)", fontWeight: 600 }}>
-            {formatTimestamp(s.startedAt)}
-          </h2>
-          <span style={{ color: "var(--on-surf-muted)", font: "var(--type-sm)" }}>
-            {formatRelative(s.startedAt)} · {prettyAppName(s.foregroundApp)}
-          </span>
-        </div>
-        <div className={styles.detailActions}>
-          <Button onClick={fireCopy} ariaLabel={t("dictations.action.copyFinal")}>
-            {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
-            {copied ? "Copied" : t("dictations.action.copyFinal")}
-          </Button>
-          <Button onClick={onMarkExample}>
-            <PlusIcon size={14} />
-            {t("dictations.action.markExample")}
-          </Button>
-          <Button variant="danger" onClick={onDelete}>
-            <TrashIcon size={14} />
-            {t("dictations.action.delete")}
-          </Button>
-        </div>
-      </div>
-
-      <Card title={t("dictations.detail.metadata")}>
-        <div className={styles.metaGrid}>
-          <span className={styles.metaKey}>{t("dictations.detail.mode")}</span>
-          <span className={styles.metaVal}>
-            <Pill tone={`mode-${s.modeSlug}`}>{s.modeSlug}</Pill>
-            {/* ADR 0045 + mb-tfyp — show start path next to the mode
-                so the metadata is self-explanatory: "casual / In-app"
-                vs "casual / Push-to-talk". */}
-            <span className={styles.metaStartMode}>
-              {s.startMode === "in_app"
-                ? t("dictations.detail.startMode.inApp")
-                : t("dictations.detail.startMode.ptt")}
-            </span>
-          </span>
-          <span className={styles.metaKey}>{t("dictations.detail.model")}</span>
-          <span className={styles.metaVal}>{detail.modelUsed ?? "—"}</span>
-          <span className={styles.metaKey}>
-            {t("dictations.detail.promptVersion")}
-          </span>
-          <span className={styles.metaVal}>{detail.promptVersion ?? "—"}</span>
-          <span className={styles.metaKey}>
-            {t("dictations.detail.dictVersion")}
-          </span>
-          <span className={styles.metaVal}>
-            {detail.dictionaryVersion ?? "—"}
-          </span>
-          <span className={styles.metaKey}>{t("dictations.detail.app")}</span>
-          <span className={styles.metaVal}>
-            {prettyAppName(s.foregroundApp)} —{" "}
-            {s.foregroundWindowTitle ?? "—"}
-          </span>
-          <span className={styles.metaKey}>{t("dictations.detail.latency")}</span>
-          <span className={styles.metaVal}>
-            STT {Math.round(detail.latency.sttMs ?? 0)} ms · Clean{" "}
-            {Math.round(detail.latency.cleanupMs ?? 0)} ms · Inject{" "}
-            {Math.round(detail.latency.injectMs ?? 0)} ms · Total{" "}
-            {Math.round(latencyTotal)} ms
-          </span>
-        </div>
-      </Card>
-
-      <Card>
-        <Stage label={t("dictations.detail.raw")} text={detail.raw} variant="raw" />
-        <Stage
-          label={t("dictations.detail.cleaned")}
-          text={detail.cleaned}
-          variant="cleaned"
-        />
-        <Stage
-          label={t("dictations.detail.final")}
-          text={detail.final}
-          variant="final"
-        />
-      </Card>
-
-      <LlmPassCard sessionId={detail.session.id} />
-    </>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* LLM-pass card                                                       */
-/*                                                                    */
-/* Optional, off the critical path. Calls the dictation LLM-pass IPC  */
-/* with a built-in prompt and renders the result. Nothing is          */
-/* persisted — same invariant as the meeting LLM pass.                */
-/* ------------------------------------------------------------------ */
-
-type DictLlmPrompt =
-  | "summary"
-  | "action_items"
-  | "cleaner_punctuation"
-  | "compress";
-
-const LLM_PROMPT_OPTIONS: Array<{ id: DictLlmPrompt; labelKey: string }> = [
-  { id: "summary", labelKey: "meetings.llm.prompt.summary" },
-  { id: "action_items", labelKey: "meetings.llm.prompt.action_items" },
-  {
-    id: "cleaner_punctuation",
-    labelKey: "meetings.llm.prompt.cleaner_punctuation",
-  },
-  // ADR 0047 §Wave 2.6 — the pull-only "tighten this up" Transform.
-  // Lives next to the other built-ins because the picker shape is
-  // identical; what makes Compress different is the prompt body, not
-  // the IPC plumbing.
-  { id: "compress", labelKey: "meetings.llm.prompt.compress" },
-];
-
-/* ------------------------------------------------------------------ */
-/* Minimal LLM-output renderer.                                       */
-/*                                                                    */
-/* Our action_items / summary / cleaner_punctuation prompts emit at   */
-/* most: paragraphs and `- ` bullet lists. We render exactly those    */
-/* two shapes — no react-markdown dep, no nested-list support, no     */
-/* inline emphasis parsing. YAGNI: if a future prompt ever needs      */
-/* tables or headings, swap in a real markdown lib then. Until then   */
-/* this stays a ~40-line pure transform.                              */
-/*                                                                    */
-/* The Copy button copies `result.text` (the source markdown), so     */
-/* paste-into-other-apps still gets dash bullets, not stripped text.  */
-/* ------------------------------------------------------------------ */
-
-function LlmMarkdownView({ text }: { text: string }) {
-  // Split the input into "blocks" separated by one-or-more blank
-  // lines. Each block is either a bullet list (every line starts
-  // with `- ` or `* `) or a paragraph.
-  const blocks = text
-    .split(/\n\s*\n/)
-    .map((b) => b.trim())
-    .filter(Boolean);
-
-  return (
-    <div className={styles.llmResultMd}>
-      {blocks.map((block, i) => {
-        const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
-        const isBulletList =
-          lines.length > 0 &&
-          lines.every((l) => l.startsWith("- ") || l.startsWith("* "));
-        if (isBulletList) {
-          return (
-            <ul key={i} className={styles.llmResultList}>
-              {lines.map((l, j) => (
-                // Strip the leading `- ` / `* ` marker — the <li>
-                // bullet supplies the visual marker. Keep it simple:
-                // no inline-formatting parsing.
-                <li key={j}>{l.slice(2)}</li>
-              ))}
-            </ul>
-          );
-        }
-        return (
-          <p key={i} className={styles.llmResultPara}>
-            {block}
-          </p>
-        );
-      })}
-    </div>
-  );
-}
-
-function LlmPassCard({ sessionId }: { sessionId: number }) {
-  const [prompt, setPrompt] = useState<DictLlmPrompt>("summary");
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<{ text: string; latencyMs: number } | null>(
-    null,
-  );
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const copyTimer = useRef<number | null>(null);
-
-  // Clear local state when the user navigates to a different
-  // session. The LLM pass is per-session; carrying over a previous
-  // result into a new session would be misleading.
-  useEffect(() => {
-    setResult(null);
-    setError(null);
-    setRunning(false);
-    setCopied(false);
-  }, [sessionId]);
-
-  useEffect(() => {
-    return () => {
-      if (copyTimer.current) window.clearTimeout(copyTimer.current);
-    };
-  }, []);
-
-  async function runPass() {
-    setRunning(true);
-    setError(null);
-    try {
-      const r = await api.dictation_run_llm_pass(sessionId, prompt);
-      setResult({ text: r.text, latencyMs: r.latencyMs });
-    } catch (e) {
-      // Surface the backend error message verbatim — it's already a
-      // human-readable string from `commands::into_err`.
-      setError(String(e));
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  async function copyOutput() {
-    if (!result) return;
-    try {
-      await navigator.clipboard.writeText(result.text);
-    } catch {
-      // Fall back silently — the user can still select + copy by
-      // hand. Not worth a toast for a 1-in-1000 permission edge.
-      return;
-    }
-    setCopied(true);
-    if (copyTimer.current) window.clearTimeout(copyTimer.current);
-    copyTimer.current = window.setTimeout(() => setCopied(false), 1200);
-  }
-
-  return (
-    <Card title={t("dictations.llm.title")}>
-      <div className={styles.llmControls}>
-        <label className={styles.llmPromptLabel}>
-          {t("dictations.llm.prompt.label")}
-          <select
-            className={styles.llmPromptSelect}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value as DictLlmPrompt)}
-            disabled={running}
-          >
-            {LLM_PROMPT_OPTIONS.map((opt) => (
-              <option key={opt.id} value={opt.id}>
-                {t(opt.labelKey)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <LlmRunButton
-          onClick={runPass}
-          running={running}
-          idleLabel={t("dictations.llm.run")}
-          runningLabel={t("dictations.llm.running")}
-        />
-      </div>
-
-      {error ? (
-        <div className={styles.llmError} role="alert">
-          {t("dictations.llm.error").replace("{message}", error)}
-        </div>
-      ) : null}
-
-      {result ? (
-        <div className={styles.llmResult}>
-          <div className={styles.llmResultMeta}>
-            <span>
-              {t("dictations.llm.latency").replace(
-                "{ms}",
-                String(result.latencyMs),
-              )}
-            </span>
-            <Button onClick={copyOutput} ariaLabel={t("dictations.llm.copy")}>
-              {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
-              {copied ? t("dictations.llm.copied") : t("dictations.llm.copy")}
-            </Button>
-          </div>
-          <LlmMarkdownView text={result.text} />
-        </div>
-      ) : !running && !error ? (
-        <p className={styles.llmHelp}>{t("dictations.llm.notRun")}</p>
-      ) : null}
-    </Card>
-  );
-}
-
-function Stage({
-  label,
-  text,
-  variant,
-}: {
-  label: string;
-  text: string;
-  variant: "raw" | "cleaned" | "final";
-}) {
-  if (!text) return null;
-  const cls =
-    variant === "raw"
-      ? `${styles.stageText} ${styles.raw}`
-      : variant === "final"
-        ? `${styles.stageText} ${styles.final}`
-        : styles.stageText;
-  return (
-    <div className={styles.stage}>
-      <div className={styles.stageLabel}>
-        <span className={styles.stageLabelText}>{label}</span>
-      </div>
-      <pre className={cls}>{text}</pre>
-    </div>
-  );
-}

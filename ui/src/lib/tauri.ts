@@ -16,10 +16,14 @@
 import type {
   ActiveMode,
   DictionaryEntry,
+  EntitySuggestion,
+  EntrySummary,
   FailedFiling,
   InboxRuntimeStatus,
   InsightsSnapshot,
   KgSettings,
+  SearchFilter,
+  TagSuggestion,
   LearningRun,
   LlmPassPromptArg,
   LlmPassResult,
@@ -189,6 +193,33 @@ export const api = {
    *  this on mount + after each successful retry. NO polling. */
   kg_queue_status: () => invoke<QueueStatus>("kg_queue_status"),
 
+  // Phase 1C Wave 1C.3 — Dictations retrieval (ADR 0051).
+  /** Combinable retrieval search. Returns matching `entry_id`s
+   *  (= `sessions.id`) by within-axis OR / across-axis AND. The UI
+   *  short-circuits when the filter is fully empty and uses the
+   *  existing `list_sessions` path instead (server-side
+   *  `SearchFilter::is_empty()` semantics). */
+  kg_search_entries: (filter: SearchFilter) =>
+    invoke<number[]>("kg_search_entries", { filter }),
+  /** Entity-chip autocomplete. `prefix=undefined` returns the global
+   *  top entities ranked by mention count. Server caps at 50 when
+   *  `limit` is omitted; we pass an explicit cap from the UI so the
+   *  autocomplete list size is predictable. */
+  kg_list_entities: (prefix?: string, limit?: number) =>
+    invoke<EntitySuggestion[]>("kg_list_entities", { prefix, limit }),
+  /** Tag-chip autocomplete — same shape as `kg_list_entities` over
+   *  the open-vocab `tag_slug` axis. */
+  kg_list_tags: (prefix?: string, limit?: number) =>
+    invoke<TagSuggestion[]>("kg_list_tags", { prefix, limit }),
+  /** Batched per-row chip + filing-state lookup. Single round-trip
+   *  for the Dictations list page's KG strip. Per-row firing is a
+   *  stop condition (kickoff brief) — always call once with the full
+   *  list of visible session ids. Returns a record keyed by
+   *  `entry_id` (JSON object keys are strings, hence the indexed
+   *  shape; callers stringify the lookup key). */
+  kg_entries_summary: (entryIds: number[]) =>
+    invoke<Record<string, EntrySummary>>("kg_entries_summary", { entryIds }),
+
   // Learning loop
   list_learning_runs: (limit: number) =>
     invoke<LearningRun[]>("list_learning_runs", { limit }),
@@ -348,6 +379,19 @@ function fixtureFor<T>(command: string, args?: object): T {
         failed: 0,
         lastDoneIso: null,
       } as QueueStatus) as T;
+    // Phase 1C Wave 1C.3 — Dictations retrieval fixtures.
+    // Defaults match the kgGraphEnabled=false world: empty
+    // autocomplete lists, empty entry-id sets, empty summary map.
+    // Playwright + Wave 1C.3 vitest specs override via
+    // `window.__MOCKINGBIRD_FIXTURES__`.
+    case "kg_search_entries":
+      return fixture(command, [] as number[]) as T;
+    case "kg_list_entities":
+      return fixture(command, [] as EntitySuggestion[]) as T;
+    case "kg_list_tags":
+      return fixture(command, [] as TagSuggestion[]) as T;
+    case "kg_entries_summary":
+      return fixture(command, {} as Record<string, EntrySummary>) as T;
     case "meeting_settings_get_all":
       return fixture(command, {
         hotkeyModifier: "VK_RCONTROL",

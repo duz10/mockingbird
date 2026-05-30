@@ -1,0 +1,107 @@
+/* Per-row Knowledge Graph strip inside DictationsList rows.
+ * Phase 1C Wave 1C.3 / ADR 0051. */
+
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-1) var(--s-2);
+  /* The strip is the LAST element in a SessionRow column; the
+   * .row's `min-width: 0; overflow: hidden` parent caps the strip
+   * width to the column width. We wrap rather than scroll so a
+   * long entity list pushes onto a second line instead of growing
+   * the row. */
+  min-width: 0;
+  /* Subtle top divider so the strip reads as metadata, distinct
+   * from the row's text. Mirrors the .rowMeta separator pattern
+   * without adding a horizontal rule. */
+  padding-top: var(--s-1);
+  margin-top: var(--s-1);
+  border-top: 1px dashed var(--border);
+}
+
+.group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-1);
+}
+
+/* Entity chip -- mode-normal accent at low chroma so 5 chips in a
+ * row read as a single grouped band rather than a parade of
+ * primary buttons. Inert (span, not button) this wave; Wave 1C.4
+ * adds click-to-filter. */
+.entity {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--s-2);
+  font: var(--type-xs);
+  color: var(--on-surf);
+  background: oklch(from var(--mode-normal) l c h / 0.12);
+  border: 1px solid oklch(from var(--mode-normal) l c h / 0.28);
+  border-radius: var(--r-pill);
+  /* Cap individual chip width so a freakishly long canonical_name
+   * doesn't break the strip layout. The native title= surfaces
+   * the full string on hover. */
+  max-width: 14ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Tag chip -- visually distinct from entity chips via the neutral
+ * surface tone (so a user can disambiguate at a glance). Carries
+ * the `#` prefix from i18n (kg.chip.tagPrefix). */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--s-2);
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  background: var(--surf-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  max-width: 14ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* "+N more" hint -- bare text, no chip frame; signals overflow
+ * without competing visually with the chips themselves. */
+.overflow {
+  font: var(--type-xs);
+  color: var(--on-surf-faint);
+  font-style: italic;
+}
+
+/* Filing-state pill. The `pending` / `processing` / `failed`
+ * variants share base shape + differ on tone. `done` and
+ * `not_enqueued` render no pill (centralised in
+ * DictationKgChips.tsx's filingPillText). */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--s-2);
+  font: var(--type-xs);
+  border-radius: var(--r-pill);
+  font-variant-numeric: tabular-nums;
+}
+
+.pillPending {
+  background: var(--surf-2);
+  color: var(--on-surf-muted);
+  border: 1px solid var(--border);
+}
+
+.pillProcessing {
+  background: oklch(from var(--mode-normal) l c h / 0.18);
+  color: var(--on-surf);
+  border: 1px solid oklch(from var(--mode-normal) l c h / 0.35);
+}
+
+.pillFailed {
+  background: oklch(from var(--status-error) l c h / 0.16);
+  color: var(--on-surf);
+  border: 1px solid oklch(from var(--status-error) l c h / 0.4);
+}
