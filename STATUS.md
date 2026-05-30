@@ -79,6 +79,28 @@ tag — seals via ADR Accepted + this STATUS update + epic close
 (LESSONS P5).
 
 **Chunk progress (most-recent first):**
+- **Chunk 3 SEALED** 2026-06-02 (`mb-eke8`; commits `45ac718` pipeline
+  5th-pass wiring + additive `PipelineResult.segment_entities`, `082aee2`
+  `kg::worker::KgFilingRuntime` filing thread + crash-recovery sweep +
+  30-day done-row reap, `11f0185` `lib.rs::run()` boot wiring gated on
+  `KgGraphEnabled`, `17fd2a0` brief amendment). Cargo gate green;
+  `kg_parity` 32/32 GREEN re-confirmed post-pipeline-change (additive
+  field invisibility hypothesis EMPIRICALLY HELD); throwaway-crate live
+  tests 11/11 (date math, `requeue_for_retry`, `load_dictation_text`,
+  `is_leap_year`); pipeline tests now exercise the 5th pass (success +
+  failure-isolation paths). **Scope expansion vs original Chunk 3 brief:**
+  the kickoff authorized wiring `extract_entities` into `run_pipeline` as
+  the 5th pass on discovering production was still 4-pass-only (the
+  parity probe was calling `extract_entities` standalone). Without this,
+  Chunk 2's `kg_entity_mentions` table would be dead-on-arrival. R3 is
+  now closed in the brief's risk register. Boot wiring is
+  `cfg(target_os = "windows")`; default `KgGraphEnabled = false` keeps
+  the worker dormant. Open for Chunk 4: which `dictation/runtime.rs`
+  tail locus enqueues + whether `InjectionOutcome::Pasted` AND
+  `InjectionOutcome::InAppNoInject` should both enqueue (ADR 0045
+  split-mode question — recommend BOTH so in-app dictations still get
+  filed, since the InAppNoInject outcome means "text exists, just
+  didn't paste").
 - **Chunk 2 SEALED** 2026-06-01 (`mb-geds`; commits `6e90f30` migration
   024, `66cc9d9` `kg::store::*` + `enqueue_for_filing` surface, `0d37c0b`
   `SettingKey::KgGraphEnabled`). Cargo gate green; `kg_parity` 32/32;
