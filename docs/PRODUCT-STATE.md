@@ -575,20 +575,29 @@ the next graduation window per ADR 0049 §"Sandbox isolation".
 
 ---
 
-### 3.19 `src-tauri/src/kg/` — Knowledge Graph library (Phase 1A graduation + Phase 1B persistence/worker/dictation hook)
+### 3.19 `src-tauri/src/kg/` — Knowledge Graph library (Phase 1A graduation + Phase 1B persistence/worker/dictation hook + Phase 1C retrieval UX/activation/concept modal)
 
 **Status:** library + storage + async filing worker + dictation-tail
-hook in place. **Default-off** via `SettingKey::KgGraphEnabled = false`
-(migration 024 seed). The dictation runtime now enqueues per-session
-filing jobs only when the toggle is on; the worker drains them in
-the background. **No retrieval UX yet** — that's Phase 1C, along with
-the Settings UX for the toggle.
+hook + **full retrieval UX surface (5 of 6 axes) + activation toggle
++ failed-filings fix-it loop + concept modal** all in place.
+**Default-off** via `SettingKey::KgGraphEnabled = false` (migration
+024 seed); user can now flip the toggle from Settings → Knowledge
+Graph and the worker picks up the change within ~5s (per-tick poll
+promoted at 1C.1). Graph-off invariant enforced on both sides: the
+Rust-side `kg_graph_off_invariant` probe (Phase 1B) asserts no
+`kg_*` table writes; the UI-side `ui/tests/kg-graph-off-invariant.spec.ts`
+Playwright spec (Phase 1C.5) asserts no `kg_*` IPC invocations
+beyond the read-only `kg_settings_get_all`. **Category axis explicitly
+deferred to Phase 1D** — see §"Phase 1C" subsection below for the gap.
 
 **Charter ADRs:** [ADR 0049](adr/0049-knowledge-graph-phase-0-5-and-v1-architectural-pivot.md)
 (parent epic; Phase 0.5 + v1 architectural pivot) +
 [ADR 0050](adr/0050-kg-phase-1b-persistence-and-dictation-hook.md)
 (Phase 1B sub-charter for persistence + worker + dictation hook;
-Accepted 2026-06-03). Wave briefs at
+Accepted 2026-06-03) +
+[ADR 0051](adr/0051-kg-phase-1c-retrieval-ux-and-activation.md)
+(Phase 1C sub-charter for retrieval UX + activation toggle +
+concept modal; Accepted 2026-05-31). Wave briefs at
 [`docs/knowledge-graph/phase-1a-brief.md`](knowledge-graph/phase-1a-brief.md)
 and
 [`docs/knowledge-graph/phase-1b-brief.md`](knowledge-graph/phase-1b-brief.md).
@@ -719,13 +728,78 @@ PINNED P2. Invocations:
   — graph-off principal invariant probe (see worker section above).
   8/8 + positive control green.
 
-**Phase 1C+ to come:** retrieval UX with six axes + Settings UX for
-`KgGraphEnabled` + failed-filings surface (1C), migration backfill
-over existing transcripts (1D), v1 beta tag (1E). Each opens its
-own ADR-0049 §"Sandbox isolation" window — the Phase 1B close-out
-does NOT lift `ui/**` / Settings UX isolation; Chunk 5 only opened
-`src-tauri/**` + `migrations/**` for the storage / worker / hook
-slice.
+**Phase 1C (sealed 2026-05-31 via ADR 0051 Accepted) — retrieval UX + activation + concept modal:**
+
+- **Settings KG tab + activation toggle** (`ui/src/pages/SettingsKgTab.tsx`,
+  Wave 1C.1). Optimistic-flip toggle backed by `kg_settings_get_all` /
+  `kg_settings_set` (single-key allowlist accepting only
+  `kg_graph_enabled` — same shape as the Phase MC meeting-settings
+  allowlist). Conditional `role="status"` notice block (scoped via
+  `aria-label={t("kg.settings.notice.title")}` at 1C.5 for a11y
+  uniqueness next to the sibling SettingsKgFailedFilings status
+  region). Tab body mounts SettingsKgFailedFilings iff toggle ON
+  (clean re-fetch on every off→on flip).
+- **Boot-vs-poll worker promotion** (Wave 1C.1). `KgGraphEnabled`
+  gate moved from once-at-boot (Phase 1B Chunk 3 shortcut) into the
+  worker's drain loop as a per-tick poll (~1 SQL per 5s idle loop
+  when off). Runtime toggle takes effect within ~5s, no
+  restart-required nag. Fail-closed on mutex poison.
+- **Failed-filings UX + queue status** (`ui/src/pages/SettingsKgFailedFilings.tsx`,
+  Wave 1C.2). Three new IPCs: `kg_list_failed_filings(limit)` (default
+  cap 50, newest-first), `kg_requeue_failed(queue_id)` (idempotent
+  on already-pending rows — J3 invariant), `kg_queue_status()` →
+  `{ pending, processing, failed, lastDoneIso }`. Per-row Retry
+  button disables mid-flight (UI-side idempotency belt-and-suspenders).
+- **Dictations retrieval UX — 5 of 6 axes**
+  (`ui/src/pages/Dictations{,FilterBar,List}.tsx` +
+  `DictationKgChips.tsx`, Wave 1C.3 + Wave 1C.4). Four new IPCs:
+  `kg_search_entries(SearchFilter)` (within-axis OR, across-axis AND,
+  query-axis UNION with FTS hits), `kg_list_entities` /
+  `kg_list_tags` (prefix autocomplete; 200ms debounce), and
+  `kg_entries_summary(Vec<i64>)` (batched per-entry chip data). UI:
+  entity multi-select combobox + tag multi-select combobox + per-row
+  top-5 entity chips + top-N tag chips + filing-state Pill
+  (pending/processing/failed). All gated on `kgGraphEnabled === true`;
+  zero `kg_*` IPCs fire when toggle off (1C.5 invariant).
+- **Concept modal** (`ui/src/pages/ConceptModal.tsx`, Wave 1C.4).
+  Two new IPCs: `kg_entity_detail(entityId)` → `EntityDetail` and
+  `kg_tag_detail(tagSlug)` → `TagDetail`, both via the
+  `kg_concept_entities_view` / `kg_concept_tags_view` joined with a
+  CTE-built `EntryRef` view. Chip click on Dictations rows opens the
+  modal; entry-row click in the modal closes-then-selects to surface
+  the row in the detail pane.
+- **Graph-off-UI invariant judge** (Wave 1C.5). Opt-in
+  `window.__KG_IPC_SPY__: (cmd: string) => void` hook installed in
+  `ui/src/lib/tauri.ts::invoke` (one `if` per IPC call; zero cost
+  when no test has opted in). Playwright spec
+  `ui/tests/kg-graph-off-invariant.spec.ts` walks Settings → KG tab,
+  Dictations page, dictation-row click with the toggle OFF, asserting
+  the recorded `kg_*` set == `{ "kg_settings_get_all" }` only.
+  Positive-control flip ON proves the spy is not vacuously passing
+  (`kg_list_failed_filings` + `kg_queue_status` fire from
+  `SettingsKgFailedFilings` mount).
+
+**Known gaps (carried into Phase 1D):**
+
+- **Category retrieval axis (`mb-oji5`).** The classify pass produces
+  `Entry.category` but Phase 1B schema has no queryable `category`
+  column anywhere (`kg_canonical_tags.category` exists but the table
+  is inert; `EntryRef.category` is always `None` in 1C.4/1C.5).
+  Verified twice — at Wave 1C.3 (`mb-5ly5` LESSONS body) and again
+  at Wave 1C.5 (kickoff prompt's claim of a non-existent
+  `entries.category` column via migration 016). Fix requires a new
+  migration, which ADR 0051 §"Out of scope" explicitly bans. Phase
+  1D's first migration (already needed for the backfill path) is the
+  natural home; add `sessions.category TEXT NULL` and a worker write
+  in `apply_filed_outcome`.
+- **Phase 1D backfill** of pre-Phase-1 dictations (no entity/tag
+  mentions captured pre-1B). At p95=59s per filing, a 500-entry
+  backfill = ~8 hours wall-clock at current throughput.
+- **Phase 1E v1 beta tag** awaits 1D completion.
+
+ADR 0051's §"UI sealed-surface authorization" window closed at the
+1C.5 seal — Phase 1D opens its own ADR-0049 §"Sandbox isolation"
+window per the established pattern.
 
 ---
 

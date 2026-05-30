@@ -123,6 +123,7 @@ export function SettingsKgTab() {
           <div
             role="status"
             aria-live="polite"
+            aria-label={t("kg.settings.notice.title")}
             style={{
               marginTop: "var(--s-3)",
               background: "var(--surf-1)",

@@ -1,6 +1,6 @@
 # ADR 0051 — KG Phase 1C: retrieval UX + activation toggle
 
-- **Status:** Proposed (2026-05-30)
+- **Status:** **Accepted (2026-05-31)** — see §"Phase 1C SEALED" close-out at the end of this ADR.
 - **Supersedes:** None
 - **Extends:** [ADR 0049](0049-knowledge-graph-phase-0-5-and-v1-architectural-pivot.md) §7 (1C row) + §"Sandbox isolation"
 - **Consumes schema from:** [ADR 0050](0050-knowledge-graph-phase-1b-persistence-and-dictation-hook.md) (Phase 1B persistence + dictation hook; migration 024 already on disk; FK + immutability triggers already enforced)
@@ -11,10 +11,14 @@
 
 ## Status
 
-**Proposed.** Flips to **Accepted** at Wave 1C.5 seal once the
-three-judge bundle (graph-off-UI invariant, retrieval-correct,
-failed-filing-retry-idempotent) is green and the epic bead `mb-j368`
-closes.
+**Accepted (2026-05-31).** Six waves shipped (1C.0 charter + latency
+baseline; 1C.1 Settings tab + activation + boot-vs-poll; 1C.2
+failed-filings UX; 1C.3 Dictations retrieval (5 of 6 axes); 1C.4
+concept modal + entity/tag detail commands; 1C.5 graph-off-UI
+invariant judge + a11y polish + seal). Epic bead `mb-j368` closed.
+See §"Phase 1C SEALED" at the end of this ADR for the close-out
+narrative, commit chain, gate results, and the explicit
+record-of-deferral for the category axis (`mb-oji5` → Phase 1D).
 
 ## Context
 
@@ -79,6 +83,19 @@ restart-required nag, no toast notification. The setting is reversible
 at any time. Failed filings remain visible in the 1C.2 UX surface
 regardless of the toggle's current state (so a user can toggle off,
 inspect the queue, then re-enable).
+
+**1C.5 close-out — retrieval axes shipped:** of the six axes promised
+in the PHASE-0-5-REPORT §7 1C row, **five** shipped at 1C.3 (entity
+filter, tag filter, free-text "contains" query merged into existing
+FTS, plus per-row entity/tag/filing-state display); the 1C.4 concept
+modal added entity + tag drill-down detail views. The **category
+axis** was empirically blocked at 1C.3 (LESSONS 2026-05-30 `mb-5ly5`
+/ `mb-oji5`): `Entry.category` is produced by the classify pass but
+has no persisted column anywhere in the Phase 1B schema, and the
+§"Out of scope" clause below explicitly bans new migrations in 1C.
+The category-persistence work is therefore deferred to Phase 1D,
+which already needs a schema-touching migration for the backfill
+path. `mb-oji5` stays open with a 1D blocker.
 
 ### D3 — Failed-filings: truncated `last_error` inline + full text in tooltip
 
@@ -283,3 +300,140 @@ Explicit deferrals so future agents don't try to fit them into 1C.
   Standing beads `mb-s6a8`, `mb-7w5f`, `mb-j3t1`, `mb-b3jy` are
   blocked-by their respective wave sub-beads (or discharged by 1C.0
   in the case of `mb-b3jy`).
+
+## Phase 1C SEALED (2026-05-31)
+
+Phase 1C sealed via Wave 1C.5 (`mb-f4gn`). The epic shipped the
+activation toggle, four of the five retrieval-axis UX surfaces, the
+failed-filings fix-it loop, the concept-modal drill-down, and the
+principal `kg-graph-off-ui-untouched` invariant judge — leaving the
+category axis as the lone explicit deferral to Phase 1D.
+
+**Gates:**
+
+- **J1 — `kg-graph-off-ui-untouched` (principal):** GREEN via the
+  new Playwright spec `ui/tests/kg-graph-off-invariant.spec.ts`
+  (5 assertions across 4 walks). The opt-in `__KG_IPC_SPY__` hook
+  on `lib/tauri.ts::invoke` records every IPC name; with
+  `KgGraphEnabled=false`, the recorded `kg_*` set is exactly
+  `{ "kg_settings_get_all" }` across Settings → KG tab, Dictations
+  page, and dictation-row click walks. The positive-control flip ON
+  (Settings tab) lights up at least one of
+  `{ kg_list_failed_filings, kg_queue_status }` from the
+  `SettingsKgFailedFilings` mount — proving the spy is not vacuously
+  passing. Zero console errors across all walks.
+- **J2 — `kg-retrieval-correct`:** GREEN via the existing Wave 1C.3
+  Playwright spec `ui/tests/kg-dictations-retrieval.spec.ts`
+  (covers the within-axis OR / across-axis AND semantics end-to-end
+  via fixture-overridden `kg_search_entries`).
+- **J3 — `kg-failed-filing-retry-idempotent`:** GREEN via the Wave
+  1C.2 Rust-side throwaway-crate idempotency test on
+  `kg::store::requeue_failed` + the Wave 1C.2 Playwright spec
+  `ui/tests/kg-failed-filings.spec.ts` (covers the UI-side disable-
+  on-click idempotency surface).
+- **Cargo gate** via the Windows wrapper: `check`, `fmt --check`,
+  `clippy --release -- -D warnings`, `test --release --no-run` all
+  GREEN (per LESSONS P2 fallback for the test runner). Parity probe
+  32/32 in both default and `--persist` modes (no `kg/store` or
+  `kg/worker` regression — Wave 1C.5 changes are UI + test-only).
+- **UI gate:** `npx tsc --noEmit`, vitest, `npm run build` all GREEN.
+  All 5 KG Playwright specs (`kg-settings-tab`, `kg-failed-filings`,
+  `kg-dictations-retrieval`, `kg-concept-modal`, `kg-graph-off-invariant`)
+  green. Lint skipped per `mb-yxh`.
+
+**Commit chain (Phase 1C end-to-end):**
+
+- `113e848..1332ed5` — Wave 1C.0: per-pass `PassTimings` instrumentation
+  + `kg_latency_bench` binary + ADR 0051 Proposed + phase-1c-brief +
+  empirical p95=59s baseline (`mb-plz9` / `mb-b3jy` closed).
+- `b5b2e74..7143d88` — Wave 1C.1: `commands/kg::{get_all,set}` +
+  boot-vs-poll worker promotion + `SettingsKgTab.tsx` + Playwright
+  visual sweep (`mb-ucmx` / `mb-s6a8` / `mb-7w5f` closed).
+- `f639485..efd2afe` — Wave 1C.2: failed-filings UX +
+  `kg_list_failed_filings` / `kg_requeue_failed` / `kg_queue_status` +
+  Playwright sweep (`mb-9ufg` / `mb-j3t1` closed).
+- `6c856af..a085ce0` — Wave 1C.3: Dictations retrieval UX (5 of 6
+  axes shipped — entity + tag + free-text + per-row chip strip +
+  filing-state pills) + 4 new IPCs + 3-way Dictations.tsx extraction
+  (830 → 549 LoC; LESSONS) + Playwright sweep (`mb-5ly5` closed).
+- `a1a6a07..9c7e11d` — Wave 1C.4: concept modal + `kg_entity_detail`
+  / `kg_tag_detail` + chip click-to-open + Playwright sweep
+  (`mb-sx6p` closed; `mb-26aw` filed for pre-1C Playwright noise).
+- This seal commit — Wave 1C.5: `__KG_IPC_SPY__` hook on
+  `lib/tauri.ts::invoke` + `kg-graph-off-invariant.spec.ts` +
+  `SettingsKgTab` `role="status"` a11y scoping + ADR Accepted +
+  STATUS sealed row + PRODUCT-STATE §3.19 update.
+
+**Key in-flight findings (full body entries in `docs/LESSONS.md`):**
+
+- **Category-axis persistence gap (Wave 1C.3 / 1C.5 — `mb-oji5`).**
+  `Entry.category` is produced by the classify pass but the Phase 1B
+  schema has no queryable `category` column anywhere (verified twice:
+  in the original 1C.3 LESSONS body finding, and again at 1C.5 seal
+  when the original Wave 1C.5 kickoff prompt claimed a non-existent
+  `entries.category` column via migration 016 — there is no `entries`
+  table). Fixing the gap requires a new migration, which §"Out of
+  scope" of THIS ADR explicitly bans. Deferred to Phase 1D where the
+  backfill path will already touch the sessions-layer schema. The
+  1C.5 in-flight discovery (kickoff-vs-disk-truth misalignment) is
+  itself a LESSONS body entry on the value of cross-checking kickoff
+  premises against the actual schema/code before the first edit.
+- **Boot-vs-poll promotion was the right cheap move (Wave 1C.1).** The
+  Phase 1B Chunk 3 boot-time-only `KgGraphEnabled` read was a known
+  shortcut. 1C.1 promoted it to per-tick polling (~1 SQL per 5s idle
+  loop when off) so runtime toggles take effect within ~5s — no
+  restart-required nag needed for the UX (D2). Cost dwarfed by the
+  worker's idle sleep; no parity regression.
+- **PassTimings additive pattern re-confirmed (Wave 1C.0).** Adding
+  `pass_timings: Vec<PassTimings>` to `PipelineResult` followed the
+  same additive-field-invisibility pattern Phase 1B Chunk 3 used
+  for `segment_entities`: the parity probe's structural JSON
+  comparison ignored the new field, so 32/32 held across the
+  instrumentation rollout. Pattern formally re-confirmed.
+- **Playwright `__KG_IPC_SPY__` opt-in hook pattern (Wave 1C.5).**
+  The cleanest place to spy on Tauri IPC from a preview-mode
+  Playwright spec is the `lib/tauri.ts::invoke` choke point itself —
+  not the `__TAURI_INTERNALS__` shim (which is absent in preview).
+  A `window.__KG_IPC_SPY__?: (cmd: string) => void` hook is one
+  `if` per IPC at runtime, zero cost when no test has opted in, and
+  reusable for future graph-off-anywhere invariants without per-spec
+  re-plumbing.
+- **a11y scoping for `role="status"` (Wave 1C.5).** The 1C.1 toggle
+  notice's `role="status"` collided with the 1C.2
+  `SettingsKgFailedFilings` empty-state's `role="status"` once both
+  were live on the Settings/KG tab simultaneously, breaking the 1C.1
+  Playwright spec's `getByRole("status")` strict-mode query. Fix: an
+  `aria-label={t("kg.settings.notice.title")}` on the notice element
+  + a scoped `getByRole("status", { name: ... })` lookup. Closes the
+  1C.1-origin part of `mb-26aw`; the smoke.spec.ts ×4 pre-1C
+  failures remain tracked separately.
+
+**Standing beads carried forward (not gating the seal):**
+
+- `mb-bbl2` — sonner retrofit (replace native browser confirms with
+  toast-confirmation; surfaced during 1C.2 review).
+- `mb-y6pq` — `--status-bad` token sweep (legacy `Settings.module.css`
+  references a non-existent token; fallback to `#d33` literal works
+  but is design-debt; surfaced in 1C.2 LESSONS).
+- `mb-26aw` — `smoke.spec.ts` ×4 pre-1C Playwright failures (filed
+  at 1C.4; root-cause not in 1C scope).
+- `mb-oji5` — category persistence; blocked on Phase 1D migration.
+
+**Phase 1D kickoff handoff:**
+
+1. All 6 retrieval axes online except category — Phase 1D's first
+   migration should add `sessions.category TEXT NULL` (or an
+   equivalent join table); category UI in `DictationsFilterBar`
+   already has the typed wire shape via `SearchFilter` (additive).
+2. Latency budget empirically locked at p95=59s per filing (extract
+   + extract_entities = 82% of pipeline cost). 1D backfill of N
+   pre-Phase-1 entries should plan for ~N × 60s wall-clock at
+   current throughput.
+3. The `KgGraphEnabled` UI toggle is now load-bearing for backfill
+   gating: 1D backfill must respect the same off-by-default contract
+   the `kg-graph-off-invariant` judge (Rust + UI sides) enforces.
+4. Phase 1E v1 beta tag awaits 1D completion.
+
+**No new `phase-*-complete` tag** — lateral epic per LESSONS
+PINNED **P5**. Epic bead `mb-j368` + Wave 1C.5 bead `mb-f4gn` +
+the deferred-not-shipped `mb-oji5` closed/parked in the seal commit.

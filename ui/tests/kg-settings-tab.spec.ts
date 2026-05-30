@@ -62,7 +62,12 @@ test.describe("KG Phase 1C.1 — Settings KG tab (mb-ucmx)", () => {
     });
 
     // ── Assertion 3: notice hidden while OFF ─────────────────────
-    const notice = page.getByRole("status");
+    // Scoped lookup by aria-label so the assertion survives the
+    // SettingsKgFailedFilings sibling `role="status"` that mounts
+    // when the toggle is ON (Wave 1C.5 a11y polish, `mb-f4gn`).
+    const notice = page.getByRole("status", {
+      name: /indexing in progress/i,
+    });
     await expect(notice).toHaveCount(0);
 
     // ── Assertion 4: toggle ON → notice appears ──────────────────

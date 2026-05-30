@@ -54,9 +54,23 @@ export function isTauri(): boolean {
  * dictionary has 1,000 entries" without spinning up Rust.
  */
 type FixtureMap = Partial<Record<string, unknown>>;
+
+/**
+ * Opt-in IPC spy. When `window.__KG_IPC_SPY__` is set (by a
+ * Playwright test in `addInitScript`), every `invoke()` call records
+ * its command name. Used by `ui/tests/kg-graph-off-invariant.spec.ts`
+ * (the Wave 1C.5 / `mb-f4gn` graph-off-UI invariant judge) to assert
+ * that no `kg_*` IPC fires when `KgGraphEnabled=false`.
+ *
+ * Production cost: one `if (spy)` per IPC call. The hook itself is
+ * a pure side-effect; it does NOT alter the value `invoke` returns.
+ */
+type IpcSpy = (command: string) => void;
+
 declare global {
   interface Window {
     __MOCKINGBIRD_FIXTURES__?: FixtureMap;
+    __KG_IPC_SPY__?: IpcSpy;
   }
 }
 
@@ -75,6 +89,15 @@ function fixture<T>(command: string, fallback: T): T {
  * commands that have no fixture).
  */
 export async function invoke<T>(command: string, args?: object): Promise<T> {
+  // Opt-in spy hook (Wave 1C.5 / `mb-f4gn`). Fires before the
+  // isTauri branch so both shell + preview test paths see it.
+  if (typeof window !== "undefined" && window.__KG_IPC_SPY__) {
+    try {
+      window.__KG_IPC_SPY__(command);
+    } catch {
+      // Spy errors must not break the real IPC path.
+    }
+  }
   if (isTauri()) {
     const { invoke: tauriInvoke } = await import("@tauri-apps/api/core");
     return tauriInvoke<T>(command, args as Record<string, unknown>);
