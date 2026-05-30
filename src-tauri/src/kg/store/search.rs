@@ -40,6 +40,7 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
+use super::{fetch_session_title_excerpt, EntryRef};
 use crate::error::AppResult;
 
 /// Combinable retrieval filter (ADR 0051 D1).
@@ -119,6 +120,31 @@ pub struct EntityRef {
 #[serde(rename_all = "camelCase")]
 pub struct TagRef {
     pub tag_slug: String,
+}
+
+/// Drill-down payload for the concept modal's tag mode (Wave 1C.4 /
+/// ADR 0051 D4).
+///
+/// **Deviates from the Wave 1C.4 kickoff spec on the input key:**
+/// the kickoff prescribed `tag_id: i64`, but `kg_canonical_tags` is
+/// inert in 1B (LESSONS P11). The slug IS the wire identifier across
+/// the rest of the 1C subsystem (see [`SearchFilter::tags`],
+/// [`TagSuggestion::tag_slug`]); minting a synthetic id here would
+/// force a fake-id translation layer the modal would never use.
+/// When `kg_canonical_tags` activates in v1.1+ a successor wave can
+/// add an Optional `canonicalTagId` field without breaking this DTO.
+///
+/// Counters split the same way as [`super::entities::EntityDetail`]:
+/// `mention_count` is total rows in `kg_tag_mentions` for this slug;
+/// `total_entries` is the count of DISTINCT entries that contain at
+/// least one such mention.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagDetail {
+    pub tag_slug: String,
+    pub mention_count: i64,
+    pub total_entries: u32,
+    pub recent_entries: Vec<EntryRef>,
 }
 
 /// Per-row filing-status pill state. `NotEnqueued` is distinct from
@@ -385,6 +411,68 @@ pub(crate) fn list_tags(
         }
     }
     Ok(suggestions)
+}
+
+/// Fetch the modal payload for one tag slug. Tags are open-vocab in
+/// 1B (LESSONS P11) so an unknown slug is **not** an error — it
+/// simply yields zero counts and an empty `recent_entries`. This
+/// matches the modal's UX: opening it for a freshly-typed slug from
+/// the filter bar before any dictation has been filed against it is
+/// a legitimate state.
+///
+/// `recent_limit` caps `recent_entries`; total counts span the full
+/// mention set so the footer ("Total entries: N") stays honest.
+///
+/// Ordering matches [`super::entities::entity_detail`]:
+/// `sessions.started_at DESC, sessions.id DESC`.
+pub(crate) fn tag_detail(
+    conn: &Connection,
+    tag_slug: &str,
+    recent_limit: u32,
+) -> AppResult<TagDetail> {
+    // Counters. COUNT-vs-SUM per LESSONS 2026-05-30 Wave 1C.2
+    // Finding 3.
+    let mention_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM kg_tag_mentions WHERE tag_slug = ?1;",
+        params![tag_slug],
+        |r| r.get(0),
+    )?;
+    let total_entries_i64: i64 = conn.query_row(
+        "SELECT COUNT(DISTINCT entry_id) FROM kg_tag_mentions WHERE tag_slug = ?1;",
+        params![tag_slug],
+        |r| r.get(0),
+    )?;
+    let total_entries = u32::try_from(total_entries_i64).unwrap_or(u32::MAX);
+
+    let mut stmt = conn.prepare(
+        "SELECT s.id, s.started_at \
+         FROM kg_tag_mentions m \
+         JOIN sessions s ON s.id = m.entry_id \
+         WHERE m.tag_slug = ?1 \
+         GROUP BY s.id \
+         ORDER BY s.started_at DESC, s.id DESC \
+         LIMIT ?2;",
+    )?;
+    let rows = stmt.query_map(params![tag_slug, recent_limit as i64], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+    })?;
+    let mut recent_entries = Vec::new();
+    for row in rows {
+        let (id, started_at) = row?;
+        recent_entries.push(EntryRef {
+            entry_id: id,
+            title: fetch_session_title_excerpt(conn, id)?,
+            captured_iso: started_at,
+            category: None, // mb-oji5 parking lot
+        });
+    }
+
+    Ok(TagDetail {
+        tag_slug: tag_slug.to_string(),
+        mention_count,
+        total_entries,
+        recent_entries,
+    })
 }
 
 /// Batch per-entry summary: for each `entry_id` in `entry_ids`,
@@ -912,5 +1000,124 @@ mod tests {
         })
         .unwrap();
         assert!(json.contains("\"filingState\":\"not_enqueued\""));
+    }
+
+    // ============================================================
+    // tag_detail (Wave 1C.4 / ADR 0051 D1)
+    //
+    // Standalone fixture (separate from seed()) so the 14 existing
+    // search.rs tests stay unchanged. Mirrors the shape used by
+    // entities.rs::entity_detail tests: sessions has started_at,
+    // transcripts exists, kg_tag_mentions populated.
+    // ============================================================
+
+    fn seed_detail() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             CREATE TABLE sessions (
+               id INTEGER PRIMARY KEY,
+               started_at TEXT NOT NULL
+             );
+             CREATE TABLE transcripts (
+               id INTEGER PRIMARY KEY,
+               session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+               stage TEXT NOT NULL,
+               text TEXT NOT NULL,
+               UNIQUE(session_id, stage)
+             );
+             CREATE TABLE kg_canonical_tags (id INTEGER PRIMARY KEY);
+             CREATE TABLE kg_tag_mentions (
+               id INTEGER PRIMARY KEY,
+               entry_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+               canonical_tag_id INTEGER REFERENCES kg_canonical_tags(id) ON DELETE SET NULL,
+               segment_idx INTEGER NOT NULL,
+               tag_slug TEXT NOT NULL,
+               created_at TEXT NOT NULL,
+               UNIQUE(entry_id, segment_idx, tag_slug)
+             );
+
+             INSERT INTO sessions (id, started_at) VALUES
+               (300, '2026-05-25T10:00:00Z'),
+               (301, '2026-05-26T10:00:00Z'),
+               (302, '2026-05-27T10:00:00Z'),
+               (303, '2026-05-28T10:00:00Z');
+
+             INSERT INTO transcripts (session_id, stage, text) VALUES
+               (300, 'final',   'Family dinner Sunday'),
+               (301, 'final',   'Quick errand'),
+               (302, 'cleaned', '  Kids soccer practice  ');
+
+             -- Tag 'family' lives in 300 (seg 0), 300 (seg 3), 302 (seg 1)
+             --   -> 3 mentions, 2 entries
+             -- Tag 'errand' lives in 301 (seg 0), 303 (seg 0)
+             --   -> 2 mentions, 2 entries
+             INSERT INTO kg_tag_mentions (entry_id, canonical_tag_id, segment_idx, tag_slug, created_at) VALUES
+               (300, NULL, 0, 'family', 't'),
+               (300, NULL, 3, 'family', 't'),
+               (302, NULL, 1, 'family', 't'),
+               (301, NULL, 0, 'errand', 't'),
+               (303, NULL, 0, 'errand', 't');",
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn tag_detail_returns_counts_and_recent_entries() {
+        let conn = seed_detail();
+        let d = tag_detail(&conn, "family", 50).unwrap();
+        assert_eq!(d.tag_slug, "family");
+        assert_eq!(d.mention_count, 3);
+        assert_eq!(d.total_entries, 2);
+        let ids: Vec<i64> = d.recent_entries.iter().map(|e| e.entry_id).collect();
+        assert_eq!(ids, vec![302, 300], "newest started_at first");
+        // Title fallthrough: 302 only has cleaned stage; whitespace trimmed.
+        let row_302 = d.recent_entries.iter().find(|e| e.entry_id == 302).unwrap();
+        assert_eq!(row_302.title, "Kids soccer practice");
+    }
+
+    #[test]
+    fn tag_detail_unknown_slug_is_empty_not_err() {
+        // Open-vocab: typing a brand-new slug must not error.
+        let conn = seed_detail();
+        let d = tag_detail(&conn, "never-seen-before", 50).unwrap();
+        assert_eq!(d.tag_slug, "never-seen-before");
+        assert_eq!(d.mention_count, 0);
+        assert_eq!(d.total_entries, 0);
+        assert!(d.recent_entries.is_empty());
+    }
+
+    #[test]
+    fn tag_detail_recent_limit_caps_list_but_not_counts() {
+        let conn = seed_detail();
+        let d = tag_detail(&conn, "errand", 1).unwrap();
+        assert_eq!(d.recent_entries.len(), 1);
+        assert_eq!(d.recent_entries[0].entry_id, 303, "newest first");
+        assert_eq!(d.mention_count, 2);
+        assert_eq!(d.total_entries, 2);
+    }
+
+    #[test]
+    fn tag_detail_dto_serializes_camel_case() {
+        let d = TagDetail {
+            tag_slug: "family".into(),
+            mention_count: 3,
+            total_entries: 2,
+            recent_entries: vec![EntryRef {
+                entry_id: 300,
+                title: "hi".into(),
+                captured_iso: "t".into(),
+                category: None,
+            }],
+        };
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(json.contains("\"tagSlug\":\"family\""));
+        assert!(json.contains("\"mentionCount\":3"));
+        assert!(json.contains("\"totalEntries\":2"));
+        assert!(json.contains("\"recentEntries\":"));
+        assert!(json.contains("\"entryId\":300"));
+        assert!(json.contains("\"capturedIso\":\"t\""));
+        assert!(json.contains("\"category\":null"));
     }
 }

@@ -61,6 +61,7 @@
 #![allow(dead_code)]
 
 use rusqlite::Connection;
+use serde::Serialize;
 
 use crate::error::AppResult;
 
@@ -73,6 +74,82 @@ pub(crate) mod search;
 
 // Re-export the call sites the rest of the crate consumes.
 pub use queue::enqueue_for_filing;
+
+/// One entry's summary row, used by the concept-modal recent-entries
+/// lists (Wave 1C.4 / ADR 0051 D1). Shared by both
+/// [`entities::entity_detail`] and [`search::tag_detail`].
+///
+/// `title` is a single-line excerpt derived from the dictation
+/// transcript (final > cleaned > raw fall-through, mirroring the
+/// `pick_summary_text` shape that drives the Dictations list page);
+/// truncated to [`ENTRY_TITLE_MAX_CHARS`] so a 50-row modal renders
+/// without horizontal scrolling.
+///
+/// `captured_iso` is `sessions.started_at` (RFC-3339 string on disk).
+///
+/// `category` is `Option<String>` and is **always `None` in 1C.4** —
+/// the pipeline parses an Entry.category but the persistence change
+/// is tracked separately as `mb-oji5` (needs a sessions-table column
+/// + a worker write; not in 1C.4 scope). The field stays on the wire
+/// so 1C.5+ adds zero IPC churn when `mb-oji5` lands.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryRef {
+    pub entry_id: i64,
+    pub title: String,
+    pub captured_iso: String,
+    pub category: Option<String>,
+}
+
+/// Cap for the single-line excerpt in [`EntryRef::title`]. 80 chars
+/// holds about one screen-line in the modal at the design system's
+/// body type-scale and matches the truncation the Dictations list
+/// row uses for its first-line preview. Larger values wrap; smaller
+/// values feel telegraphic.
+pub(crate) const ENTRY_TITLE_MAX_CHARS: usize = 80;
+
+/// Truncate to at most `max_chars` user-perceived characters
+/// (grapheme-naive — UTF-8 chars; titles are derived from cleaned
+/// dictation transcripts which are overwhelmingly ASCII). Appends an
+/// ellipsis when truncation happens so the UI can render the
+/// shortened form without re-measuring.
+pub(crate) fn truncate_title(s: &str, max_chars: usize) -> String {
+    let trimmed = s.trim();
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_string();
+    }
+    let mut out: String = trimmed.chars().take(max_chars).collect();
+    out.push('\u{2026}'); // ellipsis
+    out
+}
+
+/// Fetch the single-line title excerpt for one session, following
+/// the same final > cleaned > raw fall-through that
+/// `commands/sessions.rs::pick_summary_text` uses for the Dictations
+/// list page. Lives here (and not in commands/) so the store layer
+/// has no reverse-direction dependency on the commands layer.
+///
+/// Returns an empty string when no transcript stage exists — the UI
+/// renders this as "(empty)" rather than the row disappearing.
+pub(crate) fn fetch_session_title_excerpt(conn: &Connection, session_id: i64) -> AppResult<String> {
+    // Order matches the documented fall-through. `transcripts` has
+    // UNIQUE(session_id, stage) so each lookup is a single indexed
+    // point read; total cost is bounded at 3 reads per session and
+    // typically resolves on the first (final).
+    for stage in ["final", "cleaned", "raw"] {
+        let text: Option<String> = conn
+            .query_row(
+                "SELECT text FROM transcripts WHERE session_id = ?1 AND stage = ?2;",
+                rusqlite::params![session_id, stage],
+                |r| r.get::<_, String>(0),
+            )
+            .ok();
+        if let Some(t) = text {
+            return Ok(truncate_title(&t, ENTRY_TITLE_MAX_CHARS));
+        }
+    }
+    Ok(String::new())
+}
 
 /// One segment's worth of pipeline output, in the shape the store
 /// layer needs to persist provenance.
