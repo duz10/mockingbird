@@ -15,12 +15,19 @@ use super::{run_pipeline, AnswerKey, Category, EntityType, Entry, EntryType, Sta
 
 #[test]
 fn public_surface_runs_pipeline_with_mock_dispatcher() {
-    // Two canned responses, exactly per the kickoff brief:
-    //   1. segment → one segment
-    //   2. classify + extract for that segment (extract rule first;
+    // Five canned responses now — one per pass × one segment:
+    //   1. extract_entities (registered first because its prompt body
+    //      suffix overlaps with classify's; the unique opener
+    //      "You extract specific named or concrete" disambiguates).
+    //   2. segment → one segment
+    //   3. classify + extract for that segment (extract rule first;
     //      first-match-wins, and the extract prompt contains the
-    //      segment text but also the CLASSIFICATION marker).
+    //      segment text PLUS the CLASSIFICATION marker).
     let mock = MockOllama::new()
+        .respond_when(
+            "You extract specific named or concrete",
+            r#"{"entities":[]}"#,
+        )
         .respond_when("DICTATION", r#"["call the dentist on Friday"]"#)
         .respond_when(
             "call the dentist on Friday\nCLASSIFICATION",

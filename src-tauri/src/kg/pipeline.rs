@@ -33,7 +33,7 @@ use std::path::Path;
 use serde::Serialize;
 
 use super::ollama::{GenerateOptions, OllamaDispatcher};
-use super::passes::{self, Classification, Extraction, NewTagRequest, PassError};
+use super::passes::{self, Classification, Extraction, ExtractedEntity, NewTagRequest, PassError};
 use super::schema::{Entry, EntryType, Status};
 use super::schema_loader::Schema;
 use super::synonyms::SynonymMap;
@@ -51,6 +51,30 @@ pub struct PipelineResult {
     /// can attribute them back to a dictation + segment. Empty when
     /// the active schema is open-vocab.
     pub new_tag_requests: Vec<(usize, NewTagRequest)>,
+    /// Phase 1B Chunk 3 (`mb-eke8`, ADR 0050) — per-segment entity
+    /// outputs from the 5th pass (`extract_entities`). Threaded through
+    /// for the KG filing worker's `apply_filed_outcome` consumer; the
+    /// parity probe's `pipeline_result_to_value` manually builds the
+    /// three-key JSON shape and is invisible to this additive field by
+    /// construction (Chunk 2 LESSONS finding).
+    ///
+    /// Order is segment order; a segment that hit a `classify` or
+    /// `extract` failure (and thus never assembled an `Entry`) is
+    /// omitted here too — the pipeline `continue`s upstream of the
+    /// entity pass. A segment whose `extract_entities` call itself
+    /// failed appears here with `entities: Vec::new()` and the
+    /// matching `extract_entities[i]` error in [`Self::per_pass_errors`].
+    pub segment_entities: Vec<SegmentEntities>,
+}
+
+/// Per-segment slice of the `extract_entities` pass output. The
+/// `segment_idx` is the 0-based pipeline segment ordinal (aligns with
+/// `kg_entity_mentions.segment_idx` written by
+/// `kg::store::apply_filed_outcome`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SegmentEntities {
+    pub segment_idx: usize,
+    pub entities: Vec<ExtractedEntity>,
 }
 
 #[derive(Serialize)]
@@ -123,6 +147,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
 
     let mut errors: Vec<(String, PassError)> = Vec::new();
     let mut new_tag_requests: Vec<(usize, NewTagRequest)> = Vec::new();
+    let mut segment_entities: Vec<SegmentEntities> = Vec::new();
 
     // Resolve per-pass prompt bodies up front via the model-class
     // calibration profile (`mb-4xtd` / ADR 0049 Move 1). The dispatch
@@ -144,6 +169,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
                 entries: Vec::new(),
                 per_pass_errors: errors,
                 new_tag_requests,
+                segment_entities,
             };
         }
     };
@@ -162,6 +188,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
                 entries: Vec::new(),
                 per_pass_errors: errors,
                 new_tag_requests,
+                segment_entities,
             };
         }
     };
@@ -180,6 +207,26 @@ pub fn run_pipeline<D: OllamaDispatcher>(
                 entries: Vec::new(),
                 per_pass_errors: errors,
                 new_tag_requests,
+                segment_entities,
+            };
+        }
+    };
+    let extract_entities_prompt = match schema.prompt_body("extract_entities", model) {
+        Ok(b) => b,
+        Err(e) => {
+            errors.push((
+                format!("extract_entities[{dictation_id}]"),
+                PassError::Validation {
+                    pass: "extract_entities",
+                    detail: format!("schema resolution: {e}"),
+                    raw: String::new(),
+                },
+            ));
+            return PipelineResult {
+                entries: Vec::new(),
+                per_pass_errors: errors,
+                new_tag_requests,
+                segment_entities,
             };
         }
     };
@@ -206,6 +253,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
                 entries: Vec::new(),
                 per_pass_errors: errors,
                 new_tag_requests,
+                segment_entities,
             };
         }
     };
@@ -317,6 +365,39 @@ pub fn run_pipeline<D: OllamaDispatcher>(
             );
         }
 
+        // ── Pass 5: extract_entities ──────────────────────────────
+        // Phase 1B Chunk 3 (`mb-eke8`, ADR 0050) — sits between
+        // `extract` and normalize/assemble per ADR 0049 §6 pipeline
+        // order. Failure here records `extract_entities[i]` to
+        // `per_pass_errors` and proceeds with an empty entity vec for
+        // this segment — the `Entry` is still assembled because
+        // entries are valuable independent of entity provenance
+        // (entity attribution is best-effort in 1B per ADR 0050).
+        let entities = match passes::extract_entities(
+            dispatcher,
+            model,
+            extract_entities_prompt,
+            seg_text,
+            options,
+        ) {
+            Ok(e) => e.entities,
+            Err(e) => {
+                tracing::warn!(
+                    target: "kg::pipeline",
+                    dictation_id = %dictation_id,
+                    segment_idx = idx,
+                    error = %e,
+                    "extract_entities pass failed; segment kept with empty entity vec"
+                );
+                errors.push((format!("extract_entities[{idx}]"), e));
+                Vec::new()
+            }
+        };
+        segment_entities.push(SegmentEntities {
+            segment_idx: idx,
+            entities,
+        });
+
         // ── Assemble Entry ────────────────────────────────────────
         let status = if classification.entry_type == EntryType::Task {
             Some(Status::Todo)
@@ -339,6 +420,7 @@ pub fn run_pipeline<D: OllamaDispatcher>(
         entries,
         per_pass_errors: errors,
         new_tag_requests,
+        segment_entities,
     }
 }
 
@@ -372,7 +454,18 @@ mod tests {
         // rules, because the extract prompt also contains the segment
         // text. We disambiguate using the "CLASSIFICATION" marker
         // that only the extract prompt writes.
+        // The extract_entities needle is registered FIRST because its
+        // prompt body is the only one whose suffix overlaps with
+        // classify (`SEGMENT:\n{seg}`). First-substring-match wins;
+        // putting the unique extract_entities opener at the head of the
+        // rule list disambiguates the two passes cleanly. Empty
+        // entities are fine for this test — the assertion surface is
+        // the entry shape, not entity provenance.
         let mock = MockOllama::new()
+            .respond_when(
+                "You extract specific named or concrete",
+                r#"{"entities":[]}"#,
+            )
             .respond_when(
                 "DICTATION",
                 r#"["call the daycare on Monday","ship the order before Friday"]"#,
@@ -419,6 +512,15 @@ mod tests {
         );
         assert_eq!(result.entries.len(), 2);
 
+        // Chunk 3: extract_entities runs once per surviving segment;
+        // the canned `{"entities":[]}` response yields two empty
+        // SegmentEntities rows in segment order.
+        assert_eq!(result.segment_entities.len(), 2);
+        assert_eq!(result.segment_entities[0].segment_idx, 0);
+        assert_eq!(result.segment_entities[1].segment_idx, 1);
+        assert!(result.segment_entities[0].entities.is_empty());
+        assert!(result.segment_entities[1].entities.is_empty());
+
         let e0 = &result.entries[0];
         assert_eq!(e0.category, Category::Personal);
         assert_eq!(e0.entry_type, EntryType::Task);
@@ -445,6 +547,10 @@ mod tests {
         // per-pass JSON pass `None` and the orchestrator just
         // skips every fs::* call. Identical entry results.
         let mock = MockOllama::new()
+            .respond_when(
+                "You extract specific named or concrete",
+                r#"{"entities":[]}"#,
+            )
             .respond_when("DICTATION", r#"["call the daycare on Monday"]"#)
             .respond_when(
                 "call the daycare on Monday\nCLASSIFICATION",
@@ -521,6 +627,15 @@ mod tests {
     fn classify_failure_drops_only_that_segment() {
         let tmp = tempdir();
         let mock = MockOllama::new()
+            // extract_entities needle first — its prompt suffix also
+            // contains "SEGMENT:\n{seg}" but its body uniquely opens
+            // with "You extract specific named or concrete". First-match
+            // wins, so registering it ahead of the SEGMENT-keyed
+            // classify needle is what keeps the disambiguation clean.
+            .respond_when(
+                "You extract specific named or concrete",
+                r#"{"entities":[]}"#,
+            )
             .respond_when("DICTATION", r#"["good segment","bad segment"]"#)
             // Extract for the good segment must be MATCHED FIRST —
             // it's the strictest needle (contains "CLASSIFICATION").
@@ -556,6 +671,99 @@ mod tests {
         );
         assert_eq!(result.per_pass_errors.len(), 1);
         assert!(result.per_pass_errors[0].0.starts_with("classify["));
+    }
+
+    #[test]
+    fn extract_entities_populates_segment_entities_per_segment() {
+        // Chunk 3 (`mb-eke8`) — wire the 5th pass into the orchestrator.
+        // One dictation → two segments → two entity rows wired through.
+        let mock = MockOllama::new()
+            .respond_when(
+                "You extract specific named or concrete",
+                r#"{"entities":[{"name":"madison","type":"person","aliases":[]}]}"#,
+            )
+            .respond_when(
+                "DICTATION",
+                r#"["segment one mentions madison","segment two also mentions madison"]"#,
+            )
+            .respond_when(
+                "segment one mentions madison\nCLASSIFICATION",
+                r#"{"title":"s1","due_iso":null,"raw_topic_tags":["a"]}"#,
+            )
+            .respond_when(
+                "segment two also mentions madison\nCLASSIFICATION",
+                r#"{"title":"s2","due_iso":null,"raw_topic_tags":["a"]}"#,
+            )
+            .respond_when(
+                "SEGMENT:\nsegment one mentions madison",
+                r#"{"category":"personal","entry_type":"task"}"#,
+            )
+            .respond_when(
+                "SEGMENT:\nsegment two also mentions madison",
+                r#"{"category":"personal","entry_type":"task"}"#,
+            );
+        let schema = test_schema();
+        let result = run_pipeline(
+            &mock,
+            &schema,
+            None,
+            "qwen2.5:7b-instruct-q4_K_M",
+            "ents-1",
+            "two segments, both mention madison.",
+            "2026-06-14T08:00:00Z",
+            &GenerateOptions::default(),
+            None,
+        );
+        assert!(
+            result.per_pass_errors.is_empty(),
+            "{:?}",
+            result.per_pass_errors
+        );
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.segment_entities.len(), 2);
+        assert_eq!(result.segment_entities[0].entities.len(), 1);
+        assert_eq!(result.segment_entities[0].entities[0].name, "madison");
+        assert_eq!(result.segment_entities[1].entities.len(), 1);
+        assert_eq!(result.segment_entities[1].entities[0].name, "madison");
+    }
+
+    #[test]
+    fn extract_entities_failure_keeps_entry_with_empty_entities() {
+        // Chunk 3 (`mb-eke8`) — failure isolation per ADR 0050:
+        // entity attribution is best-effort in 1B; a parse failure on
+        // the 5th pass records `extract_entities[i]` to per_pass_errors
+        // but the segment's Entry still ships.
+        let mock = MockOllama::new()
+            .respond_when(
+                "You extract specific named or concrete",
+                "not json — entity pass should fail to parse",
+            )
+            .respond_when("DICTATION", r#"["only one segment here"]"#)
+            .respond_when(
+                "only one segment here\nCLASSIFICATION",
+                r#"{"title":"hello","due_iso":null,"raw_topic_tags":["a"]}"#,
+            )
+            .respond_when(
+                "SEGMENT:\nonly one segment here",
+                r#"{"category":"personal","entry_type":"task"}"#,
+            );
+        let schema = test_schema();
+        let result = run_pipeline(
+            &mock,
+            &schema,
+            None,
+            "qwen2.5:7b-instruct-q4_K_M",
+            "ent-fail-1",
+            "only one segment here.",
+            "2026-06-14T08:00:00Z",
+            &GenerateOptions::default(),
+            None,
+        );
+        assert_eq!(result.entries.len(), 1, "entry must still ship");
+        assert_eq!(result.segment_entities.len(), 1);
+        assert!(result.segment_entities[0].entities.is_empty());
+        assert_eq!(result.per_pass_errors.len(), 1);
+        assert!(result.per_pass_errors[0].0.starts_with("extract_entities["));
     }
 
     // ── tiny tempdir helper so we don't pull in the `tempfile` crate
