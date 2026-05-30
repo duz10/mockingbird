@@ -69,6 +69,7 @@ use super::passes::ExtractedEntity;
 pub(crate) mod entities;
 pub(crate) mod mentions;
 pub(crate) mod queue;
+pub(crate) mod search;
 
 // Re-export the call sites the rest of the crate consumes.
 pub use queue::enqueue_for_filing;
