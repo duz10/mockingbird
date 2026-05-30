@@ -59,6 +59,12 @@ pub(crate) mod passes;
 pub(crate) mod pipeline;
 pub(crate) mod schema;
 pub(crate) mod schema_loader;
+// Phase 1B Chunk 2 (`mb-geds`, ADR 0050) -- KG persistence half. Owns
+// the five tables created by migration 024, the two concept-page
+// VIEWs, and the filing queue's FIFO state machine. `enqueue_for_filing`
+// is the dictation hook's call site (Chunk 4); the worker (Chunk 3)
+// composes the rest.
+pub(crate) mod store;
 pub(crate) mod synonyms;
 
 // Phase 1A Wave 3 (`mb-qdgn`) — bit-identical re-run gate against the
@@ -81,6 +87,13 @@ pub(crate) mod embeddings;
 pub use passes::EntityType;
 pub use pipeline::{run_pipeline, PipelineResult};
 pub use schema::{AnswerKey, Category, Entry, EntryType, Status};
+
+// Phase 1B Chunk 2 — only the dictation-hook call site is `pub`. The
+// worker-side `apply_filed_outcome` + `SegmentOutput` are crate-internal
+// (see `kg::store` module docs for the rationale)— the worker is a
+// sibling module in `kg::` so it composes the lower-level pieces
+// without widening the published API.
+pub use store::enqueue_for_filing;
 
 // Wave 3 (`mb-qdgn`) — narrow public re-export for the `kg_parity`
 // binary shim. Returns a process exit code; everything else (the
