@@ -83,6 +83,17 @@ pub struct DictationRuntime {
     /// for every PTT session (the real OS hook never touches it).
     next_start_is_programmatic: Arc<AtomicBool>,
 
+    /// ADR 0052 + mb-0gt6 (KG Phase 1D Wave 1D.3) — sibling of
+    /// `next_start_is_programmatic`. Flipped to `true` by
+    /// [`Self::start_kg_note`] right before the synthetic
+    /// `KeyDown`; the orchestrator swaps + clears it inside
+    /// `start_capture` to pin the session's `CaptureKind` to
+    /// `KgNote` for the source-gated KG enqueue (ADR 0052 §D1).
+    /// Independent axis from the programmatic flag: a KG audio
+    /// note IS programmatic AND IS a KG note (both set), but the
+    /// plain in-app Start button is programmatic-only.
+    next_start_is_kg_note: Arc<AtomicBool>,
+
     /// ADR 0046 §3.2 / mb-7vyz — producer half of the sibling
     /// `crossbeam-channel` carrying [`HeadlessIngestRequest`]s to
     /// the orchestrator. Cloneable — each IPC handler / future
@@ -151,6 +162,13 @@ impl DictationRuntime {
         // its own clone so `start()` can flip it.
         let next_start_is_programmatic = Arc::new(AtomicBool::new(false));
         let programmatic_clone = next_start_is_programmatic.clone();
+        // mb-0gt6 / Wave 1D.3: sibling KG-note flag. Same lifetime
+        // + clone pattern the programmatic flag uses—the
+        // orchestrator gets one Arc; the runtime keeps another so
+        // `start_kg_note()` can flip it before injecting the
+        // synthetic KeyDown.
+        let next_start_is_kg_note = Arc::new(AtomicBool::new(false));
+        let kg_note_clone = next_start_is_kg_note.clone();
         // ADR 0046 §3.2: build the sibling crossbeam channel for
         // headless ingest. The runtime holds the sender so lib.rs
         // can clone it into Tauri managed state at boot; the
@@ -169,6 +187,7 @@ impl DictationRuntime {
                     user_overrides,
                     pipeline_complete_tx,
                     programmatic_clone,
+                    kg_note_clone,
                     vault,
                 ) {
                     tracing::error!(error = ?e, "dictation thread bailed out");
@@ -182,6 +201,7 @@ impl DictationRuntime {
             pause,
             recording_window,
             next_start_is_programmatic,
+            next_start_is_kg_note,
             headless_ingest_tx,
             _hook: hook,
             _dictation_join: Some(dictation_join),
@@ -197,11 +217,13 @@ impl DictationRuntime {
         _user_overrides: HashMap<String, InjectionStrategy>,
         _vault: Arc<crate::vault::export_job::VaultRuntime>,
     ) -> AppResult<Self> {
-        // The `next_start_is_programmatic` + headless-channel fields
-        // are unused on non-Windows (`Self` is never actually
+        // The `next_start_is_programmatic` /
+        // `next_start_is_kg_note` + headless-channel fields are
+        // unused on non-Windows (`Self` is never actually
         // constructed on those platforms), but referring to the
         // types here keeps the imports live without cfg-gated use
         // statements.
+        let _: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
         let _: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
         let (_tx, _rx) = ingest_channel::channel();
         Err(AppError::Other(
@@ -267,6 +289,39 @@ impl DictationRuntime {
             })
     }
 
+    /// Programmatic start for a KG-screen audio note (ADR 0052 §D1,
+    /// mb-0gt6 / Wave 1D.3).
+    ///
+    /// Identical to [`Self::start`] EXCEPT it also flips the
+    /// `next_start_is_kg_note` flag so the orchestrator's
+    /// `start_capture` pins the session's `CaptureKind` to `KgNote`
+    /// for the dictation-tail source-gate. The session still goes
+    /// through the full mic / VAD / STT / cleanup / persist pipeline
+    /// like any other in-app live-mic session — the only material
+    /// difference is the capture_kind, which (a) records intent in
+    /// the DB, (b) opts the row into KG filing, and (c) lets the UI
+    /// distinguish KG-originated rows in future surfaces.
+    ///
+    /// Both flags are set BEFORE the synthetic KeyDown for the same
+    /// race-avoidance rationale documented on [`Self::start`].
+    pub fn start_kg_note(&self) -> AppResult<()> {
+        self.next_start_is_programmatic
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.next_start_is_kg_note
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.pause
+            .sender_clone()
+            .send(HotkeyEvent::KeyDown {
+                vk: PROGRAMMATIC_VK,
+                at: std::time::Instant::now(),
+            })
+            .map_err(|e| {
+                AppError::Hotkey(format!(
+                    "DictationRuntime::start_kg_note: hotkey channel closed: {e}"
+                ))
+            })
+    }
+
     /// Programmatic stop (ADR 0045 mode (b)).
     ///
     /// Injects a synthetic [`HotkeyEvent::KeyUp`] on the hotkey
@@ -311,6 +366,7 @@ fn run_dictation_thread(
     user_overrides: HashMap<String, InjectionStrategy>,
     hotkey_tx: std::sync::mpsc::Sender<crate::hotkey::HotkeyEvent>,
     next_start_is_programmatic: Arc<AtomicBool>,
+    next_start_is_kg_note: Arc<AtomicBool>,
     vault: Arc<crate::vault::export_job::VaultRuntime>,
 ) -> AppResult<()> {
     // Build !Send deps here on this thread. None cross thread boundaries.
@@ -336,6 +392,7 @@ fn run_dictation_thread(
         user_overrides,
         hotkey_tx,
         next_start_is_programmatic,
+        next_start_is_kg_note,
         vault,
     );
 

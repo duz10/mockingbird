@@ -93,8 +93,20 @@ pub fn list_sessions(
     offset: usize,
 ) -> Result<Vec<SessionSummary>, String> {
     let conn = lock_db(&db)?;
+    // Wave 1D.3 (`mb-0gt6`, ADR 0052): exclude KG text-note rows.
+    // Text notes are KG-only by contract -- they live in `sessions`
+    // for shared provenance, but the Dictations history view must
+    // not surface them (acceptance gate #2). `capture_kind` defaults
+    // to 'dictation' (migration 025 NOT NULL DEFAULT) so legacy
+    // rows pass the filter unchanged, and the
+    // `idx_sessions_capture_kind` composite index covers this exact
+    // predicate + ORDER BY pair.
     let mut stmt = conn
-        .prepare("SELECT id FROM sessions ORDER BY started_at DESC LIMIT ?1 OFFSET ?2")
+        .prepare(
+            "SELECT id FROM sessions \
+             WHERE capture_kind != 'kg-note-text' \
+             ORDER BY started_at DESC LIMIT ?1 OFFSET ?2",
+        )
         .map_err(into_err)?;
     let mapped = stmt
         .query_map(

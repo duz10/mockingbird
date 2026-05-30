@@ -29,7 +29,7 @@
 // states until the user runs a dictation post-toggle-flip. That
 // is precisely the acceptance-gate condition.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   Card,
@@ -50,17 +50,29 @@ import type {
 } from "../../lib/types";
 import { DictationKgChips } from "../../pages/DictationKgChips";
 
+import { CaptureBand } from "./CaptureBand";
 import styles from "./Dashboard.module.css";
 
 export function KnowledgeGraphDashboard() {
   const [snap, setSnap] = useState<DashboardSnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Fetch on mount. No polling, no event subscription -- mirrors
-  // the SettingsKgFailedFilings pattern (Wave 1C.2): a refetch on
-  // mount is enough for a read-only surface. A future wave can
-  // promote to event-driven if filing-pipeline-finished events
-  // become a thing.
+  // Centralized refetch -- shared by the on-mount fetch and the
+  // post-capture refresh hook the CaptureBand fires after an
+  // audio or text note files. Wave 1D.3 promotion: 1D.2 was
+  // mount-only because the page was read-only; now that the user
+  // can mutate from this same page, we need a way to refresh
+  // without forcing a full route nav.
+  const refetch = useCallback(async () => {
+    try {
+      const data = await api.kg_dashboard_snapshot();
+      setSnap(data);
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(String(err));
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -94,6 +106,12 @@ export function KnowledgeGraphDashboard() {
         <Spinner label={t("kg.dashboard.title")} />
       ) : (
         <div className={styles.bands}>
+          {/* CaptureBand is first so users immediately see the
+           * "capture a note" affordance; the read-only bands flow
+           * underneath. `onFiled` triggers a snapshot refetch so
+           * the new row appears in recent-activity without a
+           * page reload (Wave 1D.3 acceptance gate #1 + #2). */}
+          <CaptureBand onFiled={() => void refetch()} />
           <CountsBand counts={snap.counts} />
           <QueueBand queue={snap.queueStatus} />
           <RecentActivityBand rows={snap.recentActivity} />

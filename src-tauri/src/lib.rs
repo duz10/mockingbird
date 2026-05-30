@@ -136,6 +136,19 @@ pub fn run() {
             let shared_conn = Arc::new(Mutex::new(database.conn));
             app.manage(AppState::new(shared_conn.clone()));
 
+            // mb-0gt6 / Wave 1D.3 — publish the orchestrator config
+            // as managed state so the KG text-note IPC
+            // (`kg_ingest_text_note`) can read the same dictionary /
+            // example / mode fallbacks the dictation pipeline uses.
+            // Cloned here BEFORE the spawn-time move into
+            // `DictationRuntime::spawn`. Provenance binding is
+            // strictly read-only after boot; the dictation tail does
+            // its OWN per-session `resolve_active_mode_from_db`
+            // lookup so the user's mode-picker selection still wins
+            // for both paths.
+            let kg_text_note_config = std::sync::Arc::new(orchestrator_config.clone());
+            app.manage(std::sync::Arc::clone(&kg_text_note_config));
+
             // ADR 0046 Iter 2 / mb-lvzw — vault export-job runtime.
             // Construct BEFORE the dictation + meeting runtimes spawn so
             // both can grab a clone for their post-commit triggers.

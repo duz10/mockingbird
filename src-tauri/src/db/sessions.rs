@@ -68,14 +68,20 @@ pub struct NewSession {
 ///
 /// Persisted to `sessions.capture_kind` (migration 025). Drives the
 /// dictation-tail KG filing source-gate: only `KgNote` sessions
-/// enqueue into `kg_filing_queue` when `KgGraphEnabled=true`. Note
-/// that `KgNoteText` is **never** persisted as a row in `sessions` —
-/// ADR 0052 §D3 routes text-only KG captures directly to
-/// `kg_filing_queue` with a synthetic entry id, bypassing the
-/// sessions/transcripts pipeline entirely. The variant is reserved
-/// here so the enum is the single source of truth for the canonical
-/// value set, even though no current writer emits it through this
-/// type.
+/// enqueue into `kg_filing_queue` when `KgGraphEnabled=true`.
+///
+/// **Wave 1D.3 (mb-0gt6) update.** Text notes DO get a session row
+/// with `KgNoteText` (via [`crate::kg::ingest_text::ingest_text_note`]).
+/// The session/transcripts write IS the canonical store; the
+/// Dictations history page filters out `kg-note-text` rows so they
+/// stay KG-only at the UI surface but remain inspectable via the
+/// same provenance ladder every other session uses (mode_id,
+/// prompt_id, dictionary_snapshot_id, example_set_id). This
+/// supersedes ADR 0052 §D3's earlier "synthetic entry id in
+/// `kg_filing_queue`" sketch — the simpler design reuses the
+/// existing tables instead of adding a parallel write path.
+/// (Recorded in `docs/LESSONS.md` 2026-05-30; will be picked up
+/// in the Wave 1D.6 seal note on ADR 0052.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CaptureKind {
@@ -88,11 +94,14 @@ pub enum CaptureKind {
     /// writes: standard dictation row + transcripts AND enqueues
     /// for KG filing via the source-gated dictation-tail hook.
     KgNote,
-    /// Text-only KG note (ADR 0052 §D3). Reserved — text notes
-    /// bypass the sessions table entirely; no current code path
-    /// writes this value through `NewSession`. Kept here so a
-    /// future schema migration that decides to materialize text
-    /// notes as session rows has the canonical name pre-allocated.
+    /// Text-only KG note (Wave 1D.3 / mb-0gt6). Written by
+    /// [`crate::kg::ingest_text::ingest_text_note`]: a sessions
+    /// row with raw/cleaned/final transcripts all carrying the
+    /// user-typed text (no Whisper, no cleanup LLM pass), then
+    /// enqueued directly into `kg_filing_queue`. The Dictations
+    /// history list filters rows with this `capture_kind` out so
+    /// they stay KG-only at the UX layer while remaining auditable
+    /// at the row + transcript level.
     KgNoteText,
 }
 

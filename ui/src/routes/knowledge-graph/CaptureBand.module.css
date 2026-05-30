@@ -1,0 +1,84 @@
+/* Phase 1D Wave 1D.3 -- KG capture band styles.
+ *
+ * Two-lane layout: audio + text side by side on wide viewports,
+ * stacked on narrow. Pure design-token composition; no hardcoded
+ * colors / spacing. Mirrors the band patterns established in
+ * Dashboard.module.css and the Settings page conventions.
+ */
+
+.subtitle {
+  margin: 0 0 var(--s-2) 0;
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+}
+
+.lanes {
+  display: grid;
+  gap: var(--s-3);
+  /* Same auto-fit pattern the bands grid uses -- two columns when
+   * there's room, one when there isn't. */
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.lane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  background: var(--surf-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+}
+
+.textLabel {
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.textInput {
+  width: 100%;
+  padding: var(--s-2);
+  background: var(--surf-0);
+  color: var(--on-surf);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  font: var(--type-sm);
+  font-family: inherit;
+  resize: vertical;
+  min-height: calc(var(--s-3) * 6);
+}
+
+.textInput:focus-visible {
+  outline: var(--ring-focus);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
+.textInput:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Status line shared by both lanes. Reserves vertical space even
+ * in the idle case so the lane layout doesn't jump when the first
+ * status arrives. */
+.status {
+  margin: 0;
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  min-height: 1.5em;
+}
+
+.statusBusy {
+  color: var(--on-surf);
+}
+
+.statusSuccess {
+  color: var(--status-ok);
+}
+
+.statusError {
+  color: var(--status-error);
+}

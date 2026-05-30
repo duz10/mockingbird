@@ -255,6 +255,11 @@ fn build_orchestrator_with_cleaner(
         // IPC. These integration tests exercise the PTT path, so the
         // flag stays false; `start_capture` will pick StartMode::Ptt.
         Arc::new(AtomicBool::new(false)),
+        // ADR 0052 + mb-0gt6 (Wave 1D.3) — sibling KG-note flag.
+        // PTT integration tests never set it; `start_capture`
+        // pins `CaptureKind::Dictation` so the source-gate's
+        // pre-1D contract holds in these fixtures verbatim.
+        Arc::new(AtomicBool::new(false)),
         // ADR 0046 Iter 2 / mb-lvzw — vault runtime, disabled by
         // default so trigger() short-circuits without touching disk.
         stub_vault(&db_arc),
@@ -497,6 +502,8 @@ fn llm_cleanup_runs_in_orchestrator_and_injects_cleaned_text() {
         HashMap::new(),
         hotkey_tx,
         // PTT path; programmatic-start flag stays false (mb-tfyp).
+        Arc::new(AtomicBool::new(false)),
+        // KG-note path inactive in this test (Wave 1D.3 / mb-0gt6).
         Arc::new(AtomicBool::new(false)),
         // ADR 0046 Iter 2 / mb-lvzw — vault disabled in tests.
         stub_vault(&db_arc),

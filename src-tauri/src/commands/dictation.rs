@@ -63,6 +63,21 @@ pub fn dictation_stop<R: Runtime>(
     runtime.stop().map_err(|e| e.to_string())
 }
 
+/// Start a KG-screen audio note (Wave 1D.3 / mb-0gt6 / ADR 0052).
+///
+/// Identical to [`dictation_start`] except the session is pinned to
+/// `CaptureKind::KgNote` for the dictation-tail source-gate —
+/// the resulting row dual-writes into Dictations history AND fires
+/// the KG enqueue (when `KgGraphEnabled = true`). Stops via the
+/// same [`dictation_stop`] IPC; no separate stop command needed.
+#[tauri::command]
+pub fn dictation_start_kg_note<R: Runtime>(
+    runtime: State<'_, crate::dictation::runtime::DictationRuntime>,
+    _app: AppHandle<R>,
+) -> Result<(), String> {
+    runtime.start_kg_note().map_err(|e| e.to_string())
+}
+
 /// Successful-import response shape — fed to the toast and the
 /// Dictations refetch trigger.
 ///

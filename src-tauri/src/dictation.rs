@@ -151,6 +151,26 @@ pub struct DictationOrchestrator {
     /// which are exactly the three places `start_mode` matters.
     next_start_is_programmatic: Arc<AtomicBool>,
 
+    /// ADR 0052 + mb-0gt6 (KG Phase 1D Wave 1D.3) — set by
+    /// [`DictationRuntime::start_kg_note`] just before it injects
+    /// the synthetic `KeyDown` for a KG-screen audio note. Read
+    /// and cleared at `start_capture` time using the same
+    /// swap-and-pin pattern as `next_start_is_programmatic`. When
+    /// `true`, the session is pinned to [`CaptureKind::KgNote`]
+    /// for the rest of its lifetime; the dictation-tail
+    /// source-gate (ADR 0052 D1) then enqueues the row into
+    /// `kg_filing_queue`.
+    ///
+    /// Lives as a sibling atomic (not as a bit on
+    /// `next_start_is_programmatic`) because the two flags are
+    /// independent axes: every KG-note start is also programmatic
+    /// (the UI button doesn't press a real key), but not every
+    /// programmatic start is a KG note (the in-app Start button
+    /// for plain dictation also goes through `start()`). Keeping
+    /// them separate makes the orchestrator's swap-and-pin logic
+    /// honest about which capture_kind to record.
+    next_start_is_kg_note: Arc<AtomicBool>,
+
     /// ADR 0046 Iter 2 / mb-lvzw — vault export-job handle. Every
     /// `persist_complete` + every successful `handle_headless`
     /// trigger fires `vault.trigger(self.db.clone())` AFTER the row
@@ -263,17 +283,37 @@ pub(crate) fn resolve_active_mode_from_db(
     fallback_slug: &str,
     fallback_prompt_id: i64,
 ) -> ResolvedMode {
-    let fallback = || ResolvedMode {
-        mode_id: fallback_mode_id,
-        slug: fallback_slug.to_string(),
-        prompt_id: fallback_prompt_id,
-    };
     let conn = match db.lock() {
         Ok(g) => g,
         Err(_) => {
             tracing::warn!("active-mode: db mutex poisoned; using boot-time config");
-            return fallback();
+            return ResolvedMode {
+                mode_id: fallback_mode_id,
+                slug: fallback_slug.to_string(),
+                prompt_id: fallback_prompt_id,
+            };
         }
+    };
+    resolve_active_mode_from_conn(&conn, fallback_mode_id, fallback_slug, fallback_prompt_id)
+}
+
+/// Inner mode-resolver — same fallback ladder as
+/// [`resolve_active_mode_from_db`] but without the mutex-locking
+/// step, for callers that already hold the connection lock. Wave
+/// 1D.3 / mb-0gt6 introduced this split so the KG text-note ingest
+/// path can reuse the same active-mode logic without re-locking
+/// (the IPC handler holds the lock for the whole insert + enqueue
+/// transaction).
+pub(crate) fn resolve_active_mode_from_conn(
+    conn: &Connection,
+    fallback_mode_id: i64,
+    fallback_slug: &str,
+    fallback_prompt_id: i64,
+) -> ResolvedMode {
+    let fallback = || ResolvedMode {
+        mode_id: fallback_mode_id,
+        slug: fallback_slug.to_string(),
+        prompt_id: fallback_prompt_id,
     };
     let slug: String = conn
         .query_row(
@@ -568,6 +608,7 @@ impl DictationOrchestrator {
         user_overrides: HashMap<String, InjectionStrategy>,
         hotkey_tx: Sender<HotkeyEvent>,
         next_start_is_programmatic: Arc<AtomicBool>,
+        next_start_is_kg_note: Arc<AtomicBool>,
         vault: Arc<crate::vault::export_job::VaultRuntime>,
     ) -> Self {
         Self {
@@ -584,6 +625,7 @@ impl DictationOrchestrator {
             user_overrides,
             hotkey_tx,
             next_start_is_programmatic,
+            next_start_is_kg_note,
             vault,
             state: SessionState::default(),
         }
@@ -779,6 +821,20 @@ impl DictationOrchestrator {
             StartMode::Ptt
         };
         self.state.start_mode = start_mode;
+        // ADR 0052 + mb-0gt6 (Wave 1D.3). Sibling swap-and-pin for
+        // the KG-note source-gate flag. Same SeqCst guarantee: the
+        // bit cannot leak into the next session even if a stray
+        // `start_kg_note` races with a real PTT hold (the FSM no-op
+        // in `Recording` / `Processing` swallows the synthetic
+        // KeyDown anyway, so the misattribution surface is closed
+        // at the state machine the same way the programmatic flag
+        // is). Defaults to `Dictation` so the pre-1D source-gate
+        // contract holds exactly as before for every non-KG path.
+        if self.next_start_is_kg_note.swap(false, Ordering::SeqCst) {
+            self.state.capture_kind = CaptureKind::KgNote;
+        } else {
+            self.state.capture_kind = CaptureKind::Dictation;
+        }
         // Pin the active mode for this whole session BEFORE we open
         // the mic. Single resolution per session: recording-window
         // colour, cleanup prompt, and DB FKs all see the same mode.

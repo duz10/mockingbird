@@ -138,6 +138,16 @@ pub use latency_bench::run_latency_bench;
 // owning any new table; mirrors the `kg::latency_bench` precedent.
 pub(crate) mod dashboard;
 
+// Phase 1D Wave 1D.3 (`mb-0gt6`, ADR 0052) -- text-note ingest. The
+// KG-screen text input fires `kg_ingest_text_note(text)`; this module
+// is the persistence + enqueue half. Sibling of
+// `crate::dictation::ingest` (the file-import path); both write to
+// `sessions` + `transcripts` with full provenance, distinguished by
+// `capture_kind`. See the module docstring for the divergence note
+// from ADR 0052 §D3's original synthetic-entry-id sketch.
+pub(crate) mod ingest_text;
+pub use ingest_text::ingest_text_note;
+
 // Smoke test for the public surface — confirms the wiring compiles
 // and `run_pipeline` is callable via a `MockOllama`. This is NOT the
 // parity probe (that lands in Chunk 3).

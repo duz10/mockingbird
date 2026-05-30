@@ -311,6 +311,27 @@ export const api = {
    *  overlay is still the cancel path). Idempotent: a no-op if the
    *  state machine isn't currently in a programmatic recording. */
   dictation_stop: () => invoke<void>("dictation_stop"),
+  /** Phase 1D Wave 1D.3 (`mb-0gt6`, ADR 0052) -- start a KG audio
+   *  note. Same orchestrator path as `dictation_start` but the
+   *  resulting session is tagged `capture_kind='kg-note'`, so it
+   *  fires KG filing AND appears in Dictations history (the
+   *  intentional "audio-note" dual-write).
+   *
+   *  Stop is the same `dictation_stop` IPC -- only the start side
+   *  carries the capture-kind tag; the orchestrator threads it
+   *  through to the persist step. */
+  dictation_start_kg_note: () => invoke<void>("dictation_start_kg_note"),
+  /** Phase 1D Wave 1D.3 (`mb-0gt6`, ADR 0052) -- file a KG text
+   *  note. Bypasses Whisper entirely: the text is the transcript.
+   *  Inserts a session with `capture_kind='kg-note-text'` (which
+   *  the history-list filter excludes), a raw+cleaned transcript
+   *  row (equal contents), and enqueues for KG filing.
+   *
+   *  Returns the inserted `sessions.id` so the UI can correlate
+   *  the subsequent dashboard refetch / filing-state pill without
+   *  a follow-up lookup. */
+  kg_ingest_text_note: (text: string) =>
+    invoke<number>("kg_ingest_text_note", { text }),
   /** ADR 0046 §3.2 / mb-7vyz — desktop audio-file import.
    *  Opens a native file picker, decodes the selected file via
    *  symphonia, queues it onto the orchestrator's sibling headless-
@@ -735,6 +756,7 @@ function fixtureFor<T>(command: string, args?: object): T {
     case "trigger_learning_run":
     case "open_path":
     case "dictation_start":
+    case "dictation_start_kg_note":
     case "dictation_stop":
     case "activity_pause":
     case "activity_resume":
@@ -752,6 +774,12 @@ function fixtureFor<T>(command: string, args?: object): T {
     case "activity_retention_set":
     case "activity_export_pdf":
       return fixture(command, undefined as unknown as T);
+    case "kg_ingest_text_note":
+      // Phase 1D Wave 1D.3 (`mb-0gt6`) -- browser-preview stub.
+      // Returns a synthetic session id so the design-mode "submit"
+      // round-trips cleanly. Playwright specs can override via
+      // `window.__MOCKINGBIRD_FIXTURES__`.
+      return fixture(command, 99_999 as unknown as T);
     case "dictation_import_file":
       // ADR 0046 §3.2 / mb-7vyz — browser-preview stub. Real
       // shell-side response shape is `SessionImportSummary`; here

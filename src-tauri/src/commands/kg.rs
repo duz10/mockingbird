@@ -382,6 +382,34 @@ pub fn kg_tag_detail(
     search::tag_detail(&conn, &tag_slug, cap).map_err(into_err)
 }
 
+/// Phase 1D Wave 1D.3 (`mb-0gt6`, ADR 0052) -- KG text-note ingest.
+///
+/// Synchronous: the React text-note input awaits the inserted
+/// `sessions.id`, then re-renders its status pill. The actual KG
+/// filing job runs out-of-band in the existing background worker;
+/// observers should listen for the standard `history:session-saved`
+/// event (fired here) plus the dashboard refetch path.
+///
+/// Returns the inserted `sessions.id` so the UI can scroll-to-row
+/// in the KG dashboard's recent-activity band without a separate
+/// lookup round-trip.
+///
+/// Errors round-trip as `Err(String)` (Tauri convention); the
+/// failure modes are limited to (a) empty input (UI should pre-
+/// validate but defensive here), (b) DB mutex poisoning (process-
+/// fatal in practice -- bubbles up to a toast), or (c) a rare
+/// transcript write failure that gets logged and surfaced.
+#[tauri::command]
+pub fn kg_ingest_text_note(
+    db: State<'_, AppStateHandle>,
+    config: State<'_, std::sync::Arc<crate::dictation::OrchestratorConfig>>,
+    runtime: State<'_, crate::dictation::runtime::DictationRuntime>,
+    text: String,
+) -> Result<i64, String> {
+    crate::kg::ingest_text_note(&db.db, &runtime.recording_window, config.as_ref(), &text)
+        .map_err(into_err)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
