@@ -30,6 +30,27 @@
 //! - [`kg_queue_status`] — per-state counts + `last_done_iso` for
 //!   the "Filing status" line above the failed-filings list.
 //!
+//! ## Wave 1C.3 additions (`mb-5ly5`, ADR 0051)
+//!
+//! Four read-side commands powering the Dictations page retrieval UX:
+//!
+//! - [`kg_search_entries`] — combinable retrieval filter
+//!   (entities + tags + free-text query). **Within-axis OR /
+//!   across-axis AND.** Returns the matched `entry_id` set
+//!   (== `sessions.id`).
+//! - [`kg_list_entities`] / [`kg_list_tags`] — prefix autocomplete
+//!   for the filter-bar chip pickers, ordered by `mention_count DESC`.
+//! - [`kg_entries_summary`] — **batched** per-row chip + filing-state
+//!   lookup (single round-trip for a 50-element list page).
+//!
+//! **Category axis dropped from this wave.** The Wave 1C.3 kickoff
+//! brief specified four axes including `categories`, but `category`
+//! is not persisted in 1B (`kg::schema::Entry.category` is
+//! in-memory only; `apply_filed_outcome` writes only entity + tag
+//! mention rows). Filed as `mb-oji5` for a future wave alongside
+//! the persistence change. The three axes that DO have queryable
+//! data ship in this wave.
+//!
 //! ## Why not extend `commands/settings.rs`?
 //!
 //! ADR 0051's wave plan calls out `src-tauri/src/commands/kg.rs` as
@@ -37,16 +58,54 @@
 //! Future KG-side IPC for filter candidates (1C.3) and concept
 //! lookups (1C.4) lands in this same module.
 
-use serde::Serialize;
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::commands::{into_err, lock_db, AppStateHandle};
 use crate::kg::store::queue::{self, FailedFiling, QueueStatus};
+use crate::kg::store::search::{self, EntitySuggestion, EntrySummary, SearchFilter, TagSuggestion};
 use crate::settings::{model::SettingKey, Settings};
 
 /// Default cap on [`kg_list_failed_filings`] when the UI omits the
 /// `limit` argument. Matches D1 in the Wave 1C.2 binding parameters.
 const DEFAULT_FAILED_FILINGS_LIMIT: u32 = 50;
+
+/// Default cap on [`kg_list_entities`] + [`kg_list_tags`] when the
+/// UI omits the `limit` argument. Matches D2 in the Wave 1C.3
+/// binding parameters ("defaults limit=50").
+const DEFAULT_AUTOCOMPLETE_LIMIT: u32 = 50;
+
+/// IPC-side wire shape for [`kg_search_entries`]'s filter argument.
+/// Mirrors [`SearchFilter`] but uses serde-derive so the camelCase
+/// JS payload deserializes cleanly. The store-layer type intentionally
+/// stays serde-free because its callers are pure-Rust.
+///
+/// Tag values are open-vocab `tag_slug` strings (per 1B schema —
+/// `kg_canonical_tags` is inert; the slug IS the identifier). The
+/// JS side passes strings directly; no synthesized tag ids on the
+/// wire.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchFilterArg {
+    #[serde(default)]
+    pub entities: Vec<i64>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub query: Option<String>,
+}
+
+impl From<SearchFilterArg> for SearchFilter {
+    fn from(a: SearchFilterArg) -> Self {
+        SearchFilter {
+            entities: a.entities,
+            tags: a.tags,
+            query: a.query,
+        }
+    }
+}
 
 /// Typed snapshot of every KG-side setting the UI reads.
 ///
@@ -138,6 +197,68 @@ pub fn kg_queue_status(db: State<'_, AppStateHandle>) -> Result<QueueStatus, Str
     queue::queue_status(&conn).map_err(into_err)
 }
 
+/// Combinable retrieval search. Returns the `entry_id`s matching
+/// `filter` (within-axis OR / across-axis AND). An empty filter
+/// returns every entry_id that appears in any mention table; the UI
+/// should short-circuit and not call this for the no-filter case
+/// (use the base `list_sessions` path instead).
+///
+/// Wave 1C.3 / ADR 0051 D1.
+#[tauri::command]
+pub fn kg_search_entries(
+    db: State<'_, AppStateHandle>,
+    filter: SearchFilterArg,
+) -> Result<Vec<i64>, String> {
+    let f: SearchFilter = filter.into();
+    let conn = lock_db(&db)?;
+    search::search_entry_ids(&conn, &f).map_err(into_err)
+}
+
+/// Entity-chip autocomplete. `prefix=None` returns the global top
+/// entities ranked by mention count; passing a string constrains to
+/// canonical names starting with it (case-insensitive). `limit`
+/// defaults to [`DEFAULT_AUTOCOMPLETE_LIMIT`] when omitted.
+///
+/// Wave 1C.3 / ADR 0051 D2.
+#[tauri::command]
+pub fn kg_list_entities(
+    db: State<'_, AppStateHandle>,
+    prefix: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<EntitySuggestion>, String> {
+    let cap = limit.unwrap_or(DEFAULT_AUTOCOMPLETE_LIMIT);
+    let conn = lock_db(&db)?;
+    search::list_entities(&conn, prefix.as_deref(), cap).map_err(into_err)
+}
+
+/// Tag-chip autocomplete. Same shape as [`kg_list_entities`] over
+/// the distinct `tag_slug` values in `kg_tag_mentions`. Wave 1C.3 /
+/// ADR 0051 D2.
+#[tauri::command]
+pub fn kg_list_tags(
+    db: State<'_, AppStateHandle>,
+    prefix: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<TagSuggestion>, String> {
+    let cap = limit.unwrap_or(DEFAULT_AUTOCOMPLETE_LIMIT);
+    let conn = lock_db(&db)?;
+    search::list_tags(&conn, prefix.as_deref(), cap).map_err(into_err)
+}
+
+/// Batched per-row chip + filing-state lookup. Single round-trip
+/// for the Dictations list page's per-row KG strip — calling per
+/// row would 50x the IPC load on a typical page render.
+///
+/// Wave 1C.3 / ADR 0051 D2 ("batch for per-row display").
+#[tauri::command]
+pub fn kg_entries_summary(
+    db: State<'_, AppStateHandle>,
+    entry_ids: Vec<i64>,
+) -> Result<HashMap<i64, EntrySummary>, String> {
+    let conn = lock_db(&db)?;
+    search::entries_summary(&conn, &entry_ids).map_err(into_err)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +303,41 @@ mod tests {
         // than a quiet UX regression where the UI shows the wrong
         // number of rows.
         assert_eq!(DEFAULT_FAILED_FILINGS_LIMIT, 50);
+    }
+
+    #[test]
+    fn default_autocomplete_limit_matches_1c3_brief() {
+        // Wave 1C.3 D2: "defaults limit=50".
+        assert_eq!(DEFAULT_AUTOCOMPLETE_LIMIT, 50);
+    }
+
+    #[test]
+    fn search_filter_arg_deserializes_camel_case_with_defaults() {
+        // Pin the wire contract. The JS side sends camelCase keys;
+        // missing fields default to empty / None so the UI can omit
+        // axes it isn't using.
+        let json = r#"{"entities": [1, 2], "tags": ["family"], "query": "foo"}"#;
+        let arg: SearchFilterArg = serde_json::from_str(json).unwrap();
+        assert_eq!(arg.entities, vec![1, 2]);
+        assert_eq!(arg.tags, vec!["family".to_string()]);
+        assert_eq!(arg.query.as_deref(), Some("foo"));
+
+        let arg: SearchFilterArg = serde_json::from_str("{}").unwrap();
+        assert!(arg.entities.is_empty());
+        assert!(arg.tags.is_empty());
+        assert!(arg.query.is_none());
+    }
+
+    #[test]
+    fn search_filter_arg_into_search_filter_round_trips() {
+        let arg = SearchFilterArg {
+            entities: vec![10, 20],
+            tags: vec!["work".into()],
+            query: Some("hi".into()),
+        };
+        let f: SearchFilter = arg.into();
+        assert_eq!(f.entities, vec![10, 20]);
+        assert_eq!(f.tags, vec!["work".to_string()]);
+        assert_eq!(f.query.as_deref(), Some("hi"));
     }
 }

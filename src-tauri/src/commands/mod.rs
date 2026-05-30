@@ -104,6 +104,11 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         kg::kg_list_failed_filings,
         kg::kg_requeue_failed,
         kg::kg_queue_status,
+        // Phase 1C Wave 1C.3 — Dictations retrieval UX (ADR 0051).
+        kg::kg_search_entries,
+        kg::kg_list_entities,
+        kg::kg_list_tags,
+        kg::kg_entries_summary,
         // Learning
         learning::list_learning_runs,
         learning::trigger_learning_run,
