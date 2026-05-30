@@ -106,7 +106,20 @@ pub use store::enqueue_for_filing;
 // binary shim. Returns a process exit code; everything else (the
 // FixtureDispatcher, fixture types, schema-driven prompt resolution)
 // stays `pub(crate)` per D6.
-pub use parity::run_parity_probe;
+//
+// Phase 1B Chunk 5 (`mb-k17a`, ADR 0050 §D8 gate 1) adds
+// [`run_parity_probe_persist`] as a second narrow surface for the
+// same shim — the `--persist` mode extends the fixture round-trip
+// through the store layer + migration 024 triggers.
+pub use parity::{run_parity_probe, run_parity_probe_persist};
+
+// Phase 1B Chunk 5 (`mb-k17a`, ADR 0050 §D8 gate 2) — graph-off
+// invariant probe. Lives in `kg::` so it can call the dictation-tail
+// helper directly and exercise the Chunk 4 outcome gate end-to-end
+// against a tempfile-backed SQLite. Consumed by
+// `src/bin/kg_graph_off_invariant.rs`.
+pub(crate) mod graph_off_invariant;
+pub use graph_off_invariant::run_graph_off_invariant_probe;
 
 // Smoke test for the public surface — confirms the wiring compiles
 // and `run_pipeline` is callable via a `MockOllama`. This is NOT the

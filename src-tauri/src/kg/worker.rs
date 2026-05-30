@@ -353,7 +353,13 @@ fn process_one(
 /// `Entry` but somehow has no matching `segment_entities` row falls
 /// back to empty entities (defensive — shouldn't happen, but we
 /// prefer dropping entity provenance over crashing the worker).
-fn build_segment_outputs(result: &PipelineResult) -> Vec<SegmentOutput> {
+///
+/// `pub(crate)` so the Chunk 5 extended parity probe (`kg::parity`'s
+/// `--persist` mode, ADR 0050 §D8 gate 1) can reuse the same
+/// `PipelineResult -> Vec<SegmentOutput>` join the production worker
+/// uses. Keeping a single source of truth avoids drift between the
+/// gate and the live path.
+pub(crate) fn build_segment_outputs(result: &PipelineResult) -> Vec<SegmentOutput> {
     // Build a lookup so the per-entry walk is O(N) not O(N²). Each
     // segment idx appears at most once in segment_entities (the
     // pipeline pushes one row per surviving segment).

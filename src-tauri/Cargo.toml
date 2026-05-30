@@ -86,8 +86,16 @@ crossbeam-channel = { workspace = true }
 # the size-stability state machine.
 notify-debouncer-full = { workspace = true }
 
-[dev-dependencies]
+# Phase 1B Chunk 5 (`mb-k17a` / ADR 0050 §D8) — promoted from
+# `[dev-dependencies]` because the `kg_parity --persist` + the
+# `kg_graph_off_invariant` probes are first-class binaries shipped
+# in the library (not `#[test]` code; see LESSONS PINNED P2 for why
+# probes are binaries on this box). Both stand up tempfile-backed
+# SQLite for migration round-trips. Still available to `[dev-deps]`-
+# scoped tests because `[dependencies]` is a superset.
 tempfile  = { workspace = true }
+
+[dev-dependencies]
 rstest    = { workspace = true }
 proptest  = { workspace = true }
 mockall   = { workspace = true }

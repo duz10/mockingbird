@@ -53,13 +53,18 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use rusqlite::{params, Connection};
 use serde::Deserialize;
 use serde_json::{json, Value};
+use tempfile::NamedTempFile;
 
 use super::ollama::{GenerateOptions, OllamaDispatcher, OllamaError};
 use super::passes::{extract_entities, ExtractedEntity};
 use super::pipeline::{run_pipeline, PipelineResult};
 use super::schema_loader::Schema;
+use super::store::{apply_filed_outcome, SegmentOutput};
+use super::worker::build_segment_outputs;
+use crate::db::migrations::apply_all;
 
 /// Resolved-at-runtime model id the Wave 0.5.4 fixture was captured
 /// against. Drives schema-profile resolution to `mid-confident`.
@@ -232,18 +237,53 @@ impl OllamaDispatcher for FixtureDispatcher {
 // Public entry point
 // ────────────────────────────────────────────────────────────────────
 
-/// Run the parity probe. Returns the process exit code: `0` on green,
-/// `1` on any divergence or fixture-load failure. Stdout carries the
-/// per-fixture status line stream; stderr carries diff dumps on failure.
+/// Probe mode selector. `FixtureOnly` is the original Phase 1A
+/// graduation gate (32/32 fixture parity, no DB). `Persist` extends
+/// each fixture run through the Chunk 2 store layer round-trip
+/// (tempfile-backed SQLite, all 24 migrations applied, FK + audit
+/// trigger sanity) per ADR 0050 §D8 gate 1.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ProbeMode {
+    FixtureOnly,
+    Persist,
+}
+
+/// Run the parity probe in the original fixture-only mode. Returns
+/// the process exit code: `0` on green, `1` on any divergence or
+/// fixture-load failure. Stdout carries the per-fixture status line
+/// stream; stderr carries diff dumps on failure.
 ///
 /// The `[[bin]]` wrapper at `src-tauri/src/bin/kg_parity.rs` is a
-/// 3-line shim that just calls this and exits.
+/// 3-line shim that just calls this (or [`run_parity_probe_persist`])
+/// and exits.
 pub fn run_parity_probe() -> i32 {
+    run_parity_probe_with(ProbeMode::FixtureOnly)
+}
+
+/// Run the parity probe in the Chunk 5 `--persist` mode (ADR 0050
+/// §D8 gate 1). Same fixture-parity assertions as
+/// [`run_parity_probe`] PLUS a per-fixture round-trip through the
+/// `kg::store::*` layer against a tempfile-backed SQLite with all 24
+/// migrations applied + `PRAGMA foreign_keys = ON`. Idempotency is
+/// asserted by re-applying `apply_filed_outcome` and confirming row
+/// counts are stable. Migration 024's `BEFORE UPDATE` immutability
+/// triggers on `kg_entity_mentions` / `kg_tag_mentions` are exercised
+/// once at the end of the run.
+pub fn run_parity_probe_persist() -> i32 {
+    run_parity_probe_with(ProbeMode::Persist)
+}
+
+fn run_parity_probe_with(mode: ProbeMode) -> i32 {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let expected_path = manifest_dir.join(EXPECTED_FIXTURE_REL);
     let canned_path = manifest_dir.join(CANNED_RESPONSES_REL);
 
+    let mode_label = match mode {
+        ProbeMode::FixtureOnly => "fixture-only",
+        ProbeMode::Persist => "--persist (ADR 0050 D8 gate 1)",
+    };
     println!("🐶 KG parity probe — Wave 0.5.4 seed-42 graduation gate (mb-2mc9 / mb-qdgn)");
+    println!("    mode:      {mode_label}");
     println!("    expected:  {}", expected_path.display());
     println!("    canned:    {}", canned_path.display());
 
@@ -308,13 +348,48 @@ pub fn run_parity_probe() -> i32 {
             }
         };
 
-        match run_one_dictation(dict, canned_for_dict, &schema, &prompts, &options) {
-            Ok(()) => {
-                passed += 1;
-                println!("  ✓ {}", dict.dictation_id);
+        let parity_result =
+            run_one_dictation(dict, canned_for_dict.clone(), &schema, &prompts, &options);
+
+        match parity_result {
+            Ok(pipeline_result) => {
+                if matches!(mode, ProbeMode::Persist) {
+                    match run_persist_round_trip(
+                        dict,
+                        &pipeline_result,
+                        (passed as i64) + 1, // entry_id = 1-based fixture counter
+                    ) {
+                        Ok(()) => {
+                            passed += 1;
+                            println!("  ✓ {} (persist round-trip OK)", dict.dictation_id);
+                        }
+                        Err(failure) => {
+                            println!("  ✗ {} (persist round-trip FAILED)", dict.dictation_id);
+                            failures.push(failure);
+                        }
+                    }
+                } else {
+                    passed += 1;
+                    println!("  ✓ {}", dict.dictation_id);
+                }
             }
             Err(failure) => {
                 println!("  ✗ {}", dict.dictation_id);
+                failures.push(failure);
+            }
+        }
+    }
+
+    // Migration 024 immutability trigger gate — fires once at end of
+    // run, regardless of mode. The store layer never UPDATEs mention
+    // rows in production, so this can't regress silently from the
+    // path the probe exercises above; we still hit it explicitly
+    // because the triggers are part of the ADR 0050 binding DB contract.
+    if matches!(mode, ProbeMode::Persist) && failures.is_empty() {
+        match assert_mention_triggers_fire() {
+            Ok(()) => println!("  ✓ immutability triggers fire on UPDATE (mentions write-once)"),
+            Err(failure) => {
+                println!("  ✗ immutability trigger gate FAILED");
                 failures.push(failure);
             }
         }
@@ -367,7 +442,7 @@ fn run_one_dictation(
     schema: &Schema,
     prompts: &PassPrompts,
     options: &GenerateOptions,
-) -> Result<(), DictationFailure> {
+) -> Result<PipelineResult, DictationFailure> {
     let dispatcher = FixtureDispatcher {
         prompts: clone_prompts(prompts),
         canned: canned.clone(),
@@ -458,6 +533,267 @@ fn run_one_dictation(
                 diff: None,
             });
         }
+    }
+
+    Ok(result)
+}
+
+// ─────────────────────────────────────────────────────────────────
+// `--persist` mode — Chunk 5 / ADR 0050 §D8 gate 1.
+// ─────────────────────────────────────────────────────────────────
+
+/// Round-trip one fixture dictation through the Chunk 2 store layer.
+///
+/// Opens a fresh tempfile-backed SQLite (per Decision A: NOT
+/// `:memory:` — we want the file-backed engine + FK behavior the
+/// production app sees), runs all 24 migrations, asserts
+/// `PRAGMA foreign_keys = ON` takes effect, inserts a minimal
+/// `sessions` row for the `entry_id` FK, materializes the
+/// `Vec<SegmentOutput>` via the worker's `build_segment_outputs`
+/// helper (single source of truth with the production worker), and
+/// applies the filed outcome inside a transaction.
+///
+/// Then asserts:
+/// 1. `kg_entity_mentions` row count == sum of distinct `(segment_idx,
+///    name, entity_type)` triples across segments.
+/// 2. `kg_tag_mentions` row count == sum of distinct `(segment_idx,
+///    tag_slug)` pairs across segments.
+/// 3. `kg_entities` row count == distinct `(name, entity_type)` pairs.
+/// 4. **Idempotency**: re-applying `apply_filed_outcome` leaves every
+///    count unchanged (kg-filing-idempotent invariant, ADR 0050).
+fn run_persist_round_trip(
+    dict: &ExpectedDictation,
+    result: &PipelineResult,
+    entry_id: i64,
+) -> Result<(), DictationFailure> {
+    let tmpfile = NamedTempFile::new().map_err(|e| persist_fail(dict, format!("tempfile: {e}")))?;
+    let conn = Connection::open(tmpfile.path())
+        .map_err(|e| persist_fail(dict, format!("open tempfile DB: {e}")))?;
+
+    // FKs default OFF on a new SQLite connection — we want them ON
+    // (the production path turns this on at `Database::open`).
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .map_err(|e| persist_fail(dict, format!("enable FKs: {e}")))?;
+    let fk_on: i64 = conn
+        .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+        .map_err(|e| persist_fail(dict, format!("read fk pragma: {e}")))?;
+    if fk_on != 1 {
+        return Err(persist_fail(
+            dict,
+            format!("PRAGMA foreign_keys returned {fk_on} (wanted 1)"),
+        ));
+    }
+
+    apply_all(&conn).map_err(|e| persist_fail(dict, format!("apply migrations: {e}")))?;
+
+    // Minimal valid sessions row — we don't care about provenance FKs
+    // (those are nullable). Only the columns NOT NULL per migration
+    // 001's `CREATE TABLE sessions` block need values.
+    conn.execute(
+        "INSERT INTO sessions (
+            id, uuid, mode_id, hotkey_pressed, started_at, recording_ended_at,
+            status, audio_duration_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            entry_id,
+            format!("persist-probe-{entry_id}-{}", dict.dictation_id),
+            1_i64, // modes(id) = 1 seeded by migration 003
+            "persist-probe",
+            PROBE_CAPTURED_ISO,
+            PROBE_CAPTURED_ISO,
+            "persist_probe",
+            0_i64,
+        ],
+    )
+    .map_err(|e| persist_fail(dict, format!("insert sessions row: {e}")))?;
+
+    let segments: Vec<SegmentOutput> = build_segment_outputs(result);
+
+    // First apply — the real round-trip.
+    let mut conn = conn;
+    let tx = conn
+        .transaction()
+        .map_err(|e| persist_fail(dict, format!("begin tx (first apply): {e}")))?;
+    apply_filed_outcome(&tx, entry_id, &segments, PROBE_CAPTURED_ISO)
+        .map_err(|e| persist_fail(dict, format!("apply_filed_outcome (first): {e}")))?;
+    tx.commit()
+        .map_err(|e| persist_fail(dict, format!("commit first tx: {e}")))?;
+
+    let expected_entity_mentions = count_distinct_entity_mentions(&segments);
+    let expected_tag_mentions = count_distinct_tag_mentions(&segments);
+    let expected_entities = count_distinct_entities(&segments);
+
+    assert_row_count(&conn, dict, "kg_entity_mentions", expected_entity_mentions)?;
+    assert_row_count(&conn, dict, "kg_tag_mentions", expected_tag_mentions)?;
+    assert_row_count(&conn, dict, "kg_entities", expected_entities)?;
+
+    // Idempotency assert — second call must not change row counts
+    // (UNIQUE constraints collapse the re-insert, upsert merges aliases).
+    let tx = conn
+        .transaction()
+        .map_err(|e| persist_fail(dict, format!("begin tx (second apply): {e}")))?;
+    apply_filed_outcome(&tx, entry_id, &segments, PROBE_CAPTURED_ISO)
+        .map_err(|e| persist_fail(dict, format!("apply_filed_outcome (idempotency): {e}")))?;
+    tx.commit()
+        .map_err(|e| persist_fail(dict, format!("commit second tx: {e}")))?;
+
+    assert_row_count(&conn, dict, "kg_entity_mentions", expected_entity_mentions)?;
+    assert_row_count(&conn, dict, "kg_tag_mentions", expected_tag_mentions)?;
+    assert_row_count(&conn, dict, "kg_entities", expected_entities)?;
+
+    Ok(())
+}
+
+fn persist_fail(dict: &ExpectedDictation, reason: String) -> DictationFailure {
+    DictationFailure {
+        dictation_id: dict.dictation_id.clone(),
+        reason,
+        diff: None,
+    }
+}
+
+fn assert_row_count(
+    conn: &Connection,
+    dict: &ExpectedDictation,
+    table: &str,
+    expected: i64,
+) -> Result<(), DictationFailure> {
+    // Table name is a compile-time-known string in this module; no
+    // user input flows here, so the `format!` is fine (and SQLite
+    // doesn't bind identifiers).
+    let sql = format!("SELECT COUNT(*) FROM {table}");
+    let actual: i64 = conn
+        .query_row(&sql, [], |r| r.get(0))
+        .map_err(|e| persist_fail(dict, format!("count {table}: {e}")))?;
+    if actual != expected {
+        return Err(persist_fail(
+            dict,
+            format!("row-count mismatch in {table}: expected {expected}, got {actual}"),
+        ));
+    }
+    Ok(())
+}
+
+fn count_distinct_entity_mentions(segs: &[SegmentOutput]) -> i64 {
+    let mut seen: std::collections::HashSet<(usize, String, &'static str)> =
+        std::collections::HashSet::new();
+    for seg in segs {
+        for ent in &seg.entities {
+            seen.insert((seg.segment_idx, ent.name.clone(), ent.entity_type.as_str()));
+        }
+    }
+    seen.len() as i64
+}
+
+fn count_distinct_tag_mentions(segs: &[SegmentOutput]) -> i64 {
+    let mut seen: std::collections::HashSet<(usize, String)> = std::collections::HashSet::new();
+    for seg in segs {
+        for slug in &seg.tag_slugs {
+            seen.insert((seg.segment_idx, slug.clone()));
+        }
+    }
+    seen.len() as i64
+}
+
+fn count_distinct_entities(segs: &[SegmentOutput]) -> i64 {
+    let mut seen: std::collections::HashSet<(String, &'static str)> =
+        std::collections::HashSet::new();
+    for seg in segs {
+        for ent in &seg.entities {
+            seen.insert((ent.name.clone(), ent.entity_type.as_str()));
+        }
+    }
+    seen.len() as i64
+}
+
+/// One-shot trigger fire: confirm migration 024's
+/// `kg_entity_mentions_no_update` + `kg_tag_mentions_no_update`
+/// `BEFORE UPDATE` triggers actually RAISE(ABORT). Decoupled from the
+/// per-fixture loop because the trigger surface is global, not
+/// per-fixture; running it once is sufficient.
+fn assert_mention_triggers_fire() -> Result<(), DictationFailure> {
+    let synthetic = ExpectedDictation {
+        dictation_id: "<trigger-gate>".to_string(),
+        dictation_text: String::new(),
+        pipeline_result: Value::Null,
+        entities: None,
+    };
+
+    let tmpfile =
+        NamedTempFile::new().map_err(|e| persist_fail(&synthetic, format!("tempfile: {e}")))?;
+    let conn = Connection::open(tmpfile.path())
+        .map_err(|e| persist_fail(&synthetic, format!("open tempfile DB: {e}")))?;
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .map_err(|e| persist_fail(&synthetic, format!("enable FKs: {e}")))?;
+    apply_all(&conn).map_err(|e| persist_fail(&synthetic, format!("apply migrations: {e}")))?;
+
+    // Minimal sessions + entity + mention rows to UPDATE against.
+    conn.execute(
+        "INSERT INTO sessions (id, uuid, mode_id, hotkey_pressed, started_at,
+            recording_ended_at, status, audio_duration_ms)
+         VALUES (1, 'trigger-gate', 1, 'gate', ?1, ?1, 'persist_probe', 0)",
+        params![PROBE_CAPTURED_ISO],
+    )
+    .map_err(|e| persist_fail(&synthetic, format!("insert sessions: {e}")))?;
+    conn.execute(
+        "INSERT INTO kg_entities (id, name, entity_type, aliases_json, created_at, updated_at)
+         VALUES (1, 'GateEntity', 'person', '[]', ?1, ?1)",
+        params![PROBE_CAPTURED_ISO],
+    )
+    .map_err(|e| persist_fail(&synthetic, format!("insert entity: {e}")))?;
+    conn.execute(
+        "INSERT INTO kg_entity_mentions (id, entry_id, entity_id, segment_idx, surface_form,
+            created_at)
+         VALUES (1, 1, 1, 0, 'GateEntity', ?1)",
+        params![PROBE_CAPTURED_ISO],
+    )
+    .map_err(|e| persist_fail(&synthetic, format!("insert entity mention: {e}")))?;
+    conn.execute(
+        "INSERT INTO kg_tag_mentions (id, entry_id, segment_idx, tag_slug, created_at)
+         VALUES (1, 1, 0, 'gate-slug', ?1)",
+        params![PROBE_CAPTURED_ISO],
+    )
+    .map_err(|e| persist_fail(&synthetic, format!("insert tag mention: {e}")))?;
+
+    // UPDATE must RAISE(ABORT).
+    let entity_err = conn.execute(
+        "UPDATE kg_entity_mentions SET surface_form = 'Edited' WHERE id = 1",
+        [],
+    );
+    if entity_err.is_ok() {
+        return Err(persist_fail(
+            &synthetic,
+            "kg_entity_mentions UPDATE silently succeeded — immutability trigger did not fire"
+                .to_string(),
+        ));
+    }
+    let entity_msg = format!("{}", entity_err.unwrap_err());
+    if !entity_msg.contains("write-once") {
+        return Err(persist_fail(
+            &synthetic,
+            format!(
+                "kg_entity_mentions UPDATE rejected but RAISE message unexpected: {entity_msg}"
+            ),
+        ));
+    }
+
+    let tag_err = conn.execute(
+        "UPDATE kg_tag_mentions SET tag_slug = 'edited-slug' WHERE id = 1",
+        [],
+    );
+    if tag_err.is_ok() {
+        return Err(persist_fail(
+            &synthetic,
+            "kg_tag_mentions UPDATE silently succeeded — immutability trigger did not fire"
+                .to_string(),
+        ));
+    }
+    let tag_msg = format!("{}", tag_err.unwrap_err());
+    if !tag_msg.contains("write-once") {
+        return Err(persist_fail(
+            &synthetic,
+            format!("kg_tag_mentions UPDATE rejected but RAISE message unexpected: {tag_msg}"),
+        ));
     }
 
     Ok(())
