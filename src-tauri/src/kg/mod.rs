@@ -92,7 +92,7 @@ pub(crate) mod embeddings;
 
 // D6 public surface — orchestrator entry point + schema types.
 pub use passes::EntityType;
-pub use pipeline::{run_pipeline, PipelineResult};
+pub use pipeline::{run_pipeline, PassTimings, PipelineResult};
 pub use schema::{AnswerKey, Category, Entry, EntryType, Status};
 
 // Phase 1B Chunk 2 — only the dictation-hook call site is `pub`. The
@@ -120,6 +120,14 @@ pub use parity::{run_parity_probe, run_parity_probe_persist};
 // `src/bin/kg_graph_off_invariant.rs`.
 pub(crate) mod graph_off_invariant;
 pub use graph_off_invariant::run_graph_off_invariant_probe;
+
+// Phase 1C.0 (`mb-plz9`, ADR 0051) — filing-pipeline latency bench.
+// Drives real Ollama against five representative parity fixtures +
+// emits CSV-on-stdout for the empirical baseline doc. Consumed by
+// `src/bin/kg_latency_bench.rs`. Discharges `mb-b3jy` (the
+// ADR 0049 §6 ~1 min latency-budget verification).
+pub(crate) mod latency_bench;
+pub use latency_bench::run_latency_bench;
 
 // Smoke test for the public surface — confirms the wiring compiles
 // and `run_pipeline` is callable via a `MockOllama`. This is NOT the
