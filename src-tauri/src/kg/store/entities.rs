@@ -429,7 +429,10 @@ mod tests {
         assert_eq!(d.canonical_name, "Mom");
         assert_eq!(d.entity_type, "person");
         assert_eq!(d.aliases, vec!["Mama".to_string()]);
-        assert_eq!(d.mention_count, 3, "3 mention rows (Mom x2 in 200 + x1 in 202)");
+        assert_eq!(
+            d.mention_count, 3,
+            "3 mention rows (Mom x2 in 200 + x1 in 202)"
+        );
         assert_eq!(d.total_entries, 2, "distinct entries: 200 + 202");
         // Newest first: 202 before 200.
         let ids: Vec<i64> = d.recent_entries.iter().map(|e| e.entry_id).collect();

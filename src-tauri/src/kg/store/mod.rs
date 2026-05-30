@@ -87,11 +87,11 @@ pub use queue::enqueue_for_filing;
 ///
 /// `captured_iso` is `sessions.started_at` (RFC-3339 string on disk).
 ///
-/// `category` is `Option<String>` and is **always `None` in 1C.4** —
-/// the pipeline parses an Entry.category but the persistence change
-/// is tracked separately as `mb-oji5` (needs a sessions-table column
-/// + a worker write; not in 1C.4 scope). The field stays on the wire
-/// so 1C.5+ adds zero IPC churn when `mb-oji5` lands.
+/// `category` is `Option<String>` and is **always `None` in 1C.4**
+/// (the pipeline parses an Entry.category but the persistence change
+/// is tracked separately as `mb-oji5` -- needs a sessions-table
+/// column + a worker write, not in 1C.4 scope). The field stays on
+/// the wire so 1C.5+ adds zero IPC churn when `mb-oji5` lands.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntryRef {
