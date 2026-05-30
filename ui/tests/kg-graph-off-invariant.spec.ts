@@ -30,18 +30,25 @@
 // IPC. Production cost: one `if (spy)` check per IPC; zero unless a
 // test has opted in.
 //
-// Walks (per Decision B in the Wave 1C.5 kickoff):
+// Walks (per Decision B in the Wave 1C.5 kickoff, EXTENDED in 1D.2
+// to cover the new `/knowledge-graph` route + sidebar nav):
 //   1. Settings → KG tab (toggle visible + OFF + failing-filings
 //      section NOT visible). Spy sees only kg_settings_get_all.
 //   2. Dictations page (no filter bar, no per-row chips, no
 //      filing-state pills). Spy unchanged.
 //   3. Click a session row to open the detail pane (no concept
 //      modal triggers reachable). Spy unchanged.
+//   3b. (Wave 1D.2) Sidebar does NOT show the Knowledge Graph nav
+//      entry while OFF. Spy unchanged.
+//   3c. (Wave 1D.2) Direct-URL navigation to `/knowledge-graph`
+//      with toggle OFF renders the disabled-state EmptyState; NO
+//      `kg_dashboard_snapshot` IPC fires (only the already-allowed
+//      `kg_settings_get_all`). Spy unchanged.
 //   4. Positive control: flip toggle ON on Settings/KG tab; the
 //      mount of SettingsKgFailedFilings fires kg_list_failed_filings
-//      + kg_queue_status (proving the UI IS structurally able to
-//      fire `kg_*` IPCs when the toggle goes on — i.e. a vacuous
-//      "no calls ever" assertion is ruled out).
+//      + kg_queue_status. Then navigate to /knowledge-graph and
+//      verify kg_dashboard_snapshot DOES fire (proving the
+//      structural ability to call the dashboard IPC when on).
 //   5. No console errors across the entire flow.
 
 import { expect, test, type ConsoleMessage } from "@playwright/test";
@@ -61,6 +68,12 @@ const POSITIVE_CONTROL_CANDIDATES = [
   "kg_list_failed_filings",
   "kg_queue_status",
 ];
+
+// Wave 1D.2 (`mb-j00j`) -- the KG dashboard IPC. Must NOT appear in
+// the spy while the toggle is off AND we're on /knowledge-graph;
+// MUST appear after the toggle flips ON and we visit
+// /knowledge-graph as the positive control for the new route.
+const DASHBOARD_IPC = "kg_dashboard_snapshot";
 
 test.describe("KG Phase 1C.5 — graph-off-UI invariant (mb-f4gn)", () => {
   test("no kg_* IPC fires when KgGraphEnabled is off; positive control proves the spy can see them", async ({
@@ -190,6 +203,40 @@ test.describe("KG Phase 1C.5 — graph-off-UI invariant (mb-f4gn)", () => {
       `Walk 3 kg_* allowlist breach. Recorded: ${[...afterWalk3].join(", ")}`,
     ).toEqual([...OFF_MODE_ALLOWLIST].sort());
 
+    // ── Walk 3b (Wave 1D.2): sidebar must NOT show KG nav item ──
+    // The KG nav item only renders when KgGraphEnabled is true.
+    // We check by aria-label "Knowledge Graph" inside the
+    // primary-navigation aside; toHaveCount(0) is the OFF-mode
+    // contract. (We use `getByRole("link", ...)` so the assertion
+    // doesn't accidentally match the page-header heading of the
+    // KG dashboard page itself if a future change loads it.)
+    await expect(
+      page
+        .getByRole("complementary", { name: /primary navigation/i })
+        .getByRole("link", { name: /knowledge graph/i }),
+    ).toHaveCount(0);
+
+    // ── Walk 3c (Wave 1D.2): direct-URL guard on /knowledge-graph
+    // Bookmarks / pasted URLs / browser-back into the route must
+    // render the disabled-state and MUST NOT fire kg_dashboard_snapshot.
+    await page.goto("/#/knowledge-graph");
+    await expect(
+      page.getByRole("heading", { name: /knowledge graph is off/i }),
+    ).toBeVisible();
+
+    const afterWalk3c = await recordedKgCalls();
+    expect(
+      [...afterWalk3c].sort(),
+      `Walk 3c kg_* allowlist breach (direct-URL /knowledge-graph). Recorded: ${[...afterWalk3c].join(", ")}`,
+    ).toEqual([...OFF_MODE_ALLOWLIST].sort());
+    expect(
+      afterWalk3c.has(DASHBOARD_IPC),
+      `kg_dashboard_snapshot fired with toggle OFF — the route guard is broken.`,
+    ).toBe(false);
+    await page.screenshot({
+      path: "test-results/kg-graph-off-3c-direct-url.png",
+    });
+
     // ── Walk 4: positive control — flip toggle ON ───────────────
     // Re-navigate to Settings (the SPA route change re-runs
     // addInitScript per `addInitScript`'s contract, but the
@@ -228,7 +275,29 @@ test.describe("KG Phase 1C.5 — graph-off-UI invariant (mb-f4gn)", () => {
       path: "test-results/kg-graph-off-3-positive-control.png",
     });
 
-    // ── Assertion 5: no console errors across all four walks ────
+    // ── Walk 4b (Wave 1D.2): /knowledge-graph mounts the dashboard
+    // and fires kg_dashboard_snapshot now that the toggle is ON.
+    // Also re-verifies the sidebar KG nav item is now present
+    // (reactive store update from the toggle flip).
+    await expect(
+      page
+        .getByRole("complementary", { name: /primary navigation/i })
+        .getByRole("link", { name: /knowledge graph/i }),
+    ).toBeVisible();
+    await page.goto("/#/knowledge-graph");
+    // The dashboard's PageHeader renders the title as an h1.
+    await expect(
+      page.getByRole("heading", { name: /^knowledge graph$/i, level: 1 }),
+    ).toBeVisible();
+    // Allow the mount-effect IPC to settle, then assert.
+    await expect.poll(async () => (await recordedKgCalls()).has(DASHBOARD_IPC)).toBe(
+      true,
+    );
+    await page.screenshot({
+      path: "test-results/kg-graph-off-4b-dashboard-on.png",
+    });
+
+    // ── Assertion 5: no console errors across all walks ────────
     expect(
       consoleErrors,
       `Unexpected console errors during graph-off-UI flow:\n${consoleErrors.join("\n")}`,

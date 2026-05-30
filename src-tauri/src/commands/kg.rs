@@ -64,6 +64,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::commands::{into_err, lock_db, AppStateHandle};
+use crate::kg::dashboard::{self, DashboardSnapshot};
 use crate::kg::store::entities::{self, EntityDetail};
 use crate::kg::store::queue::{self, FailedFiling, QueueStatus};
 use crate::kg::store::search::{
@@ -84,6 +85,20 @@ const DEFAULT_AUTOCOMPLETE_LIMIT: u32 = 50;
 /// [`kg_entity_detail`] + [`kg_tag_detail`]. Matches ADR 0051 D4
 /// ("Cap visible: 50 recent").
 const DEFAULT_CONCEPT_RECENT_LIMIT: u32 = 50;
+
+/// Cap on the "Recent activity" band of [`kg_dashboard_snapshot`].
+/// Matches the phase doc (`docs/phases/phase-1d.md` §"Wave 1D.2"):
+/// "Last 10 filed entries with timestamps + the per-entry entity /
+/// tag chip strip."
+const DASHBOARD_RECENT_ACTIVITY_LIMIT: u32 = 10;
+
+/// Cap on the "Flagged for review" band of
+/// [`kg_dashboard_snapshot`]. The phase doc equates flagged with
+/// `state='failed'` in v1; the band takes a smaller slice than the
+/// Settings → KG tab's failed-filings list (which paginates up to
+/// `DEFAULT_FAILED_FILINGS_LIMIT`) so the dashboard band stays
+/// glanceable.
+const DASHBOARD_FLAGGED_LIMIT: u32 = 10;
 
 /// IPC-side wire shape for [`kg_search_entries`]'s filter argument.
 /// Mirrors [`SearchFilter`] but uses serde-derive so the camelCase
@@ -289,6 +304,57 @@ pub fn kg_entity_detail(
     entities::entity_detail(&conn, entity_id, cap).map_err(into_err)
 }
 
+/// Composite read-only dashboard snapshot for `/knowledge-graph`
+/// (Wave 1D.2 / ADR 0052 §D2). One round-trip per render: counts +
+/// queue status + recent activity + flagged-for-review +
+/// upcoming-due (empty until Phase 1E populates it).
+///
+/// **Graph-off contract:** when `KgGraphEnabled = false`, returns an
+/// empty snapshot WITHOUT reading the DB. Mirrors the existing
+/// `kg_*` IPC pattern; protects the graph-off-UI invariant (J1 from
+/// ADR 0051 / extended in 1D.2 to cover the `/knowledge-graph`
+/// route) when the route guard fires the IPC by accident (e.g.
+/// from a stale URL after the toggle flipped off).
+#[tauri::command]
+pub fn kg_dashboard_snapshot(db: State<'_, AppStateHandle>) -> Result<DashboardSnapshot, String> {
+    let conn = lock_db(&db)?;
+    let kg_on = Settings::new(&conn)
+        .get::<bool>(SettingKey::KgGraphEnabled)
+        .map_err(into_err)?;
+    if !kg_on {
+        return Ok(empty_dashboard_snapshot());
+    }
+    dashboard::dashboard_snapshot(
+        &conn,
+        DASHBOARD_RECENT_ACTIVITY_LIMIT,
+        DASHBOARD_FLAGGED_LIMIT,
+    )
+    .map_err(into_err)
+}
+
+/// Empty snapshot returned when the graph is off. Factored out so
+/// the test below can pin the exact shape independently of the
+/// store-layer composition logic.
+fn empty_dashboard_snapshot() -> DashboardSnapshot {
+    DashboardSnapshot {
+        counts: crate::kg::dashboard::DashboardCounts {
+            total_entities: 0,
+            entities_by_type: Vec::new(),
+            total_entries: 0,
+        },
+        queue_status: QueueStatus {
+            pending: 0,
+            processing: 0,
+            failed: 0,
+            done: 0,
+            last_done_iso: None,
+        },
+        recent_activity: Vec::new(),
+        flagged_for_review: Vec::new(),
+        upcoming_due: Vec::new(),
+    }
+}
+
 /// Drill-down payload for the concept modal's tag mode
 /// (Wave 1C.4 / ADR 0051 D4).
 ///
@@ -396,6 +462,35 @@ mod tests {
         assert_eq!(f.entities, vec![10, 20]);
         assert_eq!(f.tags, vec!["work".to_string()]);
         assert_eq!(f.query.as_deref(), Some("hi"));
+    }
+
+    #[test]
+    fn dashboard_caps_match_phase_1d_brief() {
+        // Phase doc §"Wave 1D.2": "Last 10 filed entries with
+        // timestamps". Pinning the constants so a UX tweak that
+        // edits the cap doesn't silently diverge from the doc.
+        assert_eq!(DASHBOARD_RECENT_ACTIVITY_LIMIT, 10);
+        assert_eq!(DASHBOARD_FLAGGED_LIMIT, 10);
+    }
+
+    #[test]
+    fn empty_dashboard_snapshot_is_well_formed() {
+        // The graph-off branch of `kg_dashboard_snapshot` returns
+        // this without touching the DB. Pin every band so a future
+        // change that adds a band to DashboardSnapshot has to think
+        // about the off-mode shape too.
+        let s = empty_dashboard_snapshot();
+        assert_eq!(s.counts.total_entities, 0);
+        assert_eq!(s.counts.total_entries, 0);
+        assert!(s.counts.entities_by_type.is_empty());
+        assert_eq!(s.queue_status.pending, 0);
+        assert_eq!(s.queue_status.processing, 0);
+        assert_eq!(s.queue_status.failed, 0);
+        assert_eq!(s.queue_status.done, 0);
+        assert!(s.queue_status.last_done_iso.is_none());
+        assert!(s.recent_activity.is_empty());
+        assert!(s.flagged_for_review.is_empty());
+        assert!(s.upcoming_due.is_empty());
     }
 
     #[test]

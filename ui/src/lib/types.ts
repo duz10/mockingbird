@@ -390,7 +390,71 @@ export interface QueueStatus {
   pending: number;
   processing: number;
   failed: number;
+  /** Phase 1D Wave 1D.2 (ADR 0052) -- count of `state='done'` rows
+   *  currently in the queue. Bounded by the 30-day reaper, so it's
+   *  a "recent successes" counter, not a lifetime throughput tally.
+   *  Drives the KG dashboard's counts band. Pre-existing
+   *  Settings -> KG consumers ignore the field. */
+  done: number;
   lastDoneIso: string | null;
+}
+
+/** Phase 1D Wave 1D.2 (ADR 0052) -- one (entity_type, count) row in
+ *  the dashboard's counts band. Mirror of `EntityTypeCount` in
+ *  `src-tauri/src/kg/dashboard.rs`. `entityType` is the lowercase
+ *  wire form per `kg::passes::EntityType::as_str`. Ordered DESC by
+ *  count then ASC by entity_type on the server side. */
+export interface EntityTypeCount {
+  entityType: string;
+  count: number;
+}
+
+/** Phase 1D Wave 1D.2 (ADR 0052) -- aggregate counts panel. Mirror
+ *  of `DashboardCounts` in `src-tauri/src/kg/dashboard.rs`.
+ *  `totalEntries` counts DISTINCT `entry_id` across both mention
+ *  tables (entries with at least one entity or tag mention). */
+export interface DashboardCounts {
+  totalEntities: number;
+  entitiesByType: EntityTypeCount[];
+  totalEntries: number;
+}
+
+/** Phase 1D Wave 1D.2 (ADR 0052) -- one row in the dashboard's
+ *  Recent activity band. Mirror of `RecentActivity` in
+ *  `src-tauri/src/kg/dashboard.rs`. `title` is server-truncated to
+ *  <=80 chars (same single-line excerpt as the Dictations list).
+ *  `entities` and `tags` re-use the 1C.3 chip-strip shape so the
+ *  dashboard can render via the existing primitives. */
+export interface RecentActivity {
+  entryId: number;
+  title: string;
+  capturedIso: string;
+  entities: EntityRef[];
+  tags: TagRef[];
+}
+
+/** Phase 1D Wave 1D.2 (ADR 0052) -- one row in the dashboard's
+ *  Upcoming due dates band. **Always empty in 1D.2**; Phase 1E
+ *  populates once `due_iso` is persisted. The DTO ships now so the
+ *  band has a deterministic empty-state slot. */
+export interface UpcomingDue {
+  entryId: number;
+  title: string;
+  dueIso: string;
+}
+
+/** Phase 1D Wave 1D.2 (ADR 0052) -- full read-only dashboard
+ *  snapshot. Mirror of `DashboardSnapshot` in
+ *  `src-tauri/src/kg/dashboard.rs`. One round-trip per render.
+ *  When `KgGraphEnabled=false`, the IPC returns this struct with
+ *  zeroed counts + empty Vec bands (the route guard short-circuits
+ *  before calling it, so this is belt-and-braces). */
+export interface DashboardSnapshot {
+  counts: DashboardCounts;
+  queueStatus: QueueStatus;
+  recentActivity: RecentActivity[];
+  flaggedForReview: FailedFiling[];
+  upcomingDue: UpcomingDue[];
 }
 
 /** Phase 1C Wave 1C.3 — combinable retrieval filter sent to

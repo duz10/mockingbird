@@ -16,6 +16,7 @@
 import type {
   ActiveMode,
   DictionaryEntry,
+  DashboardSnapshot,
   EntityDetail,
   EntitySuggestion,
   EntrySummary,
@@ -268,6 +269,17 @@ export const api = {
   kg_tag_detail: (tagSlug: string, recentLimit?: number) =>
     invoke<TagDetail>("kg_tag_detail", { tagSlug, recentLimit }),
 
+  // Phase 1D Wave 1D.2 -- KG dashboard payload (ADR 0052 D2).
+  /** Composite snapshot for the `/knowledge-graph` dashboard. One
+   *  round-trip: counts + queue status + recent activity + flagged
+   *  for review + upcoming due. **Graph-off contract:** when
+   *  `KgGraphEnabled=false` the Rust side returns an all-zeros /
+   *  all-empty shape WITHOUT reading the DB; the route guard
+   *  short-circuits before calling here, so this is belt-and-braces
+   *  for the bookmark-while-toggle-off case. */
+  kg_dashboard_snapshot: () =>
+    invoke<DashboardSnapshot>("kg_dashboard_snapshot"),
+
   // Learning loop
   list_learning_runs: (limit: number) =>
     invoke<LearningRun[]>("list_learning_runs", { limit }),
@@ -425,8 +437,32 @@ function fixtureFor<T>(command: string, args?: object): T {
         pending: 0,
         processing: 0,
         failed: 0,
+        done: 0,
         lastDoneIso: null,
       } as QueueStatus) as T;
+    // Phase 1D Wave 1D.2 -- KG dashboard fixture. Default is the
+    // empty-everything shape so the dashboard renders its empty
+    // states out-of-the-box in browser preview (matches the
+    // KgGraphEnabled=false default world). Playwright specs that
+    // need populated bands override via __MOCKINGBIRD_FIXTURES__.
+    case "kg_dashboard_snapshot":
+      return fixture(command, {
+        counts: {
+          totalEntities: 0,
+          entitiesByType: [],
+          totalEntries: 0,
+        },
+        queueStatus: {
+          pending: 0,
+          processing: 0,
+          failed: 0,
+          done: 0,
+          lastDoneIso: null,
+        },
+        recentActivity: [],
+        flaggedForReview: [],
+        upcomingDue: [],
+      } as DashboardSnapshot) as T;
     // Phase 1C Wave 1C.3 — Dictations retrieval fixtures.
     // Defaults match the kgGraphEnabled=false world: empty
     // autocomplete lists, empty entry-id sets, empty summary map.

@@ -13,6 +13,7 @@ import { DictationsPage } from "./pages/Dictations";
 import { MeetingsPage } from "./pages/Meetings";
 import { ActivityPage } from "./pages/Activity";
 import { DictionaryPage } from "./pages/Dictionary";
+import { KnowledgeGraphPage } from "./routes/knowledge-graph";
 import { ModesPage } from "./pages/Modes";
 import { SettingsPage } from "./pages/Settings";
 import { AboutPage } from "./pages/About";
@@ -40,6 +41,12 @@ createRoot(container).render(
           <Route path="/meetings/:uuid" element={<MeetingsPage />} />
           <Route path="/activity" element={<ActivityPage />} />
           <Route path="/activity/:id" element={<ActivityPage />} />
+          {/* Phase 1D Wave 1D.2 (ADR 0052) -- KG dashboard. The page
+              itself gates on the KgGraphEnabled store flag and
+              renders a disabled-state when off (route-level guard
+              so bookmarks / manual URLs don't 404; mirrors the
+              graph-off-UI invariant). */}
+          <Route path="/knowledge-graph" element={<KnowledgeGraphPage />} />
           <Route path="/dictionary" element={<DictionaryPage />} />
           <Route path="/modes" element={<ModesPage />} />
           <Route path="/settings" element={<SettingsPage />} />

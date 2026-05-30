@@ -66,6 +66,15 @@ pub struct QueueStatus {
     pub pending: u32,
     pub processing: u32,
     pub failed: u32,
+    /// Total `state='done'` rows currently present in the queue.
+    /// Note this is bounded by the 30-day reaper
+    /// ([`reap_done_older_than`]) — it's a recent-success counter,
+    /// not lifetime throughput. Added in Wave 1D.2 for the KG
+    /// dashboard's counts band (ADR 0052 D2). Pre-existing
+    /// `pending`/`processing`/`failed` consumers in Settings → KG
+    /// (`SettingsKgFailedFilings`) ignore this field; they continue
+    /// to render unchanged.
+    pub done: u32,
     /// `finished_at` of the most recent `state='done'` row, or `None`
     /// if the queue has never produced a success.
     pub last_done_iso: Option<String>,
@@ -239,21 +248,23 @@ pub(crate) fn queue_status(conn: &Connection) -> AppResult<QueueStatus> {
     // with `InvalidColumnType(... Null)`. COUNT(CASE WHEN ... THEN 1 END)
     // is the right idiom: COUNT always yields an integer, NULL
     // arguments to CASE are filtered out, so on empty -> 0.
-    let (pending, processing, failed, last_done_iso): (i64, i64, i64, Option<String>) = conn
-        .query_row(
+    let (pending, processing, failed, done, last_done_iso): (i64, i64, i64, i64, Option<String>) =
+        conn.query_row(
             "SELECT \
                COUNT(CASE WHEN state = 'pending'    THEN 1 END), \
                COUNT(CASE WHEN state = 'processing' THEN 1 END), \
                COUNT(CASE WHEN state = 'failed'     THEN 1 END), \
+               COUNT(CASE WHEN state = 'done'       THEN 1 END), \
                MAX(CASE WHEN state = 'done'        THEN finished_at END) \
              FROM kg_filing_queue;",
             [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
         )?;
     Ok(QueueStatus {
         pending: pending.max(0) as u32,
         processing: processing.max(0) as u32,
         failed: failed.max(0) as u32,
+        done: done.max(0) as u32,
         last_done_iso,
     })
 }
@@ -568,6 +579,7 @@ mod tests {
         assert_eq!(status.pending, 2);
         assert_eq!(status.processing, 0);
         assert_eq!(status.failed, 1);
+        assert_eq!(status.done, 2);
         // Newest done's finished_at wins.
         assert_eq!(
             status.last_done_iso.as_deref(),
@@ -582,6 +594,7 @@ mod tests {
         assert_eq!(status.pending, 0);
         assert_eq!(status.processing, 0);
         assert_eq!(status.failed, 0);
+        assert_eq!(status.done, 0);
         assert!(status.last_done_iso.is_none());
     }
 
@@ -613,6 +626,7 @@ mod tests {
             pending: 5,
             processing: 1,
             failed: 2,
+            done: 9,
             last_done_iso: Some("x".into()),
         })
         .unwrap();

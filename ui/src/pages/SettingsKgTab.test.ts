@@ -128,6 +128,7 @@ describe("api.kg_queue_status (fixture mode)", () => {
     expect(s.pending).toBe(0);
     expect(s.processing).toBe(0);
     expect(s.failed).toBe(0);
+    expect(s.done).toBe(0);
     expect(s.lastDoneIso).toBeNull();
   });
 
@@ -136,6 +137,8 @@ describe("api.kg_queue_status (fixture mode)", () => {
       pending: 2,
       processing: 1,
       failed: 3,
+      // Wave 1D.2 (ADR 0052) added `done` to QueueStatus.
+      done: 4,
       lastDoneIso: "2026-05-30T09:00:00Z",
     };
     window.__MOCKINGBIRD_FIXTURES__ = { kg_queue_status: override };

@@ -234,3 +234,19 @@ export function ActivityIcon(p: IconProps) {
     </svg>
   );
 }
+
+/** Three-node graph glyph — Phase 1D Wave 1D.2 Knowledge Graph nav.
+ *  Three nodes connected by two edges; reads as "connected concepts"
+ *  without being confusable with the existing sidebar icons (no
+ *  speech-bubble silhouette, no clock face, no stacked rectangles). */
+export function KnowledgeGraphIcon(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <circle cx="5" cy="6" r="2" />
+      <circle cx="19" cy="6" r="2" />
+      <circle cx="12" cy="18" r="2" />
+      <line x1="6.5" y1="7.5" x2="10.7" y2="16.5" />
+      <line x1="17.5" y1="7.5" x2="13.3" y2="16.5" />
+    </svg>
+  );
+}

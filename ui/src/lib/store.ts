@@ -21,12 +21,26 @@ interface AppState {
    */
   activeModeSlug: string | null;
   settings: SettingsSnapshot | null;
+  /**
+   * Phase 1D Wave 1D.2 (ADR 0052) — global KG-graph activation
+   * toggle, mirrored from `KgGraphEnabled` in the typed Settings
+   * facade. `null` until the first `kg_settings_get_all` IPC call
+   * resolves at App boot. Lives in app-store rather than per-page
+   * state because the **Sidebar** subscribes to it (conditional KG
+   * nav-item render) AND the **SettingsKgTab** writes to it on
+   * toggle flip. That cross-page coupling is exactly what the store
+   * is for. The graph-off-UI invariant judge depends on this being
+   * reactive — flip the toggle off and the nav item must disappear
+   * without an app restart.
+   */
+  kgGraphEnabled: boolean | null;
   // History view's selected session detail (cleared on route change away).
   selectedSession: SessionDetail | null;
 
   setModes: (modes: ModeRow[]) => void;
   setActiveModeSlug: (slug: string | null) => void;
   setSettings: (settings: SettingsSnapshot | null) => void;
+  setKgGraphEnabled: (on: boolean | null) => void;
   setSelectedSession: (s: SessionDetail | null) => void;
   applyTheme: (theme: ThemeChoice) => void;
 }
@@ -35,10 +49,12 @@ export const useAppStore = create<AppState>((set) => ({
   modes: [],
   activeModeSlug: null,
   settings: null,
+  kgGraphEnabled: null,
   selectedSession: null,
   setModes: (modes) => set({ modes }),
   setActiveModeSlug: (slug) => set({ activeModeSlug: slug }),
   setSettings: (settings) => set({ settings }),
+  setKgGraphEnabled: (on) => set({ kgGraphEnabled: on }),
   setSelectedSession: (s) => set({ selectedSession: s }),
   applyTheme: (theme) => {
     if (typeof document === "undefined") return;

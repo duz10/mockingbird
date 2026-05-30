@@ -129,6 +129,15 @@ pub use graph_off_invariant::run_graph_off_invariant_probe;
 pub(crate) mod latency_bench;
 pub use latency_bench::run_latency_bench;
 
+// Phase 1D Wave 1D.2 (`mb-j00j`, ADR 0052) -- KG dashboard data
+// assembly. Pure-Rust composition of the read-only dashboard payload
+// powering `/knowledge-graph`; the IPC layer
+// (`commands::kg::kg_dashboard_snapshot`) is a thin wrapper. Lives
+// in `kg::` (rather than `kg::store::`) because it composes existing
+// store helpers across `entities` / `queue` / `search` rather than
+// owning any new table; mirrors the `kg::latency_bench` precedent.
+pub(crate) mod dashboard;
+
 // Smoke test for the public surface — confirms the wiring compiles
 // and `run_pipeline` is callable via a `MockOllama`. This is NOT the
 // parity probe (that lands in Chunk 3).

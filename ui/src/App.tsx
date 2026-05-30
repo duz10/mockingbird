@@ -23,23 +23,28 @@ export function App({ children }: AppProps) {
   const setModes = useAppStore((s) => s.setModes);
   const setSettings = useAppStore((s) => s.setSettings);
   const setActiveModeSlug = useAppStore((s) => s.setActiveModeSlug);
+  const setKgGraphEnabled = useAppStore((s) => s.setKgGraphEnabled);
   const applyTheme = useAppStore((s) => s.applyTheme);
 
-  // Boot — load modes, settings, and active-mode selection in
-  // parallel, then apply theme. The active-mode fetch is what feeds
-  // the Sidebar indicator on first paint (without it, the indicator
-  // wouldn't appear until the user visited the Modes page).
+  // Boot — load modes, settings, active-mode selection, and the
+  // KG-graph toggle in parallel, then apply theme. The active-mode
+  // fetch feeds the Sidebar indicator on first paint. The KG-toggle
+  // fetch feeds the Sidebar's conditional KG nav item (Phase 1D
+  // Wave 1D.2 / ADR 0052) so the item appears/disappears reactively
+  // when SettingsKgTab flips the toggle, without an app restart.
   useEffect(() => {
     void (async () => {
       try {
-        const [modes, settings, activeMode] = await Promise.all([
+        const [modes, settings, activeMode, kgSettings] = await Promise.all([
           api.list_modes(),
           api.get_settings(),
           api.get_active_mode(),
+          api.kg_settings_get_all(),
         ]);
         setModes(modes);
         setSettings(settings);
         setActiveModeSlug(activeMode.slug);
+        setKgGraphEnabled(kgSettings.kgGraphEnabled);
         applyTheme(settings.theme);
       } catch (err) {
         // Stay alive — the page will surface its own error state.
@@ -47,7 +52,7 @@ export function App({ children }: AppProps) {
         console.warn("App boot fetch failed", err);
       }
     })();
-  }, [setModes, setSettings, setActiveModeSlug, applyTheme]);
+  }, [setModes, setSettings, setActiveModeSlug, setKgGraphEnabled, applyTheme]);
 
   return (
     <>

@@ -112,6 +112,8 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         // Phase 1C Wave 1C.4 — concept-modal drill-down (ADR 0051).
         kg::kg_entity_detail,
         kg::kg_tag_detail,
+        // Phase 1D Wave 1D.2 — KG dashboard payload (ADR 0052).
+        kg::kg_dashboard_snapshot,
         // Learning
         learning::list_learning_runs,
         learning::trigger_learning_run,

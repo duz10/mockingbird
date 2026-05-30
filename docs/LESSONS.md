@@ -4487,6 +4487,28 @@ driver, so the machine never transitioned.
   `get_settings` (different by one letter) is enough. The `AppState`
   struct stays re-exported from `commands/mod.rs` so the call site
   `use crate::commands::AppState` in `lib.rs` keeps working unchanged.
+
+## 2026-06-04 [phase-1d / Wave 1D.2 / mb-j00j] STATUS prose can lie when an iteration stops short of seal
+
+- **Context:** Picked up Wave 1D.2 expecting greenfield. STATUS.md
+  already claimed `Wave 1D.2 result (mb-j00j closed 2026-06-04): ...`
+  with full body copy describing what shipped; `ui/src/routes/knowledge-graph/`
+  + `src-tauri/src/kg/dashboard.rs` were already on disk.
+- **Finding:** A prior session had implemented everything but stopped
+  before the end-of-iteration checklist. `git log` ended at the Wave
+  1D.1 close commit; `bd show mb-j00j` reported `IN_PROGRESS`; `git
+  status --porcelain=v1` showed ~17 modified + 2 new paths. STATUS.md
+  is human prose and lags reality — it gets updated by hand, while
+  git + bd are the actual ground truth. Trusting STATUS in isolation
+  would have caused a re-implementation (duplicate work, merge pain,
+  possibly worse than what was on disk).
+- **Action:** In the session-start ritual, after reading STATUS.md
+  ALWAYS run `git status --porcelain=v1` + `bd show <claimed-closed-bead-id>`
+  to cross-check any "shipped" claim before deciding the work is done.
+  If the bead is open OR git has uncommitted edits to the claimed
+  surface, the prior iteration was interrupted — verify, gate, and
+  seal, do not re-implement. Same triage as P4's stale-wrapper case
+  (a): keep moving, don't stop to ask the obvious.
 - **Action:** Treat `pub mod commands` as a directory from day one in
   Tauri projects, even when it contains only one file initially.
   Cheaper than the inevitable refactor when the IPC surface grows past

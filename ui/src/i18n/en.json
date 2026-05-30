@@ -6,6 +6,7 @@
   "nav.settings": "Settings",
   "nav.meetings": "Meetings",
   "nav.activity": "Activity",
+  "nav.knowledgeGraph": "Knowledge Graph",
   "nav.about": "About",
 
   "activity.title": "Activity",
@@ -247,6 +248,34 @@
 
   "kg.chip.more": "+{count} more",
   "kg.chip.entityAria": "Entity {name}",
+
+  "kg.dashboard.title": "Knowledge Graph",
+  "kg.dashboard.subtitle": "Read-only view of everything filed so far.",
+  "kg.dashboard.disabled.title": "Knowledge Graph is off",
+  "kg.dashboard.disabled.body": "Enable it in Settings \u2192 Knowledge Graph to start indexing your dictations.",
+  "kg.dashboard.disabled.cta": "Open Settings",
+  "kg.dashboard.loadError": "Couldn\u2019t load dashboard: {error}",
+
+  "kg.dashboard.counts.heading": "At a glance",
+  "kg.dashboard.counts.totalEntities": "Entities",
+  "kg.dashboard.counts.totalEntries": "Filed entries",
+  "kg.dashboard.counts.byType.heading": "Entities by type",
+  "kg.dashboard.counts.byType.empty": "No entities yet \u2014 record a dictation to start building your graph.",
+
+  "kg.dashboard.queue.heading": "Filing queue",
+  "kg.dashboard.queue.line": "Pending: {pending} \u00b7 Processing: {processing} \u00b7 Failed: {failed} \u00b7 Done: {done}",
+  "kg.dashboard.queue.lastDone": "Last filed: {when}",
+  "kg.dashboard.queue.never": "never",
+
+  "kg.dashboard.recent.heading": "Recent activity",
+  "kg.dashboard.recent.empty": "No filings yet \u2014 once a dictation finishes filing, it\u2019ll appear here.",
+
+  "kg.dashboard.flagged.heading": "Flagged for review",
+  "kg.dashboard.flagged.empty": "Nothing flagged \u2014 all filings succeeded.",
+  "kg.dashboard.flagged.entry": "Dictation #{entryId}",
+
+  "kg.dashboard.upcoming.heading": "Upcoming due dates",
+  "kg.dashboard.upcoming.empty": "Due-date tracking arrives in a later update.",
   "kg.chip.tagAria": "Tag {slug}",
   "kg.chip.filing.pending": "🔄 Indexing",
   "kg.chip.filing.pending.aria": "Indexing pending",

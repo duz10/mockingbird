@@ -1,0 +1,203 @@
+/* Phase 1D Wave 1D.2 -- Knowledge Graph dashboard styles.
+ *
+ * Design language: design tokens from `ui/src/design/tokens.css`
+ * (and v2 overrides) only. No hardcoded colors, no hardcoded
+ * spacing values -- everything composes from --s-*, --r-*, glass
+ * tiers, and semantic tokens. Mirrors the Settings page +
+ * Insights page conventions; if those move, this should too.
+ */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding: var(--s-4) var(--s-5);
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.bands {
+  display: grid;
+  gap: var(--s-4);
+  /* Counts and queue sit side-by-side on wide viewports; recent +
+   * flagged + upcoming stack full-width below. CSS grid means no
+   * media queries for the >2-band rows -- they wrap naturally. */
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.errorBanner {
+  padding: var(--s-2) var(--s-3);
+  background: var(--surf-1);
+  border-left: 3px solid var(--status-error);
+  border-radius: var(--r-2);
+  color: var(--on-surf);
+  font: var(--type-sm);
+}
+
+/* --- Counts band -------------------------------------------------- */
+
+.totals {
+  display: flex;
+  gap: var(--s-4);
+  flex-wrap: wrap;
+  padding-bottom: var(--s-2);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  min-width: 96px;
+}
+
+.statValue {
+  font: var(--type-xl);
+  font-weight: 600;
+  color: var(--on-surf);
+  font-variant-numeric: tabular-nums;
+}
+
+.statLabel {
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.subHeading {
+  margin: var(--s-2) 0 var(--s-2) 0;
+  font: var(--type-sm);
+  font-weight: 600;
+  color: var(--on-surf);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.typeList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.typeRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--s-1) var(--s-2);
+  background: var(--surf-1);
+  border-radius: var(--r-2);
+  font: var(--type-sm);
+}
+
+.typeName {
+  color: var(--on-surf);
+  text-transform: capitalize;
+}
+
+.typeCount {
+  color: var(--on-surf-muted);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* --- Queue band --------------------------------------------------- */
+
+.queueLine {
+  margin: 0;
+  font: var(--type-sm);
+  color: var(--on-surf);
+}
+
+.queueSubLine {
+  margin: var(--s-1) 0 0 0;
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+}
+
+/* --- Recent activity band ---------------------------------------- */
+
+.recentList,
+.flaggedList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.recentRow,
+.flaggedRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: var(--s-2) var(--s-3);
+  background: var(--surf-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+}
+
+.recentTopRow,
+.flaggedTopRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+
+.recentTitle {
+  font: var(--type-sm);
+  font-weight: 600;
+  color: var(--on-surf);
+  /* Title comes server-truncated to <=80 chars; the ellipsis
+   * here is for narrow viewports where the chips wrap below. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.recentWhen {
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+/* --- Empty states ------------------------------------------------- */
+
+.empty {
+  margin: 0;
+  font: var(--type-sm);
+  color: var(--on-surf-muted);
+}
+
+/* --- Disabled-state CTA (used by index.tsx's off-state) ---------- */
+
+.disabledCta {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-2);
+  background: var(--surf-1);
+  border: 1px solid var(--border);
+  color: var(--on-surf);
+  font: var(--type-sm);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.disabledCta:hover {
+  background: var(--surf-2);
+}
+
+.disabledCta:focus-visible {
+  outline: var(--ring-focus);
+  outline-offset: 2px;
+}

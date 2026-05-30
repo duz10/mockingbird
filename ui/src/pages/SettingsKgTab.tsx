@@ -32,6 +32,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Card, Spinner } from "../components/primitives";
 import { t } from "../i18n";
+import { useAppStore } from "../lib/store";
 import { api } from "../lib/tauri";
 import type { KgSettings } from "../lib/types";
 
@@ -41,16 +42,29 @@ import styles from "./Settings.module.css";
 export function SettingsKgTab() {
   const [snap, setSnap] = useState<KgSettings | null>(null);
   const [savingError, setSavingError] = useState<string | null>(null);
+  // Phase 1D Wave 1D.2 (ADR 0052) -- broadcast toggle flips to the
+  // app store so the Sidebar's KG nav item appears/disappears
+  // reactively. The store is the source-of-truth for cross-page KG
+  // visibility; this tab is one of two writers (the App-boot fetch
+  // in App.tsx is the other / initial). Mirrors the same pattern
+  // settings -> theme reactivity uses.
+  const setKgGraphEnabledInStore = useAppStore((s) => s.setKgGraphEnabled);
 
   useEffect(() => {
     let cancelled = false;
     void api.kg_settings_get_all().then((s) => {
-      if (!cancelled) setSnap(s);
+      if (!cancelled) {
+        setSnap(s);
+        // Re-sync the app store on tab mount -- handles the case
+        // where another process (CLI, future external API) flipped
+        // the setting since boot.
+        setKgGraphEnabledInStore(s.kgGraphEnabled);
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [setKgGraphEnabledInStore]);
 
   // Patch the one KG setting. Optimistic local flip + persist; on
   // persist error revert by re-reading from the server (mirror
@@ -61,6 +75,13 @@ export function SettingsKgTab() {
   const patch = useCallback(
     async <K extends keyof KgSettings>(key: K, value: KgSettings[K]) => {
       setSnap((prev) => (prev ? { ...prev, [key]: value } : prev));
+      // Optimistically update the cross-page store too so the
+      // Sidebar's KG nav item flips in the same React tick as the
+      // toggle. If the persist fails, the catch block rolls both
+      // back from the server snapshot.
+      if (key === "kgGraphEnabled") {
+        setKgGraphEnabledInStore(value as boolean);
+      }
       try {
         // SettingKey::as_str for KgGraphEnabled is "kg_graph_enabled".
         await api.kg_settings_set(toDbKey(key), value);
@@ -69,9 +90,10 @@ export function SettingsKgTab() {
         setSavingError(String(err));
         const fresh = await api.kg_settings_get_all();
         setSnap(fresh);
+        setKgGraphEnabledInStore(fresh.kgGraphEnabled);
       }
     },
-    [],
+    [setKgGraphEnabledInStore],
   );
 
   if (!snap) return <Spinner />;
