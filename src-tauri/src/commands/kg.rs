@@ -64,8 +64,11 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::commands::{into_err, lock_db, AppStateHandle};
+use crate::kg::store::entities::{self, EntityDetail};
 use crate::kg::store::queue::{self, FailedFiling, QueueStatus};
-use crate::kg::store::search::{self, EntitySuggestion, EntrySummary, SearchFilter, TagSuggestion};
+use crate::kg::store::search::{
+    self, EntitySuggestion, EntrySummary, SearchFilter, TagDetail, TagSuggestion,
+};
 use crate::settings::{model::SettingKey, Settings};
 
 /// Default cap on [`kg_list_failed_filings`] when the UI omits the
@@ -76,6 +79,11 @@ const DEFAULT_FAILED_FILINGS_LIMIT: u32 = 50;
 /// UI omits the `limit` argument. Matches D2 in the Wave 1C.3
 /// binding parameters ("defaults limit=50").
 const DEFAULT_AUTOCOMPLETE_LIMIT: u32 = 50;
+
+/// Default cap on the `recent_entries` list returned by
+/// [`kg_entity_detail`] + [`kg_tag_detail`]. Matches ADR 0051 D4
+/// ("Cap visible: 50 recent").
+const DEFAULT_CONCEPT_RECENT_LIMIT: u32 = 50;
 
 /// IPC-side wire shape for [`kg_search_entries`]'s filter argument.
 /// Mirrors [`SearchFilter`] but uses serde-derive so the camelCase
@@ -259,6 +267,55 @@ pub fn kg_entries_summary(
     search::entries_summary(&conn, &entry_ids).map_err(into_err)
 }
 
+/// Drill-down payload for the concept modal's entity mode
+/// (Wave 1C.4 / ADR 0051 D4). Returns header (canonical name,
+/// entity_type, aliases), counters (mention_count, total_entries),
+/// and the most-recent N entries (cap `recent_limit`, default 50).
+///
+/// **Error semantics:** an unknown `entity_id` is an error, not an
+/// empty payload — the modal should surface a clear toast ("Entity
+/// not found") rather than render a blank panel. The store layer
+/// returns `AppError::Other("entity not found: <id>")`; the
+/// `into_err` shim converts it to a string the sonner toast can
+/// display verbatim.
+#[tauri::command]
+pub fn kg_entity_detail(
+    db: State<'_, AppStateHandle>,
+    entity_id: i64,
+    recent_limit: Option<u32>,
+) -> Result<EntityDetail, String> {
+    let cap = recent_limit.unwrap_or(DEFAULT_CONCEPT_RECENT_LIMIT);
+    let conn = lock_db(&db)?;
+    entities::entity_detail(&conn, entity_id, cap).map_err(into_err)
+}
+
+/// Drill-down payload for the concept modal's tag mode
+/// (Wave 1C.4 / ADR 0051 D4).
+///
+/// **Deviates from the Wave 1C.4 kickoff spec on the argument key:**
+/// kickoff prescribed `tag_id: i64` but `kg_canonical_tags` is
+/// inert in 1B (LESSONS P11). The slug IS the wire identifier for
+/// tags across 1C ([`SearchFilter::tags`], [`TagSuggestion::tag_slug`]);
+/// using `tag_slug: String` here keeps the IPC surface internally
+/// consistent and side-steps a synthetic-id translation layer that
+/// would never round-trip back through the wire. See `TagDetail`'s
+/// docstring for the rationale + the v1.1 forward-compat note.
+///
+/// **Open-vocab semantics:** an unknown slug returns zero counts +
+/// empty `recent_entries`, **not** an error. Opening the modal for
+/// a slug that the user just typed into the filter bar (before any
+/// dictation has been filed against it) is a legitimate state.
+#[tauri::command]
+pub fn kg_tag_detail(
+    db: State<'_, AppStateHandle>,
+    tag_slug: String,
+    recent_limit: Option<u32>,
+) -> Result<TagDetail, String> {
+    let cap = recent_limit.unwrap_or(DEFAULT_CONCEPT_RECENT_LIMIT);
+    let conn = lock_db(&db)?;
+    search::tag_detail(&conn, &tag_slug, cap).map_err(into_err)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -339,5 +396,14 @@ mod tests {
         assert_eq!(f.entities, vec![10, 20]);
         assert_eq!(f.tags, vec!["work".to_string()]);
         assert_eq!(f.query.as_deref(), Some("hi"));
+    }
+
+    #[test]
+    fn default_concept_recent_limit_matches_1c4_brief() {
+        // Wave 1C.4 / ADR 0051 D4: "Cap visible: 50 recent". Pinning
+        // the constant so a typo surfaces as a unit-test failure
+        // rather than the modal silently truncating to the wrong
+        // count.
+        assert_eq!(DEFAULT_CONCEPT_RECENT_LIMIT, 50);
     }
 }

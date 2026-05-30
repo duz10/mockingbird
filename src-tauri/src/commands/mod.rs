@@ -109,6 +109,9 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         kg::kg_list_entities,
         kg::kg_list_tags,
         kg::kg_entries_summary,
+        // Phase 1C Wave 1C.4 — concept-modal drill-down (ADR 0051).
+        kg::kg_entity_detail,
+        kg::kg_tag_detail,
         // Learning
         learning::list_learning_runs,
         learning::trigger_learning_run,
