@@ -18,6 +18,7 @@ import type {
   DictionaryEntry,
   InboxRuntimeStatus,
   InsightsSnapshot,
+  KgSettings,
   LearningRun,
   LlmPassPromptArg,
   LlmPassResult,
@@ -163,6 +164,11 @@ export const api = {
   meeting_settings_set: (key: string, value: unknown) =>
     invoke<void>("meeting_settings_set", { key, value }),
 
+  // Phase 1C Wave 1C.1 — typed KG-settings IPC (ADR 0051).
+  kg_settings_get_all: () => invoke<KgSettings>("kg_settings_get_all"),
+  kg_settings_set: (key: string, value: unknown) =>
+    invoke<void>("kg_settings_set", { key, value }),
+
   // Learning loop
   list_learning_runs: (limit: number) =>
     invoke<LearningRun[]>("list_learning_runs", { limit }),
@@ -304,6 +310,8 @@ function fixtureFor<T>(command: string, args?: object): T {
       return fixture(command, { kind: "ok" } as VaultPathCheck) as T;
     case "vault_ensure_dir":
       return fixture(command, undefined) as T;
+    case "kg_settings_get_all":
+      return fixture(command, { kgGraphEnabled: false } as KgSettings) as T;
     case "meeting_settings_get_all":
       return fixture(command, {
         hotkeyModifier: "VK_RCONTROL",
@@ -535,6 +543,7 @@ function fixtureFor<T>(command: string, args?: object): T {
     case "set_active_mode":
     case "update_setting":
     case "meeting_settings_set":
+    case "kg_settings_set":
     case "vault_settings_set":
     case "report_correction":
     case "trigger_learning_run":

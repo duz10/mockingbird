@@ -34,6 +34,7 @@ import { CommandCenterChordRow } from "./SettingsCommandCenterRow";
 import { SettingsActivityAudioRow } from "./SettingsActivityAudioRow";
 import { SettingsActivityHardeningRow } from "./SettingsActivityHardeningRow";
 import { SettingsDictationTab } from "./SettingsDictationTab";
+import { SettingsKgTab } from "./SettingsKgTab";
 import { SettingsMeetingTab } from "./SettingsMeetingTab";
 import { SettingsMobileSyncTab } from "./SettingsMobileSyncTab";
 import styles from "./Settings.module.css";
@@ -48,6 +49,7 @@ type Tab =
   | "dictation"
   | "meeting"
   | "mobileSync"
+  | "kg"
   | "advanced";
 
 export function SettingsPage() {
@@ -99,6 +101,7 @@ export function SettingsPage() {
           <TabBtn id="dictation" active={tab} setActive={setTab} label={t("settings.tab.dictation")} />
           <TabBtn id="meeting" active={tab} setActive={setTab} label={t("settings.tab.meeting")} />
           <TabBtn id="mobileSync" active={tab} setActive={setTab} label={t("settings.tab.mobileSync")} />
+          <TabBtn id="kg" active={tab} setActive={setTab} label={t("settings.tab.kg")} />
           <TabBtn id="advanced" active={tab} setActive={setTab} label={t("settings.tab.advanced")} />
         </nav>
 
@@ -116,6 +119,7 @@ export function SettingsPage() {
           )}
           {tab === "meeting" && <SettingsMeetingTab />}
           {tab === "mobileSync" && <SettingsMobileSyncTab />}
+          {tab === "kg" && <SettingsKgTab />}
           {tab === "advanced" && <AdvancedPanel settings={settings} patch={patch} />}
         </div>
       </div>

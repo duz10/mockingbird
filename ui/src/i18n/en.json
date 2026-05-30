@@ -200,7 +200,17 @@
   "settings.tab.history": "Dictation data",
   "settings.tab.meeting": "Meetings",
   "settings.tab.mobileSync": "Mobile Sync",
+  "settings.tab.kg": "Knowledge Graph",
   "settings.tab.advanced": "Advanced",
+
+  "kg.settings.title": "Knowledge Graph",
+  "kg.settings.explainer": "Knowledge Graph indexes your dictations so you can search and filter by entities, tags, and categories. Default off \u2014 no data is indexed until you turn it on.",
+  "kg.settings.enabled.label": "Enable Knowledge Graph indexing",
+  "kg.settings.enabled.on": "On \u2014 new dictations are indexed",
+  "kg.settings.enabled.off": "Off \u2014 nothing is indexed",
+  "kg.settings.notice.title": "Indexing in progress",
+  "kg.settings.notice.body": "Newly recorded dictations are indexed within about a minute. Existing dictations from before you enabled this won\u2019t be indexed until a future update.",
+  "kg.settings.saveError": "Couldn\u2019t save: {error}",
 
   "settings.meeting.activation": "Activation",
   "settings.meeting.transcript": "Transcript",

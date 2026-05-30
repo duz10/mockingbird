@@ -353,6 +353,19 @@ export interface MeetingSessionSavedEvent {
   sessionRowid: number;
 }
 
+/** Phase 1C Wave 1C.1 — typed snapshot of the KG-side `SettingKey`
+ *  registry. Mirrors `KgSettingsSnapshot` in
+ *  `src-tauri/src/commands/kg.rs` (added in b5b2e74 / ADR 0051 D7).
+ *  Read via `api.kg_settings_get_all()`; individual fields are
+ *  written via `api.kg_settings_set(key, value)` where `key` is the
+ *  DB-form string per `SettingKey::as_str` (currently only
+ *  `"kg_graph_enabled"` is on the Rust allowlist). Default is
+ *  graph-off until the user opts in per ADR 0049 §"Sandbox
+ *  isolation". */
+export interface KgSettings {
+  kgGraphEnabled: boolean;
+}
+
 /** Phase MC Wave 5 — typed snapshot of the meeting-side `SettingKey`
  *  registry. Mirrors `MeetingSettingsSnapshot` in
  *  `src-tauri/src/commands/settings.rs`. Read via
