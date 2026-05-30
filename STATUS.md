@@ -78,6 +78,32 @@ baseline) gates Chunk 5 under strict IAP. No new `phase-*-complete`
 tag — seals via ADR Accepted + this STATUS update + epic close
 (LESSONS P5).
 
+**Chunk progress (most-recent first):**
+- **Chunk 2 SEALED** 2026-06-01 (`mb-geds`; commits `6e90f30` migration
+  024, `66cc9d9` `kg::store::*` + `enqueue_for_filing` surface, `0d37c0b`
+  `SettingKey::KgGraphEnabled`). Cargo gate green; `kg_parity` 32/32;
+  throwaway-crate live tests 19/19 (15 unit + 4 integration, all
+  idempotency on `apply_filed_outcome`). R3 resolved as option (c)
+  store-layer-only `SegmentOutput` (production pipeline does not yet
+  wire `extract_entities`, so a `PipelineResult.segment_outputs` field
+  would be dead code in Chunk 2 — Chunk 3 decides population locus).
+  Parity-risk concern moot regardless: `parity.rs` builds the JSON
+  manually from three named fields (LESSONS body 2026-06-01). ADR 0050
+  docstring drift flagged for Chunk 5 amendment (entity types: ADR
+  text says `person|organization|project|location|thing`; Rust truth
+  is `person|organization|object|place|project` per
+  `EntityType::as_str()`).
+- **Chunk 1 SEALED** 2026-05-31 (`mb-go9l`; commit `0fed8e3`).
+- **Chunk 3 (next; `mb-eke8`):** boot-wired filing worker thread. Open
+  questions documented in Chunk 2's report-back: where in `lib.rs::run()`
+  to spawn (recommend immediately after `Database::open` returns and
+  before the Tauri builder hands over, mirroring the activity worker)
+  and whether `KgGraphEnabled` is read once at boot (worker doesn't
+  start when false; runtime toggle requires restart — simpler, matches
+  current `AutostartEnabled` semantics) or polled per-iteration (toggle
+  takes effect without restart — costs a settings read per tick).
+  Chunk 3 picks; both are defensible.
+
 **KG Phase 0.5 narrative archived:** the full wave-by-wave in-flight
 state that lived here through 0.5.1–0.5.5 is now in
 `docs/knowledge-graph/PHASE-0-5-REPORT.md` §3 (scorecard journey) + §4
