@@ -6,8 +6,43 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use super::{bundled_prompt, EXPECTED_SCHEMA_VERSION};
+use std::sync::Mutex;
+
+use super::{bundled_prompt, EXPECTED_SCHEMA_VERSION, SCHEMA_DIR_ENV};
 use super::{Schema, SchemaError, SchemaSource, BUNDLED_SCHEMA, DEFAULT_UNKNOWN_MODEL_PROFILE};
+
+/// Serializes tests that mutate `MOCKINGBIRD_KG_SCHEMA_DIR`. Cargo's
+/// default test runner is multi-threaded; without this guard a parallel
+/// test that reads the env var could race with one that's mid-set/unset.
+/// Acquire BEFORE constructing an `EnvGuard`, hold across all
+/// `Schema::load_default()` calls in the test.
+static SCHEMA_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+/// RAII guard: sets an env var on construction, restores the prior
+/// value (or removes the var if it was unset) on drop — even on panic.
+struct EnvGuard {
+    key: &'static str,
+    prior: Option<String>,
+}
+
+impl EnvGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        let prior = std::env::var(key).ok();
+        // SAFETY: tests holding SCHEMA_ENV_LOCK serialize env mutation;
+        // see the lock's docstring above.
+        std::env::set_var(key, value);
+        EnvGuard { key, prior }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match &self.prior {
+            Some(v) => std::env::set_var(self.key, v),
+            None => std::env::remove_var(self.key),
+        }
+    }
+}
 
 /// The bedrock test: the bundled SCHEMA.md loads cleanly.
 #[test]
@@ -97,53 +132,84 @@ fn mid_confident_extract_uses_override_prompt() {
     assert_eq!(body, expected);
 }
 
-/// Wave 0.5.3: SCHEMA.md ships a 228-entry closed canonical tag
-/// vocabulary.
+/// Phase 1A (`mb-cskk`): the bundled SCHEMA.md ships the **v1 slice**
+/// per ADR 0049 amendment A2 — open-vocab tags only, NO
+/// `#### Vocabulary list` section. The closed-vocab Rust wiring
+/// (`tag_validator.rs::validate_tags` + `synonyms.rs`) remains
+/// graduated as the v1.1 starting point; coverage on the closed-vocab
+/// pipeline path lives in
+/// [`closed_vocab_path_still_active_via_env_override`] below.
+///
+/// (Wave 0.5.3 held a 228-entry closed vocab here. Stripped
+/// during the Phase 1A Wave 3 parity-gate fix.)
 #[test]
-fn canonical_tag_vocabulary_loads() {
+fn bundled_schema_is_open_vocab() {
     let s = Schema::load_bundled().unwrap();
-    assert!(s.has_closed_tag_vocabulary());
-    let vocab = s.canonical_tag_vocabulary();
+    assert!(
+        !s.has_closed_tag_vocabulary(),
+        "bundled SCHEMA.md must be open-vocab per ADR 0049 A2 — \
+         the `#### Vocabulary list` section was re-introduced without \
+         an ADR amendment"
+    );
+    assert_eq!(s.canonical_tag_vocabulary().len(), 0);
+    assert!(s.canonical_tag_vocabulary_ordered().is_empty());
+    assert_eq!(s.schema_revision, "phase-1a-v1-open-vocab");
+}
+
+/// Phase 1A (`mb-cskk`): closed-vocab pipeline path stays honest under
+/// env-override. The v1.1-deferred Move 3 wiring lives in production
+/// code as dead-but-tested; this test exercises it by writing a
+/// minimal SCHEMA.md with a `#### Vocabulary list` section to a temp
+/// dir, pointing `MOCKINGBIRD_KG_SCHEMA_DIR` at it, and asserting
+/// `Schema::load_default()` parses the closed vocab + flips
+/// `has_closed_tag_vocabulary() → true`.
+///
+/// Without this test, future drift in `tag_validator.rs` or
+/// `parsers::parse_bullet_list` could silently break the v1.1
+/// starting state and no other test would catch it.
+#[test]
+fn closed_vocab_path_still_active_via_env_override() {
+    let _lock = SCHEMA_ENV_LOCK.lock().expect("acquire schema env lock");
+
+    let dir = unique_tmp_dir("kg-schema-closed-vocab-env");
+    std::fs::create_dir_all(&dir).unwrap();
+    let schema = "\
+```yaml
+schema_version: 1
+schema_revision: test-closed-vocab
+```
+
+#### Vocabulary list
+
+- `alpha`
+- `beta`
+- `gamma`
+";
+    std::fs::write(dir.join("SCHEMA.md"), schema).unwrap();
+
+    let _guard = EnvGuard::set(SCHEMA_DIR_ENV, dir.to_str().unwrap());
+    let s = Schema::load_default().expect("load env-override schema");
+
+    assert_eq!(s.source, SchemaSource::EnvOverride(dir.clone()));
+    assert!(
+        s.has_closed_tag_vocabulary(),
+        "env-override SCHEMA.md with `#### Vocabulary list` section did not flip the flag"
+    );
+    let vocab: HashSet<String> = s.canonical_tag_vocabulary().clone();
+    assert_eq!(vocab.len(), 3);
+    for tag in ["alpha", "beta", "gamma"] {
+        assert!(
+            vocab.contains(tag),
+            "missing `{tag}` from env-override vocab"
+        );
+    }
+    let ordered = s.canonical_tag_vocabulary_ordered();
     assert_eq!(
-        vocab.len(),
-        228,
-        "vocab size drift; bullets in SCHEMA.md changed?"
+        ordered,
+        &["alpha".to_string(), "beta".into(), "gamma".into()]
     );
 
-    for tag in [
-        "daycare",
-        "kid",
-        "car-repair",
-        "olivia",
-        "permission-slip",
-        "q3",
-        "venmo",
-    ] {
-        assert!(
-            vocab.contains(tag),
-            "missing corpus canonical `{tag}` from closed vocab"
-        );
-    }
-
-    for tag in [
-        "call",
-        "follow-up",
-        "medication",
-        "dmv",
-        "flight",
-        "deadline",
-        "subscription",
-    ] {
-        assert!(
-            vocab.contains(tag),
-            "missing domain pad `{tag}` from closed vocab"
-        );
-    }
-
-    let ordered = s.canonical_tag_vocabulary_ordered();
-    assert_eq!(ordered.len(), 228);
-    let unique: HashSet<&String> = ordered.iter().collect();
-    assert_eq!(unique.len(), 228, "vocab list contains duplicates");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Passes WITHOUT a profile override fall back to the default

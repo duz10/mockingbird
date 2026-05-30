@@ -69,6 +69,70 @@ def _compact(obj) -> str:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
+def _canned_response_for(artifact: dict) -> str | None:
+    """Pick the canned string to feed MockOllama for a given per-pass
+    artifact.
+
+    Preference order:
+      1. `parsed` (compact JSON re-serialization) — the happy path.
+      2. `raw_model_output` verbatim — when the sandbox model returned
+         something the parser rejected (e.g. an invalid enum variant).
+         Replaying the raw output is the only way production can
+         reproduce the sandbox's parse error byte-for-byte; without it,
+         production's dispatcher returns an `OllamaError::Mock` instead
+         of `PassError::Parse`, and `pipeline_result.per_pass_errors`
+         diverges from the fixture.
+      3. `None` — only when both fields are absent / empty. The probe
+         will surface this as an unmatched canned response.
+
+    Added in the Phase 1A Wave 3 parity-gate fix (mb-cskk follow-up):
+    the original capture script ignored `raw_model_output`, which
+    silently flattened the corpus's only classify parse-failure case
+    (persona-06-case-05) into a no-op dispatcher error.
+    """
+    parsed = artifact.get("parsed")
+    if parsed is not None:
+        return _compact(parsed)
+    raw = artifact.get("raw_model_output")
+    if isinstance(raw, str) and raw:
+        return raw
+    return None
+
+
+def _collect_per_pass_errors(
+    segment_artifact: dict | None,
+    classify_artifacts: list,
+    extract_artifacts: list,
+) -> list:
+    """Reconstruct `pipeline_result.per_pass_errors` from sandbox
+    artifacts.
+
+    Production's `run_pipeline` pushes `(format!("{stage}[{idx}]"),
+    PassError)` tuples — the probe re-serializes these as `[tag,
+    error_string]` JSON arrays via `pipeline_result_to_value`. To match
+    that shape from the sandbox side, walk each per-pass artifact and
+    pick up any non-null `error` field. The sandbox's classify /
+    extract / extract_entities errors are already formatted with the
+    same `PassError::Parse` template production uses
+    ("JSON parse failed in {pass} pass: {error}\nRaw output:\n{raw}"),
+    so the strings round-trip byte-identical.
+
+    Added with `_canned_response_for` (Phase 1A Wave 3 parity fix).
+    """
+    errors: list = []
+    if segment_artifact and segment_artifact.get("error"):
+        errors.append([f"segment[{0}]", segment_artifact["error"]])
+    for idx, art in enumerate(classify_artifacts):
+        err = art.get("error") if art else None
+        if err:
+            errors.append([f"classify[{idx}]", err])
+    for idx, art in enumerate(extract_artifacts):
+        err = art.get("error") if art else None
+        if err:
+            errors.append([f"extract[{idx}]", err])
+    return errors
+
+
 def main() -> int:
     for required in (PIPELINE_RUN, ENTITY_RUN, CORPUS_DICTS):
         if not required.exists():
@@ -131,7 +195,14 @@ def main() -> int:
                 # reproduce bit-identically (open-vocab run; no closed-vocab
                 # validator was wired in iter-1-7b-fix).
                 "entries": entries,
-                "per_pass_errors": [],
+                # per_pass_errors reconstructed from sandbox artifacts'
+                # `error` fields — see _collect_per_pass_errors. Was
+                # hardcoded [] in the original capture; that lie matched
+                # reality for 31/32 fixtures but broke persona-06-case-05
+                # (the corpus's only classify parse-failure case).
+                "per_pass_errors": _collect_per_pass_errors(
+                    segment_artifact, classify_artifacts, extract_artifacts
+                ),
                 "new_tag_requests": [],
             },
             "entities": (
@@ -153,14 +224,11 @@ def main() -> int:
             if segment_artifact and segment_artifact.get("parsed_segments") is not None
             else None
         )
-        classify_responses = [
-            _compact(c["parsed"]) if c.get("parsed") is not None else None
-            for c in classify_artifacts
-        ]
-        extract_responses = [
-            _compact(x["parsed"]) if x.get("parsed") is not None else None
-            for x in extract_artifacts
-        ]
+        # Use _canned_response_for so parse-failure cases re-feed their
+        # raw model output to production (lets PassError::Parse fire on
+        # the production side with the same message the sandbox logged).
+        classify_responses = [_canned_response_for(c) for c in classify_artifacts]
+        extract_responses = [_canned_response_for(x) for x in extract_artifacts]
         # extract_entities: per-dictation aggregate (see README §3).
         entity_response = (
             _compact({"entities": entity_artifact["entities"]})

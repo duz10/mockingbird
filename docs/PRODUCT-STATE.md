@@ -567,11 +567,63 @@ closed-vocab Move 3 deferred to v1.1 awaiting two-field corpus re-labeling;
 opt-in graph layer (existing dictation users see zero regression); ~1 min
 intake latency budget.
 
-**Production graduation path:** Phase 1A — schema-driven pipeline moves
-from `experimental/kg-validation/` to `src-tauri/src/kg/`. Awaits Dustin
-kickoff. Until then, sandbox-isolation discipline holds: production
-files (`src-tauri/**`, `ui/**`, `migrations/**`) are read-only to KG
-work per ADR 0049 §"Sandbox isolation".
+**Production graduation path:** Phase 1A SEALED 2026-05-31 — the
+schema-driven pipeline now lives at `src-tauri/src/kg/` (see §3.19
+below). The sandbox stays alive as the v1.1+ regression rig per ADR
+0049 binding parameter D5; Phase 1B (SQLite entity/tag/edge tables) is
+the next graduation window per ADR 0049 §"Sandbox isolation".
+
+---
+
+### 3.19 `src-tauri/src/kg/` — Knowledge Graph library (Phase 1A graduation)
+
+**Status:** callable library, **no consumers wired yet.** The
+dictation orchestrator, command center, and UI do not yet call any
+`kg::` function — that's Phase 1C. Phase 1A delivered the library
+subset only.
+
+**Charter ADR:** [ADR 0049](adr/0049-knowledge-graph-phase-0-5-and-v1-architectural-pivot.md)
+(Phase 0.5 + v1 architectural pivot — same ADR; Phase 1A graduation
+sealed under it as a scoped exception window). Wave brief at
+[`docs/knowledge-graph/phase-1a-brief.md`](knowledge-graph/phase-1a-brief.md).
+
+**Public surface (D6 minimum):** `kg::run_pipeline`, `kg::PipelineResult`,
+`kg::Entry` / `Category` / `EntryType` / `EntityType` / `Status` /
+`AnswerKey`, plus `kg::run_parity_probe` (consumed only by the
+`kg_parity` binary). Everything else is `pub(crate)` — `OllamaDispatcher`,
+`Schema`, the pass modules, `MockOllama`, etc. — to keep the Phase 1B/1C
+wire-up design space open.
+
+**Bundled assets:** `src-tauri/src/kg/assets/SCHEMA.md` + the seven
+prompt files under `prompts/`, all `include_str!`-baked. The bundled
+`SCHEMA.md` is the **v1 slice** of the research sandbox file —
+`schema_revision: phase-1a-v1-open-vocab` — with the Wave 0.5.3
+closed-vocab list stripped per ADR 0049 amendment A2. The closed-vocab
+Rust wiring (`synonyms.rs` + `tag_validator.rs::validate_tags`) stays
+graduated as dead-but-tested code for the v1.1 starting point;
+activation is one `#### Vocabulary list` re-introduction away (via
+`MOCKINGBIRD_KG_SCHEMA_DIR` env override; tested by
+`schema_loader::tests::closed_vocab_path_still_active_via_env_override`).
+
+**Pipeline shape (unchanged from sandbox Wave 0.5.4):** segment →
+classify → extract → normalize → extract_entities. Five LLM passes
+driven by `SCHEMA.md` + per-model-class calibration profiles. `kg::ollama`
+speaks Ollama HTTP via `ureq::Agent` (no `reqwest`, per binding
+parameter D1). All passes return `Result<T, PassError>` with typed
+error variants (`thiserror`, no `anyhow`).
+
+**Parity gate:** `target\release\kg_parity.exe`
+(`src-tauri/src/bin/kg_parity.rs`) re-runs the full pipeline against
+the Wave 0.5.4 seed-42 fixture (`docs/knowledge-graph/parity/`) via a
+fixture-scripted `OllamaDispatcher` impl, asserting 32/32 bit-identical
+reproduction. Binary-only (no `#[test]`) per LESSONS PINNED P2.
+Invocation: `powershell -File scripts\cargo-with-cuda.ps1 run --release --bin kg_parity`.
+
+**Phase 1B+ to come:** SQLite entity/tag/edge tables (1B), retrieval
+UX with six axes (1C), migration backfill over existing transcripts
+(1D), v1 beta tag (1E). Each opens its own ADR-0049 §"Sandbox
+isolation" window — the Phase 1A close-out does NOT lift `ui/**` /
+`migrations/**` isolation.
 
 ---
 

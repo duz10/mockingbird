@@ -581,8 +581,20 @@ fn aggregate_entities_to_value(aggregate: &[ExtractedEntity], segment_count: usi
 }
 
 /// Order-insensitive comparison of the `entities` array nested inside
-/// the actual/expected aggregate Values. `segment_count` +
-/// `segment_failures` ride along as ordinary scalar equality.
+/// the actual/expected aggregate Values, plus `segment_count` scalar
+/// equality.
+///
+/// **NOT asserted: `segment_failures`.** Per `parity/README.md` §3
+/// option 1 ("Aggregate-only assertion"), the canned-responses sidecar
+/// only carries the per-dictation aggregate `{"entities": [...]}` —
+/// the per-segment parse-failure log the sandbox originally produced
+/// is unreproducible from aggregate canned responses (the canned
+/// string always parses cleanly, so `segment_failures` is always `[]`
+/// in probe runs). The fixture's `segment_failures` field is
+/// sandbox-run provenance, not a production contract; comparing it
+/// here would gate parity on something the probe architecturally
+/// cannot reproduce. `segment_count` IS reproducible (it's the input
+/// segment count) and stays asserted.
 fn entity_objects_set_equal(actual: &Value, expected: &Value) -> bool {
     let (Some(a_arr), Some(e_arr)) = (
         actual.get("entities").and_then(Value::as_array),
@@ -599,9 +611,6 @@ fn entity_objects_set_equal(actual: &Value, expected: &Value) -> bool {
         }
     }
     if actual.get("segment_count") != expected.get("segment_count") {
-        return false;
-    }
-    if actual.get("segment_failures") != expected.get("segment_failures") {
         return false;
     }
     true
@@ -669,6 +678,28 @@ mod tests {
             "segment_failures": [],
         });
         assert!(!entity_objects_set_equal(&a, &b));
+    }
+
+    #[test]
+    fn entity_objects_set_equal_ignores_segment_failures_drift() {
+        // README §3 option 1: per-segment failure provenance is
+        // unreproducible from aggregate canned responses; the probe
+        // intentionally ignores `segment_failures` divergence.
+        let actual = json!({
+            "entities": [
+                {"aliases": [], "name": "x", "type": "person"},
+            ],
+            "segment_count": 2,
+            "segment_failures": [],
+        });
+        let expected = json!({
+            "entities": [
+                {"aliases": [], "name": "x", "type": "person"},
+            ],
+            "segment_count": 2,
+            "segment_failures": ["seg 1: JSON parse failed: {} had no entities field"],
+        });
+        assert!(entity_objects_set_equal(&actual, &expected));
     }
 
     #[test]

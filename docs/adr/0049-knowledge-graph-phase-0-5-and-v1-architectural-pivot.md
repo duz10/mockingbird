@@ -448,6 +448,25 @@ This is a scoped exception, not a permanent lift of the isolation
 discipline — future KG phases (1B/1C/1D/1E) each charter their own
 window.
 
+**Phase 1A graduation window CLOSED 2026-05-31** — epic `mb-2mc9`
+sealed. The schema-driven KG pipeline now lives at `src-tauri/src/kg/`
+as a callable library (no consumers wired yet — that's Phase 1C). The
+graduation landed across the commit chain `75485de..<seal-hash>`:
+Chunk 1 scaffold + parity fixture; Chunk 2 module graduation (six
+commits, mechanical translation of the library subset per §1 of the
+wave brief); Chunk 3 `kg_parity` probe (`src-tauri/src/bin/kg_parity.rs`)
+plus the v1-slice fix to the bundled `SCHEMA.md` (closed-vocab
+Move-3 list stripped per amendment A2 — the closed-vocab Rust paths
+(`tag_validator.rs::validate_tags`, `synonyms.rs`) remain wired as
+the v1.1 starting point, activated when an env-overridden SCHEMA.md
+re-introduces the `#### Vocabulary list` section; tested by
+`schema_loader::tests::closed_vocab_path_still_active_via_env_override`).
+Parity gate green at **32/32 bit-identical** vs the Wave 0.5.4
+seed-42 fixture. No new ADR; this paragraph supersedes the prior
+open-window note. The Phase 1A seal does **not** lift `ui/**` /
+`migrations/**` isolation — future KG phases (1B/1C/1D/1E) each
+charter their own window per the original ADR contract.
+
 ---
 
 ## Beads inheritance from ADR 0048

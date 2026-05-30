@@ -45,6 +45,7 @@
 - ADR 0042 — Activity Capture retention cascade (Accepted, sealed in `phase-10-complete`)
 - ADR 0043 — Activity Capture exclusion list + built-in rules (Accepted, sealed in `phase-10-complete`)
 - ADR 0044 — Activity Capture PDF export via `printpdf` (Accepted, sealed in `phase-10-complete`)
+- **ADR 0049 — KG Phase 1A graduation** (sealed 2026-05-31 under the same ADR 0049 charter). Schema-driven KG pipeline graduated from `experimental/kg-validation/` to `src-tauri/src/kg/` as a callable library (no consumers wired yet — that's Phase 1C). Wave brief: `docs/knowledge-graph/phase-1a-brief.md`. Parity gate: **32/32 bit-identical** vs the Wave 0.5.4 seed-42 fixture via `src-tauri/src/bin/kg_parity.rs`. Commit chain `75485de..<seal-hash>` — Chunk 1 scaffold + fixture, Chunk 2 library translation (six commits), Chunk 3 probe + v1-slice fix to bundled SCHEMA.md (closed-vocab Move 3 list stripped per amendment A2; closed-vocab Rust wiring stays as v1.1 starting point, guarded by `closed_vocab_path_still_active_via_env_override`). Beads closed: `mb-2mc9`, `mb-qdgn`, `mb-cskk`. Per ADR 0049 §"Sandbox isolation" close-out: the graduation window for `src-tauri/**` + `migrations/**` is now closed for this epic; Phase 1B/1C/1D/1E each charter their own. No new `phase-*-complete` tag (lateral epic per LESSONS P5).
 - ADR 0049 — Knowledge Graph Phase 0.5 + v1 architectural pivot (Accepted 2026-05-29). Phase 0.5 sealed across six waves on the `experimental/kg-validation/` sandbox. Two architectural keepers: SCHEMA.md as portable contract with per-model-class calibration profiles (Move 1; LESSONS P10) and entity extraction as a 5th pipeline pass (Move 4; Wave 0.5.4 ACCEPT at 54.83% / 53.40% strict Jaccard, 97.08% stability, ≥ 50% bar). Two architectural falsifications: embeddings nearest-neighbour classification (Move 2; amendment A1 — preserved as a similarity tool for entity disambiguation, retired as a classifier) and closed-vocab Move 3 (DEFERRED to v1.1 — wiring on `main` commit `8fdc7fb` is architecturally correct but blocked on two-field corpus re-labeling per LESSONS P11 "tags ≠ entities"). v1 architecture binding (amendments A1/A2/A3): pipeline segment → classify → extract → **extract_entities** → normalize, two-field entry schema (`tags:` open-vocab in v1 + `entities:` typed references), SCHEMA.md drives all passes, qwen2.5:7b-instruct-q4_K_M pinned for entity-aware operation (3b = documented tags-only degraded mode), opt-in graph guarantee, ~1 min intake latency budget. REPORT at `docs/knowledge-graph/PHASE-0-5-REPORT.md`. Beads sealed: `mb-symi` (epic), `mb-xmgs`, `mb-4xtd`, `mb-yfzy`, `mb-hnb4`, `mb-rzpd`, `mb-e10v`, `mb-o4ni`, `mb-5r1b`, `mb-qogz`. **No `phase-*-complete` tag** — lateral epic. Phase 1A (schema-driven pipeline graduates to production) awaits Dustin kickoff.
 - ADR 0048 — Knowledge Graph Phase 0 validation methodology (Accepted — sealed 2026-05-29 with `docs/knowledge-graph/REPORT.md`). Seven waves shipped: Wave 0 charter + scaffold; Wave 1 corpus (32 fixtures, full taxonomy coverage); Wave 2 4-pass pipeline + run-corpus harness; Wave 3 scorer (3 sub-iterations sealing on §G7 deterministic synonym-map metric per Option E); Wave 4 6 invariant judges + run-judges rig (`phase-0-kg-start` anchor at `aad06a6`); Wave 5 IAP Wiggum loop (cap 5; 0 accepted; documented the structural ceiling); Wave 6 REPORT.md + go/no-go (§G6 strict NO-GO; defensible GO-WITH-LIMITATIONS for an assisted-filing v1 UX). Final scorecard: hard-gate `invented_dates_count=0` PASS, junk-bucket 100% PASS, segmentation 86.7% PASS, category 67.3% FAIL, entry-type 78.2% FAIL, clean-single 6.7% FAIL, tag-collapse 9.1% FAIL. Synonym map v1.1. Stability ≥95% structural agreement. v1 recommendation: lighter spec scope PART B §9 with per-entry user confirmation; draft-review pane converting filling-quality errors into 1-tap corrections; raw transcript preserved per spec §10 dual-write. **No `phase-*-complete` tag** — lateral epic. Future v1 charter ADR (provisionally 0049) inherits Q1/Q2/Q3 decisions from ADR 0048 §3 + assisted-filing-UX contract from REPORT §8. Beads sealed: `mb-4wxw`, `mb-w1lw`, `mb-i9l1`, `mb-t7w5`, `mb-901u`, `mb-i4us`, `mb-nbel`, `mb-57a1`, `mb-jz5r`, `mb-he98`, `mb-ojm5`, `mb-0baz`.
 - ADR 0046 — Mobile extension via synced Obsidian vault (Accepted — sealed 2026-05-24). Four iterations shipped (desktop file ingest → outbound vault projection → inbound mobile courier → polish). User-facing surface: `+ Audio file` desktop import button, deterministic Markdown projection of dictation + meeting history to `<vault>/history/`, inbox courier auto-processing iOS-Shortcut-delivered voice memos from `<vault>/inbox/`, full Mobile Sync settings tab (8 keys + connection-health card), nested-vault detection wizard, import progress overlay, iOS Shortcut recipe (`docs/mobile/ios-shortcut.md`, 3 actions per Wave 0 Finding 5). Channel boundary preserved across 3 reuse sites: `dictation/ingest.rs` (Iter 1 ADR §3.2 amendment) consumed by IPC handler, inbox courier, and import progress overlay event-tap with zero further sealed-surface modifications. Two `sealed-phases-untouched` judges PASS (Iter 1 @ 95%, Iter 3 @ 99%); Iter 2 + Iter 4 didn't need them (greenfield + UI-side). 19 beads closed. Seal commit: HEAD of `main` at consolidation time (this STATUS update was committed in the seal commit itself; see `git log --grep='ADR 0046 SEALED'`). Wave 5 hardening matrix (`mb-qxrm`) remains open as live-corpus catch-up; not gating epic seal. **No new `phase-*-complete` tag** (lateral epic per LESSONS PINNED P5).
@@ -57,29 +58,14 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**KG Phase 1A — schema-driven pipeline graduates to `src-tauri/src/kg/`.**
-Lateral ADR-chartered epic (ADR 0049). Epic bead `mb-2mc9`. Wave brief
-at `docs/knowledge-graph/phase-1a-brief.md`. Dispatched in three chunks:
+**Nothing in flight.** Phase 1A KG graduation sealed; Phase 1B (SQLite
+entity/tag/edge tables) awaits Dustin kickoff.
 
-- **Chunk 1 (this commit) — DONE.** Parity fixture captured at
-  `docs/knowledge-graph/parity/` (32 dictations, sorted; 4-pass + entity
-  aggregate; MockOllama canned-responses sidecar). `src-tauri/src/kg/`
-  scaffold present with docstring-only `mod.rs`. `serde_yaml = "0.9"`
-  promoted to workspace dep. Wave brief authored. Sub-beads `mb-8thh` /
-  `mb-ep3c` / `mb-fl9y` all closed. Cargo gate green.
-- **Chunk 2 — pending.** Library subset graduates from
-  `experimental/kg-validation/src/`. `anyhow` excised; `ureq::Agent`
-  in `kg::ollama`; `include_str!` + `MOCKINGBIRD_KG_SCHEMA_DIR` env
-  override in `kg::schema_loader`.
-- **Chunk 3 — pending.** `kg_parity` probe binary lands and is green.
-  ADR 0049 §"Sandbox isolation" gets a closed-window note; epic bead
-  closes; STATUS clears the in-flight block.
-
-Per ADR 0049 §"Sandbox isolation" the graduation window is OPEN for
-`src-tauri/**` + `migrations/**` for this epic only; `ui/**` remains
-out of scope (that's Phase 1C). Per AGENTS.md "Work sizing" + LESSONS
-PINNED P5: lateral epic, **no new `phase-*-complete` tag**, seal via
-ADR 0049 §"Sandbox isolation" update + STATUS clear + epic bead close.
+**Phase 1B kickoff note (from Phase 1A seal):** the production
+`extract_entities` pass emits per-segment provenance; the parity
+fixture aggregates to per-dictation. Phase 1B's entity-table schema
+must commit on one shape before drafting migrations. See
+`docs/knowledge-graph/parity/README.md` §3 for the two options.
 
 **KG Phase 0.5 narrative archived:** the full wave-by-wave in-flight
 state that lived here through 0.5.1–0.5.5 is now in

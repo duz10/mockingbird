@@ -31,7 +31,7 @@ The **library subset** of `experimental/kg-validation/src/` lands in
 | `src/synonyms.rs` | `src-tauri/src/kg/synonyms.rs` | `SynonymMap`. |
 | `src/embeddings.rs` | `src-tauri/src/kg/embeddings.rs` | Preserved per binding parameter 5; not on the `run_pipeline` hot path in v1. |
 | `src/harness/pipeline.rs` | `src-tauri/src/kg/pipeline.rs` | The orchestrator. Public surface entry. |
-| `src/assets/SCHEMA.md` + `src/assets/prompts/*.md` | `src-tauri/src/kg/assets/{SCHEMA.md, prompts/*.md}` | Bundled via `include_str!`; override resolved via `MOCKINGBIRD_KG_SCHEMA_DIR` env. |
+| `src/assets/SCHEMA.md` + `src/assets/prompts/*.md` | `src-tauri/src/kg/assets/{SCHEMA.md, prompts/*.md}` | Bundled via `include_str!`; override resolved via `MOCKINGBIRD_KG_SCHEMA_DIR` env. SCHEMA.md is graduated as the **v1 slice** of the sandbox file (closed-vocab list stripped per ADR 0049 amendment A2; `schema_revision` bumped to `phase-1a-v1-open-vocab`). The closed-vocab Rust wiring (`synonyms.rs` + `tag_validator.rs::validate_tags`) remains graduated as dead-but-tested code per A2's v1.1 starting-point clause. |
 
 ---
 
@@ -134,6 +134,12 @@ known `cargo test --release` launch failure on this box (LESSONS
 ```
 powershell -File scripts\cargo-with-cuda.ps1 run --release --bin kg_parity
 ```
+
+Probe gates against the **open-vocab** pipeline path (consistent with
+ADR 0049 amendment A2). A regression test in
+`src-tauri/src/kg/schema_loader/tests.rs::closed_vocab_path_still_active_via_env_override`
+exercises the closed-vocab path via `MOCKINGBIRD_KG_SCHEMA_DIR`
+override to keep v1.1 wiring honest.
 
 (Wrapper required even for a pure-Rust binary — the workspace links
 `whisper-rs` + `ort`, and `cargo` without the wrapper has been observed

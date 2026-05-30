@@ -1,8 +1,18 @@
 # Mockingbird Knowledge Graph — SCHEMA contract
 
+> **Production v1 slice.** This is the v1-bound subset of the research
+> SCHEMA.md in `experimental/kg-validation/`. The sandbox version
+> carries the closed-vocab Move 3 wiring per Wave 0.5.3; ADR 0049
+> amendment A2 defers that to v1.1. The closed-vocab `synonyms.rs` +
+> `tag_validator.rs` paths remain wired in production code as the v1.1
+> starting point — they activate when a future bundled asset (or
+> `MOCKINGBIRD_KG_SCHEMA_DIR` override) re-introduces the
+> `#### Vocabulary list` section. **Do not re-introduce the
+> vocabulary list here without amending ADR 0049.**
+
 ```yaml
 schema_version: 1
-schema_revision: phase-0.5-wave-4
+schema_revision: phase-1a-v1-open-vocab
 ```
 
 > A portable Markdown contract for the Knowledge Graph pipeline,
@@ -10,13 +20,13 @@ schema_revision: phase-0.5-wave-4
 > Move 1 (Clark schema-driven pattern).
 >
 > **The pipeline reads from this file at runtime.** Rust modules
-> under `src/passes/` and `src/harness/` are contract-consumers —
+> under `src/passes/` and `src/harness/` are contract-consumers â€”
 > editing this file (and the prompt files it references) is the
 > supported way to change pipeline behaviour.
 >
 > The loader validates `schema_version` against the value compiled
 > into `src/schema_loader.rs::EXPECTED_SCHEMA_VERSION` and refuses
-> to start if they disagree — a stronger structural guarantee than
+> to start if they disagree â€” a stronger structural guarantee than
 > "the prompt happens to be on disk."
 
 ---
@@ -25,7 +35,7 @@ schema_revision: phase-0.5-wave-4
 
 ### Categories (closed enum)
 
-The Layer 1 of the spec §7.2 three-layer tag system. Exactly one
+The Layer 1 of the spec Â§7.2 three-layer tag system. Exactly one
 per entry.
 
 - `personal`
@@ -34,7 +44,7 @@ per entry.
 
 ### Entry types (closed enum)
 
-The Layer 2 of the spec §7.2 three-layer tag system. Exactly one
+The Layer 2 of the spec Â§7.2 three-layer tag system. Exactly one
 per entry. Drives downstream behaviour (a `task` gets a status, a
 `note` does not).
 
@@ -54,31 +64,31 @@ tail of open-class first-class references (handled by entity
 extraction, this layer). The v1 structured entry schema separates
 these into distinct fields; Wave 0.5.4 probes whether a 7b LLM
 with calibrated prompting can populate the entity field with
-sufficient quality (≥50% Jaccard) to ship.
+sufficient quality (â‰¥50% Jaccard) to ship.
 
-Kept deliberately minimal — five buckets is sufficient for the
+Kept deliberately minimal â€” five buckets is sufficient for the
 32-pair corpus, and YAGNI says we add finer types only when an
 empirical case fails to fit.
 
-- `person` — any specific human referent. Includes proper names
+- `person` â€” any specific human referent. Includes proper names
   (`Becca`, `Karen`, `Mrs. Chen`), family-collective names
   (`the Hendersons`, `the Smiths`), referent-as-name (`Dad`,
   `Mom`), and named functional roles when the speaker references
   THEIR specific instance (`the CPA`, `my manager`).
-- `organization` — any specific business, brand, employer,
+- `organization` â€” any specific business, brand, employer,
   product-as-brand, or community/forum. Includes generic-but-
   specific (`the bakery`, `the daycare`) when the speaker has
   one specific instance in mind. Examples: `Costco`, `Etsy`,
   `Notion`, `Stripe`, `Venmo`, `YouTube`, `Acme`, `Hacker News`.
-- `object` — any specific concrete thing, document, artifact, or
+- `object` â€” any specific concrete thing, document, artifact, or
   product instance. Examples: `the Q3 deck`, `the slide deck`,
   `brake pads`, `the truck`, `the dog food`, `the permission slip`,
   `the cover letter`, `the budget revision`.
-- `place` — any specific physical location or destination.
+- `place` â€” any specific physical location or destination.
   Examples: `the airport`, `the DMV`, `the office`, `the supply
   house`, `the farmers market`, `school` (when referenced as a
   destination).
-- `project` — any named, ongoing, or recurring work / endeavor /
+- `project` â€” any named, ongoing, or recurring work / endeavor /
   event-with-deliverables. Examples: `Q3 planning`, `the website
   redesign`, `the docs migration`, `the launch`, `the school
   auction`. Distinct from `object` because a project is the
@@ -88,18 +98,18 @@ empirical case fails to fit.
 
 1. **Specific or specific-to-speaker only.** Abstract concepts
    (`work`, `health`, `car-repair`, `business`, `design`) MUST NOT
-   be extracted as entities — those are tags. Entity extraction is
+   be extracted as entities â€” those are tags. Entity extraction is
    for first-class referents.
 2. **Past-tense + vague-future entities are treated the same way
    as the date hard-gate.** Don't fabricate. If the speaker says
    "I should call someone" with no specific referent, no entity.
-   Borderline: "the next one-on-one" — there's a project context
-   but no concrete named scope ⇒ skip.
+   Borderline: "the next one-on-one" â€” there's a project context
+   but no concrete named scope â‡’ skip.
 3. **Lowercase the name.** Hyphenate multi-word names
    (`mrs-chen`, `supply-house`, `q3-planning-doc`).
 4. **One entity row per referent.** If the speaker mentions
    `Becca` and `Becca's wedding`, that's one `person` entity
-   (`becca`) — the wedding is not a separate `project` unless
+   (`becca`) â€” the wedding is not a separate `project` unless
    the speaker references it as ongoing planning work.
 5. **Empty aliases for the probe phase.** Future capability
    (v1) uses Wave 0.5.2's nomic-embed-text infrastructure for
@@ -107,286 +117,6 @@ empirical case fails to fit.
    For Wave 0.5.4 the probe ships with exact-match-after-
    lowercase aliasing only; the `aliases: []` field is the
    reserved slot.
-
-### Canonical tag vocabulary (closed; Wave 0.5.3 seed)
-
-```yaml
-status: closed
-closed_in: phase-0.5-wave-3
-seed_size: 228
-seed_composition:
-  corpus_derived: 188   # canonical RHS of synonym-map v1.1
-  domain_pad: 40        # broad-coverage tags for clusters the 32-pair corpus undersamples
-new_tag_request_channel: extract.proposed_new_tags  # JSON field; collected at runs/<run-id>/new-tag-requests.jsonl
-```
-
-Move 3 / `mb-rzpd`. The extract pass selects topic tags ONLY from
-this list. Tags the model wants to apply that are NOT in the list
-go through the new-tag-request channel (the `proposed_new_tags`
-JSON field on the extract output) and are collected per-run at
-`runs/<run-id>/new-tag-requests.jsonl` for batch review.
-
-The post-LLM `tag_validator` pass is forgiving:
-
-- A tag in `raw_topic_tags` that **is** in the vocabulary survives
-  normalization and lands on the entry.
-- A tag in `raw_topic_tags` that **is not** in the vocabulary is
-  dropped from the entry AND logged as an *implicit* new-tag-request
-  (the model forgot the protocol but proposed a tag).
-- A `{tag, rationale}` row in `proposed_new_tags` is dropped from
-  the entry AND logged as an *explicit* new-tag-request.
-
-Composition rationale: the 188 corpus-derived canonicals preserve
-scoring continuity against existing answer keys (Wave 0.5.1
-baseline + scored runs). The 40 domain pads cover clusters a real
-user would plausibly hit but the 32-pair corpus undersamples
-(communication — `call` / `voicemail` / `follow-up`; work rituals
-— `standup` / `one-on-one`; health — `medication` / `prescription`
-/ `sleep`; errands — `pickup` / `delivery` / `dmv`; travel —
-`flight` / `hotel` / `passport`).
-
-ADR 0048 G7 (person names NEVER collapse to domain tags) is
-preserved: corpus persons (`becca`, `brandon`, `chen`, `dad`,
-`henderson`, `jamie`, `joe`, `karen`, `lisa`, `madison`, `mom`,
-`olivia`, `sarah`, `smith`) stay in the vocabulary as identity
-entries.
-
-#### Vocabulary list
-
-<!-- This is THE closed vocabulary. 228 entries, alphabetical, ASCII.
-     The schema loader reads this list verbatim; the prompt template
-     inlines it (grouped into clusters for readability) at runtime.
-     ANY edit here is a schema change — keep the bullet list flat,
-     one tag per line, in backticks. -->
-
-- `401k`
-- `access-code`
-- `accounting`
-- `accounts-receivable`
-- `ai`
-- `apartment`
-- `app`
-- `appliance`
-- `application`
-- `appointment`
-- `async`
-- `auction`
-- `bakery`
-- `becca`
-- `bill`
-- `birthday`
-- `birthday-cake`
-- `book`
-- `booth-fee`
-- `brake-pad`
-- `brandon`
-- `brunch`
-- `budget`
-- `budgeting`
-- `budget-revision`
-- `business`
-- `business-expense`
-- `business-tool`
-- `call`
-- `car`
-- `career`
-- `career-conversation`
-- `career-direction`
-- `car-repair`
-- `certificate`
-- `chat`
-- `chen`
-- `cleaning`
-- `cleat`
-- `client`
-- `client-visit`
-- `code-review`
-- `content`
-- `conversion`
-- `cooking`
-- `costco`
-- `cover-letter`
-- `cpa`
-- `craft-tutorial`
-- `craft-vinyl`
-- `dad`
-- `daycare`
-- `deadline`
-- `debt`
-- `delivery`
-- `dentist`
-- `design`
-- `dinner`
-- `dishwasher`
-- `dmv`
-- `docs-migration`
-- `doctor-appointment`
-- `documentation`
-- `dog`
-- `dog-food`
-- `drill-bit`
-- `dry-cleaning`
-- `electricity`
-- `email`
-- `etsy`
-- `exercise`
-- `expense`
-- `family`
-- `farmers-market`
-- `field-trip`
-- `finance`
-- `financial-goal`
-- `fitness`
-- `flight`
-- `follow-up`
-- `food`
-- `freelance`
-- `friend`
-- `fyi`
-- `garage`
-- `gate-code`
-- `gift`
-- `gift-bundle`
-- `gift-idea`
-- `grocery`
-- `growth`
-- `habit`
-- `henderson`
-- `hobby`
-- `holiday`
-- `home`
-- `home-maintenance`
-- `home-office`
-- `home-office-deduction`
-- `hotel`
-- `ic-vs-management`
-- `insurance`
-- `insurance-renewal`
-- `internet`
-- `interview`
-- `inventory`
-- `investment`
-- `invoice`
-- `jamie`
-- `job-application`
-- `job-search`
-- `job-tracking`
-- `joe`
-- `karen`
-- `kid`
-- `kids-sport`
-- `launch-date`
-- `launch-slip`
-- `lawn`
-- `lead`
-- `lisa`
-- `listing`
-- `madison`
-- `maintenance`
-- `manager`
-- `marketing`
-- `meal-planning`
-- `mechanic`
-- `medication`
-- `meeting`
-- `mockup`
-- `mom`
-- `morale`
-- `mortgage`
-- `notion`
-- `nutrition`
-- `olivia`
-- `one-on-one`
-- `parent-teacher`
-- `passport`
-- `paycheck`
-- `payment`
-- `payment-plan`
-- `pediatrician`
-- `performance-review`
-- `permission-slip`
-- `pet-care`
-- `photos`
-- `pickup`
-- `planning`
-- `planning-doc`
-- `plumbing-supply`
-- `portfolio`
-- `post-office`
-- `prescription`
-- `presentation`
-- `pricing`
-- `pricing-strategy`
-- `product-idea`
-- `project-status`
-- `q2`
-- `q3`
-- `q4-holiday`
-- `reading`
-- `reading-log`
-- `receipt`
-- `refund`
-- `reminder`
-- `rent`
-- `renters-insurance`
-- `repair`
-- `resume`
-- `resume-update`
-- `retirement`
-- `return`
-- `rollover`
-- `roth`
-- `rsvp`
-- `rust`
-- `rust-async`
-- `sarah`
-- `saving`
-- `school`
-- `school-auction`
-- `self-improvement`
-- `shirt`
-- `shot`
-- `side-business`
-- `sleep`
-- `slide-deck`
-- `small-business`
-- `smith`
-- `soccer`
-- `social`
-- `software`
-- `sprint-planning`
-- `standup`
-- `stripe`
-- `subscription`
-- `summer-reading`
-- `tax`
-- `tax-prep`
-- `team`
-- `team-culture`
-- `technical-reference`
-- `text-message`
-- `therapy`
-- `thermostat`
-- `tokio`
-- `tool`
-- `tooling`
-- `truck`
-- `utility`
-- `venmo`
-- `vet`
-- `video-call`
-- `voicemail`
-- `volunteer`
-- `volunteering`
-- `water`
-- `water-bill`
-- `water-heater`
-- `website`
-- `website-redesign`
-- `wedding`
-- `wholesale`
-- `work`
-- `youtube`
 
 ---
 
@@ -407,19 +137,19 @@ evidence justifies specialist routing.
 
 ## Pipeline order
 
-1. **`segment`** (LLM) — 1 dictation → 0..N candidate entry strings.
-2. **`classify`** (LLM, per segment) — `{category, entry_type}`.
-3. **`extract`** (LLM, per segment) — `{title, due_iso, raw_topic_tags}`.
-4. **`extract_entities`** (LLM, per segment, Wave 0.5.4 probe — DECOUPLED) — `{entities: [{name, type, aliases}]}`. Runs as a standalone probe over the artifacts produced by step 3; not yet wired into per-dictation orchestration. Promotion to in-band pipeline pass conditional on Wave 0.5.4 ≥50% bar + Wave 0.5.6 REPORT acceptance.
-5. **`normalize`** (pure Rust, per segment) — tag canonicalization.
+1. **`segment`** (LLM) â€” 1 dictation â†’ 0..N candidate entry strings.
+2. **`classify`** (LLM, per segment) â€” `{category, entry_type}`.
+3. **`extract`** (LLM, per segment) â€” `{title, due_iso, raw_topic_tags}`.
+4. **`extract_entities`** (LLM, per segment, Wave 0.5.4 probe â€” DECOUPLED) â€” `{entities: [{name, type, aliases}]}`. Runs as a standalone probe over the artifacts produced by step 3; not yet wired into per-dictation orchestration. Promotion to in-band pipeline pass conditional on Wave 0.5.4 â‰¥50% bar + Wave 0.5.6 REPORT acceptance.
+5. **`normalize`** (pure Rust, per segment) â€” tag canonicalization.
 
 ### Failure policy
 
-- `segment` failure → abort that dictation (no segments ⇒ nothing to do).
-- `classify` failure → drop only the offending segment, continue.
-- `extract` failure → drop only the offending segment, continue.
+- `segment` failure â†’ abort that dictation (no segments â‡’ nothing to do).
+- `classify` failure â†’ drop only the offending segment, continue.
+- `extract` failure â†’ drop only the offending segment, continue.
 
-This is the spec §8.1 contract and is invariant across all four
+This is the spec Â§8.1 contract and is invariant across all four
 architectural moves in ADR 0049.
 
 ---
@@ -427,7 +157,7 @@ architectural moves in ADR 0049.
 ## Model-class calibration profiles
 
 Different model families / sizes have different natural priors. A
-single prompt body behaves differently across models — instructions
+single prompt body behaves differently across models â€” instructions
 that push a 3b-class model just hard enough to overcome its
 cautious-by-default disposition do NOT push a 7b/9b-class model far
 enough to overcome its confident-by-default disposition (Wave 0.5.1
@@ -446,7 +176,7 @@ body automatically.
   uncertain.
 - Date-extraction needs: minimal null-bias reinforcement; light
   examples sufficient.
-- This is the **default profile** — any prompt the schema does not
+- This is the **default profile** â€” any prompt the schema does not
   override per-profile lives in the small-conservative variant.
 
 ### Profile: `mid-confident`
@@ -481,7 +211,7 @@ low-cost). Defaulting to the safer-on-trust-gate side is the call.
 ## Pass prompts
 
 Prompt bodies live in separate files referenced below. The loader
-reads them at startup and the passes use them verbatim — the runtime
+reads them at startup and the passes use them verbatim â€” the runtime
 prompt sent to Ollama is `{prompt_body}{per_pass_context_suffix}`.
 
 ### Default prompt body per pass
@@ -507,7 +237,7 @@ below.
 Resolution rule: `prompt_body(pass, model)` =
 `overrides[(pass, profile_for(model))]` if present, else
 `default[pass]`. Profiles that don't override a pass inherit the
-default — YAGNI says we add override rows only where empirical
+default â€” YAGNI says we add override rows only where empirical
 evidence (a hard-gate breach, a per-metric regression) demands them.
 
 ### Per-pass context suffix
@@ -532,12 +262,12 @@ know.
 Pure Rust, no LLM. Logic lives in `src/passes/normalize.rs`. Contract:
 
 1. Lowercase.
-2. Whitespace and `_` → `-`.
+2. Whitespace and `_` â†’ `-`.
 3. Collapse repeated `-`.
 4. Trim leading / trailing `-`.
 5. Conservative singularization on the last hyphen-segment only:
-   - `ies` → `y` (parties → party)
-   - `xes`/`zes` → `x`/`z` (taxes → tax)
+   - `ies` â†’ `y` (parties â†’ party)
+   - `xes`/`zes` â†’ `x`/`z` (taxes â†’ tax)
    - drop trailing `s` only when:
      - word length > 3
      - prior char is NOT in `{s, x, z, u, i, o}`
@@ -557,7 +287,7 @@ status: empty
 unlocked_in: v1.1
 ```
 
-Reserved schema slot for per-user preference overrides — category
+Reserved schema slot for per-user preference overrides â€” category
 routing hints, entry-type heuristics, additional tag synonyms. Phase
 0.5 leaves this empty by design; v1.1 (post-ship, empirically driven)
 populates it from observed user corrections via the SCHEMA.md learning
@@ -570,10 +300,10 @@ loop (ADR 0049 v1.1 deferrals).
 | Wave | Adds to schema | Sub-bead |
 |---|---|---|
 | 0.5.1        | Portable contract; passes load from here at runtime. Model-class calibration profiles + per-profile prompt overrides (`mb-4xtd` hard-gate fix). | `mb-xmgs`, `mb-4xtd` |
-| 0.5.2        | (Falsified, no schema change; embeddings infra preserved for Move 4 entity disambiguation — ADR 0049 A1 amendment.) | `mb-yfzy`, `mb-hnb4` |
+| 0.5.2        | (Falsified, no schema change; embeddings infra preserved for Move 4 entity disambiguation â€” ADR 0049 A1 amendment.) | `mb-yfzy`, `mb-hnb4` |
 | 0.5.3 (this) | Closed canonical tag vocabulary (228 seed entries) + new-tag-request validator + closed-vocab extract prompt override. | `mb-rzpd` |
 | 0.5.4 (this) | Entity types (closed 5-bucket enum). New `extract_entities` pass + per-profile prompts + hand-labeled entity ground truth on 21 entity-rich dictations + Jaccard scorer. Decoupled from production pipeline for probe phase. | `mb-o4ni` |
-| 0.5.5        | (No schema change — cross-test on 3b.) | `mb-5r1b` |
+| 0.5.5        | (No schema change â€” cross-test on 3b.) | `mb-5r1b` |
 
 Each later wave's PR amends this file additively. `schema_version`
 bumps when a consumer must change to remain compatible.

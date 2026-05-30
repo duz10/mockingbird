@@ -1827,7 +1827,12 @@
       "captured_iso": "2026-06-14T08:00:00Z",
       "pipeline_result": {
         "entries": [],
-        "per_pass_errors": [],
+        "per_pass_errors": [
+          [
+            "classify[0]",
+            "JSON parse failed in classify pass: unknown variant `objective`, expected one of `task`, `research`, `idea`, `note`, `reference` at line 1 column 50\nRaw output:\n{\"category\": \"personal\", \"entry_type\": \"objective\"}"
+          ]
+        ],
         "new_tag_requests": []
       },
       "entities": {
