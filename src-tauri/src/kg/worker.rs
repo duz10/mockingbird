@@ -7,9 +7,11 @@
 //!
 //! ## Lifecycle
 //!
-//! Spawned at app boot from `lib.rs::run()` *iff* `KgGraphEnabled =
-//! true` (Decision C — read-once-at-boot). On startup, before entering
-//! the drain loop, the worker:
+//! Spawned at app boot from `lib.rs::run()` unconditionally. The
+//! `KgGraphEnabled` setting is re-read at the top of every drain
+//! loop tick (Phase 1C Wave 1C.1, `mb-7w5f` / ADR 0051 §D6 —
+//! supersedes the Phase 1B Decision C read-once-at-boot wiring). On
+//! startup, before entering the drain loop, the worker:
 //!
 //! 1. Calls [`super::store::queue::sweep_orphaned_processing`] to flip
 //!    any `state='processing'` rows from a prior crashed process back
@@ -73,6 +75,7 @@ use std::time::{Duration, Instant, SystemTime};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
+use crate::settings::{model::SettingKey, Settings};
 
 use super::ollama::{GenerateOptions, OllamaClient};
 use super::pipeline::{run_pipeline, PipelineResult};
@@ -214,6 +217,19 @@ fn run(conn: Arc<Mutex<Connection>>, shutdown: Arc<AtomicBool>) {
         if shutdown.load(Ordering::SeqCst) {
             tracing::info!(target: "kg::worker", "shutdown observed; worker exiting cleanly");
             return;
+        }
+
+        // Phase 1C Wave 1C.1 (`mb-7w5f`, ADR 0051 §D6) — per-tick
+        // KgGraphEnabled poll. When the user has the toggle off (the
+        // default) we skip the dequeue entirely and nap. This costs
+        // one SELECT per IDLE_SLEEP tick (~1ms) and lets the Settings
+        // KG tab flip take effect inside one tick without an app
+        // restart. A poisoned mutex falls through to the existing
+        // sleep/continue path on the next iteration.
+        if !is_graph_enabled(&conn) {
+            tracing::trace!(target: "kg::worker", "KgGraphEnabled=false; skipping dequeue");
+            thread::sleep(IDLE_SLEEP);
+            continue;
         }
 
         let claimed = match conn.lock() {
@@ -491,6 +507,21 @@ fn requeue_for_retry(conn: &Connection, queue_id: i64, err_msg: &str) -> AppResu
     Ok(())
 }
 
+/// Read [`SettingKey::KgGraphEnabled`] under a short-lived DB lock.
+/// Returns `false` on any failure (mutex poisoning, missing row
+/// recovery via [`Settings::get`], deserialize error) so the
+/// graph-off invariant holds even when the settings layer is
+/// transiently unhealthy — the worker fails closed.
+fn is_graph_enabled(conn: &Arc<Mutex<Connection>>) -> bool {
+    let Ok(guard) = conn.lock() else {
+        tracing::warn!(target: "kg::worker", "db mutex poisoned in KgGraphEnabled poll; treating as false");
+        return false;
+    };
+    Settings::new(&guard)
+        .get::<bool>(SettingKey::KgGraphEnabled)
+        .unwrap_or(false)
+}
+
 /// Read the dictation text for a session by trying transcript stages
 /// in priority order. ADR 0050 § D6 wires the dictation hook *after*
 /// the session is finalized, so `stage='final'` should always exist
@@ -701,6 +732,56 @@ mod tests {
             Some("raw-text-3")
         );
         assert!(load_dictation_text(&conn, 999).unwrap().is_none());
+    }
+
+    #[test]
+    fn is_graph_enabled_returns_false_when_settings_table_missing() {
+        // Fail-closed: a DB without the settings table errors on the
+        // SELECT, which `is_graph_enabled` swallows to `false`. This
+        // is the graph-off-untouched invariant's safety net for a
+        // transiently broken settings layer.
+        let conn = Connection::open_in_memory().unwrap();
+        let shared = Arc::new(Mutex::new(conn));
+        assert!(!is_graph_enabled(&shared));
+    }
+
+    #[test]
+    fn is_graph_enabled_defaults_to_false_when_row_absent() {
+        // Settings table exists but no `kg_graph_enabled` row → the
+        // `Settings::get` default-fallback returns `false` (mirrors
+        // `SettingKey::KgGraphEnabled::default_value`).
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+            .unwrap();
+        let shared = Arc::new(Mutex::new(conn));
+        assert!(!is_graph_enabled(&shared));
+    }
+
+    #[test]
+    fn is_graph_enabled_reflects_setting_writes() {
+        // Per-tick poll contract: flipping the setting changes the
+        // observed value WITHOUT recreating the worker.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);\n             INSERT INTO settings (key, value) VALUES ('kg_graph_enabled', 'true');",
+        )
+        .unwrap();
+        let shared = Arc::new(Mutex::new(conn));
+        assert!(is_graph_enabled(&shared), "true value must read back true");
+
+        // Flip to false → next poll observes the flip.
+        shared
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE settings SET value = 'false' WHERE key = 'kg_graph_enabled'",
+                [],
+            )
+            .unwrap();
+        assert!(
+            !is_graph_enabled(&shared),
+            "flipping the setting must take effect on the next poll"
+        );
     }
 
     #[test]

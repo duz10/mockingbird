@@ -20,6 +20,7 @@ pub mod activity;
 pub mod dictation;
 pub mod dictionary;
 pub mod insights;
+pub mod kg;
 pub mod learning;
 pub mod legacy;
 pub mod meetings;
@@ -96,6 +97,9 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         // Phase MC Wave 5 — typed meeting-settings IPC.
         settings::meeting_settings_get_all,
         settings::meeting_settings_set,
+        // Phase 1C Wave 1C.1 — typed KG-settings IPC (ADR 0051).
+        kg::kg_settings_get_all,
+        kg::kg_settings_set,
         // Learning
         learning::list_learning_runs,
         learning::trigger_learning_run,
