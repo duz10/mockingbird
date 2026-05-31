@@ -10,7 +10,7 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-06-04 (**KG Phase 1D SEALED via ADR 0052 Accepted** — Wave 1D.6 shipped three acceptance-gate judges (`kg-source-gate-invariant` NEW deterministic Rust probe + `kg-dictation-untouched` extended + `kg-graph-off-ui-tightened` consolidated) + epic seal; `mb-q2p1` + epic `mb-x7f9` closed). Prior anchors: 2026-05-31 (**KG Phase 1C SEALED via ADR 0051 Accepted**); 2026-06-03 (ADR 0050 KG Phase 1B SEALED); 2026-05-30 (Wave 1C.0 charter).
+**Last consolidated:** 2026-06-04 (**KG Phase 1E Wave 1E.0 charter shipped** — ADR 0053 Proposed + `docs/phases/phase-1e.md` + epic `mb-imc2` with 10 sub-beads + dependency chain wired. Pure documentation iteration; zero Rust / UI delta). Prior anchors: 2026-06-04 earlier (**KG Phase 1D SEALED via ADR 0052 Accepted** — Wave 1D.6 three judges + epic seal); 2026-05-31 (**KG Phase 1C SEALED via ADR 0051 Accepted**); 2026-06-03 (ADR 0050 KG Phase 1B SEALED); 2026-05-30 (Wave 1C.0 charter).
 
 ## ✅ Sealed (do not re-execute)
 
@@ -61,23 +61,18 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**Nothing in flight. Phase 1D sealed via ADR 0052 Accepted (2026-06-04). Phase 1E (Obsidian-as-source-of-truth) awaits Dustin kickoff.**
+**KG Phase 1E (Obsidian as source of truth) — Wave 1E.0 charter complete; Wave 1E.1 (vault subtree bootstrap) ready next.** Charter ADR [ADR 0053](docs/adr/0053-kg-phase-1e-obsidian-as-source-of-truth.md) authored (Proposed); phase doc at `docs/phases/phase-1e.md` (616 lines, 9 implementation waves + this charter wave + seal wave); bead epic `mb-imc2` minted with 10 sub-beads + dependency chain wired.
 
-### Phase 1E kickoff notes (next session's starting point)
+### Wave 1E.0 deliverables shipped (this iteration)
 
-Per `docs/phases/phase-1d.md` §"Out of scope (explicit)" → "Deferred to Phase 1E":
+- `docs/adr/0053-kg-phase-1e-obsidian-as-source-of-truth.md` — Proposed (532 lines). Ten load-bearing decisions (D1–D10): vault subtree shape, filename format (`<date>-<slug>__<id8>.md`), YAML frontmatter shape + versioning, two-phase commit ordering (DB-first then file then DB-seal then queue-seal), reverse-watcher conflict resolution (file-wins; hash-based loop-prevention NOT mtime), KG-Inbox courier shape (sibling to ADR 0046; positional routing per Q2), History archive (per-session JSON sidecar; audio file move-out-of-Inbox), pre-built seeds, Obsidian Tasks emission, iOS Shortcut docs scope.
+- `docs/phases/phase-1e.md` — 616 lines. Wave-by-wave: 1E.1 (subtree bootstrap), 1E.2 (Markdown serializer), 1E.3 (worker writes Markdown + migration 026), 1E.4 (History archive), 1E.5 (reverse-watcher; J1 invariant), 1E.6 (KG-Inbox courier), 1E.7 (seeds), 1E.8 (iOS Shortcut docs), 1E.9 (4 judges + seal).
+- Bead epic `mb-imc2` + 10 sub-beads: 1E.0 `mb-nuba`, 1E.1 `mb-e16d`, 1E.2 `mb-vq8y`, 1E.3 `mb-k2pk`, 1E.4 `mb-i14b`, 1E.5 `mb-qwfy`, 1E.6 `mb-i46v`, 1E.7 `mb-bgpt`, 1E.8 `mb-wnsm`, 1E.9 `mb-kazi`. Dependency chain wired (`bd link` blocks-relationship for serial chain; `--type parent-child` for epic ↔ sub-task). Critical path: 1E.0 → 1E.1 → 1E.2 → 1E.3 → {1E.4, 1E.5, 1E.6, 1E.7} → 1E.9; 1E.8 docs-only (no code deps).
+- This STATUS update.
 
-- **Markdown projection** of KG entries to `<vault>/knowledge-graph/` per spec §7.1 + §14.1 (the inverse of ADR 0046's history projection — same primitives, KG subtree).
-- **Reverse-watcher** (vault .md changes → mockingbird.db updates) per ADR 0048 Q3. Loop-avoidance seam already documented in `kg/ingest_text.rs` module docstring ("this row originated outside the vault" marker).
-- **KG-Inbox courier** (mobile-shortcut-delivered captures auto-flow through the same KG pipeline as the desktop text-note IPC). Reuses ADR 0046's inbox courier shape.
-- **History archive** folder semantics per spec §7.1 (3-month rollover, lossless export).
-- **Obsidian Tasks format emission** per spec §7.4.
-- **Pre-built Kanban / dashboard / board notes** per spec §14.2.
-- **iOS Shortcut docs** for the new `kg_ingest_text_note` IPC (mirror of `docs/mobile/ios-shortcut.md`, KG-flavored).
+**Resume next iteration:** `bd ready -t task` will surface 1E.1 (`mb-e16d`) as the lead actionable once `mb-nuba` closes; 1E.8 docs-only bead is available in parallel any time. Dispatch one-liner pattern per LESSONS P8: `implement Wave 1E.1 per docs/phases/phase-1e.md` (no embedded spec).
 
-The Phase 1E charter (future ADR 0053) inherits ADR 0048 Q1/Q2/Q3 decisions and ADR 0046 vault-handling primitives. v1 beta tag (Phase 1F) waits on Phase 1E.
-
-**Standing beads carrying forward** (not blocking Phase 1E kickoff):
+**Standing beads carrying forward** (not blocking Phase 1E waves):
 
 - `mb-bbl2` — sonner toast retrofit for native browser confirms.
 - `mb-y6pq` — `--status-bad` design-token sweep.
