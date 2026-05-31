@@ -910,13 +910,55 @@ Mockingbird DB (no vault projection yet); the user opens the KG
 from the sidebar, sees a read-only dashboard, captures via the
 dedicated KG audio + text note lanes (separate from PTT), filters
 + drills into concepts inline, and can launch Obsidian to the
-configured vault. **Phase 1E (Obsidian as source of truth) is NOT
-YET SHIPPED** — markdown projection of KG entries to
-`<vault>/knowledge-graph/`, the reverse-watcher (vault → SQLite
-ingest), the KG-Inbox courier, the history archive folder, the
-Obsidian Tasks format emission, and the pre-built Kanban/dashboard
-boards are all Phase 1E (future ADR 0053) scope. The v1 beta tag
-awaits Phase 1F.
+configured vault.
+
+**Phase 1E (Obsidian as source of truth) IN FLIGHT — Waves 1E.0
+through 1E.4 SHIPPED (2026-06-04 to 2026-06-05); Waves 1E.5–1E.9
+ahead.** Charter: [ADR 0053](adr/0053-kg-phase-1e-obsidian-as-source-of-truth.md)
+(Proposed). Phase doc: [`docs/phases/phase-1e.md`](phases/phase-1e.md).
+Bead epic `mb-imc2`. What's shipped so far:
+
+- **1E.1 — Subtree bootstrap** (`vault::kg_layout`). Idempotent
+  creation of `<vault>/Knowledge Graph/{Inbox,Entries,History}/`
+  at toggle-on + at boot. New `kg_subtree_bootstrap` IPC.
+- **1E.2 — Markdown serializer** (`vault::markdown_serializer`).
+  Pure `KgEntry → (filename, bytes)`. Hand-rolled YAML emitter
+  for byte-stable output (deterministic field order, double-
+  quoted strings, block-style non-empty lists, LF only, RFC 3339
+  Z timestamps, conditional fields omitted). 5 golden fixtures.
+- **1E.3 — Two-phase commit + worker integration**
+  (`vault::writer`). KG filing worker writes Markdown to
+  `<vault>/Knowledge Graph/Entries/<date>-<slug>__<id8>.md`
+  after `apply_filed_outcome` succeeds. Migration 026 adds
+  `sessions.{entry_id, vault_path, vault_file_hash}`; the
+  SHA-256 is pre-recorded BEFORE the file write so the 1E.5
+  reverse-watcher's first event can short-circuit as
+  "that's our own write" without race. Three sequential
+  transactions: (a) kg_* rows commit, (b) atomic file write
+  outside any txn, (c) seal + `mark_done` together. Vault
+  projection failure is **non-fatal to queue** — `reconcile_vault`
+  is the on-demand orphan recovery surface.
+- **1E.4 — History archive** (`vault::history`). After seal +
+  `mark_done`, a per-session canonical JSON sidecar lands at
+  `<vault>/Knowledge Graph/History/<YYYY-MM>/<session-uuid>.json`
+  + (for audio captures) the source recording is moved to the
+  same bucket as `<session-uuid>.<ext>`. Sidecar shape per ADR
+  0053 §D7: ten fields in pinned order, `archive_version = 1`,
+  `serde_json::to_string_pretty` + trailing newline (LF only by
+  contract on every platform). Cross-volume-safe audio move
+  (rename → copy+delete fallback). Idempotent. `reconcile_history`
+  is the on-demand scan surface for sealed-but-not-archived
+  sessions + orphan sidecars; read-only. Same non-fatal-to-queue
+  philosophy as 1E.3.
+
+Not yet shipped (Waves 1E.5–1E.9): the **reverse-watcher**
+(file edits → SQLite + FTS reconcile; hash-based loop-
+prevention via the substrate 1E.3 already laid down), the
+**KG-Inbox courier** (sibling to ADR 0046's history-folder
+courier — positional routing per ADR 0053 Q2), the **pre-built
+Kanban + dashboard + README seeds**, the **iOS Shortcut docs**
+for capturing into `Knowledge Graph/Inbox/`, and the four Phase
+1E judges + epic ADR seal. The v1 beta tag awaits Phase 1F.
 
 **Standing carry-forwards** (not gating Phase 1E kickoff):
 `mb-bbl2` (sonner retrofit), `mb-y6pq` (`--status-bad` token

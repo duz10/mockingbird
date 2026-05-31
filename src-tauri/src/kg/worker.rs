@@ -77,6 +77,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::db::sessions::{self as db_sessions, CaptureKind as DbCaptureKind};
 use crate::error::{AppError, AppResult};
 use crate::settings::{model::SettingKey, Settings};
+use crate::vault::history::{archive_session_history, HistoryArchiveInput};
 use crate::vault::markdown_serializer::{
     CaptureKind as VaultCaptureKind, Category as VaultCategory, EntryType as VaultEntryType,
     KgEntry, Status as VaultStatus,
@@ -437,6 +438,26 @@ fn process_one(
             "vault projection sealed"
         );
     }
+
+    // ── History archive (ADR 0053 §D7, mb-i14b / 1E.4) ─────────
+    // Phase 4: runs strictly AFTER seal + mark_done. Failure here
+    // is logged + swallowed (the entry + queue are already sealed;
+    // `vault::history::reconcile_history` recovers on demand).
+    // Gated on the same conditions as the vault projection -- if
+    // the entry didn't get a vault projection, there's no entry_id
+    // / vault_path / file_hash to archive against, so we skip.
+    if let Some(ref outcome) = vault_outcome {
+        if let Err(e) = maybe_archive_history(conn, entry_id, outcome, &captured_iso) {
+            tracing::warn!(
+                target: "kg::worker",
+                queue_id,
+                entry_id,
+                error = %e,
+                "history archive failed; entry already sealed; reconcile_history will recover"
+            );
+        }
+    }
+
     let total_filing_ms = total_t0.elapsed().as_millis() as u64;
 
     // Phase 1C.0 (`mb-plz9`, ADR 0051) — structured latency event.
@@ -600,6 +621,119 @@ fn maybe_commit_to_vault(
         commit_entry_to_vault(&c, session_id, &entry, &vault_root)?
     };
     Ok(Some(outcome))
+}
+
+/// History archive step (ADR 0053 §D7, mb-i14b). Runs AFTER the
+/// seal + mark_done transaction so a failure here can't roll back
+/// a successful filing. The caller logs + swallows the error.
+///
+/// Returns `Ok(())` even when the archive was a no-op (idempotent
+/// re-call on a session whose sidecar already exists). The
+/// distinction is logged via `HistoryArchiveOutcome.archived` inside
+/// the helper; the worker doesn't care to differentiate.
+fn maybe_archive_history(
+    conn: &Arc<Mutex<Connection>>,
+    session_id: i64,
+    outcome: &CommitOutcome,
+    captured_iso: &str,
+) -> AppResult<()> {
+    // Snapshot under a single short-lived lock: session metadata
+    // (uuid, capture_kind, audio_blob_path) + transcripts (raw +
+    // cleaned/final) + vault root.
+    let (vault_root, session_uuid, capture_kind_db_str, audio_blob_path, raw_text, cleaned_text) = {
+        let c = conn
+            .lock()
+            .map_err(|_| AppError::Other("db mutex poisoned in maybe_archive_history".into()))?;
+
+        let vault_path: Option<String> = Settings::new(&c)
+            .get::<Option<String>>(SettingKey::VaultPath)
+            .ok()
+            .flatten();
+        let vault_path_str = match vault_path {
+            Some(s) if !s.trim().is_empty() => s,
+            _ => {
+                // Vault was unconfigured mid-run -- nothing to do.
+                return Ok(());
+            }
+        };
+
+        let session = db_sessions::get_by_id(&c, session_id)?.ok_or_else(|| {
+            AppError::Other(format!(
+                "maybe_archive_history: session id={session_id} disappeared mid-run"
+            ))
+        })?;
+
+        let raw = load_transcript_stage(&c, session_id, "raw")?.unwrap_or_default();
+        // Prefer the post-cleanup stage; fall back to cleaned, then
+        // to empty (sessions whose cleanup pass never ran still
+        // archive cleanly).
+        let cleaned = load_transcript_stage(&c, session_id, "final")?
+            .or(load_transcript_stage(&c, session_id, "cleaned")?)
+            .unwrap_or_default();
+
+        (
+            std::path::PathBuf::from(vault_path_str),
+            session.uuid,
+            session.capture_kind.as_db_str().to_string(),
+            session.audio_blob_path,
+            raw,
+            cleaned,
+        )
+    };
+
+    // Derive the entry filename from the vault-relative POSIX-style
+    // path the 1E.3 writer recorded. Last `/`-separated component is
+    // the bare filename (always emitted with forward slashes, so the
+    // split is host-OS independent).
+    let entry_filename = outcome
+        .vault_relative_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(&outcome.vault_relative_path)
+        .to_string();
+
+    let audio_path_buf = audio_blob_path.as_deref().map(std::path::PathBuf::from);
+
+    let input = HistoryArchiveInput {
+        session_id,
+        session_uuid: &session_uuid,
+        capture_kind: &capture_kind_db_str,
+        captured_at: captured_iso,
+        raw_transcript: &raw_text,
+        cleaned_transcript: &cleaned_text,
+        entry_id: &outcome.entry_id,
+        entry_filename: &entry_filename,
+        vault_file_hash: &outcome.file_hash,
+        audio_blob_path: audio_path_buf.as_deref(),
+    };
+
+    let archived = archive_session_history(&input, &vault_root)?;
+    tracing::info!(
+        target: "kg::worker",
+        session_id,
+        json = %archived.json_path.display(),
+        audio = ?archived.audio_path.as_ref().map(|p| p.display().to_string()),
+        archived = archived.archived,
+        "history archive step complete"
+    );
+    Ok(())
+}
+
+/// Single-stage transcript fetch. Like `load_dictation_text` but
+/// returns just one stage's text -- the history archive wants both
+/// raw + cleaned independently, not the first-available cascade.
+fn load_transcript_stage(
+    conn: &Connection,
+    session_id: i64,
+    stage: &str,
+) -> AppResult<Option<String>> {
+    conn.query_row(
+        "SELECT text FROM transcripts WHERE session_id = ?1 AND stage = ?2",
+        params![session_id, stage],
+        |r| r.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(Into::into)
 }
 
 // ── KG → vault enum mappings ────────────────────────────

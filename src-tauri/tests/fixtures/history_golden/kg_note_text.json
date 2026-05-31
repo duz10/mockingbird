@@ -1,0 +1,12 @@
+{
+  "session_uuid": "660e8400-e29b-41d4-a716-446655440001",
+  "session_id": 43,
+  "capture_kind": "kg-note-text",
+  "captured_at": "2026-06-15T14:32:01Z",
+  "raw_transcript": "Refactor injection table.",
+  "cleaned_transcript": "Refactor injection table.",
+  "entry_id": "01HMTEXT0abcdef1234567890",
+  "entry_filename": "2026-06-15-refactor-injection-table__01HMTEXT.md",
+  "vault_file_hash": "cafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe",
+  "archive_version": 1
+}

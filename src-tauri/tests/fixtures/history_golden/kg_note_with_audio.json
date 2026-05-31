@@ -1,0 +1,12 @@
+{
+  "session_uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "session_id": 42,
+  "capture_kind": "kg-note",
+  "captured_at": "2026-06-15T14:32:01Z",
+  "raw_transcript": "buy milk tomorrow",
+  "cleaned_transcript": "Buy milk tomorrow.",
+  "entry_id": "01HMVWAB7C8X9Y0Z1234567890",
+  "entry_filename": "2026-06-15-buy-milk__abcd1234.md",
+  "vault_file_hash": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  "archive_version": 1
+}

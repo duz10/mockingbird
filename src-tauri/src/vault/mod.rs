@@ -24,6 +24,7 @@
 //! mechanically.
 
 pub mod export_job;
+pub mod history;
 pub mod kg_layout;
 pub mod layout;
 pub mod manifest;

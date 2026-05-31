@@ -1,0 +1,12 @@
+{
+  "session_uuid": "770e8400-e29b-41d4-a716-446655440002",
+  "session_id": 44,
+  "capture_kind": "kg-note",
+  "captured_at": "2026-01-02T03:04:05Z",
+  "raw_transcript": "test",
+  "cleaned_transcript": "",
+  "entry_id": "01HMSPARSE0abcdef12345678",
+  "entry_filename": "2026-01-02-test__01HMSPAR.md",
+  "vault_file_hash": "0011223300112233001122330011223300112233001122330011223300112233",
+  "archive_version": 1
+}
