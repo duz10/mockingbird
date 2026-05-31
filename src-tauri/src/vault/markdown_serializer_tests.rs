@@ -1,0 +1,734 @@
+//! Tests for `markdown_serializer`.
+//!
+//! Lives in a sibling file (loaded via `#[cfg(test)] #[path]` from
+//! the impl) so the impl module stays under the 600-line file cap
+//! without having to fragment cohesive test surface (helpers, unit
+//! tests, property tests, and golden tests all share fixture
+//! constructors — splitting them across multiple files would
+//! duplicate the constructors, violating DRY for no real win).
+
+use super::*;
+use chrono::TimeZone;
+
+// ────────────────────────────────────────────────────────────
+// Fixture helpers
+// ────────────────────────────────────────────────────────────
+
+fn ts(y: i32, m: u32, d: u32, hh: u32, mm: u32, ss: u32) -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(y, m, d, hh, mm, ss).unwrap()
+}
+
+fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+    NaiveDate::from_ymd_opt(y, m, d).unwrap()
+}
+
+fn minimal_entry() -> KgEntry {
+    KgEntry {
+        id: "01HMVWAB7C8X9Y0Z1234567890".to_string(),
+        captured_at: ts(2026, 6, 15, 14, 32, 1),
+        captured_at_local_date: date(2026, 6, 15),
+        capture_kind: CaptureKind::Dictation,
+        title: "Switch suppliers for brake pads".to_string(),
+        category: Category::Professional,
+        entry_type: EntryType::Note,
+        status: None,
+        due_date: None,
+        tags: vec![],
+        entities: vec![],
+        source_session_uuid: None,
+        body: "Maple recommended switching from AutoZone to Home Depot for brake pads.\n"
+            .to_string(),
+    }
+}
+
+fn full_task_entry() -> KgEntry {
+    KgEntry {
+        id: "01HMTASK00abcdef1234567890".to_string(),
+        captured_at: ts(2026, 6, 15, 14, 32, 1),
+        captured_at_local_date: date(2026, 6, 15),
+        capture_kind: CaptureKind::KgNote,
+        title: "Switch suppliers for brake pads".to_string(),
+        category: Category::Professional,
+        entry_type: EntryType::Task,
+        status: Some(Status::Todo),
+        due_date: Some(ts(2026, 6, 20, 0, 0, 0)),
+        tags: vec!["brake-pads".to_string(), "suppliers".to_string()],
+        entities: vec!["Home Depot".to_string(), "AutoZone".to_string()],
+        source_session_uuid: Some("550e8400-e29b-41d4-a716-446655440000".to_string()),
+        body: "Maple recommended switching to Home Depot.".to_string(),
+    }
+}
+
+fn doing_task_entry() -> KgEntry {
+    let mut e = full_task_entry();
+    e.id = "01HMDOING00abcdef1234567890".to_string();
+    e.status = Some(Status::Doing);
+    e.title = "Refactor injection strategy override table".to_string();
+    e.due_date = None;
+    e.tags = vec!["refactor".to_string()];
+    e.entities = vec![];
+    e.body = "Move the per-app override map out of the orchestrator constructor.".to_string();
+    e
+}
+
+fn done_task_entry() -> KgEntry {
+    let mut e = full_task_entry();
+    e.id = "01HMDONE00abcdef1234567890".to_string();
+    e.status = Some(Status::Done);
+    e.title = "Buy milk".to_string();
+    e.due_date = Some(ts(2026, 6, 10, 0, 0, 0));
+    e.tags = vec!["errand".to_string()];
+    e.entities = vec![];
+    e.source_session_uuid = None;
+    e.capture_kind = CaptureKind::KgNoteText;
+    e.body = "Picked it up on Saturday.".to_string();
+    e
+}
+
+fn special_chars_entry() -> KgEntry {
+    KgEntry {
+        id: "01HMSPECIAL00ab1234567890af".to_string(),
+        captured_at: ts(2026, 1, 2, 3, 4, 5),
+        captured_at_local_date: date(2026, 1, 2),
+        capture_kind: CaptureKind::Dictation,
+        // Embeds: backslash, double-quote, newline, tab, unicode.
+        title: "Re: \"urgent\"\tnotes & \\paths\nmulti-line — café".to_string(),
+        category: Category::Personal,
+        entry_type: EntryType::Idea,
+        status: None,
+        due_date: None,
+        tags: vec!["weird-\"tag\"".to_string()],
+        entities: vec!["O'Reilly\\".to_string()],
+        source_session_uuid: None,
+        body: "Body with \"quotes\" and a \\ backslash.".to_string(),
+    }
+}
+
+// ────────────────────────────────────────────────────────────
+// Filename tests
+// ────────────────────────────────────────────────────────────
+
+#[test]
+fn filename_happy_path() {
+    let e = minimal_entry();
+    assert_eq!(
+        filename_for(&e),
+        "2026-06-15-switch-suppliers-for-brake-pads__01hmvwab.md"
+    );
+}
+
+#[test]
+fn filename_empty_title_becomes_untitled() {
+    let mut e = minimal_entry();
+    e.title = "".to_string();
+    assert_eq!(filename_for(&e), "2026-06-15-untitled__01hmvwab.md");
+}
+
+#[test]
+fn filename_all_symbols_title_becomes_untitled() {
+    let mut e = minimal_entry();
+    e.title = "??? !!! ###".to_string();
+    // After hyphen-mapping + collapse + trim: empty → "untitled".
+    assert_eq!(filename_for(&e), "2026-06-15-untitled__01hmvwab.md");
+}
+
+#[test]
+fn filename_non_ascii_title_drops_to_hyphens() {
+    let mut e = minimal_entry();
+    // Café, em-dash, CJK, emoji — none are ASCII-alphanum.
+    // 'C','a','f' survive; 'é' is NOT ASCII-alphanum so it drops
+    // to '-'. Then ' ','—',' ','寿','司',' ','🍣',' ' all drop to
+    // '-' and collapse. "plan" survives. Net slug: "caf-plan".
+    // (The 'é'-drop is the intentional "no transliteration"
+    // choice; identity recovery lives in the `__<id8>` suffix.)
+    e.title = "Café — 寿司 🍣 plan".to_string();
+    assert_eq!(filename_for(&e), "2026-06-15-caf-plan__01hmvwab.md");
+}
+
+#[test]
+fn filename_slug_capped_at_50_chars() {
+    let mut e = minimal_entry();
+    e.title = "a".repeat(120);
+    let name = filename_for(&e);
+    // Extract the slug part between the date and the "__".
+    let slug = name
+        .strip_prefix("2026-06-15-")
+        .and_then(|s| s.split("__").next())
+        .unwrap();
+    assert_eq!(slug.len(), 50, "slug must be capped at 50 chars: {slug}");
+    assert!(slug.chars().all(|c| c == 'a'));
+}
+
+#[test]
+fn filename_slug_truncation_strips_trailing_hyphen() {
+    let mut e = minimal_entry();
+    // Construct: 49 'a' chars + a '!' that maps to '-'. Cap at 50
+    // would keep "aaa...a-"; the trailing '-' must be re-trimmed.
+    e.title = format!("{}!", "a".repeat(49));
+    let name = filename_for(&e);
+    let slug = name
+        .strip_prefix("2026-06-15-")
+        .and_then(|s| s.split("__").next())
+        .unwrap();
+    assert!(
+        !slug.ends_with('-'),
+        "post-truncation slug must not end with '-': {slug}"
+    );
+    assert_eq!(slug.len(), 49);
+}
+
+#[test]
+fn filename_id8_strips_hyphens_in_uuids() {
+    let mut e = minimal_entry();
+    e.id = "550e8400-e29b-41d4-a716-446655440000".to_string();
+    let name = filename_for(&e);
+    // First 8 alphanumeric chars: 550e8400.
+    assert!(
+        name.contains("__550e8400.md"),
+        "id8 must strip hyphens: got {name}"
+    );
+}
+
+#[test]
+fn filename_id8_pads_short_ids() {
+    let mut e = minimal_entry();
+    e.id = "abc".to_string();
+    let name = filename_for(&e);
+    assert!(
+        name.ends_with("__abc00000.md"),
+        "short ids must zero-pad to 8 chars: {name}"
+    );
+}
+
+#[test]
+fn filename_matches_regex() {
+    // The contract regex per the kickoff brief.
+    let e = minimal_entry();
+    let name = filename_for(&e);
+    let re = regex::Regex::new(r"^\d{4}-\d{2}-\d{2}-[a-z0-9-]+__[a-z0-9]{8}\.md$").unwrap();
+    assert!(
+        re.is_match(&name),
+        "filename must match contract regex: {name}"
+    );
+}
+
+// ────────────────────────────────────────────────────────────
+// Frontmatter tests
+// ────────────────────────────────────────────────────────────
+
+#[test]
+fn frontmatter_field_order_pinned() {
+    let e = full_task_entry();
+    let out = serialize_entry(&e);
+    // Find each field's offset; assert strictly-increasing order.
+    let order = [
+        "id:",
+        "schema_version:",
+        "capture_kind:",
+        "captured_at:",
+        "title:",
+        "category:",
+        "type:",
+        "status:",
+        "due_date:",
+        "tags:",
+        "entities:",
+        "source_session_uuid:",
+    ];
+    let mut prev_pos = 0usize;
+    for key in order {
+        let pos = out
+            .find(key)
+            .unwrap_or_else(|| panic!("missing key {key} in:\n{out}"));
+        assert!(
+            pos > prev_pos,
+            "field {key} appears out of order (at {pos}, prev {prev_pos}):\n{out}"
+        );
+        prev_pos = pos;
+    }
+}
+
+#[test]
+fn frontmatter_conditional_fields_omitted_when_none() {
+    let e = minimal_entry();
+    let out = serialize_entry(&e);
+    assert!(!out.contains("status:"), "status must be omitted: {out}");
+    assert!(
+        !out.contains("due_date:"),
+        "due_date must be omitted: {out}"
+    );
+    assert!(
+        !out.contains("source_session_uuid:"),
+        "source_session_uuid must be omitted: {out}"
+    );
+}
+
+#[test]
+fn frontmatter_empty_lists_render_inline() {
+    let e = minimal_entry();
+    let out = serialize_entry(&e);
+    assert!(
+        out.contains("tags: []\n"),
+        "empty tags must render as `tags: []`: {out}"
+    );
+    assert!(
+        out.contains("entities: []\n"),
+        "empty entities must render as `entities: []`: {out}"
+    );
+}
+
+#[test]
+fn frontmatter_lists_use_block_style() {
+    let e = full_task_entry();
+    let out = serialize_entry(&e);
+    assert!(
+        out.contains("tags:\n  - \"brake-pads\"\n  - \"suppliers\"\n"),
+        "tags must use block style with quoted items: {out}"
+    );
+}
+
+#[test]
+fn frontmatter_strings_always_quoted() {
+    let e = full_task_entry();
+    let out = serialize_entry(&e);
+    // Sample: title should be wrapped in double-quotes.
+    assert!(
+        out.contains("title: \"Switch suppliers for brake pads\"\n"),
+        "title must be double-quoted: {out}"
+    );
+    // schema_version is an integer — NOT quoted.
+    assert!(
+        out.contains("schema_version: 1\n"),
+        "schema_version must be unquoted: {out}"
+    );
+}
+
+#[test]
+fn frontmatter_escapes_special_chars_in_strings() {
+    let e = special_chars_entry();
+    let out = serialize_entry(&e);
+    // Title contains: " \t \\ \n
+    let title_line = out
+        .lines()
+        .find(|line| line.starts_with("title:"))
+        .expect("title line present");
+    assert!(
+        title_line.contains("\\\""),
+        "double-quote must be escaped in title: {title_line}"
+    );
+    assert!(
+        title_line.contains("\\\\"),
+        "backslash must be escaped in title: {title_line}"
+    );
+    assert!(
+        title_line.contains("\\n"),
+        "newline must be escaped in title: {title_line}"
+    );
+    assert!(
+        title_line.contains("\\t"),
+        "tab must be escaped in title: {title_line}"
+    );
+    // Title must occupy exactly one source line.
+    let occurrences = out.matches("\ntitle:").count();
+    assert_eq!(
+        occurrences, 1,
+        "title must be on exactly one line after escaping; raw newlines must NOT split it"
+    );
+}
+
+#[test]
+fn frontmatter_uses_lf_line_endings_on_all_platforms() {
+    let e = full_task_entry();
+    let out = serialize_entry(&e);
+    assert!(
+        !out.contains('\r'),
+        "output must not contain CR bytes (LF only): {out:?}"
+    );
+}
+
+#[test]
+fn frontmatter_uses_rfc3339_utc_with_z_suffix() {
+    let e = full_task_entry();
+    let out = serialize_entry(&e);
+    assert!(
+        out.contains("captured_at: \"2026-06-15T14:32:01Z\""),
+        "captured_at must be RFC3339-Z: {out}"
+    );
+    assert!(
+        out.contains("due_date: \"2026-06-20T00:00:00Z\""),
+        "due_date must be RFC3339-Z: {out}"
+    );
+}
+
+#[test]
+fn frontmatter_uses_type_not_entry_type_on_wire() {
+    // Wire-name discipline: the field is `type:` in YAML even
+    // though the struct field is `entry_type` (avoiding the Rust
+    // keyword collision).
+    let e = full_task_entry();
+    let out = serialize_entry(&e);
+    assert!(
+        out.contains("\ntype: \"task\"\n"),
+        "must emit `type:`, not `entry_type:`: {out}"
+    );
+    assert!(
+        !out.contains("entry_type:"),
+        "must NOT emit `entry_type:`: {out}"
+    );
+}
+
+// ────────────────────────────────────────────────────────────
+// Body tests
+// ────────────────────────────────────────────────────────────
+
+#[test]
+fn body_no_checkbox_when_status_absent() {
+    let e = minimal_entry();
+    let out = serialize_entry(&e);
+    // The frontmatter ends at "---\n"; the next non-empty line
+    // should be the body, not a checkbox.
+    let after_fm = out.split("---\n").nth(2).expect("post-frontmatter body");
+    assert!(
+        !after_fm.trim_start().starts_with("- ["),
+        "non-task entry must not start with a checkbox: {after_fm}"
+    );
+}
+
+#[test]
+fn body_emits_checkbox_for_todo() {
+    let mut e = full_task_entry();
+    e.due_date = None;
+    let out = serialize_entry(&e);
+    assert!(
+        out.contains("- [ ] Switch suppliers for brake pads\n"),
+        "todo must render as `- [ ] {{title}}`: {out}"
+    );
+}
+
+#[test]
+fn body_emits_checkbox_for_doing() {
+    let e = doing_task_entry();
+    let out = serialize_entry(&e);
+    assert!(
+        out.contains("- [/] Refactor injection strategy override table\n"),
+        "doing must render as `- [/] {{title}}`: {out}"
+    );
+}
+
+#[test]
+fn body_emits_checkbox_for_done() {
+    let e = done_task_entry();
+    let out = serialize_entry(&e);
+    assert!(
+        out.contains("- [x] Buy milk \u{1F4C5} 2026-06-10\n"),
+        "done must render as `- [x] {{title}} 📅 {{date}}`: {out}"
+    );
+}
+
+#[test]
+fn body_checkbox_includes_due_date_in_yyyy_mm_dd() {
+    let e = full_task_entry();
+    let out = serialize_entry(&e);
+    assert!(
+        out.contains("\u{1F4C5} 2026-06-20"),
+        "checkbox must include `📅 YYYY-MM-DD`: {out}"
+    );
+    // Must NOT include the full timestamp on the checkbox line.
+    let checkbox_line = out
+        .lines()
+        .find(|line| line.starts_with("- ["))
+        .expect("checkbox present");
+    assert!(
+        !checkbox_line.contains('T'),
+        "checkbox line must not contain timestamp 'T' separator: {checkbox_line}"
+    );
+}
+
+#[test]
+fn body_ends_with_exactly_one_trailing_newline() {
+    let e = full_task_entry();
+    let out = serialize_entry(&e);
+    assert!(out.ends_with('\n'), "output must end with newline");
+    assert!(
+        !out.ends_with("\n\n"),
+        "output must end with exactly ONE newline: {out:?}"
+    );
+}
+
+#[test]
+fn body_with_trailing_whitespace_normalizes() {
+    let mut e = minimal_entry();
+    e.body = "trimmed body\n\n\n   \t\n".to_string();
+    let out = serialize_entry(&e);
+    assert!(
+        out.ends_with("trimmed body\n"),
+        "body must normalize: {out}"
+    );
+}
+
+// ────────────────────────────────────────────────────────────
+// Frontmatter YAML parses cleanly (sanity check for the
+// future parser at 1E.5)
+// ────────────────────────────────────────────────────────────
+
+/// The hand-rolled emitter still needs to produce valid YAML —
+/// the reverse-watcher (1E.5) will use a real YAML parser. This
+/// test pulls the frontmatter out of each fixture and round-trips
+/// it through `serde_yaml::from_str::<serde_yaml::Value>` to
+/// catch any quoting/escaping bugs early.
+#[test]
+fn frontmatter_is_valid_yaml() {
+    for entry in [
+        minimal_entry(),
+        full_task_entry(),
+        doing_task_entry(),
+        done_task_entry(),
+        special_chars_entry(),
+    ] {
+        let out = serialize_entry(&entry);
+        let fm = extract_frontmatter(&out);
+        let parsed: serde_yaml::Value = serde_yaml::from_str(fm)
+            .unwrap_or_else(|e| panic!("invalid YAML for entry {}:\n{fm}\n\nerror: {e}", entry.id));
+        // Sanity: required fields are present and types are sane.
+        let map = parsed.as_mapping().expect("frontmatter is a mapping");
+        assert!(map.contains_key("id"));
+        assert!(map.contains_key("schema_version"));
+        assert!(map.contains_key("capture_kind"));
+        assert!(map.contains_key("captured_at"));
+        assert!(map.contains_key("title"));
+        assert!(map.contains_key("tags"));
+        assert!(map.contains_key("entities"));
+    }
+}
+
+fn extract_frontmatter(serialized: &str) -> &str {
+    let after_open = serialized
+        .strip_prefix("---\n")
+        .expect("frontmatter open fence");
+    let close_idx = after_open.find("\n---\n").expect("frontmatter close fence");
+    &after_open[..close_idx]
+}
+
+// ────────────────────────────────────────────────────────────
+// Property tests (proptest)
+// ────────────────────────────────────────────────────────────
+
+use proptest::prelude::*;
+
+fn arb_entry() -> impl Strategy<Value = KgEntry> {
+    let title = prop::collection::vec(prop::char::any(), 0..100)
+        .prop_map(|chars| chars.into_iter().collect::<String>());
+    let id = prop::string::string_regex("[A-Za-z0-9-]{4,40}").unwrap();
+    let body = prop::collection::vec(prop::char::any(), 0..200)
+        .prop_map(|chars| chars.into_iter().collect::<String>());
+    let tags = prop::collection::vec("[a-z][a-z0-9-]{0,20}", 0..5)
+        .prop_map(|v| v.into_iter().map(String::from).collect::<Vec<_>>());
+    let entities = prop::collection::vec("[A-Za-z][A-Za-z0-9 -]{0,30}", 0..5)
+        .prop_map(|v| v.into_iter().map(String::from).collect::<Vec<_>>());
+    let day = 1u32..28;
+    let month = 1u32..13;
+    let year = 2000i32..2099;
+    (
+        id,
+        title,
+        body,
+        tags,
+        entities,
+        year,
+        month,
+        day,
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+    )
+        .prop_map(
+            |(id, title, body, tags, entities, y, m, d, has_status, has_due, has_uuid)| KgEntry {
+                id,
+                captured_at: ts(y, m, d, 12, 0, 0),
+                captured_at_local_date: date(y, m, d),
+                capture_kind: CaptureKind::Dictation,
+                title,
+                category: Category::Personal,
+                entry_type: if has_status {
+                    EntryType::Task
+                } else {
+                    EntryType::Note
+                },
+                status: if has_status { Some(Status::Todo) } else { None },
+                due_date: if has_due {
+                    Some(ts(y, m, d, 23, 59, 59))
+                } else {
+                    None
+                },
+                tags,
+                entities,
+                source_session_uuid: if has_uuid {
+                    Some("550e8400-e29b-41d4-a716-446655440000".to_string())
+                } else {
+                    None
+                },
+                body,
+            },
+        )
+}
+
+proptest! {
+    #[test]
+    fn prop_filename_matches_contract_regex(entry in arb_entry()) {
+        let name = filename_for(&entry);
+        let re = regex::Regex::new(r"^\d{4}-\d{2}-\d{2}-[a-z0-9-]+__[a-z0-9]{8}\.md$").unwrap();
+        prop_assert!(re.is_match(&name), "filename violates regex: {name}");
+    }
+
+    #[test]
+    fn prop_frontmatter_is_valid_yaml(entry in arb_entry()) {
+        let out = serialize_entry(&entry);
+        let fm = extract_frontmatter(&out);
+        let parsed: Result<serde_yaml::Value, _> = serde_yaml::from_str(fm);
+        prop_assert!(parsed.is_ok(), "invalid YAML: {fm}\n\nerror: {parsed:?}");
+    }
+
+    #[test]
+    fn prop_output_uses_lf_only(entry in arb_entry()) {
+        let out = serialize_entry(&entry);
+        prop_assert!(!out.contains('\r'), "CR found in output");
+    }
+
+    #[test]
+    fn prop_output_ends_with_single_newline(entry in arb_entry()) {
+        let out = serialize_entry(&entry);
+        prop_assert!(out.ends_with('\n'));
+        prop_assert!(!out.ends_with("\n\n"));
+    }
+
+    #[test]
+    fn prop_slug_is_lowercase_alphanum_or_hyphen(title in ".{0,80}") {
+        let slug = slugify_title(&title);
+        prop_assert!(!slug.is_empty(), "slug must never be empty");
+        prop_assert!(
+            slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+            "slug must be lowercase-alphanum-or-hyphen: {slug}"
+        );
+        prop_assert!(!slug.starts_with('-'), "slug must not start with '-': {slug}");
+        prop_assert!(!slug.ends_with('-'), "slug must not end with '-': {slug}");
+        prop_assert!(slug.len() <= SLUG_MAX_LEN, "slug must be <= {SLUG_MAX_LEN}: {slug}");
+    }
+}
+
+// ────────────────────────────────────────────────────────────
+// Golden-file tests
+//
+// The five fixtures cover the documented matrix from the kickoff
+// brief: minimal (only required fields), full (all conditional
+// fields), task-with-checkbox variants for each status glyph, and
+// a special-chars stress fixture for the escaping rules. Files
+// live under `src-tauri/tests/fixtures/markdown_golden/` for
+// human-reviewable diffs; the test below `include_str!`s each so
+// a stale fixture surfaces as a clean assertion failure at the
+// diff site, not a "file not found" at run time.
+//
+// To intentionally update a golden after a deliberate canonical-
+// form change: set `MOCKINGBIRD_UPDATE_GOLDENS=1` in the env and
+// re-run; the test will rewrite the on-disk fixtures and fail
+// with a one-line "fixtures updated, re-run" message so the human
+// notices and reviews the diff.
+// ────────────────────────────────────────────────────────────
+
+fn golden_for(name: &str) -> &'static str {
+    match name {
+        "minimal" => include_str!("../../tests/fixtures/markdown_golden/minimal.md"),
+        "full_task" => include_str!("../../tests/fixtures/markdown_golden/full_task.md"),
+        "doing_task" => include_str!("../../tests/fixtures/markdown_golden/doing_task.md"),
+        "done_task" => include_str!("../../tests/fixtures/markdown_golden/done_task.md"),
+        "special_chars" => include_str!("../../tests/fixtures/markdown_golden/special_chars.md"),
+        other => panic!("unknown golden fixture: {other}"),
+    }
+}
+
+fn assert_golden(name: &str, entry: &KgEntry) {
+    let actual = serialize_entry(entry);
+    if std::env::var("MOCKINGBIRD_UPDATE_GOLDENS").is_ok() {
+        // Resolve via `file!()` rather than `CARGO_MANIFEST_DIR`
+        // so the throwaway-test-crate harness (LESSONS P2) writes
+        // back to the REAL `src-tauri/tests/...` fixtures, not
+        // the throwaway crate's own (empty) tests dir.
+        // `file!()` returns the source-file path as the compiler
+        // saw it — with `#[path]` attrs pointing at absolute
+        // paths, this is the real on-disk location.
+        let here = std::path::PathBuf::from(file!());
+        let path = here
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .expect("file!() yields a deep-enough path")
+            .join("tests")
+            .join("fixtures")
+            .join("markdown_golden")
+            .join(format!("{name}.md"));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &actual).unwrap();
+        panic!(
+            "MOCKINGBIRD_UPDATE_GOLDENS=1 -- wrote {}; re-run without the env var",
+            path.display()
+        );
+    }
+    let expected = golden_for(name);
+    if actual != expected {
+        panic!(
+            "golden mismatch for `{name}`.\n\
+             --- expected ---\n{expected}\n\
+             --- actual ---\n{actual}\n\
+             --- byte diff ---\nexpected.len()={}, actual.len()={}",
+            expected.len(),
+            actual.len()
+        );
+    }
+}
+
+#[test]
+fn golden_minimal() {
+    assert_golden("minimal", &minimal_entry());
+}
+
+#[test]
+fn golden_full_task() {
+    assert_golden("full_task", &full_task_entry());
+}
+
+#[test]
+fn golden_doing_task() {
+    assert_golden("doing_task", &doing_task_entry());
+}
+
+#[test]
+fn golden_done_task() {
+    assert_golden("done_task", &done_task_entry());
+}
+
+#[test]
+fn golden_special_chars() {
+    assert_golden("special_chars", &special_chars_entry());
+}
+
+/// Filenames for every golden fixture must also match the
+/// contract regex — pinned alongside the body goldens so any
+/// future filename-shape refactor surfaces at the same site.
+#[test]
+fn golden_filenames_match_contract() {
+    let cases: &[(&str, &dyn Fn() -> KgEntry)] = &[
+        ("minimal", &(minimal_entry as fn() -> KgEntry)),
+        ("full_task", &(full_task_entry as fn() -> KgEntry)),
+        ("doing_task", &(doing_task_entry as fn() -> KgEntry)),
+        ("done_task", &(done_task_entry as fn() -> KgEntry)),
+        ("special_chars", &(special_chars_entry as fn() -> KgEntry)),
+    ];
+    let re = regex::Regex::new(r"^\d{4}-\d{2}-\d{2}-[a-z0-9-]+__[a-z0-9]{8}\.md$").unwrap();
+    for (label, ctor) in cases {
+        let entry = ctor();
+        let name = filename_for(&entry);
+        assert!(
+            re.is_match(&name),
+            "filename for `{label}` violates regex: {name}"
+        );
+    }
+}

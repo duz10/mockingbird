@@ -27,4 +27,5 @@ pub mod export_job;
 pub mod kg_layout;
 pub mod layout;
 pub mod manifest;
+pub mod markdown_serializer;
 pub mod project;

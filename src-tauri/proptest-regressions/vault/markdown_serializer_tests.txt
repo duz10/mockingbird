@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc eb439199e573b8b89f06ab49667210ec84b59d76e6e80b65d71721acfec80d1d # shrinks to entry = KgEntry { id: "aa0A", captured_at: 2000-01-01T12:00:00Z, captured_at_local_date: 2000-01-01, capture_kind: Dictation, title: "\u{fffe}", category: Personal, entry_type: Note, status: None, due_date: None, tags: [], entities: [], source_session_uuid: None, body: "" }

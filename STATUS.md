@@ -61,9 +61,17 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**KG Phase 1E (Obsidian as source of truth) — Waves 1E.0 + 1E.1 shipped; Wave 1E.2 (Markdown serializer) ready next.** Charter ADR [ADR 0053](docs/adr/0053-kg-phase-1e-obsidian-as-source-of-truth.md) Proposed; phase doc at `docs/phases/phase-1e.md`; bead epic `mb-imc2` with 10 sub-beads. 1E.1 landed the idempotent vault subtree bootstrap (`<vault>/Knowledge Graph/{Inbox,Entries,History}/`) per ADR 0053 §D1.
+**KG Phase 1E (Obsidian as source of truth) — Waves 1E.0 + 1E.1 + 1E.2 shipped; Wave 1E.3 (worker writes Markdown + migration 026) ready next.** Charter ADR [ADR 0053](docs/adr/0053-kg-phase-1e-obsidian-as-source-of-truth.md) Proposed; phase doc at `docs/phases/phase-1e.md`; bead epic `mb-imc2` with 10 sub-beads. 1E.1 landed the idempotent vault subtree bootstrap; 1E.2 lands the deterministic Markdown serializer (pure function, golden-file tested) per ADR 0053 §§D2/D3/D9.
 
-### Wave 1E.1 deliverables shipped (this iteration)
+### Wave 1E.2 deliverables shipped (this iteration)
+
+- `src-tauri/src/vault/markdown_serializer.rs` — new module (512 LoC impl, under the 600-line cap). Pure transformation: `KgEntry -> (filename, bytes)`. No I/O, no DB, no clock. Hand-rolled YAML emitter (not `serde_yaml`) for byte-stable output: deterministic field order, double-quoted strings even when YAML would let us bare them, block-style non-empty lists, flow-style empty lists (`tags: []`), LF line endings on every platform, RFC 3339 `Z` timestamps, conditional fields omitted (never `field: null`). YAML 1.2 §5.7 escape coverage: `\`, `"`, `\n`, `\r`, `\t`, NEL/LSEP/PSEP, plus every codepoint outside YAML's `c-printable` range (the libyaml reader's hard floor — pinned by `prop_frontmatter_is_valid_yaml`).
+- `src-tauri/src/vault/markdown_serializer_tests.rs` — sibling test file (734 LoC; loaded via `#[cfg(test)] #[path]` so the impl stays under the file-cap). 41 tests total: 24 unit tests (filename slug edge cases, frontmatter field-order pin, conditional-field omission, empty-list rendering, block-list style, LF-only, escape rules, RFC 3339, wire-name discipline, Obsidian Tasks checkbox glyphs for todo/doing/done, due-date format on the checkbox line); 5 property tests via `proptest` (filename regex, frontmatter valid YAML, LF-only invariant, single trailing newline, slug invariants); 5 golden-file tests with on-disk fixtures + 1 golden-filename pin.
+- `src-tauri/tests/fixtures/markdown_golden/` — 5 hand-crafted golden files + README. Cover: minimal (only required fields), full_task (every conditional field), doing_task (`- [/]` glyph), done_task (`- [x]` + 📅 date), special_chars (escape stress: `\` `"` `\t` `\n` + Unicode em-dash + café). Reproducible via `MOCKINGBIRD_UPDATE_GOLDENS=1 cargo test` — assert_golden resolves the fixtures path via `file!()` (not `env!("CARGO_MANIFEST_DIR")`) so the throwaway-crate harness writes back to the real `src-tauri/tests/...` dir, not the throwaway copy.
+- Round-trip-safety documented inline in the impl module docs as a forward declaration for 1E.5 (reverse-watcher); every canonical-form choice (LF-only, quoted strings, block-vs-flow lists, omitted optionals) explicitly justified as a fixed-point for `serialize(parse(serialize(e)))`.
+- All gates green: `fmt --check`, `clippy --release -- -D warnings`, `check`, `test --release --no-run --lib` (Finished release profile in 4m 24s, executable links clean). UI: `tsc --noEmit`. Live tests via LESSONS P2 throwaway-crate recipe: **41/41 pass.**
+
+### Wave 1E.1 deliverables shipped (last iteration)
 
 - `src-tauri/src/vault/kg_layout.rs` — new module (~330 LoC incl. tests). Pure-Rust `kg_subtree_paths` + `bootstrap_kg_subtree` helpers. `BootstrapReport` enum (`Created` / `AlreadyExists`) serialized camelCase. Seven unit tests cover all four idempotency cells from ADR 0053 §D1's contract table + partial-subtree completion + file-at-root error path + Windows-path-with-space discipline + wire-format serialization pin. All 7 verified live via the LESSONS P2 throwaway-crate recipe (cargo test runner blocked on this box).
 - `src-tauri/src/commands/kg.rs` — new `kg_subtree_bootstrap` IPC. Reads `SettingKey::VaultPath` (ADR 0046 single source of truth), surfaces structured `Err(String)` for the vault-unconfigured / empty-path edge cases.
@@ -79,7 +87,7 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 - Bead epic `mb-imc2` + 10 sub-beads: 1E.0 `mb-nuba`, 1E.1 `mb-e16d`, 1E.2 `mb-vq8y`, 1E.3 `mb-k2pk`, 1E.4 `mb-i14b`, 1E.5 `mb-qwfy`, 1E.6 `mb-i46v`, 1E.7 `mb-bgpt`, 1E.8 `mb-wnsm`, 1E.9 `mb-kazi`. Dependency chain wired (`bd link` blocks-relationship for serial chain; `--type parent-child` for epic ↔ sub-task). Critical path: 1E.0 → 1E.1 → 1E.2 → 1E.3 → {1E.4, 1E.5, 1E.6, 1E.7} → 1E.9; 1E.8 docs-only (no code deps).
 - This STATUS update.
 
-**Resume next iteration:** `bd ready -t task` will surface 1E.2 (`mb-vq8y`, Markdown serializer) as the lead actionable now that 1E.1 (`mb-e16d`) is closed; 1E.8 docs-only bead is available in parallel any time. Dispatch one-liner pattern per LESSONS P8: `implement Wave 1E.2 per docs/phases/phase-1e.md` (no embedded spec).
+**Resume next iteration:** `bd ready -t task` will surface 1E.3 (`mb-k2pk`, worker writes Markdown after DB insert + migration 026 — file_path / file_hash / file_mtime columns + two-phase commit) as the lead actionable now that 1E.2 (`mb-vq8y`) is closed; 1E.8 docs-only bead is available in parallel any time. Dispatch one-liner pattern per LESSONS P8: `implement Wave 1E.3 per docs/phases/phase-1e.md` (no embedded spec).
 
 **Standing beads carrying forward** (not blocking Phase 1E waves):
 
