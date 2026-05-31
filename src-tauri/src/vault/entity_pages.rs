@@ -1,12 +1,29 @@
-//! Phase 1E amendment `mb-08za` (ADR 0053 §D11 / §D12) —
-//! auto-generated Entity + Project stub pages.
+//! Phase 1E amendment `mb-08za` (ADR 0053 §D11 / §D12) +
+//! amendment `mb-bgpt` (ADR 0054 §F) — auto-generated Entity +
+//! Project + Tag stub pages.
 //!
 //! On every successful KG filing, the worker iterates the entry's
 //! unique entity slugs and idempotently creates a stub `.md` at
 //! `Knowledge Graph/Entities/<slug>.md` (and, for entities the
 //! pipeline classifies as `EntityType::Project`, also at
-//! `Knowledge Graph/Projects/<slug>.md`). This module owns the
-//! write-once-then-leave-alone contract.
+//! `Knowledge Graph/Projects/<slug>.md`); a parallel pass iterates
+//! the entry's tag slugs and writes
+//! `Knowledge Graph/Tags/<tag-slug>.md`. This module owns the
+//! write-once-then-leave-alone contract for all three stub families.
+//!
+//! # Why one module for all three (not a sibling per shape)
+//!
+//! The file-write contract is identical: validate slug → existence
+//! probe → temp-sibling-atomic-write → idempotent return. The
+//! only branching is the per-shape frontmatter (`type: entity` vs
+//! `type: project` vs `type: tag`), the per-shape body heading,
+//! and (for tags) a tag-flavored Dataview rollup keyed on the
+//! `tags:` frontmatter field rather than `entities:`. Splitting
+//! would force three copies of the same atomic-write helper + slug
+//! validator + report enum -- a DRY-vs-cohesion call where DRY +
+//! cohesion both point at "one module". (Kickoff `mb-bgpt`
+//! sanctioned this path explicitly; revisit if line count crosses
+//! the 600 cap.)
 //!
 //! # Contract (write-once, user-owns-thereafter)
 //!
@@ -72,12 +89,13 @@ pub enum StubPageReport {
     AlreadyExists,
 }
 
-/// Distinguishes the two stub shapes so the file body / frontmatter
-/// can branch on a single value.
+/// Distinguishes the three stub shapes so the file body /
+/// frontmatter can branch on a single value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StubKind {
     Entity,
     Project,
+    Tag,
 }
 
 impl StubKind {
@@ -85,6 +103,7 @@ impl StubKind {
         match self {
             Self::Entity => "entity",
             Self::Project => "project",
+            Self::Tag => "tag",
         }
     }
 }
@@ -164,6 +183,19 @@ pub fn ensure_project_page(
     ensure_stub_page(vault_root, slug, created_at, StubKind::Project)
 }
 
+/// Idempotently create the tag stub page for `slug` under
+/// `<vault_root>/Knowledge Graph/Tags/<slug>.md`. Amendment
+/// `mb-bgpt` (ADR 0054 §F). Same write-once contract as
+/// [`ensure_entity_page`]; the body's Dataview rollup keys on the
+/// entry-frontmatter `tags:` array instead of `entities:`.
+pub fn ensure_tag_page(
+    vault_root: &Path,
+    slug: &str,
+    created_at: DateTime<Utc>,
+) -> AppResult<StubPageReport> {
+    ensure_stub_page(vault_root, slug, created_at, StubKind::Tag)
+}
+
 fn ensure_stub_page(
     vault_root: &Path,
     slug: &str,
@@ -176,6 +208,7 @@ fn ensure_stub_page(
     let target_dir = match kind {
         StubKind::Entity => subtree.entities,
         StubKind::Project => subtree.projects,
+        StubKind::Tag => subtree.tags,
     };
     let target_path = target_dir.join(format!("{slug}.md"));
 
@@ -248,30 +281,56 @@ fn render_stub(kind: StubKind, slug: &str, created_at: DateTime<Utc>) -> String 
     match kind {
         StubKind::Entity => out.push_str("aliases: []\n"),
         StubKind::Project => out.push_str("status: \"active\"\n"),
+        // Tag stubs carry no extra optional frontmatter -- the
+        // page is purely a Dataview rollup driven by the slug.
+        StubKind::Tag => {}
     }
     out.push_str("---\n");
     out.push('\n');
-    out.push_str(&format!("# {slug}\n"));
+    match kind {
+        StubKind::Entity | StubKind::Project => {
+            out.push_str(&format!("# {slug}\n"));
+        }
+        // Tag pages render with the `#` prefix so the heading
+        // matches how Obsidian renders the tag in body text;
+        // this makes the page header visually unambiguous.
+        StubKind::Tag => {
+            out.push_str(&format!("# #{slug}\n"));
+        }
+    }
     out.push('\n');
-    // Dataview block: the entity wiki-link can appear in two
-    // shapes in an entry's `entities:` frontmatter list — the
-    // post-1E.5-polish pipe-alias form `[[Entities/<slug>|<slug>]]`
-    // (current) and the pre-1E.5-polish bare form
-    // `[[Entities/<slug>]]` (Wave 1E.2/3/4 amendment, written by
-    // earlier Mockingbird builds). The `any(...) => contains(...)`
-    // predicate matches BOTH so existing on-disk entries continue
-    // to surface on the stub page after the polish lands. Pure
-    // presentation; the DB-side representation is always the bare
-    // slug. Project pages reuse the same predicate — navigating
-    // from either Entity page or Project page lands the user on
-    // the same set of entries (project entities are a strict
-    // subset of all entities).
     out.push_str("```dataview\n");
     out.push_str("TABLE category, type, status, captured_at\n");
     out.push_str("FROM \"Knowledge Graph/Entries\"\n");
-    out.push_str(&format!(
-        "WHERE any(entities, (e) => contains(e, \"[[Entities/{slug}]]\") OR contains(e, \"[[Entities/{slug}|\"))\n"
-    ));
+    match kind {
+        StubKind::Entity | StubKind::Project => {
+            // Dataview block: the entity wiki-link can appear in two
+            // shapes in an entry's `entities:` frontmatter list -- the
+            // post-1E.5-polish pipe-alias form
+            // `[[Entities/<slug>|<slug>]]` (current) and the
+            // pre-1E.5-polish bare form `[[Entities/<slug>]]` (Wave
+            // 1E.2/3/4 amendment, written by earlier Mockingbird
+            // builds). The `any(...) => contains(...)` predicate
+            // matches BOTH so existing on-disk entries continue to
+            // surface on the stub page after the polish lands. Pure
+            // presentation; the DB-side representation is always the
+            // bare slug. Project pages reuse the same predicate --
+            // navigating from either Entity page or Project page
+            // lands the user on the same set of entries (project
+            // entities are a strict subset of all entities).
+            out.push_str(&format!(
+                "WHERE any(entities, (e) => contains(e, \"[[Entities/{slug}]]\") OR contains(e, \"[[Entities/{slug}|\"))\n"
+            ));
+        }
+        StubKind::Tag => {
+            // Tags live in the `tags:` frontmatter list as plain
+            // ASCII-kebab-case strings (no wiki-link wrapping), so
+            // the predicate is a direct `contains(tags, "<slug>")`
+            // -- simpler than the entity case and matches the
+            // serializer's emission shape exactly.
+            out.push_str(&format!("WHERE contains(tags, \"{slug}\")\n"));
+        }
+    }
     out.push_str("SORT captured_at DESC\n");
     out.push_str("```\n");
     out

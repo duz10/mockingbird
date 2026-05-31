@@ -733,10 +733,13 @@ mod tests {
     }
 
     /// Status-bearing entry round-trips through the writer. The
-    /// serializer emits a Tasks checkbox; the bytes-on-disk must
-    /// equal the bytes we hashed.
+    /// serializer emits a Tasks checkbox when `status` is present,
+    /// regardless of the knowledge-shape `type:` field (ADR 0054 §L
+    /// -- the checkbox stays an *opt-in capability* tied to `status`,
+    /// not to the type). The bytes-on-disk must equal the bytes we
+    /// hashed.
     #[test]
-    fn task_entry_with_status_round_trips() {
+    fn status_bearing_entry_round_trips_with_checkbox() {
         let td = TempDir::new().unwrap();
         bootstrap_kg_subtree(td.path()).unwrap();
 
@@ -744,7 +747,7 @@ mod tests {
         seed_session(&conn, 1, "sess-uuid-1");
 
         let mut entry = sample_entry("abc12345-0000-4000-8000-000000000000", "Buy Milk");
-        entry.entry_type = EntryType::Task;
+        entry.entry_type = EntryType::Note;
         entry.status = Some(Status::Todo);
 
         let outcome = commit_entry_to_vault(&conn, 1, &entry, td.path()).unwrap();

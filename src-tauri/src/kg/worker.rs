@@ -77,8 +77,12 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::db::sessions::{self as db_sessions, CaptureKind as DbCaptureKind};
 use crate::error::{AppError, AppResult};
 use crate::settings::{model::SettingKey, Settings};
-use crate::vault::entity_pages::{ensure_entity_page, ensure_project_page, StubPageReport};
+use crate::vault::entity_pages::{
+    ensure_entity_page, ensure_project_page, ensure_tag_page, StubPageReport,
+};
 use crate::vault::history::{archive_session_history, HistoryArchiveInput};
+use crate::vault::index_md::rebuild_index_md;
+use crate::vault::log_md::{append_log_line, LogOp};
 use crate::vault::markdown_serializer::{
     slugify_title, CaptureKind as VaultCaptureKind, Category as VaultCategory,
     EntryType as VaultEntryType, KgEntry, Status as VaultStatus,
@@ -468,6 +472,32 @@ fn process_one(
     // reference anyway.
     if vault_outcome.is_some() {
         maybe_generate_stub_pages(conn, queue_id, entry_id, &result);
+    }
+
+    // ── PKE Phase 5a: tag stub pages (ADR 0054 §F, mb-bgpt) ────
+    // Same post-seal non-fatal pattern as 4b. Stubs only have any
+    // value once the entry `.md` is on disk (Dataview's
+    // `WHERE contains(tags, "<slug>")` query needs an entry to
+    // match), so this is gated on `vault_outcome.is_some()`.
+    if vault_outcome.is_some() {
+        maybe_generate_tag_stub_pages(conn, queue_id, entry_id, &result);
+    }
+
+    // ── PKE Phase 5b: INDEX.md rebuild (ADR 0054 §D, mb-bgpt) ──
+    // Full rebuild from DB after every filing -- O(N) over filed
+    // entries, fine for the scale of a single user's KG. Always
+    // safe to run even when `vault_outcome` was None (the new
+    // filing didn't land on disk so the rebuild output happens to
+    // equal the previous output; no harm done). The atomic write
+    // means a crash mid-rebuild leaves the prior INDEX.md intact.
+    maybe_rebuild_index_md(conn, queue_id, entry_id);
+
+    // ── PKE Phase 5c: LOG.md append (ADR 0054 §E, mb-bgpt) ─────
+    // Only append when we actually projected to disk: an entry that
+    // never reached the vault isn't a "capture" event from the
+    // chat-LLM's perspective.
+    if let Some(ref outcome) = vault_outcome {
+        maybe_append_log_capture(conn, queue_id, entry_id, outcome);
     }
 
     let total_filing_ms = total_t0.elapsed().as_millis() as u64;
@@ -891,6 +921,227 @@ fn maybe_generate_stub_pages(
     );
 }
 
+/// Phase 5a (ADR 0054 §F, mb-bgpt) -- tag stub-page generation.
+///
+/// Mirrors [`maybe_generate_stub_pages`] but unions tag slugs across
+/// `result.entries[*].topic_tags` instead of entity slugs across
+/// `result.segment_entities`. Same non-fatal-per-slug semantics: a
+/// failed stub write is logged and the loop continues. The pages
+/// are write-once (see [`crate::vault::entity_pages::ensure_tag_page`]),
+/// so re-firing for a slug that already has a stub is a no-op.
+///
+/// Vault root resolution + the "toggle flipped off mid-flight" /
+/// "vault unconfigured" early returns are identical to the entity
+/// path -- copied (not factored) because the read-locked block is
+/// 8 lines and a shared helper would obscure the per-phase log
+/// targets that LESSONS values for triage.
+fn maybe_generate_tag_stub_pages(
+    conn: &Arc<Mutex<Connection>>,
+    queue_id: i64,
+    entry_id: i64,
+    result: &PipelineResult,
+) {
+    let vault_root_opt: Option<std::path::PathBuf> = {
+        let lock = conn.lock();
+        let Ok(c) = lock else {
+            tracing::warn!(
+                target: "kg::worker",
+                queue_id,
+                entry_id,
+                "db mutex poisoned in maybe_generate_tag_stub_pages; skipping"
+            );
+            return;
+        };
+        Settings::new(&c)
+            .get::<Option<String>>(SettingKey::VaultPath)
+            .ok()
+            .flatten()
+            .filter(|s| !s.trim().is_empty())
+            .map(std::path::PathBuf::from)
+    };
+    let Some(vault_root) = vault_root_opt else {
+        return;
+    };
+
+    // Union tag slugs across every Entry the pipeline produced for
+    // this dictation. `topic_tags` is already normalized + canonical
+    // by `passes::normalize` / `passes::tag_validator`, so we don't
+    // re-slugify -- the canonical form IS the slug.
+    let mut slugs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for entry in &result.entries {
+        for tag in &entry.topic_tags {
+            let t = tag.trim();
+            if t.is_empty() {
+                continue;
+            }
+            slugs.insert(t.to_string());
+        }
+    }
+
+    let now = chrono::Utc::now();
+    let mut created = 0usize;
+    let mut already = 0usize;
+    for slug in &slugs {
+        match ensure_tag_page(&vault_root, slug, now) {
+            Ok(StubPageReport::Created) => created += 1,
+            Ok(StubPageReport::AlreadyExists) => already += 1,
+            Err(e) => {
+                tracing::warn!(
+                    target: "kg::worker",
+                    queue_id,
+                    entry_id,
+                    slug = %slug,
+                    error = %e,
+                    "tag stub generation failed; continuing"
+                );
+            }
+        }
+    }
+
+    tracing::info!(
+        target: "kg::worker",
+        queue_id,
+        entry_id,
+        tag_created = created,
+        tag_already = already,
+        slug_count = slugs.len(),
+        "tag-stub generation complete"
+    );
+}
+
+/// Phase 5b (ADR 0054 §D, mb-bgpt) -- INDEX.md rebuild from DB.
+///
+/// Non-fatal on failure: the entry + queue are already sealed, so an
+/// INDEX rebuild glitch can't unwind the filing. The next successful
+/// rebuild (= next filing) reconciles state. Vault-unconfigured ⇒
+/// silent no-op.
+fn maybe_rebuild_index_md(conn: &Arc<Mutex<Connection>>, queue_id: i64, entry_id: i64) {
+    let lock = conn.lock();
+    let Ok(c) = lock else {
+        tracing::warn!(
+            target: "kg::worker",
+            queue_id,
+            entry_id,
+            "db mutex poisoned in maybe_rebuild_index_md; skipping"
+        );
+        return;
+    };
+    let vault_root: Option<std::path::PathBuf> = Settings::new(&c)
+        .get::<Option<String>>(SettingKey::VaultPath)
+        .ok()
+        .flatten()
+        .filter(|s| !s.trim().is_empty())
+        .map(std::path::PathBuf::from);
+    let Some(vault_root) = vault_root else {
+        return;
+    };
+    match rebuild_index_md(&c, &vault_root) {
+        Ok(outcome) => tracing::info!(
+            target: "kg::worker",
+            queue_id,
+            entry_id,
+            sources = outcome.sources_emitted,
+            entities = outcome.entities_emitted,
+            projects = outcome.projects_emitted,
+            tags = outcome.tags_emitted,
+            concepts_preserved = outcome.concepts_preserved,
+            "INDEX.md rebuild complete"
+        ),
+        Err(e) => tracing::warn!(
+            target: "kg::worker",
+            queue_id,
+            entry_id,
+            error = %e,
+            "INDEX.md rebuild failed; next filing will retry"
+        ),
+    }
+}
+
+/// Phase 5c (ADR 0054 §E, mb-bgpt) -- LOG.md append.
+///
+/// Subject is derived from the entry filename (slug between the
+/// date prefix and the `__id8` suffix). Pulling the title via a
+/// fresh DB lookup would round-trip more bytes than the slug is
+/// worth for an operations log meant to be skimmed by a human.
+fn maybe_append_log_capture(
+    conn: &Arc<Mutex<Connection>>,
+    queue_id: i64,
+    entry_id: i64,
+    outcome: &CommitOutcome,
+) {
+    let vault_root_opt: Option<std::path::PathBuf> = {
+        let lock = conn.lock();
+        let Ok(c) = lock else {
+            tracing::warn!(
+                target: "kg::worker",
+                queue_id,
+                entry_id,
+                "db mutex poisoned in maybe_append_log_capture; skipping"
+            );
+            return;
+        };
+        Settings::new(&c)
+            .get::<Option<String>>(SettingKey::VaultPath)
+            .ok()
+            .flatten()
+            .filter(|s| !s.trim().is_empty())
+            .map(std::path::PathBuf::from)
+    };
+    let Some(vault_root) = vault_root_opt else {
+        return;
+    };
+
+    let subject = log_subject_from_vault_path(&outcome.vault_relative_path);
+    match append_log_line(&vault_root, chrono::Utc::now(), LogOp::Capture, &subject) {
+        Ok(o) => tracing::info!(
+            target: "kg::worker",
+            queue_id,
+            entry_id,
+            log = %o.path.display(),
+            line = %o.line.trim_end(),
+            "LOG.md append complete"
+        ),
+        Err(e) => tracing::warn!(
+            target: "kg::worker",
+            queue_id,
+            entry_id,
+            error = %e,
+            "LOG.md append failed; entry already sealed"
+        ),
+    }
+}
+
+/// Derive a human-skimmable subject from a vault-relative entry
+/// path like
+/// `Knowledge Graph/Entries/2026-06-15-buy-milk__abcd1234.md`. The
+/// 10-char date prefix + 10-char `__id8.md` suffix get stripped so
+/// the middle slug is what surfaces in LOG.md.
+fn log_subject_from_vault_path(vault_rel: &str) -> String {
+    let basename = vault_rel.rsplit('/').next().unwrap_or(vault_rel);
+    let stem = basename.strip_suffix(".md").unwrap_or(basename);
+    let without_id = match stem.rfind("__") {
+        Some(idx) => &stem[..idx],
+        None => stem,
+    };
+    // Strip `YYYY-MM-DD-` prefix if present.
+    let trimmed = if without_id.len() > 11
+        && without_id
+            .chars()
+            .take(10)
+            .all(|c| c.is_ascii_digit() || c == '-')
+        && without_id.chars().nth(10) == Some('-')
+    {
+        &without_id[11..]
+    } else {
+        without_id
+    };
+    if trimmed.is_empty() {
+        basename.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 /// Single-stage transcript fetch. Like `load_dictation_text` but
 /// returns just one stage's text -- the history archive wants both
 /// raw + cleaned independently, not the first-available cascade.
@@ -940,15 +1191,38 @@ fn kg_status_to_vault(s: KgStatus) -> VaultStatus {
 
 fn kg_entry_type_to_vault(t: KgEntryType) -> VaultEntryType {
     // KG-side has {Task, Research, Idea, Note, Reference}; vault-
-    // side has {Note, Task, Idea, Question, Decision}. Three
-    // shared, two each side-only. Mismatched cases collapse to
-    // Note per mb-1E3-vocab-drift.
+    // side now has the nine knowledge shapes from ADR 0054 §G:
+    // {Source, Note, Concept, Entity, Project, Question, Decision,
+    // Reference, Observation}.
+    //
+    // The classifier prompt realignment (`mb-qw7n`) is a separate
+    // dispatch -- until that ships, the KG pipeline still emits the
+    // legacy 5-variant set, so this mapping is the migration bridge:
+    //
+    //   - Reference -> Reference (pass-through; identical shape)
+    //   - Note      -> Note      (pass-through; identical shape)
+    //   - Research  -> Reference (research notes point to external
+    //                             material being studied -- closer
+    //                             to Reference than Note)
+    //   - Task      -> Note      (task semantics dropped per ADR 0054
+    //                             §G; no semantically richer fit until
+    //                             the classifier learns Decision)
+    //   - Idea      -> Observation (an idea is the inchoate noticing
+    //                               of a pattern -- closest knowledge
+    //                               shape is Observation, which the
+    //                               chat-LLM Lint pass can
+    //                               crystallize into a Concept page
+    //                               later)
+    //
+    // Lossy in the Task -> Note direction (`mb-il83` was originally
+    // filed against this gap; ADR 0054 closes the bead by redefining
+    // the canonical set rather than by reconciling 5-variant Task).
     match t {
-        KgEntryType::Task => VaultEntryType::Task,
-        KgEntryType::Idea => VaultEntryType::Idea,
+        KgEntryType::Task => VaultEntryType::Note,
+        KgEntryType::Idea => VaultEntryType::Observation,
         KgEntryType::Note => VaultEntryType::Note,
-        KgEntryType::Research => VaultEntryType::Note,
-        KgEntryType::Reference => VaultEntryType::Note,
+        KgEntryType::Research => VaultEntryType::Reference,
+        KgEntryType::Reference => VaultEntryType::Reference,
     }
 }
 

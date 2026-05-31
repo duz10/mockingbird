@@ -548,6 +548,113 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 ## 📜 Body (chronological)
 
+## 2026-06-06 [KG Phase 1E Wave 1E.7 part 1 / mb-bgpt / ADR 0054 §C/§D/§E/§F/§G] Substrate + worker wiring shipped; refactor (worker.rs + kg_layout.rs over 600-LoC cap) deferred to a follow-up iteration — three findings worth keeping
+
+**Context.** Wave 1E.7 (RESCOPED per `phase-1e.md` Amendment 2026-06-06
+#2) implements ADR 0054's Personal Knowledge Engine substrate end-to-end:
+SCHEMA.md + INDEX.md + LOG.md root files, Tags/ subtree, nine-shape
+type vocab, three new worker phases (5a tag-stubs / 5b INDEX rebuild /
+5c LOG append). The fresh session inherited a partial in-flight state
+from a prior session: `schema_md.rs` + `index_md.rs` + serializer vocab
++ tag-page renderer were on disk, but `log_md.rs` didn't exist, the
+new modules weren't registered in `vault/mod.rs` (so the build was
+broken), and the worker had zero phase-5* wiring.
+
+### Finding 1 — Orphan-check triage in fresh-session pickup: "complete the unfinished bits" wins over "pivot to seal" when build is broken
+
+The AGENTS.md session-start ritual says: "if dirty or IN_PROGRESS,
+pivot to verify+gate+seal." Read literally, that points at `bd close
+mb-bgpt`. But the actual disk state was: 60% of the wave shipped, 40%
+including load-bearing wiring missing, **and `cargo check` failed**
+(referenced `vault::log_md::render_bootstrap_log_md` from `kg_layout.rs`
+but the module didn't exist). Sealing a broken build to honour the
+ritual would have been actively destructive.
+
+The load-bearing question for triage isn't "is the bead in_progress?" —
+it's "would `cargo check` pass right now?" If no, the in-flight
+deliverable hasn't actually landed yet, so the pivot is "finish the
+minimum to make the build green AND honest about what's left," not
+"close the bead." Sealing requires green gates AND green acceptance
+criteria; either failing means the bead stays open, even when the
+start-of-iteration ritual would otherwise nudge toward seal.
+
+**Action:** add an implicit precondition to the ritual: a `cargo check`
+(via wrapper) before any pivot decision when the orphan check returns
+dirty. If check fails, the pivot is "finish enough to make check pass
++ surface honest delta," not "close the bead."
+
+### Finding 2 — Splitting tests to a sibling `#[path]`-included file is the lowest-friction way to fit a module under the 600-LoC cap when production code is genuinely cohesive
+
+The inherited `vault/index_md.rs` was 764 LoC — 124 over the cap.
+Production code was ~440 LoC (the renderer, the snapshot loader, the
+rebuild orchestrator) and felt cohesively grouped; splitting THAT into
+submodules would have hurt cohesion (renderer + snapshot + write-atomic
+all co-exist for a reason). The tests, by contrast, are 320 LoC of
+fixture setup + assertions that can live in a sibling file.
+
+Pattern (mirrors existing `entity_pages.rs` ⇄ `entity_pages_tests.rs`):
+
+```rust
+// vault/index_md.rs (end of file)
+#[cfg(test)]
+#[path = "index_md_tests.rs"]
+mod tests;
+```
+
+The sibling tests file uses `use super::*;` plus any extra fixtures.
+This is the **right** instinct of "don't split for cohesion harm" + the
+**hard** constraint of the cap. Production-cohesion-preserving split.
+
+**Action:** when a `vault::*.rs` file goes over cap and production code
+is already tightly coupled, prefer the `#[path]`-include test-extraction
+pattern before reaching for production submodule splits. Reserve
+production splits for files where the production code itself has
+separable concerns (which is the case for `kg/worker.rs` next session —
+running thread vs filing vs projection vs archive vs stubs vs index/log).
+
+### Finding 3 — PowerShell `Set-Content -Encoding ASCII` rewrites file line endings to CRLF; LF-only files must use `[System.IO.File]::WriteAllText` after explicit `-replace "`r`n", "`n"`
+
+Mid-refactor, I used `$lines[0..N] | Set-Content -Encoding ASCII path` to
+truncate `index_md.rs` after extracting tests. The `Set-Content` cmdlet
+wrote CRLF endings even with `-Encoding ASCII` — confirmed by
+`Get-Content -Tail` showing `\r\n` and validated by counting CR bytes
+(`($bytes | Where-Object { $_ -eq 13 }).Count` = nonzero).
+
+Fix: read the whole file via `[System.IO.File]::ReadAllText`, do an
+explicit `-replace "`r`n", "`n"`, then
+`[System.IO.File]::WriteAllText` it back. Post-write CR count = 0.
+
+This is the same family as LESSONS PINNED P12 Finding 1 (CRLF crept
+back in via `cp_create_file`). The fix is the same shape (explicit
+byte-level LF normalization), but the trigger is different — `cp_create_file`
+writes whatever bytes you hand it (caller responsibility); PowerShell
+`Set-Content` actively *converts* on write (cmdlet responsibility).
+
+**Action:** when surgically truncating a file in PowerShell, never use
+`Set-Content`. Use `[System.IO.File]::WriteAllText($path, $joined)`
+after explicit join with `"`n"`. Belt-and-braces: re-read post-write
+and assert CR count = 0 in the same script.
+
+### Mechanics worth noting
+
+- The worker is now at 1669 LoC (was 1429 at session start; +240 LoC
+  for phases 5a/5b/5c). `kg_layout.rs` is 698 LoC (inherited; the
+  prior session expanded it for the 6-folder + root-files bootstrap).
+  Both are OVER the hard 600-LoC cap. `mb-bgpt` cannot close until the
+  refactor (closes `mb-5lla`) lands. That's the next iteration's bead.
+- The `cargo test --release --no-run` link of all 17 test executables
+  took **24m 47s** wall on this box (full clean rebuild after
+  `vault/mod.rs` registration invalidated the cache). Live test exec
+  remains blocked by P2; this number is informational for planning
+  future test-only iterations.
+- The agent shell has a ~270s soft cap on synchronous command
+  execution; long cargo builds MUST run via `background=true` + polled
+  via `Get-Process -Id <pid>` to capture their exit cleanly. This is
+  not a new lesson but worth surfacing again for fresh sessions doing
+  multi-minute cargo invocations.
+
+---
+
 ## 2026-06-06 [KG Phase 1E charter amendment / mb-08za / ADR 0053 amendments] Entity pages + Project pages + wiki-link entities shipped as one interstitial wave between 1E.4 and 1E.5 — closes the "entities are dead text, not graph nodes" gap surfaced by Dustin opening the live vault
 
 **Context.** Phase 1E Wave 1E.4 shipped clean (history archive) and Dustin

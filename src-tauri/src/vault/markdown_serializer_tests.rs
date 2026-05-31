@@ -41,6 +41,12 @@ fn minimal_entry() -> KgEntry {
     }
 }
 
+/// Full-shape entry exercising every optional frontmatter field +
+/// the Obsidian Tasks checkbox body line. Renamed conceptually from
+/// "task entry" to "status-bearing note" with the ADR 0054 §G vocab
+/// realignment: `type` is now the knowledge shape (`note`) and the
+/// checkbox lives on its own gate (`status: Some(_)`), so a Note
+/// with a Todo status is the new pattern for opt-in task workflows.
 fn full_task_entry() -> KgEntry {
     KgEntry {
         id: "01HMTASK00abcdef1234567890".to_string(),
@@ -49,7 +55,7 @@ fn full_task_entry() -> KgEntry {
         capture_kind: CaptureKind::KgNote,
         title: "Switch suppliers for brake pads".to_string(),
         category: Category::Professional,
-        entry_type: EntryType::Task,
+        entry_type: EntryType::Note,
         status: Some(Status::Todo),
         due_date: Some(ts(2026, 6, 20, 0, 0, 0)),
         tags: vec!["brake-pads".to_string(), "suppliers".to_string()],
@@ -115,6 +121,40 @@ fn wiki_linked_entities_entry() -> KgEntry {
     }
 }
 
+/// ADR 0054 §G knowledge-shape coverage: a `decision`-typed entry,
+/// pinned as a byte-stable golden so the new vocab gets the same
+/// round-trip protection the legacy `Note`/`Task`/`Idea` shapes had.
+/// One golden is enough -- the per-shape parse smoke lives in
+/// `markdown_parser::tests::canonical_knowledge_shapes_round_trip`.
+fn knowledge_shape_diversity_entry() -> KgEntry {
+    KgEntry {
+        id: "01HMSHAPE00abcdef1234567890".to_string(),
+        captured_at: ts(2026, 6, 15, 14, 32, 1),
+        captured_at_local_date: date(2026, 6, 15),
+        capture_kind: CaptureKind::KgNote,
+        title: "Decided to standardize on Tailwind v4 across all Mockingbird UI surfaces"
+            .to_string(),
+        category: Category::Professional,
+        entry_type: EntryType::Decision,
+        status: None,
+        due_date: None,
+        tags: vec![
+            "tailwind".to_string(),
+            "ui-architecture".to_string(),
+            "phase-1e".to_string(),
+        ],
+        entities: vec!["Mockingbird".to_string(), "Tailwind".to_string()],
+        source_session_uuid: Some("550e8400-e29b-41d4-a716-446655440000".to_string()),
+        body: "Standardizing on Tailwind v4 across every Mockingbird UI surface. \
+               Rationale: the v3-vs-v4 split was costing two separate token files \
+               and an ESLint-config fork, with no functional payoff. v4's \
+               design-token CSS variables compose cleanly with the existing \
+               tokens.css. Migration cost: small (lint-only churn on a handful \
+               of files); downstream simplification: large.\n"
+            .to_string(),
+    }
+}
+
 fn special_chars_entry() -> KgEntry {
     KgEntry {
         id: "01HMSPECIAL00ab1234567890af".to_string(),
@@ -124,7 +164,11 @@ fn special_chars_entry() -> KgEntry {
         // Embeds: backslash, double-quote, newline, tab, unicode.
         title: "Re: \"urgent\"\tnotes & \\paths\nmulti-line — café".to_string(),
         category: Category::Personal,
-        entry_type: EntryType::Idea,
+        // `Idea` was dropped in ADR 0054 §G; the closest knowledge
+        // shape for a brainstorm fragment is Observation -- an
+        // inchoate noticing-of-a-pattern that the chat-LLM Lint pass
+        // can later crystallize into a Concept page.
+        entry_type: EntryType::Observation,
         status: None,
         due_date: None,
         tags: vec!["weird-\"tag\"".to_string()],
@@ -699,11 +743,10 @@ fn arb_entry() -> impl Strategy<Value = KgEntry> {
                 capture_kind: CaptureKind::Dictation,
                 title,
                 category: Category::Personal,
-                entry_type: if has_status {
-                    EntryType::Task
-                } else {
-                    EntryType::Note
-                },
+                // Status emission is now decoupled from `type:` (ADR
+                // 0054 §L). Pick Note unconditionally; let `has_status`
+                // drive the optional Status field independently.
+                entry_type: EntryType::Note,
                 status: if has_status { Some(Status::Todo) } else { None },
                 due_date: if has_due {
                     Some(ts(y, m, d, 23, 59, 59))
@@ -872,6 +915,9 @@ fn golden_for(name: &str) -> &'static str {
         "wiki_linked_entities" => {
             include_str!("../../tests/fixtures/markdown_golden/wiki_linked_entities.md")
         }
+        "knowledge_shape_diversity" => {
+            include_str!("../../tests/fixtures/markdown_golden/knowledge_shape_diversity.md")
+        }
         other => panic!("unknown golden fixture: {other}"),
     }
 }
@@ -948,6 +994,19 @@ fn golden_wiki_linked_entities() {
     assert_golden("wiki_linked_entities", &wiki_linked_entities_entry());
 }
 
+/// ADR 0054 §G: pins the `decision` knowledge-shape as a byte-stable
+/// golden so the new vocab has a guarded round-trip example, not just
+/// hand-built test strings. Same fixture is also referenced by the
+/// parser's `roundtrip_all_seven_goldens` test (one source of truth
+/// on disk; consumed from both sides).
+#[test]
+fn golden_knowledge_shape_diversity() {
+    assert_golden(
+        "knowledge_shape_diversity",
+        &knowledge_shape_diversity_entry(),
+    );
+}
+
 /// Filenames for every golden fixture must also match the
 /// contract regex — pinned alongside the body goldens so any
 /// future filename-shape refactor surfaces at the same site.
@@ -962,6 +1021,10 @@ fn golden_filenames_match_contract() {
         (
             "wiki_linked_entities",
             &(wiki_linked_entities_entry as fn() -> KgEntry),
+        ),
+        (
+            "knowledge_shape_diversity",
+            &(knowledge_shape_diversity_entry as fn() -> KgEntry),
         ),
     ];
     let re = regex::Regex::new(r"^\d{4}-\d{2}-\d{2}-[a-z0-9-]+__[a-z0-9]{8}\.md$").unwrap();

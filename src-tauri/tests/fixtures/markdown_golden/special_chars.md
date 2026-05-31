@@ -5,7 +5,7 @@ capture_kind: "dictation"
 captured_at: "2026-01-02T03:04:05Z"
 title: "Re: \"urgent\"\tnotes & \\paths\nmulti-line — café"
 category: "personal"
-type: "idea"
+type: "observation"
 tags:
   - "weird-\"tag\""
 entities:

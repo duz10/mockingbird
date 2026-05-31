@@ -81,13 +81,113 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 **KG Phase 1E (Obsidian as source of truth, reframed as Personal Knowledge
 Engine substrate per ADR 0054) — Waves 1E.0 + 1E.1 + 1E.2 + 1E.3 + 1E.4 +
-1E.5 + entity/project amendment + two hotfixes + Alignment Wave shipped;
-Waves 1E.6 (KG-Inbox courier) and 1E.7 (RESCOPED — `SCHEMA.md` / `INDEX.md`
-/ `LOG.md` / `Tags/` subtree / type-vocab realignment) unblocked in
-parallel; 1E.8 (iOS Shortcut docs) docs-only available any time; 1E.9
-seals both ADR 0053 + ADR 0054 together.**
+1E.5 + entity/project amendment + two hotfixes + Alignment Wave +
+**1E.7 implementation (part 1: substrate + worker wiring) shipped** —
+Waves 1E.6 (KG-Inbox courier) and 1E.7 refactor follow-up (worker split
+under 600 LoC) unblocked; 1E.8 (iOS Shortcut docs) docs-only available
+any time; 1E.9 seals both ADR 0053 + ADR 0054 together.**
 
-### Alignment Wave deliverables shipped (this iteration; mb-rik9; zero code changes)
+### Wave 1E.7 implementation deliverables shipped (this iteration; mb-bgpt PART 1 — substrate + worker wiring)
+
+Implements the bulk of ADR 0054 §C/§D/§E/§F/§G end-to-end. **mb-bgpt
+remains OPEN** because gate #4 (worker refactor under 600 LoC, closes
+`mb-5lla`) is unmet — `kg/worker.rs` is at 1669 LoC after wiring phases
+5a/5b/5c and `vault/kg_layout.rs` is at 698 LoC. Both are over the hard
+cap; refactor handled in a follow-up iteration so this checkpoint can
+seal a known-good build for Dustin's smoke verification.
+
+- **`vault::schema_md`** (310 LoC, prior 1E.7 session) — SCHEMA.md
+  write-once user-owned renderer per ADR 0054 §C. Auto-generated on
+  bootstrap; documents folder structure, page templates, frontmatter
+  conventions, INDEX/LOG format specs, three-operation chat-LLM
+  workflow (Ingest / Query / Lint), user-preferences seed defaults.
+- **`vault::index_md`** (439 LoC main + 307 LoC sibling tests file) —
+  per ADR 0054 §D. Full rebuild from DB after every filing (atomic
+  temp-sibling rename). Five H2 sections (Sources / Entities / Projects
+  / Tags / Concepts). Concepts section preserved verbatim across
+  rebuilds (file-wins-against-chat-LLM contract). Byte-deterministic
+  given fixed snapshot. **Tests split to `index_md_tests.rs` via
+  `#[path]` include this iteration** to fit under 600-LoC cap; pattern
+  mirrors existing `entity_pages` ⇄ `entity_pages_tests` precedent.
+- **`vault::log_md`** (318 LoC, this iteration) — per ADR 0054 §E.
+  Append-only operations log; format `## [YYYY-MM-DD HH:MM] kind |
+  subject`. `LogOp` enum (Capture / Ingest / Query / Lint); Mockingbird
+  only ever appends Capture. Atomic full-file rewrite (parity with
+  every other vault writer; matches `.mb-tmp` suffix convention).
+  Pipe-escapes + newline-folds subjects so malformed input can't
+  corrupt line grammar. Recovers when LOG.md was deleted mid-life
+  (next append re-seeds the header). 7 unit tests.
+- **`vault::kg_layout`** (698 LoC; prior 1E.7 session expanded to 6
+  folders + root-files bootstrap; **OVER 600-LoC cap, split deferred
+  to `mb-5lla` follow-up**). New: `KgSubtreePaths.tags`,
+  `bootstrap_kg_root_files` for SCHEMA/INDEX/LOG (write-once-if-missing
+  for SCHEMA + LOG; minimal skeleton for INDEX so worker can rebuild
+  cleanly on first filing).
+- **`vault::entity_pages::ensure_tag_page`** (prior 1E.7 session) —
+  tag stub generation mirroring entity/project stub pattern;
+  Dataview rollup body keys on entry-frontmatter `tags:` array.
+- **`vault::markdown_serializer` + `markdown_parser` type vocab
+  realignment** (prior 1E.7 session) — serializer write path commits
+  to nine knowledge shapes (`source` / `note` / `concept` / `entity` /
+  `project` / `question` / `decision` / `reference` / `observation`);
+  parser tolerates legacy `task` / `event` values by re-classifying as
+  `note` on read. New `knowledge_shape_diversity.md` golden covers
+  question / decision / reference / observation diversity.
+- **`kg/worker.rs` phases 5a / 5b / 5c wired** (this iteration) —
+  three new sequential post-seal phases after the existing 4b stubs.
+  - **5a tag-stub generation**: unions `result.entries[*].topic_tags`
+    into a `BTreeSet<String>` and calls `ensure_tag_page` per slug.
+    Non-fatal per slug; gated on `vault_outcome.is_some()`.
+  - **5b INDEX.md rebuild**: `rebuild_index_md(&conn, &vault_root)`.
+    Non-fatal; always runs (rebuild is idempotent so an in-flight
+    `vault_outcome=None` simply rewrites the prior bytes).
+  - **5c LOG.md append**: `append_log_line(LogOp::Capture)` with the
+    subject derived from the vault-relative filename slug (between
+    date prefix and `__id8` suffix). Gated on `vault_outcome.is_some()`.
+- **`vault/mod.rs`** — three new public modules declared
+  (`index_md` / `log_md` / `schema_md`); without this declaration the
+  prior 1E.7 session's `kg_layout` references would have left the build
+  broken (the orphan check at this session's start confirmed exactly
+  this).
+- **Acceptance gates this iteration:**
+  - `cargo check` (via wrapper) — GREEN, zero warnings.
+  - `cargo clippy --release -- -D warnings` — GREEN.
+  - `cargo fmt --check` — GREEN.
+  - `cargo test --release --no-run` — GREEN (24m 47s; all 17 test
+    executables linked cleanly). Live test exec deferred per
+    LESSONS PINNED P-test-runner-block (sanctioned fallback).
+  - `cargo build --release` — IN FLIGHT at commit time (PINNED P13;
+    Dustin to verify fresh `target/release/mockingbird.exe` mtime).
+- **Gates NOT met / deferred (block `bd close mb-bgpt`):**
+  - Gate #4 (worker refactor closes `mb-5lla`): worker.rs at 1669 LoC
+    (cap 600). The wave brief mandates the cohesive split into
+    `worker/{filing,projection,archive,stubs,index_log}.rs` modules;
+    that's a multi-session refactor on its own and is best done as a
+    pure rearrangement separate from this functional landing.
+  - `vault/kg_layout.rs` at 698 LoC (cap 600). The §C/§D/§E bootstrap
+    + per-root-file render helpers want to migrate into the new
+    `vault::index_md` / `vault::log_md` / `vault::schema_md` sibling
+    modules. Same follow-up as worker split.
+  - kg_parity 32/32, kg_source_gate 6/6, kg_graph_off 8/8 re-runs —
+    require live Ollama; deferred to a dedicated invariant-gate iteration.
+  - Dustin smoke verification (relaunch → vault root files present →
+    fresh capture → INDEX rebuilds + LOG appends + tag pages appear →
+    chat-LLM reads SCHEMA.md).
+
+**Resume next iteration:** two parallel followups —
+(a) **worker.rs + kg_layout.rs refactor** under 600-LoC cap (closes
+`mb-5lla`; unblocks `bd close mb-bgpt`); (b) **1E.9 judges + dual ADR
+seal** (`mb-kazi`) once Dustin smoke is GREEN. Wave 1E.6 (KG-Inbox
+courier, `mb-i46v`) and 1E.8 (iOS Shortcut docs, `mb-wnsm`) remain
+unblocked and orthogonal. Dispatch one-liner pattern per LESSONS P8:
+`refactor kg/worker.rs into worker/{filing,projection,archive,stubs,
+index_log}.rs submodules per docs/phases/phase-1e.md Amendment
+2026-06-06 #2 + ADR 0054, under 600-LoC cap; do the same shape for
+vault/kg_layout.rs`.
+
+### Prior in-flight (now historical): Alignment Wave + Wave 1E.5
+
+### Alignment Wave deliverables shipped (prior iteration; mb-rik9; zero code changes)
 
 - **ADR 0054** (Personal Knowledge Engine substrate, Proposed) — 15
   sections (§A three-layer architecture / §B two-agent role separation
@@ -158,7 +258,7 @@ implementation. 1E.8 docs-only bead available any time. Dispatch
 one-liner pattern per LESSONS P8: `implement Wave 1E.7 per
 docs/phases/phase-1e.md Amendment 2026-06-06 #2 and ADR 0054`.
 
-### Prior in-flight (now historical): KG Phase 1E Wave 1E.5 shipped (Obsidian as source of truth) — Waves 1E.0 + 1E.1 + 1E.2 + 1E.3 + 1E.4 + 1E.5 shipped + hotfix; Waves 1E.6 (KG-Inbox courier) and 1E.7 (seeds) unblocked in parallel. Charter ADR [ADR 0053](docs/adr/0053-kg-phase-1e-obsidian-as-source-of-truth.md) Proposed; phase doc at `docs/phases/phase-1e.md`; bead epic `mb-imc2` with 10 sub-beads. 1E.5 lands the reverse-watcher: Obsidian edits on `<vault>/Knowledge Graph/Entries/*.md` reconcile back into SQLite within ~3s, with SHA-256 hash-based loop-prevention against Mockingbird's own writes (`sessions.vault_file_hash` from migration 026). Entity/project pages, History sidecars, and Inbox audio are all routed to IGNORED. Wiki-link entities now emit with Obsidian's pipe-alias display form (`[[Entities/<slug>|<slug>]]`); the new parser strips the alias when extracting the slug for DB write, and tolerates both pipe-alias and legacy bare wiki-link forms.
+### Prior in-flight (now historical, deeper): KG Phase 1E Wave 1E.5 shipped (Obsidian as source of truth) — Waves 1E.0 + 1E.1 + 1E.2 + 1E.3 + 1E.4 + 1E.5 shipped + hotfix; Waves 1E.6 (KG-Inbox courier) and 1E.7 (seeds) unblocked in parallel. Charter ADR [ADR 0053](docs/adr/0053-kg-phase-1e-obsidian-as-source-of-truth.md) Proposed; phase doc at `docs/phases/phase-1e.md`; bead epic `mb-imc2` with 10 sub-beads. 1E.5 lands the reverse-watcher: Obsidian edits on `<vault>/Knowledge Graph/Entries/*.md` reconcile back into SQLite within ~3s, with SHA-256 hash-based loop-prevention against Mockingbird's own writes (`sessions.vault_file_hash` from migration 026). Entity/project pages, History sidecars, and Inbox audio are all routed to IGNORED. Wiki-link entities now emit with Obsidian's pipe-alias display form (`[[Entities/<slug>|<slug>]]`); the new parser strips the alias when extracting the slug for DB write, and tolerates both pipe-alias and legacy bare wiki-link forms.
 
 ### Wave 1E.5 deliverables shipped (this iteration)
 

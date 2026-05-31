@@ -373,13 +373,36 @@ fn parse_category(s: Option<&str>) -> Result<Category, ParseError> {
     }
 }
 
+/// Parse the YAML `type:` field into [`EntryType`].
+///
+/// **ADR 0054 §G — knowledge-shape vocabulary.** Accepts the nine
+/// canonical shapes (`source`/`note`/`concept`/`entity`/`project`/
+/// `question`/`decision`/`reference`/`observation`). For the
+/// migration window we also tolerate three pre-pivot legacy values
+/// (`task`/`event`/`idea`) by silently re-classifying them as
+/// `Note` -- the serializer can no longer emit those (enum-level
+/// rejection), but any user-edited entry written under the
+/// pre-pivot serializer is still reconciled cleanly by the
+/// reverse-watcher rather than parked at `state='failed'`.
+///
+/// New code should NOT add new legacy tolerances here without a
+/// charter ADR -- the migration path is one-way (legacy in, modern
+/// out).
 fn parse_entry_type(s: Option<&str>) -> Result<EntryType, ParseError> {
     match s.ok_or(ParseError::MissingField("type"))? {
+        // Nine canonical knowledge shapes (ADR 0054 §G).
+        "source" => Ok(EntryType::Source),
         "note" => Ok(EntryType::Note),
-        "task" => Ok(EntryType::Task),
-        "idea" => Ok(EntryType::Idea),
+        "concept" => Ok(EntryType::Concept),
+        "entity" => Ok(EntryType::Entity),
+        "project" => Ok(EntryType::Project),
         "question" => Ok(EntryType::Question),
         "decision" => Ok(EntryType::Decision),
+        "reference" => Ok(EntryType::Reference),
+        "observation" => Ok(EntryType::Observation),
+        // Legacy tolerance -- migration path only. Re-classify as
+        // Note on read; the serializer can no longer emit these.
+        "task" | "event" | "idea" => Ok(EntryType::Note),
         other => Err(ParseError::UnknownVocab {
             field: "type",
             value: other.to_string(),
@@ -469,12 +492,21 @@ mod tests {
     const DONE_TASK: &str = include_str!("../../tests/fixtures/markdown_golden/done_task.md");
     const SPECIAL: &str = include_str!("../../tests/fixtures/markdown_golden/special_chars.md");
     const WIKI: &str = include_str!("../../tests/fixtures/markdown_golden/wiki_linked_entities.md");
+    /// ADR 0054 §G knowledge-shape coverage: pins a `decision`-typed
+    /// entry through the round-trip pipeline so the new
+    /// `Source`/`Concept`/`Question`/`Decision`/`Reference`/
+    /// `Observation` vocab isn't tested only via hand-built strings.
+    /// One golden is enough to cover the byte-identical contract;
+    /// the per-shape parse smoke is in
+    /// `canonical_knowledge_shapes_round_trip`.
+    const KNOWLEDGE_SHAPE_DIVERSITY: &str =
+        include_str!("../../tests/fixtures/markdown_golden/knowledge_shape_diversity.md");
 
-    /// All six goldens round-trip byte-identical:
+    /// All seven goldens round-trip byte-identical:
     /// parse → serialize == original bytes. This is the core
     /// 1E.5 round-trip contract.
     #[test]
-    fn roundtrip_all_six_goldens() {
+    fn roundtrip_all_seven_goldens() {
         for (name, golden) in [
             ("minimal", MINIMAL),
             ("full_task", FULL_TASK),
@@ -482,6 +514,7 @@ mod tests {
             ("done_task", DONE_TASK),
             ("special_chars", SPECIAL),
             ("wiki_linked_entities", WIKI),
+            ("knowledge_shape_diversity", KNOWLEDGE_SHAPE_DIVERSITY),
         ] {
             let parsed = parse_entry(golden).unwrap_or_else(|e| {
                 panic!("parse failed for golden `{name}`: {e}");
@@ -624,6 +657,60 @@ mod tests {
         );
         let out = serialize_entry(&parsed.entry);
         assert!(out.contains("[[Entities/mockingbird|mockingbird]]"));
+    }
+
+    /// ADR 0054 §G migration tolerance: the parser must accept the
+    /// legacy `task`/`event`/`idea` vocab and silently re-classify
+    /// each as `Note` so user-edited pre-pivot entries still
+    /// reconcile cleanly. The serializer can no longer emit these
+    /// values, so this is a one-way migration bridge.
+    #[test]
+    fn legacy_vocab_reclassifies_as_note() {
+        for legacy in ["task", "event", "idea"] {
+            let content = format!(
+                "---\nid: \"01HMLEGAC{legacy}000\"\nschema_version: 1\ncapture_kind: \"dictation\"\ncaptured_at: \"2026-01-02T03:04:05Z\"\ntitle: \"legacy {legacy}\"\ncategory: \"personal\"\ntype: \"{legacy}\"\ntags: []\nentities: []\n---\n"
+            );
+            let parsed = parse_entry(&content)
+                .unwrap_or_else(|e| panic!("legacy vocab `{legacy}` must parse; got error: {e:?}"));
+            assert_eq!(
+                parsed.entry.entry_type,
+                EntryType::Note,
+                "legacy `{legacy}` must re-classify as Note"
+            );
+        }
+    }
+
+    /// ADR 0054 §G: the parser accepts the nine canonical knowledge
+    /// shapes. Pin them all so adding a new variant requires a
+    /// conscious test-update (defense against accidental enum
+    /// drift).
+    #[test]
+    fn canonical_knowledge_shapes_round_trip() {
+        for shape in [
+            "source",
+            "note",
+            "concept",
+            "entity",
+            "project",
+            "question",
+            "decision",
+            "reference",
+            "observation",
+        ] {
+            let content = format!(
+                "---\nid: \"01HMSHAPE{shape}00\"\nschema_version: 1\ncapture_kind: \"dictation\"\ncaptured_at: \"2026-01-02T03:04:05Z\"\ntitle: \"shape {shape}\"\ncategory: \"personal\"\ntype: \"{shape}\"\ntags: []\nentities: []\n---\n"
+            );
+            let parsed = parse_entry(&content).unwrap_or_else(|e| {
+                panic!("canonical shape `{shape}` must parse; got error: {e:?}")
+            });
+            // Round-trip: re-serialize and the type field on disk
+            // must match the canonical wire form.
+            let out = serialize_entry(&parsed.entry);
+            assert!(
+                out.contains(&format!("type: \"{shape}\"")),
+                "round-trip lost type for `{shape}`: {out}"
+            );
+        }
     }
 
     #[test]

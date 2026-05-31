@@ -5,7 +5,7 @@ capture_kind: "kg-note"
 captured_at: "2026-06-15T14:32:01Z"
 title: "Switch suppliers for brake pads"
 category: "professional"
-type: "task"
+type: "note"
 status: "todo"
 due_date: "2026-06-20T00:00:00Z"
 tags:

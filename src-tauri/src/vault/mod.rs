@@ -26,12 +26,15 @@
 pub mod entity_pages;
 pub mod export_job;
 pub mod history;
+pub mod index_md;
 pub mod kg_layout;
 pub mod layout;
+pub mod log_md;
 pub mod manifest;
 pub mod markdown_parser;
 pub mod markdown_serializer;
 pub mod project;
+pub mod schema_md;
 pub mod watcher;
 mod watcher_reconcile;
 pub mod writer;

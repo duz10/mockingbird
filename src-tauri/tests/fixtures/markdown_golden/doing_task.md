@@ -5,7 +5,7 @@ capture_kind: "kg-note"
 captured_at: "2026-06-15T14:32:01Z"
 title: "Refactor injection strategy override table"
 category: "professional"
-type: "task"
+type: "note"
 status: "doing"
 tags:
   - "refactor"

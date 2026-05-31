@@ -5,7 +5,7 @@ capture_kind: "kg-note-text"
 captured_at: "2026-06-15T14:32:01Z"
 title: "Buy milk"
 category: "professional"
-type: "task"
+type: "note"
 status: "done"
 due_date: "2026-06-10T00:00:00Z"
 tags:

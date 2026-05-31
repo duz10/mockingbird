@@ -222,29 +222,63 @@ impl Category {
     }
 }
 
-/// Layer-2 vocabulary entry-type.
+/// Layer-2 vocabulary entry-type -- the **nine knowledge shapes**.
+///
+/// ADR 0054 §G (Personal Knowledge Engine substrate): the canonical
+/// type vocabulary is the nine knowledge shapes below. `task` and
+/// `event` are **DROPPED** from the canonical set; the legacy values
+/// `task`, `event`, and `idea` are tolerated by the parser only
+/// (re-classified as `Note` on read for the round-trip migration
+/// path), and the serializer cannot emit them at all (enum-level
+/// rejection -- defense in depth per ADR 0054 §G).
+///
+/// Every `Entries/` file is **implicitly a source** by virtue of
+/// being captured; the `type:` field describes the *knowledge shape*
+/// within. A `decision`-typed Entry is still implicitly a source
+/// (the raw material is the decision-recording dictation); the
+/// distinction matters for the chat-LLM's Ingest/Query/Lint passes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryType {
-    /// Plain informational note.
+    /// Default shape -- the Entry is itself the source material
+    /// (a transcript, a memo, raw capture). Most KG captures land
+    /// here unless the classifier picks a more specific shape.
+    Source,
+    /// Short observation or aside; quick thought or brief reaction.
+    /// Doesn't rise to source-level.
     Note,
-    /// Actionable task (gets an Obsidian Tasks checkbox).
-    Task,
-    /// Inchoate idea / brainstorm fragment.
-    Idea,
-    /// Open question awaiting answer.
+    /// A definition or explanation of an idea. Tends to migrate to
+    /// a dedicated concept page authored by the chat-LLM.
+    Concept,
+    /// Reference-to-an-entity Entry. The body is *about* the entity;
+    /// the durable home is `Entities/<slug>.md`.
+    Entity,
+    /// Reference-to-a-project Entry. The body is *about* the
+    /// project; the durable home is `Projects/<slug>.md`.
+    Project,
+    /// Open question awaiting answer. Useful for Lint passes.
     Question,
-    /// Recorded decision / rationale.
+    /// Point-in-time decision record with rationale. Lightweight
+    /// ADR shape.
     Decision,
+    /// Pointer to external material (URL, book chapter, article).
+    Reference,
+    /// Empirical noticing -- pattern, anomaly, surprise.
+    /// Raw material for chat-LLM Lint to crystallize into concepts.
+    Observation,
 }
 
 impl EntryType {
     fn as_wire(self) -> &'static str {
         match self {
+            Self::Source => "source",
             Self::Note => "note",
-            Self::Task => "task",
-            Self::Idea => "idea",
+            Self::Concept => "concept",
+            Self::Entity => "entity",
+            Self::Project => "project",
             Self::Question => "question",
             Self::Decision => "decision",
+            Self::Reference => "reference",
+            Self::Observation => "observation",
         }
     }
 }
