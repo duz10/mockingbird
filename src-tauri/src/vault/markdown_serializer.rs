@@ -65,18 +65,24 @@
 //! item is slugified via [`slugify_title`] (the same helper that
 //! drives filenames — one source of truth for the ASCII-kebab-case
 //! identifier rule) and emitted as the quoted YAML scalar
-//! `"[[Entities/<slug>]]"`. Slug collisions across the same entry
-//! (e.g. `["Mockingbird", "mockingbird"]` both → `mockingbird`) are
+//! `"[[Entities/<slug>|<slug>]]"` (1E.5 polish: Obsidian pipe-alias
+//! form — the alias keeps the rendered Properties panel showing
+//! the clean entity name instead of the full `Entities/<slug>`
+//! path). Slug collisions across the same entry (e.g.
+//! `["Mockingbird", "mockingbird"]` both → `mockingbird`) are
 //! deduped at serialize time so the emitted list has unique entries.
 //!
 //! Round-trip implication for Wave 1E.5: the reverse-watcher's
-//! parser MUST accept BOTH legacy bare-string entries (written
-//! pre-amendment) AND the new `"[[Entities/<slug>]]"` shape. The
-//! DB-side representation remains a bare entity slug; the
-//! `[[Entities/` prefix + `]]` suffix are pure presentation. Parsing
-//! direction: strip the prefix/suffix → the inner token IS the slug.
-//! Serializing direction (this module): slugify → wrap in
-//! `[[Entities/...]]`.
+//! parser MUST accept ALL three forms in the wild — the new
+//! pipe-alias `"[[Entities/<slug>|<alias>]]"`, the post-amendment
+//! pre-1E.5-polish `"[[Entities/<slug>]]"`, AND legacy bare-string
+//! entries (written pre-amendment, before the wiki-link shape
+//! landed). The DB-side representation remains a bare entity slug;
+//! the `[[Entities/` prefix, `|<alias>]]` (or bare `]]`) suffix are
+//! pure presentation. Parsing direction: strip prefix, drop
+//! `|<alias>` suffix if present, drop `]]` → the inner token IS the
+//! slug. Serializing direction (this module): slugify → wrap in
+//! `[[Entities/<slug>|<slug>]]`.
 
 use chrono::{DateTime, NaiveDate, Utc};
 use std::fmt::Write as _;
@@ -156,8 +162,9 @@ pub struct KgEntry {
 
     /// Mentioned entities (person / org / place / product / project).
     /// Empty vec renders as `entities: []`. Non-empty entries are
-    /// emitted as `"[[Entities/<slug>]]"` wiki-links per amendment
-    /// `mb-08za` (ADR 0053 §D3 as amended). Distinct input strings
+    /// emitted as `"[[Entities/<slug>|<slug>]]"` wiki-links per
+    /// amendment `mb-08za` (ADR 0053 §D3 as amended) + the 1E.5
+    /// pipe-alias polish. Distinct input strings
     /// that slugify identically are deduped at serialize time;
     /// callers don't need to pre-dedupe.
     pub entities: Vec<String>,
@@ -463,14 +470,25 @@ fn write_string_list(out: &mut String, key: &str, items: &[String]) {
 
 /// Entity-list writer: slugify each entry's name, dedupe by slug
 /// (preserving first-occurrence order), and emit as quoted
-/// `"[[Entities/<slug>]]"` wiki-link scalars. Empty input renders as
-/// the flow-form `entities: []` so the reverse-watcher can
-/// distinguish "no entities" from "field absent" (same discipline
-/// as [`write_string_list`]).
+/// `"[[Entities/<slug>|<slug>]]"` wiki-link scalars (Obsidian
+/// pipe-alias syntax — the alias keeps the rendered Properties
+/// panel showing the clean entity name instead of the full path).
+/// Empty input renders as the flow-form `entities: []` so the
+/// reverse-watcher can distinguish "no entities" from "field
+/// absent" (same discipline as [`write_string_list`]).
 ///
-/// Amendment `mb-08za` (ADR 0053 §D3 as amended). The slug rule is
-/// shared with [`slugify_title`] — one source of truth for the
-/// ASCII-kebab-case identifier the rest of the KG references.
+/// Round-trip contract: the 1E.5 reverse parser
+/// (`vault::markdown_parser::parse_entity_slug_from_wiki_link`) MUST
+/// strip the `|<alias>` suffix when extracting the slug for DB
+/// write, AND tolerate the legacy bare `"[[Entities/<slug>]]"`
+/// form so files written under an earlier Mockingbird build still
+/// reconcile cleanly. The serializer never emits the bare form
+/// post-1E.5.
+///
+/// Amendment `mb-08za` (ADR 0053 §D3 as amended) + 1E.5 polish.
+/// The slug rule is shared with [`slugify_title`] — one source of
+/// truth for the ASCII-kebab-case identifier the rest of the KG
+/// references.
 fn write_entity_wiki_link_list(out: &mut String, key: &str, items: &[String]) {
     if items.is_empty() {
         out.push_str(key);
@@ -505,7 +523,13 @@ fn write_entity_wiki_link_list(out: &mut String, key: &str, items: &[String]) {
     out.push_str(":\n");
     for slug in emitted_slugs {
         out.push_str("  - ");
-        let wiki_link = format!("[[Entities/{slug}]]");
+        // Pipe-alias form: `[[Entities/<slug>|<slug>]]`. Obsidian's
+        // wiki-link resolver follows the pre-pipe target; the
+        // post-pipe text is what renders in the Properties panel.
+        // We emit `slug` on both sides so the displayed name is the
+        // ASCII kebab-case (e.g. `feta-cheese` instead of
+        // `Entities/feta-cheese`). Reverse-parser strips the alias.
+        let wiki_link = format!("[[Entities/{slug}|{slug}]]");
         push_quoted_scalar(out, &wiki_link);
         out.push('\n');
     }

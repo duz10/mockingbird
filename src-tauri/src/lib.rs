@@ -393,6 +393,22 @@ pub fn run() {
                 tracing::info!(
                     "\u{1f9e0} KG filing worker spawned (per-tick KgGraphEnabled poll)"
                 );
+
+                // Phase 1E Wave 1E.5 (`mb-qwfy`, ADR 0053 §D5) —
+                // reverse-watcher. Mirrors the KG filing worker's
+                // "always-spawn, settings-gated internally" shape:
+                // the manager thread polls KgGraphEnabled +
+                // VaultPath every 3s and only constructs the inner
+                // FS-watcher once both are live. Disabled-by-default
+                // installs pay one bounded sleep loop and zero I/O.
+                let reverse_watcher =
+                    crate::vault::watcher::ReverseWatcherRuntime::spawn(
+                        shared_conn.clone(),
+                    );
+                app.manage(reverse_watcher);
+                tracing::info!(
+                    "\u{1f441}\u{fe0f}  KG reverse-watcher manager spawned (gated on KgGraphEnabled + VaultPath)"
+                );
             }
 
             // Phase 1E Wave 1E.1 (`mb-e16d`, ADR 0053 §D1) — KG

@@ -105,7 +105,8 @@ fn entity_page_writes_when_missing() {
     assert!(content.contains("# maple"));
     assert!(content.contains("```dataview"));
     assert!(content.contains("FROM \"Knowledge Graph/Entries\""));
-    assert!(content.contains("contains(entities, \"[[Entities/maple]]\")"));
+    // 1E.5 polish: predicate matches BOTH bare and pipe-alias forms.
+    assert!(content.contains("any(entities, (e) => contains(e, \"[[Entities/maple]]\") OR contains(e, \"[[Entities/maple|\"))"));
 }
 
 /// THE write-once invariant. A user who has edited their own
@@ -201,7 +202,8 @@ fn project_page_writes_when_missing() {
     assert!(content.contains("# mockingbird"));
     // Dataview body still filters via the `entities` field — a
     // Project entity is still emitted in entries' `entities:` list.
-    assert!(content.contains("contains(entities, \"[[Entities/mockingbird]]\")"));
+    // 1E.5 polish: predicate matches BOTH bare and pipe-alias forms.
+    assert!(content.contains("any(entities, (e) => contains(e, \"[[Entities/mockingbird]]\") OR contains(e, \"[[Entities/mockingbird|\"))"));
 }
 
 #[test]
@@ -280,7 +282,10 @@ fn render_stub_dataview_block_references_canonical_wiki_link() {
     let body = render_stub(StubKind::Entity, "feta-cheese", fixed_created_at());
     // Pin the exact dataview WHERE clause so a future drift surfaces
     // here, not at user-visible-broken-Dataview-rendering time.
-    assert!(body.contains("contains(entities, \"[[Entities/feta-cheese]]\")"));
+    // 1E.5 polish: matches BOTH the bare `[[Entities/<slug>]]` (pre-
+    // polish) and the pipe-alias `[[Entities/<slug>|...]]` (current)
+    // forms so existing on-disk entries remain discoverable.
+    assert!(body.contains("any(entities, (e) => contains(e, \"[[Entities/feta-cheese]]\") OR contains(e, \"[[Entities/feta-cheese|\"))"));
     assert!(body.contains("```dataview"));
     assert!(body.contains("FROM \"Knowledge Graph/Entries\""));
     assert!(body.contains("SORT captured_at DESC"));

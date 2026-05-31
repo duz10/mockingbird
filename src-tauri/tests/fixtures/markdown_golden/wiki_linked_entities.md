@@ -10,9 +10,9 @@ tags:
   - "mockingbird"
   - "team-sync"
 entities:
-  - "[[Entities/mockingbird]]"
-  - "[[Entities/maple]]"
-  - "[[Entities/dustin]]"
+  - "[[Entities/mockingbird|mockingbird]]"
+  - "[[Entities/maple|maple]]"
+  - "[[Entities/dustin|dustin]]"
 ---
 
 We discussed Phase 1E and the Obsidian sync work.

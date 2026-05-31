@@ -9,7 +9,7 @@ type: "idea"
 tags:
   - "weird-\"tag\""
 entities:
-  - "[[Entities/o-reilly]]"
+  - "[[Entities/o-reilly|o-reilly]]"
 ---
 
 Body with "quotes" and a \ backslash.

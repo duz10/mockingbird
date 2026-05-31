@@ -5651,3 +5651,32 @@ Four small things that bit during 1C.3 backend authoring + qa-spec authoring (qa
 - Bigger picture: when a one-shot PowerShell pipeline is the "obvious" tool for a refactor, ask whether `replace_in_file` (which is encoding- and newline-safe by construction) can do the same job. The cmdlet ergonomics that look like Unix `head`/`tail` have surprising defaults that don't match Unix semantics.
 - Tag: powershell, encoding, refactor, set-content, recovery
 
+
+
+## 2026-06-06 [phase-1e/wave-1e.5] AGENTS.md orphan-check ritual saves an iteration on resumed work
+
+- Context: Wave 1E.5 kickoff arrived as a fresh `/goal` dispatch. The kickoff prompt opened with the mandatory orphan-check directive (git status + bd show mb-qwfy). Running it surfaced two untracked files (vault/watcher.rs, vault/markdown_parser.rs) + modified serializer/goldens/lib.rs/mod.rs + an IN_PROGRESS bead -- a prior session had implemented ~95% of the deliverable but had not gated, sealed, or committed.
+- Finding: the "verify+gate+seal" pivot the kickoff instructed is the right move ONLY because the orphan check ran first. Without it, the natural reaction would be to re-implement watcher + parser from scratch, blow away whatever the previous session did, and burn an iteration. The check takes ~10 seconds; the alternative burns ~30 minutes of redundant LLM cost.
+- Action: keep the "git status + diff stat + bd show <id>" pattern as the literal first tool call after STATUS.md when a kickoff prompt mentions a specific bead. Worth promoting to PINNED if this pattern bites again in a different shape.
+- Tag: workflow, orphan-recovery, kickoff-ritual
+
+## 2026-06-06 [phase-1e/wave-1e.5] 600-line cap: split on natural seams, not arbitrary line counts
+
+- Context: prior session's watcher.rs landed at 779 lines (post-fmt 788), over the AGENTS.md 600-line cap. AGENTS.md says "consider splitting into smaller subcomponents but don't split purely to hit a line count if it hurts cohesion".
+- Finding: large modules that legitimately need splitting often already have natural seams marked by the author's own `// ----` section dividers. watcher.rs had four such sections: Tunables / Public surface / Pure path-filter / Reconciliation / Manager loop / Tests. The split point picked itself: "Pure path-filter + Reconciliation + classify-path tests" form a cohesive pure-Rust file-to-DB reconciler; everything else is async runtime (debouncer thread, manager loop, OS watch lifecycle). Resulting files: watcher.rs 413 lines (threading), watcher_reconcile.rs 401 lines (pure reconcile + tests). watcher.rs `pub use`s the public types back so external callers see one entry point.
+- Action: when a file exceeds the cap, look for the author's own section headers BEFORE inventing a split. The seam is usually already drawn. Split runtime-vs-pure-logic if the boundary exists; do NOT split tests-from-impl as the default move (that hides line count without improving cohesion).
+- Tag: refactor, file-size-cap, cohesion, splits
+
+## 2026-06-06 [phase-1e/wave-1e.5] clippy::doc_lazy_continuation hair-triggers on lines starting with "+"
+
+- Context: post-split watcher.rs failed `clippy --release -- -D warnings` with three doc_lazy_continuation errors on module-doc `//!` lines that read "tracing::warn!-ed + skipped. The watcher stays alive ... isolating the inner watcher in its own thread + treating a join failure ...".
+- Finding: clippy interprets a line-leading "+" inside a doc paragraph as the start of a list bullet (since `+` is a valid Markdown bullet character), and then flags the following continuation lines as "list item without indentation". The lint fires even though the content is plain prose -- it is a syntax-level pattern match, not a semantic one.
+- Action: in module-doc paragraphs, prefer prose connectives ("and", "then", "plus") over a literal "+" mid-sentence when the "+" would land at line start after wrap. Same goes for "*" and "-" at line start. Trivial to fix once you see it; takes ~2 minutes to track down if you do not realise clippy treats it as a list marker.
+- Tag: rust, clippy, doc-comments, lints
+
+## 2026-06-06 [phase-1e/wave-1e.5] cp_create_file CRLF on Windows -- bit goldens again (P12 Finding 1 reinforcement)
+
+- Context: re-verifying the wiki-link alias polish, found three of seven markdown_golden fixtures (full_task.md, special_chars.md, wiki_linked_entities.md) had CRLF line endings. The serializer emits LF-only by contract, so the golden tests would have failed if the test runner were live (test --no-run only checks link surface).
+- Finding: same trap as LESSONS 2026-06-05 Finding 1 -- the file-creation tool produces CRLF on Windows when invoked via cp_create_file. The prior session edited the goldens (per `mb-08za` and the 1E.5 polish) and re-introduced CRLF on the affected files. The other four goldens kept their original LF endings because they were not touched.
+- Action: when modifying any LF-canonical fixture via cp_create_file or cp_replace_in_file on Windows, immediately verify with `[System.IO.File]::ReadAllBytes($path)` and renormalize CRLF -> LF if needed. Two-line PowerShell normalize script kept handy: enumerate bytes, drop 0x0D when followed by 0x0A, rewrite. Promote to a project skill if this bites a third time.
+- Tag: windows, file-encoding, line-endings, golden-tests, lessons-p12-reinforcement

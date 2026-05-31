@@ -322,16 +322,17 @@ fn frontmatter_lists_use_block_style() {
 // ──────────────────────────────────────────────
 
 /// Every entity in a non-empty list emits as a quoted wiki-link
-/// matching `"[[Entities/<slug>]]"`. Pinned at the golden site too,
-/// but called out as a standalone assertion so a future refactor
-/// that breaks the shape surfaces here with a clear message.
+/// matching `"[[Entities/<slug>|<slug>]]"` (Obsidian pipe-alias
+/// form — 1E.5 polish). Pinned at the golden site too, but called
+/// out as a standalone assertion so a future refactor that breaks
+/// the shape surfaces here with a clear message.
 #[test]
 fn entities_emit_as_wiki_links() {
     let e = full_task_entry();
     let out = serialize_entry(&e);
     assert!(
-        out.contains("entities:\n  - \"[[Entities/home-depot]]\"\n  - \"[[Entities/autozone]]\"\n"),
-        "entities must emit as quoted wiki-link block list: {out}"
+        out.contains("entities:\n  - \"[[Entities/home-depot|home-depot]]\"\n  - \"[[Entities/autozone|autozone]]\"\n"),
+        "entities must emit as quoted pipe-aliased wiki-link block list: {out}"
     );
 }
 
@@ -352,13 +353,15 @@ fn entities_deduped_by_slug_at_serialize_time() {
         .nth(1)
         .and_then(|s| s.split("\n---\n").next())
         .expect("entities block present");
-    let mockingbird_lines = entities_block.matches("[[Entities/mockingbird]]").count();
+    let mockingbird_lines = entities_block
+        .matches("[[Entities/mockingbird|mockingbird]]")
+        .count();
     assert_eq!(
         mockingbird_lines, 1,
         "slug-colliding entities must dedupe to one line: {entities_block}"
     );
     assert!(
-        entities_block.contains("[[Entities/maple]]"),
+        entities_block.contains("[[Entities/maple|maple]]"),
         "distinct entities must survive dedupe: {entities_block}"
     );
 }
@@ -761,10 +764,11 @@ proptest! {
         prop_assert!(slug.len() <= SLUG_MAX_LEN, "slug must be <= {SLUG_MAX_LEN}: {slug}");
     }
 
-    /// Amendment `mb-08za`: every emitted entity scalar matches the
-    /// `[[Entities/<slug>]]` shape with the same slug alphabet as
-    /// the filename slug. The regex is the formal contract the
-    /// reverse-watcher's parser keys on.
+    /// Amendment `mb-08za` + 1E.5 polish: every emitted entity
+    /// scalar matches the `[[Entities/<slug>|<slug>]]` pipe-alias
+    /// shape with the same slug alphabet as the filename slug, and
+    /// the alias text equals the slug. The regex is the formal
+    /// contract the reverse-watcher's parser keys on.
     #[test]
     fn prop_entities_emit_as_wiki_links(entry in arb_entry()) {
         let out = serialize_entry(&entry);
@@ -781,15 +785,32 @@ proptest! {
         let seq = entities
             .as_sequence()
             .ok_or_else(|| TestCaseError::fail("entities must be a sequence".to_string()))?;
-        let re = regex::Regex::new(r"^\[\[Entities/[a-z0-9-]+\]\]$").unwrap();
+        // Pipe-alias form: `[[Entities/<slug>|<alias>]]`. The slug
+        // and alias are both ASCII kebab-case; we additionally
+        // assert (via captures, below) that slug == alias for our
+        // serializer's output. A reader that encounters a different
+        // alias (e.g. user-edited Obsidian rename) is still valid
+        // input for the parser — the contract is one-way (writer
+        // emits identity-alias; parser tolerates any alias).
+        let re = regex::Regex::new(
+            r"^\[\[Entities/([a-z0-9-]+)\|([a-z0-9-]+)\]\]$",
+        )
+        .unwrap();
         for v in seq {
             let s = v.as_str().ok_or_else(|| {
                 TestCaseError::fail(format!("entity item must be a string: {v:?}"))
             })?;
-            prop_assert!(
-                re.is_match(s),
-                "entity wiki-link violates regex `{}`: {s}",
-                re.as_str()
+            let caps = re.captures(s).ok_or_else(|| {
+                TestCaseError::fail(format!(
+                    "entity wiki-link violates regex `{}`: {s}",
+                    re.as_str()
+                ))
+            })?;
+            prop_assert_eq!(
+                &caps[1],
+                &caps[2],
+                "serializer emits identity-alias (slug == alias): {}",
+                s
             );
         }
     }

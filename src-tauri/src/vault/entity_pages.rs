@@ -253,17 +253,24 @@ fn render_stub(kind: StubKind, slug: &str, created_at: DateTime<Utc>) -> String 
     out.push('\n');
     out.push_str(&format!("# {slug}\n"));
     out.push('\n');
-    // Dataview block: the entity wiki-link form `[[Entities/<slug>]]`
-    // is the canonical reference (per ADR 0053 §D3 as amended), so
-    // both entity AND project stubs filter on the same `entities`
-    // field. Project pages don't need a separate `projects` field;
-    // navigating from either Entity page or Project page lands the
-    // user on the same set of entries.
+    // Dataview block: the entity wiki-link can appear in two
+    // shapes in an entry's `entities:` frontmatter list — the
+    // post-1E.5-polish pipe-alias form `[[Entities/<slug>|<slug>]]`
+    // (current) and the pre-1E.5-polish bare form
+    // `[[Entities/<slug>]]` (Wave 1E.2/3/4 amendment, written by
+    // earlier Mockingbird builds). The `any(...) => contains(...)`
+    // predicate matches BOTH so existing on-disk entries continue
+    // to surface on the stub page after the polish lands. Pure
+    // presentation; the DB-side representation is always the bare
+    // slug. Project pages reuse the same predicate — navigating
+    // from either Entity page or Project page lands the user on
+    // the same set of entries (project entities are a strict
+    // subset of all entities).
     out.push_str("```dataview\n");
     out.push_str("TABLE category, type, status, captured_at\n");
     out.push_str("FROM \"Knowledge Graph/Entries\"\n");
     out.push_str(&format!(
-        "WHERE contains(entities, \"[[Entities/{slug}]]\")\n"
+        "WHERE any(entities, (e) => contains(e, \"[[Entities/{slug}]]\") OR contains(e, \"[[Entities/{slug}|\"))\n"
     ));
     out.push_str("SORT captured_at DESC\n");
     out.push_str("```\n");
