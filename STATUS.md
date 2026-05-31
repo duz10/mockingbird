@@ -10,7 +10,25 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-06-06 (**KG Phase 1E Wave 1E.5 shipped** — reverse-watcher reconciles Obsidian Entry edits back into SQLite within ~3s; SHA-256 loop-prevention against own writes; entity/project/history/inbox routed to IGNORED; new `vault::watcher` + `vault::watcher_reconcile` + `vault::markdown_parser` modules (all under 600-LoC cap); wiki-link alias polish — entities now emit `"[[Entities/<slug>|<slug>]]"`; 3 LF-normalized golden updates; 3 pipeline-quality beads filed for post-1E sprint (`mb-82h6`, `mb-ifun`, `mb-xqcf`); all gates green incl. cargo build --release; closes `mb-qwfy`). Prior consolidation 2026-06-06 (**KG Phase 1E charter amendment shipped** — four ADR 0053 amendments (subtree → 5 folders; entities emit as `"[[Entities/<slug>]]"` wiki-links; auto-generated entity pages §D11; auto-generated project pages §D12); new `vault::entity_pages` module; serializer retrofit; worker integration; 19 new live tests + 1 new golden + 2 property tests; closes `mb-08za`; fresh release exe built per PINNED P13). Prior consolidation 2026-06-06 (**KG Phase 1E hotfix #2 shipped** — vault entry body now sources from `transcripts(stage='final')` cleaned cascade, not `entries[0].body` segmenter output; multi-bullet KG notes no longer drop segments 1..N; closes `mb-wzui`; fresh release exe built). Prior consolidation 2026-06-06 earlier (**KG Phase 1E hotfix #1 shipped** — fresh release binary + `kg_reconcile_vault` + `kg_reconcile_history` IPCs + dashboard "Reconcile vault" button; closes `mb-43xw`; LESSONS PINNED P13 added). Prior consolidation 2026-06-05 (**KG Phase 1E Wave 1E.4 shipped** — `vault::history` module ships per-session JSON sidecar + audio file archive to `History/<YYYY-MM>/<session-uuid>.{json,ext}`; KG worker phase-4 integration; reconcile scan helper. Three golden JSON fixtures locked. All gates green; kg_parity 32/32, source_gate 6/6, graph_off 8/8 GREEN). Prior anchors: 2026-06-04 (Wave 1E.3 two-phase commit shipped); 2026-06-04 earlier (**KG Phase 1D SEALED via ADR 0052 Accepted** — Wave 1D.6 three judges + epic seal); 2026-05-31 (**KG Phase 1C SEALED via ADR 0051 Accepted**); 2026-06-03 (ADR 0050 KG Phase 1B SEALED).
+**Last consolidated:** 2026-06-06 (**KG Phase 1E Alignment Wave shipped** —
+zero-code docs-only realignment to the Karpathy/Clark Personal Knowledge
+Engine pattern; **ADR 0054 Proposed** (Personal Knowledge Engine substrate)
+adopts a richer framing OVER ADR 0053's vault foundation, with two-agent role
+separation (Mockingbird = capture + first-pass synthesis layer; user's
+chat-LLM = wiki author performing Ingest/Query/Lint); ADR 0053 amended with
+supersession pointer (§D3 vocab partial, §D8 seeds scope partial, §D9 Tasks
+default-on de-emphasized); `phase-1e.md` Amendment 2026-06-06 #2 rescopes
+Wave 1E.7 (drop `Kanban-Tasks.md`; ADD `SCHEMA.md` / `INDEX.md` / `LOG.md` /
+`Tags/` subtree / type-vocab realignment); LESSONS PINNED **P14** (Karpathy/Clark
+north star) added; PRODUCT-STATE.md adds §3.20 KG subsystem + bumps snapshot
+framing; AGENTS.md project-context paragraph updated; type vocabulary realigned
+to nine knowledge shapes (`source`/`note`/`concept`/`entity`/`project`/
+`question`/`decision`/`reference`/`observation` — drops `task`/`event`); 4
+beads reframed (`mb-82h6`/`mb-ifun`/`mb-xqcf` description rewrites; `mb-il83`
+closed by vocab realignment); 4 new follow-up beads filed (`mb-rik9` this
+wave; UI copy; pipeline prompt realignment; `spec.md` realignment;
+Phase 2 charter draft); single `[alignment]` commit; closes `mb-rik9`).
+Prior consolidation 2026-06-06 (**KG Phase 1E Wave 1E.5 shipped** — reverse-watcher reconciles Obsidian Entry edits back into SQLite within ~3s; SHA-256 loop-prevention against own writes; entity/project/history/inbox routed to IGNORED; new `vault::watcher` + `vault::watcher_reconcile` + `vault::markdown_parser` modules (all under 600-LoC cap); wiki-link alias polish — entities now emit `"[[Entities/<slug>|<slug>]]"`; 3 LF-normalized golden updates; 3 pipeline-quality beads filed for post-1E sprint (`mb-82h6`, `mb-ifun`, `mb-xqcf`); all gates green incl. cargo build --release; closes `mb-qwfy`). Prior consolidation 2026-06-06 (**KG Phase 1E charter amendment shipped** — four ADR 0053 amendments (subtree → 5 folders; entities emit as `"[[Entities/<slug>]]"` wiki-links; auto-generated entity pages §D11; auto-generated project pages §D12); new `vault::entity_pages` module; serializer retrofit; worker integration; 19 new live tests + 1 new golden + 2 property tests; closes `mb-08za`; fresh release exe built per PINNED P13). Prior consolidation 2026-06-06 (**KG Phase 1E hotfix #2 shipped** — vault entry body now sources from `transcripts(stage='final')` cleaned cascade, not `entries[0].body` segmenter output; multi-bullet KG notes no longer drop segments 1..N; closes `mb-wzui`; fresh release exe built). Prior consolidation 2026-06-06 earlier (**KG Phase 1E hotfix #1 shipped** — fresh release binary + `kg_reconcile_vault` + `kg_reconcile_history` IPCs + dashboard "Reconcile vault" button; closes `mb-43xw`; LESSONS PINNED P13 added). Prior consolidation 2026-06-05 (**KG Phase 1E Wave 1E.4 shipped** — `vault::history` module ships per-session JSON sidecar + audio file archive to `History/<YYYY-MM>/<session-uuid>.{json,ext}`; KG worker phase-4 integration; reconcile scan helper. Three golden JSON fixtures locked. All gates green; kg_parity 32/32, source_gate 6/6, graph_off 8/8 GREEN). Prior anchors: 2026-06-04 (Wave 1E.3 two-phase commit shipped); 2026-06-04 earlier (**KG Phase 1D SEALED via ADR 0052 Accepted** — Wave 1D.6 three judges + epic seal); 2026-05-31 (**KG Phase 1C SEALED via ADR 0051 Accepted**); 2026-06-03 (ADR 0050 KG Phase 1B SEALED).
 
 ## ✅ Sealed (do not re-execute)
 
@@ -61,7 +79,86 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**KG Phase 1E (Obsidian as source of truth) — Waves 1E.0 + 1E.1 + 1E.2 + 1E.3 + 1E.4 + 1E.5 shipped + hotfix; Waves 1E.6 (KG-Inbox courier) and 1E.7 (seeds) unblocked in parallel.** Charter ADR [ADR 0053](docs/adr/0053-kg-phase-1e-obsidian-as-source-of-truth.md) Proposed; phase doc at `docs/phases/phase-1e.md`; bead epic `mb-imc2` with 10 sub-beads. 1E.5 lands the reverse-watcher: Obsidian edits on `<vault>/Knowledge Graph/Entries/*.md` reconcile back into SQLite within ~3s, with SHA-256 hash-based loop-prevention against Mockingbird's own writes (`sessions.vault_file_hash` from migration 026). Entity/project pages, History sidecars, and Inbox audio are all routed to IGNORED. Wiki-link entities now emit with Obsidian's pipe-alias display form (`[[Entities/<slug>|<slug>]]`); the new parser strips the alias when extracting the slug for DB write, and tolerates both pipe-alias and legacy bare wiki-link forms.
+**KG Phase 1E (Obsidian as source of truth, reframed as Personal Knowledge
+Engine substrate per ADR 0054) — Waves 1E.0 + 1E.1 + 1E.2 + 1E.3 + 1E.4 +
+1E.5 + entity/project amendment + two hotfixes + Alignment Wave shipped;
+Waves 1E.6 (KG-Inbox courier) and 1E.7 (RESCOPED — `SCHEMA.md` / `INDEX.md`
+/ `LOG.md` / `Tags/` subtree / type-vocab realignment) unblocked in
+parallel; 1E.8 (iOS Shortcut docs) docs-only available any time; 1E.9
+seals both ADR 0053 + ADR 0054 together.**
+
+### Alignment Wave deliverables shipped (this iteration; mb-rik9; zero code changes)
+
+- **ADR 0054** (Personal Knowledge Engine substrate, Proposed) — 15
+  sections (§A three-layer architecture / §B two-agent role separation
+  / §C SCHEMA.md / §D INDEX.md / §E LOG.md / §F Tags subtree / §G type
+  vocab realignment / §H chat-LLM operations / §I Mockingbird
+  operations / §J Phase 1E wave rescope / §K Phase 2 scope / §L
+  supersedes / §M references / §N consequences / §O open questions).
+  Lineage: Vannevar Bush Memex (1945) → Karpathy LLM Wiki gist →
+  Alvin Clark *Building a Personal Knowledge Engine with LLMs and
+  Obsidian* (April 2026).
+- **ADR 0053 amendment** — supersession-pointer block appended:
+  §D3 (type vocab) partial; §D8 (Kanban + Dashboard seeds) partial;
+  §D9 (Tasks-plugin checkbox default-on) de-emphasized to opt-in.
+  Sections that carry forward unchanged enumerated explicitly
+  (D1/D2/D3-shape/D4/D5/D6/D7/D10/D11/D12).
+- **`docs/phases/phase-1e.md` Amendment 2026-06-06 #2** — Wave 1E.6
+  unchanged; Wave 1E.7 RESCOPED (drop Kanban; add SCHEMA/INDEX/LOG/
+  Tags/type-vocab); Wave 1E.8 framing updated (Shortcut delivers to
+  Inbox/ Layer 1; chat-LLM crystallizes to Layer 2); Wave 1E.9
+  judges semantic shift from task semantics to knowledge-link
+  semantics.
+- **LESSONS PINNED P14** added (above P13) — "The Karpathy/Clark
+  North Star" — two-agent role separation, three-layer architecture,
+  chat-LLM owns Ingest/Query/Lint, nine knowledge shapes, anti-patterns.
+- **`docs/PRODUCT-STATE.md`** — snapshot date bumped to 2026-06-06;
+  top "What Mockingbird is" rewritten to name the three layers
+  (dictation / meeting capture / KG capture+first-pass synthesis
+  layer); architecture map expanded to include the KG capture branch +
+  Obsidian vault layout + chat-LLM consumer; new **§3.20 Knowledge
+  Graph / Personal Knowledge Engine substrate** section covering
+  ships-today / upcoming / role-separation / vocab / lineage / ADR
+  trail.
+- **`.code_puppy/AGENTS.md`** — top "Project context" paragraph
+  expanded: Mockingbird is dictation+meeting-capture AND the capture
+  layer for the Karpathy/Clark Personal Knowledge Engine pattern;
+  chat-LLM = wiki author / Obsidian = IDE / vault = knowledge
+  codebase / SCHEMA.md = portable contract.
+- **Bead descriptions updated:** `mb-82h6` (knowledge-shape vocabulary
+  in tag extractor few-shots, not "small note"), `mb-ifun` (entity
+  extraction quality affects KG navigation), `mb-xqcf` (type
+  classification for the nine knowledge shapes, not task/note
+  binary). **Bead `mb-il83` CLOSED** — vocab drift resolved by
+  ADR 0054 §G realignment.
+- **New follow-up beads filed:** UI copy relabel pass; pipeline
+  prompt realignment (classify + entity extraction few-shots);
+  Phase 2 charter draft; `spec.md` realignment chore.
+  `PLAN-mockingbird-v2.md` spot-check: **clean** (zero KG / kanban /
+  task-management mentions — KG epic happened entirely as lateral
+  ADR-chartered work; no follow-up bead needed).
+  `docs/knowledge-graph/spec.md` spot-check: **task framing
+  identified at §3 (TaskForge/Tasks plugin context), §7.2 (Layer 2
+  type includes `task`), §7.4 (entire "Tasks use Obsidian Tasks
+  format" section), §11 ("tasks actionable as native checkboxes"),
+  §14 (Kanban + dashboard contract), §14.4 (dependency-aware boards
+  framing), §15.3 (light insights "open tasks"), Appendix
+  Sequencing summary** — filed as P2 bead for in-place rewrite
+  follow-up; ADR 0054 supersedes by reference in the interim.
+- **NO code changes anywhere** — `git diff --stat` shows only `.md`
+  files modified/created. No cargo gate run (not applicable to
+  docs-only).
+
+**Resume next iteration:** `bd ready -t task` surfaces 1E.6
+(`mb-i46v`) and 1E.7 (`mb-bgpt`, NOW RESCOPED — see Amendment
+2026-06-06 #2 in `docs/phases/phase-1e.md` + ADR 0054 §J) as the
+unblocked parallel set. 1E.7 author MUST read ADR 0054 §C/§D/§E/§F/§G
+for the SCHEMA / INDEX / LOG / Tags / type-vocab contracts before
+implementation. 1E.8 docs-only bead available any time. Dispatch
+one-liner pattern per LESSONS P8: `implement Wave 1E.7 per
+docs/phases/phase-1e.md Amendment 2026-06-06 #2 and ADR 0054`.
+
+### Prior in-flight (now historical): KG Phase 1E Wave 1E.5 shipped (Obsidian as source of truth) — Waves 1E.0 + 1E.1 + 1E.2 + 1E.3 + 1E.4 + 1E.5 shipped + hotfix; Waves 1E.6 (KG-Inbox courier) and 1E.7 (seeds) unblocked in parallel. Charter ADR [ADR 0053](docs/adr/0053-kg-phase-1e-obsidian-as-source-of-truth.md) Proposed; phase doc at `docs/phases/phase-1e.md`; bead epic `mb-imc2` with 10 sub-beads. 1E.5 lands the reverse-watcher: Obsidian edits on `<vault>/Knowledge Graph/Entries/*.md` reconcile back into SQLite within ~3s, with SHA-256 hash-based loop-prevention against Mockingbird's own writes (`sessions.vault_file_hash` from migration 026). Entity/project pages, History sidecars, and Inbox audio are all routed to IGNORED. Wiki-link entities now emit with Obsidian's pipe-alias display form (`[[Entities/<slug>|<slug>]]`); the new parser strips the alias when extracting the slug for DB write, and tolerates both pipe-alias and legacy bare wiki-link forms.
 
 ### Wave 1E.5 deliverables shipped (this iteration)
 

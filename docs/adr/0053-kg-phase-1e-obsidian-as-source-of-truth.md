@@ -846,3 +846,51 @@ should defensively handle both shapes (e.g. `contains(entities,
 "feta-cheese") OR contains(entities, "[[Entities/feta-cheese]]")`).
 Automatic backfill is deferred to Phase 1F; the manual
 alternatives (re-capture, hand-edit) are documented in LESSONS.
+
+### 2026-06-06 — Superseded in part by ADR 0054 (Karpathy/Clark adoption)
+
+**Bead:** `mb-rik9` (Phase 1E Alignment Wave). **Trigger:** Dustin
+recognized that Obsidian is knowledge-graph-first (not
+task-management-first) and surfaced the Karpathy "LLM Wiki" gist +
+Alvin Clark "Building a Personal Knowledge Engine with LLMs and
+Obsidian" (April 2026) as the architectural north star. ADR 0054
+(Proposed) charters the adoption of the Personal Knowledge Engine
+substrate pattern over this ADR's foundation; it does NOT supersede
+wholesale.
+
+**Sections of THIS ADR that ADR 0054 supersedes:**
+
+- **§D3 (YAML frontmatter shape — type vocabulary) — partial.** The
+  `task` / `event` / `research` / `reference` / `note` set is
+  replaced by the nine knowledge shapes (`source` / `note` /
+  `concept` / `entity` / `project` / `question` / `decision` /
+  `reference` / `observation`). The frontmatter *shape* (field
+  order, conditional fields, LF discipline, escape rules) remains
+  in force unchanged. See ADR 0054 §G.
+- **§D8 (Pre-built `.md` seeds — Wave 1E.7) — partial.** The
+  `Kanban-Tasks.md` seed is dropped; the new seeds are `SCHEMA.md`
+  (write-once user-owned), `INDEX.md` (auto-maintained catalog),
+  `LOG.md` (append-only operations log), and the `Tags/` subtree.
+  The `Dashboard.md` seed in its original task-flavored shape is
+  superseded by `INDEX.md`. The `README.md` seed shape carries
+  forward with updated framing. See ADR 0054 §J (Wave 1E.7
+  rescope) + §C/§D/§E/§F.
+- **§D9 (Obsidian Tasks emission) — de-emphasized.** Tasks-plugin
+  checkbox emission moves from default-on to opt-in via a user
+  preference setting. The serializer retains the capability; the
+  default flips off. See ADR 0054 §L.
+
+**Sections that carry forward unchanged:** D1 (vault subtree shape;
+as amended above to five folders), D2 (filename format), D3
+*shape* (only the vocabulary changed; field order + escape rules
+intact), D4 (two-phase commit), D5 (reverse-watcher), D6 (KG-Inbox
+courier), D7 (history archive), D10 (iOS Shortcut docs), D11
+(entity pages), D12 (project pages). The reverse-watcher remains
+the load-bearing reconcile path; the two-phase commit remains the
+DB-first-then-file-then-DB-seal ordering; the file-wins conflict
+resolution remains in force.
+
+**Action:** Phase 1E continues toward seal via the rescoped 1E.7 +
+1E.9 (per ADR 0054 §J). 1E.6 + 1E.8 are unchanged. ADR 0053 stays
+Proposed until Phase 1E seals; at seal both ADR 0053 and ADR 0054
+flip to Accepted together.

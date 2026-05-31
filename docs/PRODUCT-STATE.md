@@ -1,9 +1,14 @@
 # Mockingbird — Product State
 
-**Snapshot date:** 2026-05-23
-**Branch:** `main` (commit `a4e0ec3` — post-MC-hotfix)
-**Maturity:** Phase 0-4 + Phase 8 sealed; Meeting Capture (MC) sealed. Phases 5/6/7
-(polish, windows, signing) and Phase 9 (macOS) remain ahead.
+**Snapshot date:** 2026-06-06 (Karpathy/Clark Personal Knowledge Engine pivot;
+KG Phase 1E Wave 1E.5 shipped; Phase 10 sealed; MC sealed; ADR 0054 Proposed)
+**Branch:** `main` (commit `c70a5d7` — Wave 1E.5 seal)
+**Maturity:** Phase 0-4 + Phase 8 + Phase 10 sealed; Meeting Capture (MC) sealed;
+Knowledge Graph Phase 1A–1E in flight under ADR 0049 lineage (Phases 1A–1D sealed;
+1E waves 1E.0–1E.5 + entity/project amendment + two hotfixes shipped; 1E.6 / 1E.7 /
+1E.8 / 1E.9 unblocked). Phases 5/6/7 (polish, windows, signing) and Phase 9 (macOS)
+remain ahead. Phase 2 (Personal Knowledge Engine substrate enrichments) chartered
+under ADR 0054 (Proposed); detailed sequencing in a future ADR 0055.
 
 This is the durable "what does the app actually do today?" reference. Update when a
 subsystem ships or materially changes — NOT every iteration. For session-by-session
@@ -13,13 +18,28 @@ state, see `STATUS.md`.
 
 ## 1. What Mockingbird is
 
-A **local-first, privacy-respecting voice dictation app for Windows**, intended as
-a drop-in replacement for Wispr Flow. Zero telemetry, zero cloud calls (unless the
-user explicitly opts into the optional Unsplash photo background or chooses a cloud
-LLM provider). Everything — speech-to-text, LLM cleanup, database, model weights —
-runs on the user's machine.
+Mockingbird is THREE things in one binary, layered:
 
-Two top-level capture modes share one app:
+1. A **local-first, privacy-respecting voice dictation app for Windows**, intended
+   as a drop-in replacement for Wispr Flow. Zero telemetry, zero cloud calls
+   (unless the user explicitly opts into the optional Unsplash photo background
+   or chooses a cloud LLM provider). Everything — speech-to-text, LLM cleanup,
+   database, model weights — runs on the user's machine.
+2. A **meeting-capture app** for long-form two-channel recordings
+   (mic + system audio loopback) with deterministic transcript formatting.
+3. The **capture + first-pass synthesis layer for a Karpathy/Clark Personal
+   Knowledge Engine pattern** (KG epic; ADR 0049 lineage). In this layer,
+   **Obsidian is the IDE**, the **user's chat-LLM** (Claude Code / Cursor /
+   OpenCode / etc.) is the **wiki author/maintainer**, and the **Obsidian
+   vault is the knowledge codebase**. Mockingbird captures audio/text → cleans
+   → classifies → extracts entities → projects to vault as wiki-linked
+   Markdown → auto-generates Entity/Project/Tag stub pages → maintains
+   `INDEX.md` + `LOG.md`. The chat-LLM reads `SCHEMA.md` and performs
+   Ingest / Query / Lint over the vault. North star chartered under **ADR
+   0054** (Proposed); load-bearing context in LESSONS PINNED P14.
+
+**Top-level capture modes** (the first two are user-facing surfaces; the third
+is the substrate that the KG path consumes):
 
 1. **Dictation** — push-to-talk via a global hotkey. Records, transcribes with
    Whisper, optionally cleans with a local LLM, pastes into the focused app via
@@ -30,6 +50,14 @@ Two top-level capture modes share one app:
    with rolling-prompt long-form Whisper, merges into a two-speaker markdown
    transcript via a deterministic formatter, optionally summarizes with an
    ephemeral LLM pass (not persisted).
+
+3. **KG note capture** (audio + text) — same capture pipeline as dictation,
+   but the post-cleanup output is enqueued for the KG filing worker (per
+   ADR 0050) instead of (or in addition to) clipboard injection. Source-gated
+   per ADR 0052 D3 so default PTT + in-app dictations are NEVER auto-filed.
+   The filed entry is projected to the vault as canonical Markdown
+   (ADR 0053 §D2/D3) with auto-generated Entity/Project/Tag stub pages
+   (ADR 0053 §D11/§D12 + ADR 0054 §F).
 
 Stack: **Tauri 2 + Rust + React 19 + TypeScript + Tailwind v4 + SQLite (rusqlite)**.
 CUDA 12.8 via `whisper-rs` for STT, ORT 1.22 for Silero VAD, Ollama for LLM cleanup,
@@ -44,31 +72,70 @@ cpal for audio (mic + WASAPI loopback).
                  │   Global hotkey (WH_KEYBOARD_LL)     │
                  │   Right Alt → Dictation              │
                  │   Right Ctrl + . → Meeting Capture   │
+                 │   KG note buttons → KG-note capture  │
                  └──────────┬───────────────────────────┘
                             │
-            ┌───────────────┴───────────────┐
-            │                               │
-            ▼                               ▼
-   ┌────────────────────┐         ┌─────────────────────┐
-   │   DICTATION        │         │   MEETING CAPTURE   │
-   │   (Phase 3)        │         │   (Phase MC)        │
-   ├────────────────────┤         ├─────────────────────┤
-   │ 1 mic stream       │         │ mic + loopback      │
-   │ Silero VAD gate    │         │ 30s/2s chunker      │
-   │ Whisper (one-shot) │         │ Long-form Whisper   │
-   │ Cleanup (LLM, sync)│         │ Two-channel merge   │
-   │ Clipboard inject   │         │ Persist → Meetings  │
-   │ History row        │         │ Optional LLM pass   │
-   └────────┬───────────┘         └──────────┬──────────┘
-            │                                │
-            ▼                                ▼
-       ┌──────────────────────────────────────┐
-       │   SQLite (migrations 001-011)        │
-       │   transcripts (immutable raw)        │
-       │   sessions, modes, prompts,          │
-       │   dictionary, settings, meetings,    │
-       │   meeting_chunks                     │
-       └──────────────────────────────────────┘
+            ┌───────────────┼─────────────────────────────┐
+            │               │                             │
+            ▼               ▼                             ▼
+   ┌──────────────┐  ┌───────────────────┐  ┌─────────────────────┐
+   │  DICTATION   │  │  MEETING CAPTURE  │  │  KG NOTE CAPTURE    │
+   │  (Phase 3)   │  │  (Phase MC)       │  │  (ADR 0049→0054)    │
+   ├──────────────┤  ├───────────────────┤  ├─────────────────────┤
+   │ mic stream   │  │ mic + loopback    │  │ mic OR text-input   │
+   │ VAD gate     │  │ 30s/2s chunker    │  │ same cleanup as     │
+   │ Whisper      │  │ Long-form Whisper │  │   dictation         │
+   │ Cleanup LLM  │  │ Two-channel merge │  │ classify + extract  │
+   │ Clipboard    │  │ Persist→Meetings  │  │   entities + tags   │
+   │ History row  │  │ Optional LLM pass │  │ Source-gated filing │
+   └──────┬───────┘  └──────────┬────────┘  │   (ADR 0052)        │
+          │                     │           └──────────┬──────────┘
+          │                     │                      │
+          ▼                     ▼                      ▼
+   ┌──────────────────────────────────────────────────────────┐
+   │   SQLite (migrations 001-026)                            │
+   │   transcripts (immutable raw), sessions, modes,          │
+   │   prompts, dictionary, settings, meetings, meeting_chunks│
+   │   + kg_entities, kg_entity_mentions, kg_canonical_tags,  │
+   │     kg_tag_mentions, kg_filing_queue, activity_*,        │
+   │     sessions.entry_id/vault_path/vault_file_hash         │
+   └──────────────────────────────────────────────────────────┘
+                                       │
+                                       │ KG filing worker (ADR 0050)
+                                       ▼
+            ┌─────────────────────────────────────────────────┐
+            │  Obsidian vault — Knowledge Graph/ subtree      │
+            │  (ADR 0053 + ADR 0054 substrate)                │
+            │                                                 │
+            │  Layer 1 raw immutable:                         │
+            │   ├── History/  (session JSON sidecars + audio) │
+            │   └── Inbox/    (iOS Shortcut / desktop import) │
+            │                                                 │
+            │  Layer 2 wiki LLM-maintained:                   │
+            │   ├── Entries/  (Mockingbird-authored, deterministic)
+            │   ├── Entities/ (stub pages; write-once)        │
+            │   ├── Projects/ (stub pages; write-once)        │
+            │   ├── Tags/     (stub pages; write-once) [1E.7] │
+            │   └── Concepts/  (chat-LLM-authored) [upcoming] │
+            │                                                 │
+            │  Layer 3 operational contract:                  │
+            │   ├── SCHEMA.md (write-once user-owned) [1E.7]  │
+            │   ├── INDEX.md  (auto-maintained)       [1E.7]  │
+            │   └── LOG.md    (append-only)           [1E.7]  │
+            └────────┬─────────────────────────────┬──────────┘
+                     │                             │
+     reverse-watcher │                             │ reads + writes
+     (file → SQLite) │                             ▼
+                     │            ┌────────────────────────────┐
+                     ▼            │  User's chat-LLM           │
+           ┌─────────────────┐    │  (Claude Code / Cursor /   │
+           │  SQLite         │    │   OpenCode / ...)          │
+           │  (file-wins per │    │                            │
+           │   ADR 0053 §D5) │    │  • Reads SCHEMA.md         │
+           └─────────────────┘    │  • Ingest / Query / Lint   │
+                                  │  • Ripples 10-15 pages     │
+                                  │  • Files results as wiki   │
+                                  └────────────────────────────┘
             ▲                                ▲
             │                                │
        ┌────┴───────┐               ┌────────┴────────┐
@@ -999,6 +1066,113 @@ ADR 0051's §"UI sealed-surface authorization" window closed at the
 1C.5 seal; ADR 0052's analog window closed at the 1D.6 seal —
 Phase 1E opens its own ADR-0049 §"Sandbox isolation" window per
 the established pattern.
+
+### 3.20 Knowledge Graph / Personal Knowledge Engine substrate (ADR 0049 → 0053 → 0054)
+
+**Status:** in flight. Phases 1A–1D sealed; Phase 1E Waves 1E.0–1E.5 +
+entity/project page amendment + two hotfixes shipped on `main` at
+`c70a5d7`; Waves 1E.6 / 1E.7 / 1E.8 / 1E.9 remain. Architectural
+north star pivoted 2026-06-06 to the Karpathy/Clark Personal
+Knowledge Engine pattern via **ADR 0054** (Proposed) — a richer
+framing OVER the ADR 0053 vault-substrate foundation, not a
+supersession of it. Load-bearing context: **LESSONS PINNED P14**.
+
+**What ships today (as of 2026-06-06):**
+
+- **Capture path** — `capture_kind` source-gate (ADR 0052 D3) so
+  default PTT + in-app dictations NEVER auto-file. The KG screen
+  exposes audio and text-note capture surfaces (`dictation_start_kg_note`,
+  `kg_ingest_text_note` IPCs); ADR 0046 desktop-file import has a
+  KG-tagged path; KG-Inbox courier ships in Wave 1E.6.
+- **First-pass synthesis pipeline** (ADR 0049 §6 + ADR 0050) —
+  segment → classify → extract → **extract_entities** → normalize.
+  Per-segment, in isolation, no cross-vault reasoning. Schema-driven
+  via the bundled `SCHEMA.md` (v1-slice; closed-vocab Move 3
+  deferred). Calibrated for ~1 min intake latency budget at
+  qwen2.5:7b-instruct-q4_K_M.
+- **Two-phase commit** (ADR 0053 §D4) — DB-first then file write
+  then DB-seal then queue-seal. File write is non-fatal to the
+  queue (retry budgets decoupled).
+- **Vault projection** (`vault::markdown_serializer`,
+  `vault::writer`, `vault::entity_pages`) — deterministic Markdown
+  with double-quoted YAML frontmatter, LF-only, single trailing
+  newline, byte-stable golden suite. Filename format
+  `<date>-<slug>__<id8>.md`. Entities emit as Obsidian wiki-links
+  `"[[Entities/<slug>|<slug>]]"`. Auto-generated stub pages for
+  every entity + Project-typed entity mention (write-once;
+  user-owns-thereafter).
+- **Five-folder subtree** — `Knowledge Graph/{Inbox, Entries,
+  History, Entities, Projects}` (`Tags/` added in upcoming Wave
+  1E.7). Idempotent bootstrap via `vault::kg_layout`.
+- **History archive** (`vault::history`, ADR 0053 §D7) — per-session
+  JSON sidecar + audio file move to
+  `History/<YYYY-MM>/<session-uuid>.{json,wav,mp3,...}`.
+- **Reverse-watcher** (`vault::watcher`, `vault::watcher_reconcile`,
+  `vault::markdown_parser`, ADR 0053 §D5) — Obsidian edits to
+  `Entries/*.md` reconcile back into SQLite within ~3s, with
+  SHA-256 hash-based loop-prevention against Mockingbird's own
+  writes. Entity/Project pages, History sidecars, Inbox audio are
+  IGNORED.
+- **KG screen** (sidebar nav, ADR 0052 D5) — read-only dashboard
+  with 5 status bands (Recent / Failed / Filed / Retrieval /
+  Actions). Actions band hosts "Reconcile vault" + "Open vault in
+  Obsidian" buttons.
+- **Standing regression gates** — `kg_parity` 32/32 bit-identical
+  (default + `--persist`); `kg_source_gate_invariant` 6/6;
+  `kg_graph_off_invariant` 8/8 + controls.
+
+**What's upcoming (1E.6 → seal):**
+
+- **Wave 1E.6** — KG-Inbox courier (sibling to ADR 0046 inbox).
+- **Wave 1E.7** — rescoped per ADR 0054 §J: drops `Kanban-Tasks.md`
+  seed (task-flavored, off-axis); ADDS `SCHEMA.md` (write-once
+  user-owned operational contract), `INDEX.md` (auto-maintained
+  catalog), `LOG.md` (append-only operations log, format `##
+  [YYYY-MM-DD HH:MM] operation | title`), `Tags/` subtree (parallel
+  to Entities/Projects/, auto-generated tag pages with Dataview
+  rollups), type vocabulary realignment in serializer + goldens.
+- **Wave 1E.8** — iOS Shortcut docs (`docs/mobile/ios-shortcut-kg.md`).
+- **Wave 1E.9** — four judges (J1–J4 per ADR 0053; extended scope
+  per ADR 0054 §J) + ADR 0053 + 0054 seal.
+
+**Two-agent role separation (ADR 0054 §B):**
+
+- **Mockingbird** = capture + first-pass synthesis layer. NOT the
+  wiki author.
+- **User's chat-LLM** (Claude Code / Cursor / OpenCode / etc.) =
+  wiki author. Reads `SCHEMA.md`, performs Ingest / Query / Lint,
+  ripples updates across pages, files query results as new wiki
+  pages. Mockingbird-side Phase 2 (provisionally ADR 0055) ships
+  only Mockingbird-side enrichments (concept extraction, source-
+  summary distinction, optional lint-hint surfacing, optional
+  "Open in chat-LLM" launcher, INDEX.md/LOG.md incremental
+  refinements). The deep Ingest/Query/Lint work stays in the
+  chat-LLM.
+
+**Type vocabulary** (ADR 0054 §G) — nine knowledge shapes: `source` /
+`note` / `concept` / `entity` / `project` / `question` / `decision` /
+`reference` / `observation`. **NOT** `task`, **NOT** `event`. Every
+`Entries/` file is implicitly a source; `type:` describes the
+knowledge shape within. Closes the `mb-il83` drift bead.
+
+**Lineage:** Vannevar Bush's Memex (1945) → Karpathy "LLM Wiki" gist
+→ Alvin Clark "Building a Personal Knowledge Engine with LLMs and
+Obsidian" (April 2026).
+
+**ADR trail (chronological):**
+
+- ADR 0048 — Phase 0 validation methodology (Accepted)
+- ADR 0049 — Phase 0.5 + v1 architectural pivot (Accepted)
+- ADR 0050 — Phase 1B persistence + worker + dictation-tail hook
+  (Accepted)
+- ADR 0051 — Phase 1C retrieval UX + activation toggle + concept
+  modal (Accepted)
+- ADR 0052 — Phase 1D source-gated filing + first-class KG screen
+  (Accepted)
+- ADR 0053 — Phase 1E Obsidian as source of truth (Proposed;
+  amendments + partial supersession by ADR 0054)
+- ADR 0054 — Personal Knowledge Engine substrate (Proposed;
+  Karpathy/Clark adoption)
 
 ---
 

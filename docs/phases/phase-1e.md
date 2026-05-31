@@ -852,3 +852,138 @@ candidates: `kg::reverse_watcher` (split into watcher + runtime if it
 crosses), `kg::worker` (already 31.8 KB at end-of-1D; the 1E.3
 extension may push it; consider extracting projection-writing into
 `kg::worker::projection_step` as a sibling file).
+
+---
+
+## Amendment 2026-06-06 #2 — Karpathy/Clark adoption (mb-rik9, ADR 0054)
+
+**Trigger:** Dustin recognized that Obsidian is
+knowledge-graph-first (not task-management-first) and surfaced the
+Karpathy "LLM Wiki" gist + Alvin Clark "Building a Personal
+Knowledge Engine with LLMs and Obsidian" (April 2026) as the
+architectural north star. ADR 0054 (Proposed) charters the
+adoption of the Personal Knowledge Engine substrate pattern over
+ADR 0053's foundation. This amendment is the phase-doc-side
+rescope of the remaining unseal waves.
+
+**Two-agent role separation (load-bearing context for all remaining
+waves):**
+
+- **Mockingbird** = capture + first-pass synthesis layer. Captures
+  audio/text → cleans → classifies → extracts entities → projects
+  to vault as wiki-linked Markdown → maintains INDEX.md + LOG.md →
+  auto-generates Entity/Project/Tag stub pages. NOT the wiki
+  author.
+- **User's chat-LLM** (Claude Code / Cursor / OpenCode / etc.) =
+  wiki author + maintainer. Reads `SCHEMA.md`, performs Ingest /
+  Query / Lint over the vault. Ripple updates across pages; files
+  query results as new wiki pages.
+
+See ADR 0054 §B for the full role separation + diagram.
+
+### Wave 1E.6 — UNCHANGED
+
+KG-Inbox courier sibling to ADR 0046 inbox, positional routing,
+shared dedup ledger. Scope is orthogonal to the Karpathy/Clark
+adoption; ships as charted in the original phase doc.
+
+### Wave 1E.7 — RESCOPED (drops Kanban; adds SCHEMA + INDEX + LOG + Tags)
+
+**Drops from previous scope:**
+
+- `Kanban-Tasks.md` seed — task-management-flavored; off-axis with
+  the knowledge-engine pivot. Users who want a Kanban view install
+  the Kanban plugin themselves.
+- `Dashboard.md` seed in its previous task-flavored shape —
+  replaced by `INDEX.md` (knowledge-engine catalog shape).
+
+**Adds:**
+
+- **`SCHEMA.md` seed** (write-once user-owned) — operational
+  contract any LLM reads to maintain the wiki consistently. Per
+  ADR 0054 §C. Seeded on first activation if missing; Mockingbird
+  never rewrites thereafter.
+- **`INDEX.md` seed + maintenance** (auto-maintained catalog) —
+  H2 sections for Sources / Entities / Projects / Tags / Concepts.
+  Per ADR 0054 §D. Mockingbird writes the Sources/Entities/
+  Projects/Tags sections incrementally; never touches the Concepts
+  section (chat-LLM-owned).
+- **`LOG.md` seed + append** (append-only operations log) — format
+  `## [YYYY-MM-DD HH:MM] operation | title`. Per ADR 0054 §E.
+  Mockingbird appends a `capture` line on each successful Entry
+  projection. Read-tail-then-append discipline; never
+  read-modify-write.
+- **`Tags/` subtree** (parallel to `Entities/`, `Projects/`) —
+  auto-generated tag pages with Dataview rollups. Per ADR 0054 §F.
+  Same write-once user-owns-thereafter contract as entity/project
+  pages. Created as part of `bootstrap_kg_subtree`.
+- **Type vocabulary realignment** in the serializer + goldens —
+  `vault::markdown_serializer::EntryType` enum expanded to the
+  nine knowledge shapes (`source` / `note` / `concept` / `entity`
+  / `project` / `question` / `decision` / `reference` /
+  `observation`). Lossy `Research/Reference → Note` mapping at the
+  worker boundary removed in favor of direct pass-through. Per
+  ADR 0054 §G. Closes the drift bead `mb-il83`.
+- **`README.md` seed** — short orientation pointing the user at
+  SCHEMA.md + the chat-LLM workflow + the Karpathy/Clark pattern
+  + the open-format guarantee.
+
+**Implementation hint:** the six-folder subtree (`Inbox`, `Entries`,
+`History`, `Entities`, `Projects`, `Tags`) plus three root files
+(`SCHEMA.md`, `INDEX.md`, `LOG.md`) plus `README.md` is the
+full first-activation shape. `bootstrap_kg_subtree` returns
+`BootstrapReport::AlreadyExists` only when ALL six folders AND all
+four files are present-as-expected.
+
+### Wave 1E.8 — FRAMING UPDATED
+
+The iOS Shortcut docs shape (`docs/mobile/ios-shortcut-kg.md`) is
+unchanged. Body framing shifts: the Shortcut delivers content to
+`Inbox/` (Layer 1 raw immutable); the chat-LLM Ingest operation
+crystallizes it into Layer 2 wiki pages later. Mockingbird-side:
+KG-Inbox courier's job is the same (drop file → classify → enqueue
+for first-pass synthesis). Cross-link to ADR 0054 §H for the
+Ingest contract.
+
+### Wave 1E.9 — FRAMING UPDATED
+
+The four judges (J1–J4) carry over from ADR 0053 with extended
+scope:
+
+- **J1 `kg-reverse-watcher-loop-prevention`** — unchanged.
+- **J2 `kg-file-wins-on-conflict`** — unchanged.
+- **J3 `kg-subtree-bootstrap-idempotent`** — extended to cover the
+  six-folder + three-file + README shape from Wave 1E.7 above.
+  Back-to-back bootstrap calls must be idempotent across the full
+  shape.
+- **J4 `kg-serializer-golden-roundtrip`** — extended goldens cover
+  the new nine-knowledge-shape type vocabulary. Round-trip stays
+  byte-identical.
+
+Semantic shift: from "task semantics" (Kanban seeded;
+Tasks-plugin checkboxes default-on round-trip) to
+"knowledge-link semantics" (auto-generated stub pages exist for
+every entity/project/tag mention; wiki-link emission byte-stable;
+INDEX.md catalog covers what was created). The judges should
+encode the new semantics; the underlying mechanics (file-wins,
+loop-prevention, idempotency, byte-stability) carry forward
+unchanged.
+
+### Acceptance gates carry-forward
+
+The standing regression gates (`kg_parity` 32/32,
+`kg_source_gate_invariant` 6/6, `kg_graph_off_invariant` 8/8 +
+controls) remain in force across all rescoped waves. The cargo
+gate per LESSONS P2 (check + clippy + fmt + `test --release
+--no-run`) plus the PINNED P13 `cargo build --release` for any
+wave touching migrations/worker/IPC also remain in force.
+
+### Closing notes
+
+- ADR 0054 stays Proposed until Phase 1E seals; at seal both ADR
+  0053 and ADR 0054 flip to Accepted together.
+- Phase 2 charter (provisionally ADR 0055) inherits the rescoped
+  Phase 2 scope from ADR 0054 §K (Mockingbird-side enrichments
+  only; chat-LLM owns Ingest/Query/Lint).
+- This amendment is docs-only. Zero code changes in this
+  alignment wave.

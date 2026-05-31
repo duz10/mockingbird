@@ -2,9 +2,21 @@
 
 ## Project context
 
-You are working on **Mockingbird**, a local-first voice dictation +
-meeting-capture app for Windows (Mac support planned for Phase 9). It
-replaces Wispr Flow with a fully local, privacy-respecting implementation.
+You are working on **Mockingbird**, which is two things in one binary:
+
+1. A **local-first voice dictation + meeting-capture app for Windows**
+   (Mac support planned for Phase 9). Replaces Wispr Flow with a fully
+   local, privacy-respecting implementation. Zero telemetry, everything
+   on-device.
+2. The **capture + first-pass synthesis layer for a Karpathy/Clark
+   Personal Knowledge Engine pattern** — where Obsidian is the IDE, the
+   user's chat-LLM (Claude Code / Cursor / OpenCode / etc.) is the wiki
+   author, and the Obsidian vault is the knowledge codebase.
+   Mockingbird captures audio/text → cleans → classifies → extracts
+   entities → projects to vault as wiki-linked Markdown → maintains
+   `INDEX.md` + `LOG.md`. The chat-LLM reads `SCHEMA.md` and performs
+   Ingest / Query / Lint over the vault. Chartered under ADR 0054;
+   load-bearing context in LESSONS PINNED P14.
 
 **The fast onboarding path** (~10 min cold-start, do this every session):
 

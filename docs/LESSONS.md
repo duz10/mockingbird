@@ -109,6 +109,91 @@ Added to the end-of-iteration gate checklist in AGENTS.md.
 The `--no-run` fallback is still correct for *gating* (type / trait / link
 validity) — it's just not a substitute for *producing the runtime artifact*.
 
+### P14. The Karpathy/Clark North Star — Mockingbird is the capture layer, NOT the wiki author
+
+**Date:** 2026-06-06. **Charter:** ADR 0054 (Personal Knowledge Engine
+substrate). **Bead:** `mb-rik9` (Phase 1E Alignment Wave).
+
+Mockingbird's KG architectural north star is the Karpathy "LLM Wiki" gist +
+Alvin Clark "Building a Personal Knowledge Engine with LLMs and Obsidian"
+(April 2026) pattern. Lineage: Vannevar Bush's Memex (1945) — *"the part
+he couldn't solve was who does the maintenance. The LLM handles that."*
+
+**Mockingbird's role:** capture + first-pass synthesis layer. NOT the wiki
+author.
+
+**Two-agent role separation:**
+
+- **Mockingbird** captures audio/text → cleans → classifies → extracts
+  entities → emits wiki-links → auto-generates Entity/Project/Tag stub
+  pages → maintains `INDEX.md` + `LOG.md`. Per-segment, in isolation, no
+  cross-vault reasoning. Calibrated for ~1 min intake latency.
+- **User's chat-LLM** (Claude Code / Cursor / OpenCode / etc.) reads
+  `SCHEMA.md`, performs **Ingest** (drop source → ripple across 10-15
+  pages) / **Query** (answer with citations, file results as new wiki
+  pages) / **Lint** (contradictions, orphans, stale claims, missing
+  concepts). The chat-LLM is the wiki author.
+
+**Three-layer architecture:**
+
+- **Layer 1 — Raw immutable:** `History/` + `Inbox/`. Mockingbird
+  writes; nobody modifies. (Principle 1.)
+- **Layer 2 — Wiki LLM-maintained:** `Entries/` (Mockingbird-authored
+  first pass) + `Entities/` / `Projects/` / `Tags/` (Mockingbird-
+  authored stub pages, user-owns-thereafter) + chat-LLM-authored
+  source summaries / concept pages / runbooks.
+- **Layer 3 — `SCHEMA.md`:** vault-resident operational contract.
+  Write-once user-owned. Preferences travel with the file, not the
+  model. Makes the vault portable across chat-LLM products.
+
+**Karpathy's three operations belong to the chat-LLM, NOT Mockingbird:**
+Ingest, Query, Lint. Do NOT build Mockingbird-side ingest-ripple,
+query-engine, or lint-engine. Mockingbird's "ingest" is shallow
+first-pass; the chat-LLM does the deep ingest.
+
+**Type vocabulary — the nine knowledge shapes:**
+`source` / `note` / `concept` / `entity` / `project` / `question` /
+`decision` / `reference` / `observation`. **NOT** `task`, **NOT**
+`event`. Every `Entries/` file is implicitly a source; `type:`
+describes the knowledge shape within. (Resolves the `mb-il83`
+vocab-drift bead by redefining the canonical set.)
+
+**Load-bearing vault-resident files:**
+
+- `SCHEMA.md` (write-once user-owned) — operational contract for any LLM
+  maintaining the wiki.
+- `INDEX.md` (auto-maintained by Mockingbird) — content catalog
+  organized as H2 sections per category (Sources / Entities / Projects /
+  Tags / Concepts). Mockingbird writes the first four; chat-LLM owns
+  Concepts.
+- `LOG.md` (append-only; Mockingbird + chat-LLM both append) —
+  chronological operations record, format
+  `## [YYYY-MM-DD HH:MM] operation | title`.
+
+**Anti-patterns to avoid:**
+
+- Don't add task-management surfaces (Kanban boards, due-date workflows
+  beyond the inert metadata field, status-cascading projects). The
+  Obsidian Tasks plugin remains a passive ecosystem fit (users can
+  opt-in), not a load-bearing default.
+- Don't fight Obsidian's grain (it's knowledge-graph-first, not
+  task-management-first).
+- Don't try to be a mediocre Things/Todoist when you can be an
+  excellent Karpathy/Clark capture layer.
+- Don't build Mockingbird-side query/lint engines; the user's chat-LLM
+  already has the tools and the context for that work.
+
+**References:**
+
+- Karpathy "LLM Wiki" gist (canonical insight: LLM as compiler, not
+  search engine).
+- Alvin Clark, *Building a Personal Knowledge Engine with LLMs and
+  Obsidian* (April 2026).
+- Vannevar Bush, *As We May Think* (1945) — the architectural
+  great-grandparent.
+
+**Charter:** ADR 0054 (Personal Knowledge Engine substrate adoption).
+
 ### P4. Session-start ritual is mandatory — stale prompts are real, AND so is over-correction
 
 Two incidents shaped this rule:
