@@ -80,6 +80,35 @@ NOT at `src-tauri/target/release/`. Tauri 2 builds into the workspace root.
 Run via `powershell -File scripts\run-mockingbird.ps1` — never
 `Start-Process` the exe directly (missing `ORT_DYLIB_PATH` + CUDA bin on PATH).
 
+### P13. `cargo test --release --no-run` is NOT a substitute for `cargo build --release` when shipping behavior to a live user
+
+The `--no-run` fallback (P2 above) was designed for the CI/test-gate use-case
+— linking the test binaries confirms the type system + trait surface + link
+surface are all valid even though `cargo test` can't *execute* on this box.
+It does NOT produce a fresh `target/release/mockingbird.exe`. The app exe
+is a different cargo target with a different linker invocation; the
+test-binary link does not write through to it.
+
+**The trap:** a wave that touches migrations, worker-pipeline code, or IPC
+surface, runs the full sanctioned fallback gate (check + clippy + fmt +
+`test --release --no-run`), and seals — leaves the runtime exe untouched.
+Dustin relaunches the (stale) exe, sees no behavior change, smokes-and-
+discovers nothing works. 2026-06-06 Phase 1E hotfix: the running exe was
+pre-1E.3, so migration 026 + `maybe_commit_to_vault` weren't in the
+binary even though both had been authored, tested, and sealed across
+Waves 1E.3 + 1E.4.
+
+**Rule:** after ANY wave that touches
+  (a) migrations,
+  (b) worker pipeline code paths,
+  (c) IPC surface (new `#[tauri::command]` or new generate_handler entry),
+explicitly run `powershell -File scripts\cargo-with-cuda.ps1 build --release`
+before declaring the wave shipped. Verify the exe mtime is post-wave.
+Added to the end-of-iteration gate checklist in AGENTS.md.
+
+The `--no-run` fallback is still correct for *gating* (type / trait / link
+validity) — it's just not a substitute for *producing the runtime artifact*.
+
 ### P4. Session-start ritual is mandatory — stale prompts are real, AND so is over-correction
 
 Two incidents shaped this rule:
@@ -354,6 +383,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-06-06 | `[KG Phase 1E hotfix / mb-43xw + reconcile_history IPC]` | Pre-1E.3 release exe shipped to live user because Waves 1E.3 + 1E.4 sealed on `test --release --no-run` (correct for gating link validity; does NOT produce a fresh runtime exe). Fix: rebuilt + promoted both deferred reconcile IPCs to the dashboard `ActionsBand` (Open vault + Reconcile vault). Findings: (1) PINNED P13 — test-no-run is not a build substitute when shipping behavior to a live user; AGENTS.md end-of-iteration gate now requires `cargo build --release` after any wave touching migrations / worker pipeline / IPC. (2) Two symmetric reconcile IPCs > one; render combined banner so the operator sees the whole drift picture, not half. (3) Sequential `await` (not `Promise.all`) on identical-gate IPC pairs avoids duplicate error toasts during a toggle-off race. (4) Match Button variants to the existing palette; `tsc` will catch typos like `secondary` against `primary/ghost/danger`. Body, broad-implication (every future migration / worker / IPC wave inherits Finding 1). |
 | 2026-06-05 | `[KG Phase 1E Wave 1E.4 / mb-i14b / ADR 0053 §D7]` | History archive (per-session JSON sidecar + audio move) shipped. Two findings: (1) golden JSON fixtures created via the file-write tool land as CRLF on Windows; byte-identity tests fail with expected.len() = actual.len() + 12 across a 12-line file (one CR per line). Visible content is byte-for-byte identical in the panic message. Fix: rewrite via `[System.IO.File]::WriteAllText` with `UTF8Encoding(false)` after manual `"\`r\`n" -> "\`n"` replace, OR use `MOCKINGBIRD_UPDATE_GOLDENS=1` to regenerate via the runtime serializer. `.gitattributes` already specifies `*.json text eol=lf` so the on-commit normalization is correct; only the local working tree was wrong. (2) `serde_json::to_string_pretty` is LF-deterministic by contract — `PrettyFormatter`'s default constructor uses `b"\n"` directly, so canonical-LF-bytes guarantees come for free on every platform. Safe to lean on for any future JSON-artefact contract. Body, narrow blast radius |
 | 2026-06-04 | `[KG Phase 1E Wave 1E.3 / mb-k2pk / ADR 0053]` | Two-phase commit implementation; three findings: (1) vault and KG `EntryType` vocabularies have drifted (kg::schema ships {Task,Research,Idea,Note,Reference}; vault ships {Note,Task,Idea,Question,Decision}) -- Research+Reference lossy-collapse to Note in the projection; filed mb-il83 to reconcile. (2) The vault projection's retry budget MUST decouple from the LLM-filing queue's retry budget -- conflating them means a transient file I/O glitch burns LLM retry attempts and orphans the kg_* rows. Split the seal txns: kg_* rows commit in their own txn, vault projection failure is non-fatal-to-queue, reconcile_vault picks up the "hash set, paths NULL" signature later. (3) clippy::unnecessary_lazy_evaluations fires on `unwrap_or_else(|| Type::CONST)` -- reach for `unwrap_or(value)` first whenever the fallback is a const / cheap field access. Body, narrow blast radius |
 | 2026-06-04 | `[KG Phase 1E Wave 1E.0 / mb-nuba / ADR 0053]` | Three non-obvious design calls baked into the Phase 1E charter that load-bear on later waves: (1) **reverse-watcher loop-prevention keys on content SHA-256, NOT file mtime** — Obsidian Sync can byte-identical re-touch (mtime updates, content unchanged), and Obsidian plugins can cosmetically reformat lines (whitespace shifts without semantic change); mtime-keyed dedup false-fires on both. SHA-256 is ~50µs/kB and absorbed by the 2s debounce window. Same call ADR 0046 §6 made for the inbox dedup ledger; same solution. Pre-record the hash BEFORE the OS rename so the watcher's first event already finds it in place. (2) **Two-phase commit ordering is DB-first / file-second / DB-seal-third** — file-first creates a watcher race: the watcher sees a new file but no DB row, can't distinguish "new user file via Sync" from "file I just wrote." Option (c) (insert stub row → write file → UPDATE stub with `file_path`+`file_hash`+`file_mtime` → seal queue) pre-records the hash before the artifact exists, collapsing the race window to zero. Failure modes (file write fails / DB seal fails / queue seal fails) are all recoverable via nightly sweep + orphan-recovery in the reverse-watcher. Generalization: when a watcher and a writer share a substrate, the writer establishes its identity in the loop-prevention ledger BEFORE producing the artifact. (3) **Filenames need a durable opaque-identity suffix even when YAML frontmatter carries a stable `id:`** — picked `<YYYY-MM-DD>-<short-title-slug>__<id8>.md` (8 chars of ULID = 40 bits collision resistance). Reasons: frontmatter survives careless copy-paste poorly (user can select-all + retype), and slug+date collisions are real (same-day dictations with similar titles). The `__<id8>` is the reverse-watcher's identity-recovery fallback when YAML is corrupted. Same shape ADR 0046 history projection landed on. Generalization: any file-projection of a DB row embeds opaque identity in the filename, not just in the frontmatter. Body, broad-implication (1E.5 author MUST inherit Finding 1; 1E.3 inherits Finding 2; 1E.2 inherits Finding 3) |
@@ -430,6 +460,80 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+## 2026-06-06 [KG Phase 1E hotfix / mb-43xw + new reconcile_history IPC] Pre-1E.3 release exe shipped to live user because Waves 1E.3+1E.4 sealed on `test --release --no-run` and never rebuilt the runtime artifact; reconcile IPCs promoted from deferred P3 and wired to a dashboard button
+
+**Smoke discovery (Dustin, end-to-end on the running build):** KG dashboard
+shows entries flowing (Done counter increments) BUT `<vault>/Knowledge
+Graph/Entries/` is empty. Subtree exists (`Entries/`, `History/`, `Inbox/`
+visible in Obsidian) — so the 1E.1 bootstrap shipped, but no entry files
+are landing.
+
+**Diagnosis (high confidence, confirmed via SQL probe):** the running
+`target/release/mockingbird.exe` was from a pre-1E.3 build. Waves 1E.3 +
+1E.4 used `test --release --no-run` as their cargo gate per LESSONS P2 —
+that's correct for gating type/trait/link validity but **does not produce
+a fresh release binary**. Migration 026 (the `entry_id` / `vault_path` /
+`vault_file_hash` columns) wasn't in the running schema; the worker's
+`maybe_commit_to_vault` projection wasn't in the running binary. Hence:
+rows seal correctly in the old `sessions` shape (so Done increments),
+but nothing ever writes Markdown to disk.
+
+**Confirmation:** the SQL probe
+`SELECT entry_id, vault_path, vault_file_hash FROM sessions ...` against
+the live DB returned `no such column: entry_id` — migration 026 hadn't
+run, proving the running binary was pre-1E.3.
+
+**Fix:** rebuilt `target/release/mockingbird.exe` (6m 47s on this box) so
+the current code (post-1E.4 seal + this hotfix's IPC additions) ships.
+New exe verified at `<workspace>\target\release\mockingbird.exe`,
+~53 MB, mtime 2026-05-31 04:42 (post-1E.4 seal commit).
+
+**Hotfix scope (promoted from deferred P3 in 1E.3/1E.4):** the
+`vault::writer::reconcile_vault` and `vault::history::reconcile_history`
+store-layer functions existed but had no UI surface. Promoted both to
+IPC (`kg_reconcile_vault` + `kg_reconcile_history`, both KG-toggle +
+vault-configured gated) and wired a "Reconcile vault" button into the
+dashboard `ActionsBand` (right beside the existing "Open vault in
+Obsidian" button from 1D.5). Both reconciles fire on click and the
+combined drift summary renders inline. Dustin will use this to backfill
+the pre-1E.3 sessions: the `missing_file_count` will surface every
+sealed-but-not-projected row, then a future wave actually writes the
+backfill (current scan is read-only by design — non-destructive
+operator-visible signal).
+
+Findings worth keeping:
+
+1. **`cargo test --release --no-run` ≠ `cargo build --release` for shipping.**
+   The gate confirms link validity; it does NOT produce the runtime exe.
+   PINNED P13 documents this; AGENTS.md end-of-iteration checklist now
+   explicitly requires `cargo build --release` after any wave touching
+   migrations / worker pipeline / IPC surface.
+
+2. **Two symmetric reconcile IPCs > one.** The 1E.3 + 1E.4 deferred-work
+   beads tracked entry-reconcile and history-reconcile separately, but
+   the operator sees one logical thing: "is my `<vault>/Knowledge Graph/`
+   subtree consistent with the DB?". Exposing only one would force the
+   operator to run SQL to surface the other half. The hotfix wires both
+   IPCs and renders one combined banner. Future symmetric DB-projection
+   subsystems should follow the same shape: expose every drift-detection
+   IPC together, render one combined dashboard surface.
+
+3. **Sequential await on two reconcile IPCs, not `Promise.all`.** Both
+   gates are identical (KG toggle + vault configured). If a toggle-off
+   race fires during the click, parallel calls would surface two
+   identical error toasts. Sequential `await` short-circuits on the
+   first failure. Tiny UX point; documents the deliberate choice for
+   future similar pairs.
+
+4. **The "Button variant" typo guard.** Reached for `variant="secondary"`
+   on the Reconcile button by reflex — UI primitive only ships
+   `"primary" | "ghost" | "danger"`. Caught by `npx tsc --noEmit` on
+   the first pre-build attempt. `as never` casts and other escape
+   hatches are NOT the answer; the right move is to match the existing
+   palette. Generalization: when adding a button to an established
+   band, copy the variant from a sibling button, not from muscle memory.
+
 
 ---
 

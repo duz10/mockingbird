@@ -241,6 +241,13 @@
   "kg.dashboard.actions.launch": "Open vault in Obsidian",
   "kg.dashboard.actions.launch.disabled.tooltip": "Configure vault in Mobile Sync settings to enable.",
   "kg.dashboard.actions.launch.error": "Couldn’t open Obsidian: {error}",
+  "kg.dashboard.actions.reconcile": "Reconcile vault",
+  "kg.dashboard.actions.reconcile.busy": "Reconciling…",
+  "kg.dashboard.actions.reconcile.disabled.kgOff": "Reconcile requires KG to be enabled",
+  "kg.dashboard.actions.reconcile.disabled.noVault": "Configure vault path in Mobile Sync settings",
+  "kg.dashboard.actions.reconcile.clean": "Vault and history archive are in sync — nothing to reconcile.",
+  "kg.dashboard.actions.reconcile.summary": "Vault: {missingFiles} missing files, {orphans} orphan files, {sealed} sealed from disk. History: {missingSidecars} missing sidecars, {orphanSidecars} orphan sidecars.",
+  "kg.dashboard.actions.reconcile.error": "Reconcile failed: {error}",
 
   "kg.status.title": "Filing status",
   "kg.status.line": "Pending: {pending} · Processing: {processing} · Failed: {failed} · Last filed: {lastDone}",

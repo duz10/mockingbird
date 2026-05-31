@@ -103,6 +103,14 @@ names but ships no implementations. Do not attempt to invoke them.
    - `powershell -File scripts\cargo-with-cuda.ps1 test --release` (use `--no-run`
      fallback when the documented launch failure hits; pure-Rust modules go
      through the throwaway-crate recipe — same section)
+   - **If the wave touched (a) migrations, (b) worker pipeline code paths, or
+     (c) IPC surface (new `#[tauri::command]` / new generate_handler entry):
+     ALSO run `powershell -File scripts\cargo-with-cuda.ps1 build --release`**
+     to refresh `target/release/mockingbird.exe`. The `--no-run` fallback
+     above is *correct for gating* link/type/trait validity, but does NOT
+     produce the runtime exe — Dustin relaunching the (stale) binary after
+     a sealed wave is the failure mode. Verify the new exe's mtime is
+     post-seal. (LESSONS PINNED P13; 2026-06-06 Phase 1E hotfix.)
 6. **UI gate:** `npx tsc --noEmit`, `npm test`, `npm run build` (whichever apply).
    `npm run lint` is currently broken pending `mb-yxh` (ESLint v9 migration).
 7. **Commit** all changes with a descriptive message referencing the bead id +

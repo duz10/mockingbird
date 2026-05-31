@@ -10,7 +10,7 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-06-05 (**KG Phase 1E Wave 1E.4 shipped** — `vault::history` module ships per-session JSON sidecar + audio file archive to `History/<YYYY-MM>/<session-uuid>.{json,ext}`; KG worker phase-4 integration; reconcile scan helper. Three golden JSON fixtures locked. All gates green; kg_parity 32/32, source_gate 6/6, graph_off 8/8 GREEN). Prior anchors: 2026-06-04 (Wave 1E.3 two-phase commit shipped); 2026-06-04 earlier (**KG Phase 1D SEALED via ADR 0052 Accepted** — Wave 1D.6 three judges + epic seal); 2026-05-31 (**KG Phase 1C SEALED via ADR 0051 Accepted**); 2026-06-03 (ADR 0050 KG Phase 1B SEALED).
+**Last consolidated:** 2026-06-06 (**KG Phase 1E hotfix shipped** — fresh release binary + `kg_reconcile_vault` + `kg_reconcile_history` IPCs + dashboard "Reconcile vault" button; closes `mb-43xw`; LESSONS PINNED P13 added). Prior consolidation 2026-06-05 (**KG Phase 1E Wave 1E.4 shipped** — `vault::history` module ships per-session JSON sidecar + audio file archive to `History/<YYYY-MM>/<session-uuid>.{json,ext}`; KG worker phase-4 integration; reconcile scan helper. Three golden JSON fixtures locked. All gates green; kg_parity 32/32, source_gate 6/6, graph_off 8/8 GREEN). Prior anchors: 2026-06-04 (Wave 1E.3 two-phase commit shipped); 2026-06-04 earlier (**KG Phase 1D SEALED via ADR 0052 Accepted** — Wave 1D.6 three judges + epic seal); 2026-05-31 (**KG Phase 1C SEALED via ADR 0051 Accepted**); 2026-06-03 (ADR 0050 KG Phase 1B SEALED).
 
 ## ✅ Sealed (do not re-execute)
 
@@ -61,7 +61,7 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**KG Phase 1E (Obsidian as source of truth) — Waves 1E.0 + 1E.1 + 1E.2 + 1E.3 + 1E.4 shipped; Waves 1E.5 (reverse-watcher), 1E.6 (KG-Inbox courier), 1E.7 (seeds) unblocked in parallel.** Charter ADR [ADR 0053](docs/adr/0053-kg-phase-1e-obsidian-as-source-of-truth.md) Proposed; phase doc at `docs/phases/phase-1e.md`; bead epic `mb-imc2` with 10 sub-beads. 1E.4 lands the per-session forensic history archive — every filed KG session now has a canonical JSON sidecar in `History/<YYYY-MM>/<session-uuid>.json` plus its source audio (when present) archived next to it.
+**KG Phase 1E (Obsidian as source of truth) — Waves 1E.0 + 1E.1 + 1E.2 + 1E.3 + 1E.4 shipped + hotfix; Waves 1E.5 (reverse-watcher), 1E.6 (KG-Inbox courier), 1E.7 (seeds) unblocked in parallel.** Charter ADR [ADR 0053](docs/adr/0053-kg-phase-1e-obsidian-as-source-of-truth.md) Proposed; phase doc at `docs/phases/phase-1e.md`; bead epic `mb-imc2` with 10 sub-beads. 1E.4 lands the per-session forensic history archive — every filed KG session now has a canonical JSON sidecar in `History/<YYYY-MM>/<session-uuid>.json` plus its source audio (when present) archived next to it.
 
 ### Wave 1E.4 deliverables shipped (this iteration)
 
@@ -73,6 +73,46 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 - 1 P3 bead filed: `mb-5lla` (kg worker.rs at 1261 LoC; investigate cohesive split).
 
 **Resume next iteration:** `bd ready -t task` surfaces 1E.5 (`mb-qwfy`, reverse-watcher), 1E.6 (`mb-i46v`, KG-Inbox courier), and 1E.7 (`mb-bgpt`, seeds) as the unblocked parallel set — each depends only on 1E.3 (now closed). 1E.5 is the highest-leverage next pick because the J1 loop-prevention invariant judge (1E.9) blocks on its hash-based dedup ledger landing. 1E.8 docs-only bead is available any time. Dispatch one-liner pattern per LESSONS P8: `implement Wave 1E.5 per docs/phases/phase-1e.md`.
+
+### Wave 1E hotfix — 2026-06-06 (reconcile IPCs + fresh release binary)
+
+**Trigger:** Dustin smoke-tested 1E.4 end-to-end and discovered `Knowledge
+Graph/Entries/` was empty despite the dashboard's Done counter
+incrementing. SQL probe against the live DB (`SELECT entry_id FROM
+sessions ...`) returned `no such column: entry_id` → migration 026
+never ran → the running `target/release/mockingbird.exe` was pre-1E.3.
+Root cause: Waves 1E.3 + 1E.4 sealed on the `test --release --no-run`
+fallback (correct for *gating* link validity per LESSONS P2) but never
+produced a fresh runtime exe. **Promoted to LESSONS PINNED P13 +
+AGENTS.md end-of-iteration checklist.**
+
+Shipped:
+
+- Rebuilt `target/release/mockingbird.exe` (6m 47s; mtime 2026-05-31
+  04:42, well post-1E.4 seal commit). Dustin relaunches manually.
+- `commands/kg.rs` — promoted `kg_reconcile_vault` (closes `mb-43xw`)
+  and `kg_reconcile_history` (new sibling, no pre-existing bead) from
+  store-layer deferred work to live `#[tauri::command]` IPC, both
+  KG-toggle + vault-configured gated via a shared
+  `resolve_vault_root_for_reconcile` helper (DRY in the small).
+  `ReconcileReport` + `HistoryReconcileReport` gained `#[derive(Serialize)]`
+  + `#[serde(rename_all = "camelCase")]` for the wire contract; pinned
+  by two regression tests in `commands/kg.rs::tests`.
+- `commands/mod.rs` — both commands registered in `generate_handler!`.
+- `ui/src/routes/knowledge-graph/Actions.tsx` — new "Reconcile vault"
+  button on the `ActionsBand` (right beside the 1D.5 "Open vault in
+  Obsidian" button). Disabled-with-tooltip when KG toggle is off OR
+  vault is unconfigured; runs both reconcile IPCs sequentially on
+  click (not `Promise.all` — identical gates ⇒ parallel race produces
+  duplicate error toasts) and renders a single combined drift banner.
+- `ui/src/lib/{tauri,types}.ts` + `i18n/en.json` — typed `api.*`
+  bindings + browser-fixture defaults (zero-drift) + i18n strings.
+- All gates green: `fmt --check`, `clippy --release -D warnings`,
+  `check`, `test --release --no-run --lib` (link surface clean,
+  4m 17s), `cargo build --release` (6m 47s, fresh exe). UI:
+  `tsc --noEmit`, `npm test` 143/143, `npm run build` clean.
+- 1 P3 bead closed: `mb-43xw`. `mb-srvh` (timer-driven sweep) stays
+  open as planned.
 
 ### Wave 1E.3 deliverables shipped (last iteration)
 

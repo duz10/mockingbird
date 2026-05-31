@@ -537,6 +537,99 @@ pub fn kg_subtree_bootstrap(
     crate::vault::kg_layout::bootstrap_kg_subtree(&PathBuf::from(path_str)).map_err(into_err)
 }
 
+/// Resolve the vault root for a reconcile IPC. Returns the same
+/// structured error strings the UI surfaces verbatim. Shared by
+/// [`kg_reconcile_vault`] and [`kg_reconcile_history`] so the two
+/// IPCs stay in lockstep on every error path (DRY in the small).
+///
+/// Gate order matches every other kg_* IPC: KG toggle first
+/// (consistency with `kg_dashboard_snapshot`), vault path second.
+/// The toggle check is belt-and-braces — the UI disables the
+/// reconcile button when the toggle is off, but the IPC must hold
+/// the invariant on its own (mirrors the graph-off-UI invariant
+/// judge's posture: no `kg_*` IPC reaches into KG state when the
+/// toggle is off).
+fn resolve_vault_root_for_reconcile(db: &State<'_, AppStateHandle>) -> Result<PathBuf, String> {
+    let conn = lock_db(db)?;
+    let kg_on = Settings::new(&conn)
+        .get::<bool>(SettingKey::KgGraphEnabled)
+        .map_err(into_err)?;
+    if !kg_on {
+        return Err("knowledge graph is disabled -- enable it in Settings > Knowledge Graph before reconciling".into());
+    }
+    let vault_path: Option<String> = Settings::new(&conn)
+        .get::<Option<String>>(SettingKey::VaultPath)
+        .map_err(into_err)?;
+    drop(conn);
+    let path_str = vault_path.ok_or_else(|| {
+        "vault path is not configured -- set the vault path in Mobile Sync settings before reconciling"
+            .to_string()
+    })?;
+    if path_str.trim().is_empty() {
+        return Err(
+            "vault path is empty -- set the vault path in Mobile Sync settings before reconciling"
+                .into(),
+        );
+    }
+    Ok(PathBuf::from(path_str))
+}
+
+/// Phase 1E hotfix to Wave 1E.3 (closes `mb-43xw`) -- on-demand
+/// reconcile of `<vault>/Knowledge Graph/Entries/` against the
+/// `sessions` table.
+///
+/// Read-only: the v1 scan counts (a) sessions with a recorded hash
+/// but no `vault_path` AND no file on disk (worker should re-write),
+/// (b) sessions with a recorded hash but no `vault_path` whose file
+/// IS on disk (orphan recovery candidate -- 1E.5 will seal-from-
+/// disk-suffix), and (c) files in the entries dir whose hash is not
+/// recorded against any session. The store-layer
+/// [`crate::vault::writer::reconcile_vault`] logs each finding at
+/// `tracing::warn!` level so operators can see what came up.
+///
+/// Gating: KG toggle must be on AND vault path must be configured;
+/// both gates return structured `Err(String)` messages the UI
+/// surfaces verbatim.
+///
+/// Use case for the hotfix: a pre-1E.3 binary that wrote
+/// `kg-note*` sessions but never projected them to the vault will,
+/// after upgrade + the user clicking "Reconcile vault", show every
+/// such session under `missing_file_count` -- the operator-visible
+/// signal that a backfill pass is needed (separate work; the
+/// current scan is non-destructive).
+#[tauri::command]
+pub fn kg_reconcile_vault(
+    db: State<'_, AppStateHandle>,
+) -> Result<crate::vault::writer::ReconcileReport, String> {
+    let vault_root = resolve_vault_root_for_reconcile(&db)?;
+    let conn = lock_db(&db)?;
+    crate::vault::writer::reconcile_vault(&conn, &vault_root).map_err(into_err)
+}
+
+/// Phase 1E hotfix to Wave 1E.4 -- on-demand reconcile of
+/// `<vault>/Knowledge Graph/History/` JSON sidecars against the
+/// `sessions` table.
+///
+/// Symmetric to [`kg_reconcile_vault`]: counts sealed-but-not-
+/// archived sessions (missing sidecar) and orphan sidecars whose
+/// uuid is not in `sessions`. Read-only.
+///
+/// Why expose this alongside the entry reconcile: the hotfix
+/// kickoff (Dustin) called out the symmetry explicitly; both are
+/// post-seal projections of `sessions` and both can drift
+/// independently. Exposing only one would leave the operator with
+/// no way to surface history-archive gaps from the dashboard --
+/// they would have to run a SQL query against the DB. Per the
+/// hotfix kickoff: "probably yes -- they're symmetric."
+#[tauri::command]
+pub fn kg_reconcile_history(
+    db: State<'_, AppStateHandle>,
+) -> Result<crate::vault::history::HistoryReconcileReport, String> {
+    let vault_root = resolve_vault_root_for_reconcile(&db)?;
+    let conn = lock_db(&db)?;
+    crate::vault::history::reconcile_history(&conn, &vault_root).map_err(into_err)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -700,5 +793,37 @@ mod tests {
         // rather than the modal silently truncating to the wrong
         // count.
         assert_eq!(DEFAULT_CONCEPT_RECENT_LIMIT, 50);
+    }
+
+    /// Wire-shape pins for the two reconcile IPCs added in the hotfix
+    /// (post-1E.4). These don't touch the Tauri State machinery —
+    /// they just serialize the report structs and assert the camelCase
+    /// JS-side names land. Catches a future field rename that forgets
+    /// to update the `#[serde(rename_all)]` attribute.
+    #[test]
+    fn reconcile_report_serializes_camel_case() {
+        let r = crate::vault::writer::ReconcileReport {
+            missing_file_count: 1,
+            sealed_count: 2,
+            orphan_files_count: 3,
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["missingFileCount"], 1);
+        assert_eq!(v["sealedCount"], 2);
+        assert_eq!(v["orphanFilesCount"], 3);
+        // Belt-and-braces: no snake_case keys snuck through.
+        assert!(v.get("missing_file_count").is_none());
+    }
+
+    #[test]
+    fn history_reconcile_report_serializes_camel_case() {
+        let r = crate::vault::history::HistoryReconcileReport {
+            missing_sidecar_count: 4,
+            orphan_sidecar_count: 5,
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["missingSidecarCount"], 4);
+        assert_eq!(v["orphanSidecarCount"], 5);
+        assert!(v.get("missing_sidecar_count").is_none());
     }
 }

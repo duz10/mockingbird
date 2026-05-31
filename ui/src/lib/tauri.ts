@@ -24,6 +24,8 @@ import type {
   InboxRuntimeStatus,
   InsightsSnapshot,
   KgBootstrapReport,
+  KgHistoryReconcileReport,
+  KgReconcileReport,
   KgSettings,
   SearchFilter,
   TagSuggestion,
@@ -321,6 +323,26 @@ export const api = {
   kg_subtree_bootstrap: () =>
     invoke<KgBootstrapReport>("kg_subtree_bootstrap"),
 
+  /** Phase 1E hotfix to Wave 1E.3 (closes `mb-43xw`) -- on-demand
+   *  reconcile of `<vault>/Knowledge Graph/Entries/` against the
+   *  `sessions` table. Returns a [`KgReconcileReport`] with three
+   *  counters: `missingFileCount`, `sealedCount`, `orphanFilesCount`.
+   *  Read-only in v1 -- the report tells the operator what drift
+   *  was detected; actual repair (file rewrite, row sealing,
+   *  orphan cleanup) lands in later waves.
+   *
+   *  Errors when the KG toggle is off OR the vault path is unset /
+   *  empty. The UI pre-checks both and disables the button + shows
+   *  a tooltip; this IPC is the belt-and-braces guard. */
+  kg_reconcile_vault: () =>
+    invoke<KgReconcileReport>("kg_reconcile_vault"),
+
+  /** Phase 1E hotfix sibling -- on-demand reconcile of the
+   *  `History/` JSON sidecar archive. Symmetric to
+   *  [`kg_reconcile_vault`]; same gating, same read-only posture. */
+  kg_reconcile_history: () =>
+    invoke<KgHistoryReconcileReport>("kg_reconcile_history"),
+
   // Learning loop
   list_learning_runs: (limit: number) =>
     invoke<LearningRun[]>("list_learning_runs", { limit }),
@@ -546,6 +568,22 @@ function fixtureFor<T>(command: string, args?: object): T {
       // default. Playwright specs that want the freshly-created
       // variant override via __MOCKINGBIRD_FIXTURES__.
       return fixture(command, "alreadyExists" as KgBootstrapReport) as T;
+    // Phase 1E hotfix -- reconcile fixtures. Both return the
+    // zero-drift report by default (the common case once a vault
+    // is fully synced). Playwright + vitest specs override via
+    // `__MOCKINGBIRD_FIXTURES__` to exercise the
+    // "missing/sealed/orphan" copy paths.
+    case "kg_reconcile_vault":
+      return fixture(command, {
+        missingFileCount: 0,
+        sealedCount: 0,
+        orphanFilesCount: 0,
+      } as KgReconcileReport) as T;
+    case "kg_reconcile_history":
+      return fixture(command, {
+        missingSidecarCount: 0,
+        orphanSidecarCount: 0,
+      } as KgHistoryReconcileReport) as T;
     // Phase 1C Wave 1C.3 — Dictations retrieval fixtures.
     // Defaults match the kgGraphEnabled=false world: empty
     // autocomplete lists, empty entry-id sets, empty summary map.

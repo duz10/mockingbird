@@ -373,6 +373,26 @@ export interface KgSettings {
  *  the toast copy + the tracing-log level on the Rust side. */
 export type KgBootstrapReport = "created" | "alreadyExists";
 
+/** Phase 1E hotfix to Wave 1E.3 (closes `mb-43xw`) -- result of
+ *  `api.kg_reconcile_vault()`. Mirrors the Rust
+ *  `vault::writer::ReconcileReport` with camelCase serde rename.
+ *  All three counters are non-negative; v1 is read-only so the
+ *  UI just displays the totals (no per-row recovery action yet). */
+export interface KgReconcileReport {
+  missingFileCount: number;
+  sealedCount: number;
+  orphanFilesCount: number;
+}
+
+/** Phase 1E hotfix sibling -- result of
+ *  `api.kg_reconcile_history()`. Mirrors
+ *  `vault::history::HistoryReconcileReport`. Symmetric to
+ *  [`KgReconcileReport`] but for the History/ archive. Read-only. */
+export interface KgHistoryReconcileReport {
+  missingSidecarCount: number;
+  orphanSidecarCount: number;
+}
+
 /** Phase 1D Wave 1D.5 (`mb-navi`, ADR 0052) -- typed payload of
  *  `api.kg_vocabularies_get()`. Mirrors the Rust `Vocabularies`
  *  struct in `src-tauri/src/commands/kg.rs`. Both lists are the

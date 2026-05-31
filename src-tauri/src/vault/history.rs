@@ -160,7 +160,11 @@ pub struct HistoryArchiveOutcome {
 }
 
 /// Report of an on-demand reconcile pass over the history archive.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+///
+/// IPC-visible (`kg_reconcile_history`, hotfix to 1E.4). camelCase
+/// rename matches the rest of the kg_* IPC surface.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HistoryReconcileReport {
     /// Sessions that have a sealed entry projection
     /// (`sessions.entry_id` set) but no JSON sidecar at the

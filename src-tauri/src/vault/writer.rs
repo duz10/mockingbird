@@ -76,6 +76,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::db::sessions;
@@ -254,7 +255,12 @@ fn write_atomic(target: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 /// Report of an on-demand reconcile pass.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+///
+/// IPC-visible (`kg_reconcile_vault`, hotfix to 1E.3). The
+/// camelCase rename keeps the wire shape consistent with the rest
+/// of the kg_* IPC surface; the field names map 1:1.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ReconcileReport {
     /// Sessions that had `vault_file_hash` set but no `vault_path`
     /// AND the expected file was missing on disk. Recovery: re-run
