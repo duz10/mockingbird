@@ -404,6 +404,35 @@ further events. J1 verifies.
   unchecked task entry → simulate external check → assert DB
   `status` is `done` + YAML `status: done` on next read.
 
+### Amendment 2026-06-06 (mb-08za, ADR 0053 amendments)
+
+The interstitial wave between 1E.4 and 1E.5 expanded the vault
+subtree and changed the entity-frontmatter shape. Wave 1E.5 must
+absorb the following deltas:
+
+- **Five-folder subtree:** the watcher iterates `Knowledge Graph/`
+  and must NOT panic / spam-warn on the new `Entities/` and
+  `Projects/` subdirectories. Files there are vault-only artifacts
+  with NO DB row; the watcher should classify them as
+  "not-an-entry" (no `type: entry` frontmatter / no `kg_entries` row
+  by id) and treat user edits to those files as no-ops on the DB
+  side. They're the same shape as 1E.7 seeds — opaque to the DB,
+  hash-tracked iff that table grows a generic file-tracking column,
+  otherwise pure no-op.
+- **Wiki-link entity parsing:** entry frontmatter `entities:` now
+  emits as `"[[Entities/<slug>]]"`. The watcher's normalize pass
+  must parse BOTH legacy bare-string entries (pre-amendment) AND
+  the new wiki-link form. Recommended: detect the `[[Entities/`
+  prefix + `]]` suffix; strip them; the inner slug IS the DB-side
+  entity reference. For bare-string entries, slugify on parse so
+  the reverse direction (DB → file) emits the canonical wiki-link
+  form. The serializer module docs (`vault::markdown_serializer`)
+  carry the formal contract.
+- **Out-of-scope side effects:** user edits to entity/project pages
+  (e.g. adding a body note to `Entities/maple.md`) MUST NOT trigger
+  an entry-row reverse-sync. The stub pages exist purely as vault
+  artifacts.
+
 ---
 
 ## Wave 1E.6 — KG-Inbox courier (sibling to ADR 0046 inbox)
@@ -529,6 +558,36 @@ reverse-watcher ignores them by virtue of missing frontmatter `id`.
 - Manual smoke (Dustin): open the seeded vault in Obsidian with
   Dataview + Kanban installed; assert boards render with the day-
   one entries.
+
+### Amendment 2026-06-06 (mb-08za, ADR 0053 amendments)
+
+The interstitial wave between 1E.4 and 1E.5 shipped continuous
+auto-generation of entity + project pages on every filing. Wave
+1E.7's scope tightens to **first-activation-only seeds** that
+COMPLEMENT (don't duplicate) the continuous machinery:
+
+- **Scope still in 1E.7:** `Dashboard.md`, `Kanban - Tasks.md`,
+  `README.md` at the `Knowledge Graph/` root. These are
+  first-activation-only and never overwritten thereafter (same
+  write-once user-owns-thereafter contract as the new entity
+  pages, but the *trigger* is toggle-on, not per-filing).
+- **NOT in 1E.7's scope anymore:** seeding individual entity /
+  project pages. Those are written continuously by the worker
+  (§D11 / §D12) on first mention of each entity, so a one-shot
+  seed would have nothing meaningful to write at toggle-on time
+  (zero entries exist yet).
+- **Dashboard.md content opportunity (recommended):** include
+  sample Dataview queries that leverage the new entity wiki-links,
+  e.g. "open tasks by project" (`WHERE type = "task" AND status
+  != "done" GROUP BY entities`), "recent activity by entity"
+  (top-N entities by mention count last 7 days), "all Projects"
+  (a TABLE query against `Knowledge Graph/Projects/`). These
+  showcase the wiki-link entity graph and give Dustin an
+  immediate "oh, the KG is alive" payoff on the first capture.
+- **Five-folder subtree assumption:** by the time 1E.7 runs,
+  `Entities/` and `Projects/` already exist as folders (the
+  amendment to 1E.1 created them); 1E.7 does NOT need to create
+  them.
 
 ---
 

@@ -57,6 +57,26 @@
 //!   the field present-but-empty or absent.
 //! - Omitted optional fields (no `null` sentinels) -> the parser
 //!   reports them as `None`; we re-omit them on serialize.
+//!
+//! # Entity wiki-link emission (amendment `mb-08za`, ADR 0053 §D3 as amended)
+//!
+//! The `entities:` field emits as **Obsidian wiki-links** keyed on
+//! the entity slug, NOT as bare strings. Each `KgEntry.entities`
+//! item is slugified via [`slugify_title`] (the same helper that
+//! drives filenames — one source of truth for the ASCII-kebab-case
+//! identifier rule) and emitted as the quoted YAML scalar
+//! `"[[Entities/<slug>]]"`. Slug collisions across the same entry
+//! (e.g. `["Mockingbird", "mockingbird"]` both → `mockingbird`) are
+//! deduped at serialize time so the emitted list has unique entries.
+//!
+//! Round-trip implication for Wave 1E.5: the reverse-watcher's
+//! parser MUST accept BOTH legacy bare-string entries (written
+//! pre-amendment) AND the new `"[[Entities/<slug>]]"` shape. The
+//! DB-side representation remains a bare entity slug; the
+//! `[[Entities/` prefix + `]]` suffix are pure presentation. Parsing
+//! direction: strip the prefix/suffix → the inner token IS the slug.
+//! Serializing direction (this module): slugify → wrap in
+//! `[[Entities/...]]`.
 
 use chrono::{DateTime, NaiveDate, Utc};
 use std::fmt::Write as _;
@@ -134,8 +154,12 @@ pub struct KgEntry {
     /// Free-form lowercase tags. Empty vec renders as `tags: []`.
     pub tags: Vec<String>,
 
-    /// Mentioned entities (person / org / place / product).
-    /// Empty vec renders as `entities: []`.
+    /// Mentioned entities (person / org / place / product / project).
+    /// Empty vec renders as `entities: []`. Non-empty entries are
+    /// emitted as `"[[Entities/<slug>]]"` wiki-links per amendment
+    /// `mb-08za` (ADR 0053 §D3 as amended). Distinct input strings
+    /// that slugify identically are deduped at serialize time;
+    /// callers don't need to pre-dedupe.
     pub entities: Vec<String>,
 
     /// Originating dictation-session UUID, when applicable.
@@ -406,7 +430,7 @@ fn write_frontmatter(out: &mut String, entry: &KgEntry) {
     }
 
     write_string_list(out, "tags", &entry.tags);
-    write_string_list(out, "entities", &entry.entities);
+    write_entity_wiki_link_list(out, "entities", &entry.entities);
 
     if let Some(uuid) = &entry.source_session_uuid {
         write_kv_quoted(out, "source_session_uuid", uuid);
@@ -433,6 +457,56 @@ fn write_string_list(out: &mut String, key: &str, items: &[String]) {
     for item in items {
         out.push_str("  - ");
         push_quoted_scalar(out, item);
+        out.push('\n');
+    }
+}
+
+/// Entity-list writer: slugify each entry's name, dedupe by slug
+/// (preserving first-occurrence order), and emit as quoted
+/// `"[[Entities/<slug>]]"` wiki-link scalars. Empty input renders as
+/// the flow-form `entities: []` so the reverse-watcher can
+/// distinguish "no entities" from "field absent" (same discipline
+/// as [`write_string_list`]).
+///
+/// Amendment `mb-08za` (ADR 0053 §D3 as amended). The slug rule is
+/// shared with [`slugify_title`] — one source of truth for the
+/// ASCII-kebab-case identifier the rest of the KG references.
+fn write_entity_wiki_link_list(out: &mut String, key: &str, items: &[String]) {
+    if items.is_empty() {
+        out.push_str(key);
+        out.push_str(": []\n");
+        return;
+    }
+    // Dedupe by slug, preserving first-occurrence order. We can't
+    // use HashSet alone because the property tests + the
+    // round-trip contract care about emission order matching input
+    // order (modulo collapsed collisions). Small-N (typically <= 5
+    // entities per entry); the O(n*m) probe is fine.
+    let mut emitted_slugs: Vec<String> = Vec::with_capacity(items.len());
+    for item in items {
+        let slug = slugify_title(item);
+        if !emitted_slugs.iter().any(|s| s == &slug) {
+            emitted_slugs.push(slug);
+        }
+    }
+    // If ALL items collapsed to the empty-slug fallback (the
+    // `slugify_title` "untitled" path) AND that's the only emitted
+    // slug, we still emit it. "untitled" entities are pathological
+    // but the contract is "emit what we have, don't silently drop."
+    if emitted_slugs.is_empty() {
+        // Defensive: slugify_title never returns empty (it falls back
+        // to "untitled"), so this branch is unreachable for non-empty
+        // input. Emit the empty-list form to keep the YAML valid.
+        out.push_str(key);
+        out.push_str(": []\n");
+        return;
+    }
+    out.push_str(key);
+    out.push_str(":\n");
+    for slug in emitted_slugs {
+        out.push_str("  - ");
+        let wiki_link = format!("[[Entities/{slug}]]");
+        push_quoted_scalar(out, &wiki_link);
         out.push('\n');
     }
 }

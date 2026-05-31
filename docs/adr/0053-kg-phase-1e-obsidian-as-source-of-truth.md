@@ -649,3 +649,200 @@ ingest primitives).
   §15.5 / §11).
 - History/ retention rollover (current v1: kept untouched forever).
 - macOS support (Phase 9).
+
+## Amendments
+
+Dated entries below are AUTHORITATIVE over the original §D sections
+where they conflict. Original §D text is preserved for historical
+record; new readers should treat "D1 (as amended)" / "D3 (as
+amended)" + the new §D11 / §D12 below as the live contract.
+
+### 2026-06-06 — Charter amendment: entity pages, project pages, wiki-link entities
+
+**Bead:** `mb-08za`. **Trigger:** Wave 1E.4 shipped end-to-end and
+Dustin opened the resulting vault in Obsidian. Entities were
+emitted as bare strings in frontmatter, which Obsidian renders as
+untyped text — not as graph nodes. Without per-entity pages, the
+"all entries mentioning Maple" view that's the whole point of a KG
+doesn't exist. The four amendments below close the gap before
+1E.5 ships (the reverse-watcher would otherwise lock the
+bare-string shape in).
+
+#### Amendment to §D1 — Vault subtree shape
+
+The KG subtree expands from `{Inbox, Entries, History}` to
+**`{Inbox, Entries, History, Entities, Projects}`** (five folders).
+The two new folders host the auto-generated stub pages introduced
+by §D11 / §D12 below.
+
+Idempotent creation continues to use the same `create_dir_all`
+pattern (`vault::kg_layout::bootstrap_kg_subtree`); the
+`BootstrapReport::AlreadyExists` discriminator now requires all
+FIVE directories to be present-as-dirs. Bootstrap fires on the
+same triggers as before (toggle-on; opportunistic on first
+capture).
+
+#### Amendment to §D3 — YAML frontmatter shape
+
+The `entities:` field emits as **Obsidian wiki-links** to the
+corresponding entity page under `Entities/`, NOT as bare strings.
+Example:
+
+```yaml
+entities:
+  - "[[Entities/feta-cheese]]"
+  - "[[Entities/eggs]]"
+  - "[[Entities/milk]]"
+```
+
+Wiki-link emission rules:
+
+1. **Slug derivation** reuses the §D2 filename-slug helper
+   (`vault::markdown_serializer::slugify_title`) — lowercase ASCII
+   kebab-case, length-capped at `SLUG_MAX_LEN` (50 chars), empty
+   collapses to the literal `"untitled"`. The slug rule is the
+   SAME across filename + entity-link emission so there is one
+   source of truth for "how Mockingbird turns a free-form string
+   into an ASCII identifier".
+
+2. **Slug-collision merging** happens at serialize time. Distinct
+   input strings that slugify identically (`["Mockingbird",
+   "mockingbird", "MockingBird"]` all → `mockingbird`) collapse to
+   a single wiki-link in the emitted list. v1 explicitly does NOT
+   ship a disambiguation/merge UX; collapsing to the same entity
+   is the default behaviour and the user can split via manual edit
+   if needed. Tracked post-v1 as `mb-...` (filed alongside this
+   amendment).
+
+3. **YAML quoting** keeps the existing double-quote-everything
+   discipline — the wiki-link itself contains `[`, `]`, `/`, and a
+   hyphen, all of which YAML 1.2 would accept bare, but the
+   reverse-watcher's parser is happier when every string scalar
+   has the same shape.
+
+4. **Round-trip contract for 1E.5:** the reverse-watcher MUST
+   accept BOTH shapes (legacy bare-string entries written before
+   this amendment AND the new wiki-link form). Parsing
+   `"[[Entities/<slug>]]"` back to a bare slug for DB write is the
+   reverse direction; the canonical form on the way OUT is always
+   wiki-link. See `vault::markdown_serializer` module docs for the
+   round-trip safety statement.
+
+#### New §D11 — Entity pages (auto-generated, write-once, user-owns-thereafter)
+
+On every successful filing, after the entry's `.md` file has been
+committed to `Entries/` and sealed, the worker iterates the entry's
+unique entity slugs and **idempotently** creates a stub at
+`Knowledge Graph/Entities/<slug>.md` for any slug whose stub does
+not yet exist.
+
+Stub frontmatter:
+
+```yaml
+---
+id: feta-cheese
+type: entity
+schema_version: 1
+created_at: 2026-06-06T10:00:00Z
+aliases: []
+---
+```
+
+Stub body:
+
+```markdown
+# feta-cheese
+
+```dataview
+TABLE category, type, status, captured_at
+FROM "Knowledge Graph/Entries"
+WHERE contains(entities, "[[Entities/feta-cheese]]")
+SORT captured_at DESC
+```
+```
+
+**Write-once, user-owns-thereafter contract:**
+
+- The stub is written ONCE, on first mention. The detection
+  mechanism is purely existence-based: `Entities/<slug>.md` exists
+  on disk ⇒ skip stub generation entirely. No content hash; no
+  schema upgrades that mutate user-edited stubs.
+- After creation, Mockingbird NEVER overwrites the file. The user
+  may freely rewrite the body (add notes, add their own queries,
+  change the title) — Mockingbird will not touch it.
+- Failure to write the stub is **non-fatal** to the entry's
+  filing. Same retry-budget decoupling as §D4 step 4: log via
+  `tracing::warn!`, continue, let `reconcile_vault` (or a future
+  extension thereof) pick up missing stubs later.
+- Atomic write via temp-sibling + rename, same discipline as
+  §D4 step 4 (`vault::writer::commit_entry_to_vault`).
+- Canonical-form bytes (LF only, deterministic frontmatter field
+  order, single trailing newline) for byte-identity diffs and
+  Phase 1E.5 round-trip discipline.
+
+#### New §D12 — Project pages (same pattern as §D11, scoped to Project-typed entities)
+
+For entities the pipeline's `extract_entities` pass classifies as
+`EntityType::Project` (one of the five-bucket closed enum from
+`kg::passes::extract_entities`), the worker ALSO generates a stub
+at `Knowledge Graph/Projects/<slug>.md` on first mention. Same
+write-once user-owns-thereafter semantics as §D11.
+
+Stub frontmatter:
+
+```yaml
+---
+id: <slug>
+type: project
+schema_version: 1
+created_at: 2026-06-06T10:00:00Z
+status: active
+---
+```
+
+Stub body:
+
+```markdown
+# <slug>
+
+```dataview
+TABLE category, type, status, captured_at
+FROM "Knowledge Graph/Entries"
+WHERE contains(entities, "[[Entities/<slug>]]")
+SORT captured_at DESC
+```
+```
+
+Notes:
+
+- The Dataview body filters on `entities`, not a separate
+  `projects` field — the frontmatter has one entity list and the
+  user can navigate from either Entity page or Project page to the
+  same set of entries.
+- A single slug can produce BOTH an Entity page and a Project page
+  when classified as Project (Project entities are still emitted
+  as `entities:` wiki-links in the entry frontmatter; the
+  duplication is intentional — Dataview queries on the Project
+  page filter by the same wiki-link).
+- `status: active` is a STATIC initial value; the user is
+  expected to edit it (`active` / `paused` / `done` etc.) — same
+  user-owns-thereafter contract; Mockingbird never rewrites it.
+
+#### Wave plan impact
+
+All five amendment-bundled changes (subtree expansion, serializer
+retrofit, two stub generators, worker integration) ship in ONE
+wave (`mb-08za`), interstitial between 1E.4 and 1E.5. The wave
+seals with the original Phase 1E acceptance gates re-passed
+(`kg_parity` 32/32, `kg_source_gate_invariant` 6/6,
+`kg_graph_off_invariant` 8/8) plus the new entity-page golden +
+property tests on the wiki-link emission shape.
+
+#### Backfill
+
+Entries written before this amendment retain bare-string entities
+on disk; new entries get wiki-link entities. Dataview queries
+should defensively handle both shapes (e.g. `contains(entities,
+"feta-cheese") OR contains(entities, "[[Entities/feta-cheese]]")`).
+Automatic backfill is deferred to Phase 1F; the manual
+alternatives (re-capture, hand-edit) are documented in LESSONS.

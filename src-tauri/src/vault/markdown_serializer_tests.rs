@@ -85,6 +85,36 @@ fn done_task_entry() -> KgEntry {
     e
 }
 
+/// Amendment `mb-08za` fixture: covers the wiki-link entity
+/// emission shape explicitly. Includes a slug-collision pair
+/// (`"Mockingbird"` + `"mockingbird"` both → `mockingbird`) so the
+/// golden + the dedupe property are pinned in one place.
+fn wiki_linked_entities_entry() -> KgEntry {
+    KgEntry {
+        id: "01HMWIKI00abcdef1234567890".to_string(),
+        captured_at: ts(2026, 6, 18, 9, 0, 0),
+        captured_at_local_date: date(2026, 6, 18),
+        capture_kind: CaptureKind::KgNote,
+        title: "Team sync about Mockingbird and project status".to_string(),
+        category: Category::Professional,
+        entry_type: EntryType::Note,
+        status: None,
+        due_date: None,
+        tags: vec!["mockingbird".to_string(), "team-sync".to_string()],
+        // Mix: slug-collision pair (Mockingbird + mockingbird) +
+        // two distinct entities. Dedupe + wiki-link emission are
+        // both exercised by the golden below.
+        entities: vec![
+            "Mockingbird".to_string(),
+            "mockingbird".to_string(),
+            "Maple".to_string(),
+            "Dustin".to_string(),
+        ],
+        source_session_uuid: None,
+        body: "We discussed Phase 1E and the Obsidian sync work.".to_string(),
+    }
+}
+
 fn special_chars_entry() -> KgEntry {
     KgEntry {
         id: "01HMSPECIAL00ab1234567890af".to_string(),
@@ -285,6 +315,94 @@ fn frontmatter_lists_use_block_style() {
         out.contains("tags:\n  - \"brake-pads\"\n  - \"suppliers\"\n"),
         "tags must use block style with quoted items: {out}"
     );
+}
+
+// ──────────────────────────────────────────────
+// Entity wiki-link emission tests (amendment mb-08za)
+// ──────────────────────────────────────────────
+
+/// Every entity in a non-empty list emits as a quoted wiki-link
+/// matching `"[[Entities/<slug>]]"`. Pinned at the golden site too,
+/// but called out as a standalone assertion so a future refactor
+/// that breaks the shape surfaces here with a clear message.
+#[test]
+fn entities_emit_as_wiki_links() {
+    let e = full_task_entry();
+    let out = serialize_entry(&e);
+    assert!(
+        out.contains("entities:\n  - \"[[Entities/home-depot]]\"\n  - \"[[Entities/autozone]]\"\n"),
+        "entities must emit as quoted wiki-link block list: {out}"
+    );
+}
+
+/// Slug collisions (distinct input strings that slugify identically)
+/// collapse to a single wiki-link, first-occurrence wins for order.
+#[test]
+fn entities_deduped_by_slug_at_serialize_time() {
+    let mut e = minimal_entry();
+    e.entities = vec![
+        "Mockingbird".to_string(),
+        "mockingbird".to_string(),
+        "MockingBird".to_string(),
+        "Maple".to_string(),
+    ];
+    let out = serialize_entry(&e);
+    let entities_block = out
+        .split("entities:\n")
+        .nth(1)
+        .and_then(|s| s.split("\n---\n").next())
+        .expect("entities block present");
+    let mockingbird_lines = entities_block.matches("[[Entities/mockingbird]]").count();
+    assert_eq!(
+        mockingbird_lines, 1,
+        "slug-colliding entities must dedupe to one line: {entities_block}"
+    );
+    assert!(
+        entities_block.contains("[[Entities/maple]]"),
+        "distinct entities must survive dedupe: {entities_block}"
+    );
+}
+
+/// Empty entity list still emits as flow-form `entities: []` (same
+/// discipline as `tags: []`) so the reverse-watcher can distinguish
+/// "no entities" from "field absent".
+#[test]
+fn empty_entities_render_inline_after_amendment() {
+    let e = minimal_entry();
+    let out = serialize_entry(&e);
+    assert!(
+        out.contains("entities: []\n"),
+        "empty entities must still render as flow-form: {out}"
+    );
+}
+
+/// Wiki-links pass through `push_quoted_scalar` so the YAML parser
+/// still sees a single double-quoted scalar with no escape
+/// surprises. Pinned as a sanity check; the property test below
+/// is the broad guarantee.
+#[test]
+fn entity_wiki_links_are_valid_yaml_scalars() {
+    let e = wiki_linked_entities_entry();
+    let out = serialize_entry(&e);
+    let fm = extract_frontmatter(&out);
+    let parsed: serde_yaml::Value = serde_yaml::from_str(fm).expect("valid YAML");
+    let entities_val = parsed
+        .as_mapping()
+        .and_then(|m| m.get(serde_yaml::Value::String("entities".into())))
+        .expect("entities key present");
+    let entities_seq = entities_val.as_sequence().expect("entities is a sequence");
+    assert_eq!(
+        entities_seq.len(),
+        3,
+        "slug collisions dedupe Mockingbird+mockingbird → 1 entry"
+    );
+    for v in entities_seq {
+        let s = v.as_str().expect("entity is a string");
+        assert!(
+            s.starts_with("[[Entities/") && s.ends_with("]]"),
+            "entity must be a wiki-link: {s}"
+        );
+    }
 }
 
 #[test]
@@ -512,6 +630,7 @@ fn frontmatter_is_valid_yaml() {
         doing_task_entry(),
         done_task_entry(),
         special_chars_entry(),
+        wiki_linked_entities_entry(),
     ] {
         let out = serialize_entry(&entry);
         let fm = extract_frontmatter(&out);
@@ -641,6 +760,66 @@ proptest! {
         prop_assert!(!slug.ends_with('-'), "slug must not end with '-': {slug}");
         prop_assert!(slug.len() <= SLUG_MAX_LEN, "slug must be <= {SLUG_MAX_LEN}: {slug}");
     }
+
+    /// Amendment `mb-08za`: every emitted entity scalar matches the
+    /// `[[Entities/<slug>]]` shape with the same slug alphabet as
+    /// the filename slug. The regex is the formal contract the
+    /// reverse-watcher's parser keys on.
+    #[test]
+    fn prop_entities_emit_as_wiki_links(entry in arb_entry()) {
+        let out = serialize_entry(&entry);
+        let fm = extract_frontmatter(&out);
+        let parsed: serde_yaml::Value = serde_yaml::from_str(fm)
+            .map_err(|e| TestCaseError::fail(format!("YAML parse failed: {e}")))?;
+        let entities = parsed
+            .as_mapping()
+            .and_then(|m| m.get(serde_yaml::Value::String("entities".into())))
+            .ok_or_else(|| TestCaseError::fail("entities key missing".to_string()))?;
+        // Empty entities renders as flow-form `[]` which still
+        // parses as a sequence — the for-loop below is a no-op in
+        // that case, which is the desired behaviour.
+        let seq = entities
+            .as_sequence()
+            .ok_or_else(|| TestCaseError::fail("entities must be a sequence".to_string()))?;
+        let re = regex::Regex::new(r"^\[\[Entities/[a-z0-9-]+\]\]$").unwrap();
+        for v in seq {
+            let s = v.as_str().ok_or_else(|| {
+                TestCaseError::fail(format!("entity item must be a string: {v:?}"))
+            })?;
+            prop_assert!(
+                re.is_match(s),
+                "entity wiki-link violates regex `{}`: {s}",
+                re.as_str()
+            );
+        }
+    }
+
+    /// Slug-collision dedupe is total: the emitted entity count is
+    /// at most the number of unique slugs derived from the input
+    /// (and the slug alphabet is closed-form ASCII kebab-case).
+    #[test]
+    fn prop_entities_dedupe_by_slug(entry in arb_entry()) {
+        let unique_slugs: std::collections::BTreeSet<String> = entry
+            .entities
+            .iter()
+            .map(|s| slugify_title(s))
+            .collect();
+        let out = serialize_entry(&entry);
+        let fm = extract_frontmatter(&out);
+        let parsed: serde_yaml::Value = serde_yaml::from_str(fm)
+            .map_err(|e| TestCaseError::fail(format!("YAML parse failed: {e}")))?;
+        let seq_len = parsed
+            .as_mapping()
+            .and_then(|m| m.get(serde_yaml::Value::String("entities".into())))
+            .and_then(|v| v.as_sequence())
+            .map(|s| s.len())
+            .unwrap_or(0);
+        prop_assert_eq!(
+            seq_len,
+            unique_slugs.len(),
+            "emitted entity count must equal unique-slug count"
+        );
+    }
 }
 
 // ────────────────────────────────────────────────────────────
@@ -669,6 +848,9 @@ fn golden_for(name: &str) -> &'static str {
         "doing_task" => include_str!("../../tests/fixtures/markdown_golden/doing_task.md"),
         "done_task" => include_str!("../../tests/fixtures/markdown_golden/done_task.md"),
         "special_chars" => include_str!("../../tests/fixtures/markdown_golden/special_chars.md"),
+        "wiki_linked_entities" => {
+            include_str!("../../tests/fixtures/markdown_golden/wiki_linked_entities.md")
+        }
         other => panic!("unknown golden fixture: {other}"),
     }
 }
@@ -738,6 +920,13 @@ fn golden_special_chars() {
     assert_golden("special_chars", &special_chars_entry());
 }
 
+/// Amendment `mb-08za`: pins the wiki-link entity emission shape
+/// (including slug-collision dedupe) as a byte-stable golden.
+#[test]
+fn golden_wiki_linked_entities() {
+    assert_golden("wiki_linked_entities", &wiki_linked_entities_entry());
+}
+
 /// Filenames for every golden fixture must also match the
 /// contract regex — pinned alongside the body goldens so any
 /// future filename-shape refactor surfaces at the same site.
@@ -749,6 +938,10 @@ fn golden_filenames_match_contract() {
         ("doing_task", &(doing_task_entry as fn() -> KgEntry)),
         ("done_task", &(done_task_entry as fn() -> KgEntry)),
         ("special_chars", &(special_chars_entry as fn() -> KgEntry)),
+        (
+            "wiki_linked_entities",
+            &(wiki_linked_entities_entry as fn() -> KgEntry),
+        ),
     ];
     let re = regex::Regex::new(r"^\d{4}-\d{2}-\d{2}-[a-z0-9-]+__[a-z0-9]{8}\.md$").unwrap();
     for (label, ctor) in cases {

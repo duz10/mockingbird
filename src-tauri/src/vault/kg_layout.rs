@@ -1,9 +1,17 @@
 //! Phase 1E Wave 1E.1 (`mb-e16d`, ADR 0053 §D1) — KG subtree bootstrap.
 //!
 //! Owns the idempotent creation of the
-//! `<vault>/Knowledge Graph/{Inbox,Entries,History}/` subtree
-//! beneath the user's configured vault root. The folder name carries
-//! a literal space — Obsidian-facing UX per ADR 0053 §D1 / spec §7.1.
+//! `<vault>/Knowledge Graph/{Inbox,Entries,History,Entities,Projects}/`
+//! subtree beneath the user's configured vault root. The folder name
+//! carries a literal space — Obsidian-facing UX per ADR 0053 §D1 /
+//! spec §7.1.
+//!
+//! **Amendment 2026-06-06 (`mb-08za`, ADR 0053 §D1 as amended):**
+//! subtree expanded from 3 → 5 folders to host the new auto-generated
+//! Entity / Project stub pages (§D11 / §D12). The expansion is
+//! purely additive — the original Cell A/B/C semantics still hold;
+//! `BootstrapReport::AlreadyExists` now requires ALL five directories
+//! to be present-as-dirs.
 //!
 //! ## Idempotency contract (ADR 0053 §D1)
 //!
@@ -67,6 +75,17 @@ pub const KG_ENTRIES_NAME: &str = "Entries";
 /// `<YYYY-MM>/<session-uuid>.json` sidecars + audio moves here.
 pub const KG_HISTORY_NAME: &str = "History";
 
+/// Entities subfolder name. Amendment `mb-08za` (ADR 0053 §D11) — the
+/// continuous auto-generation target for entity stub pages. One
+/// `.md` per unique entity slug, write-once + user-owns-thereafter.
+pub const KG_ENTITIES_NAME: &str = "Entities";
+
+/// Projects subfolder name. Amendment `mb-08za` (ADR 0053 §D12) — the
+/// continuous auto-generation target for project stub pages. Same
+/// write-once contract as `Entities/`, scoped to entities classified
+/// as `EntityType::Project` by the pipeline.
+pub const KG_PROJECTS_NAME: &str = "Projects";
+
 /// Pure path-assembly view over the KG subtree under a given vault
 /// root. Constructed via [`kg_subtree_paths`]. No I/O; the helpers
 /// just compose `PathBuf`s.
@@ -85,6 +104,10 @@ pub struct KgSubtreePaths {
     pub entries: PathBuf,
     /// `<vault>/Knowledge Graph/History/`
     pub history: PathBuf,
+    /// `<vault>/Knowledge Graph/Entities/` (amendment `mb-08za`).
+    pub entities: PathBuf,
+    /// `<vault>/Knowledge Graph/Projects/` (amendment `mb-08za`).
+    pub projects: PathBuf,
 }
 
 /// Compose the four KG subtree paths from a vault root. Pure — no
@@ -98,11 +121,15 @@ pub fn kg_subtree_paths(vault_path: &Path) -> KgSubtreePaths {
     let inbox = root.join(KG_INBOX_NAME);
     let entries = root.join(KG_ENTRIES_NAME);
     let history = root.join(KG_HISTORY_NAME);
+    let entities = root.join(KG_ENTITIES_NAME);
+    let projects = root.join(KG_PROJECTS_NAME);
     KgSubtreePaths {
         root,
         inbox,
         entries,
         history,
+        entities,
+        projects,
     }
 }
 
@@ -172,9 +199,18 @@ pub fn bootstrap_kg_subtree(vault_path: &Path) -> AppResult<BootstrapReport> {
     let all_present = paths.root.is_dir()
         && paths.inbox.is_dir()
         && paths.entries.is_dir()
-        && paths.history.is_dir();
+        && paths.history.is_dir()
+        && paths.entities.is_dir()
+        && paths.projects.is_dir();
 
-    for dir in [&paths.root, &paths.inbox, &paths.entries, &paths.history] {
+    for dir in [
+        &paths.root,
+        &paths.inbox,
+        &paths.entries,
+        &paths.history,
+        &paths.entities,
+        &paths.projects,
+    ] {
         std::fs::create_dir_all(dir).map_err(|e| {
             AppError::Vault(format!(
                 "bootstrap_kg_subtree: failed to create {} -- {}",
@@ -221,6 +257,8 @@ mod tests {
         assert!(p.inbox.is_dir(), "inbox must exist");
         assert!(p.entries.is_dir(), "entries must exist");
         assert!(p.history.is_dir(), "history must exist");
+        assert!(p.entities.is_dir(), "entities must exist (mb-08za)");
+        assert!(p.projects.is_dir(), "projects must exist (mb-08za)");
     }
 
     /// Cell B — subtree already exists, empty. Expect
@@ -278,7 +316,8 @@ mod tests {
         let td = TempDir::new().unwrap();
         let p = kg_subtree_paths(td.path());
 
-        // Only root + inbox present; entries + history missing.
+        // Only root + inbox present; entries + history + entities +
+        // projects all missing.
         fs::create_dir_all(&p.root).unwrap();
         fs::create_dir_all(&p.inbox).unwrap();
 
@@ -290,6 +329,35 @@ mod tests {
         );
         assert!(p.entries.is_dir(), "entries must now exist");
         assert!(p.history.is_dir(), "history must now exist");
+        assert!(p.entities.is_dir(), "entities must now exist (mb-08za)");
+        assert!(p.projects.is_dir(), "projects must now exist (mb-08za)");
+    }
+
+    /// Amendment `mb-08za` regression guard: a pre-existing
+    /// three-folder subtree (Inbox + Entries + History present;
+    /// Entities + Projects missing) must report `Created` rather than
+    /// `AlreadyExists`, because the expansion DID create something.
+    /// This is the upgrade path for users who toggled the KG on
+    /// pre-amendment.
+    #[test]
+    fn bootstrap_upgrades_pre_amendment_three_folder_subtree() {
+        let td = TempDir::new().unwrap();
+        let p = kg_subtree_paths(td.path());
+
+        // Plant the pre-amendment shape: only the original three.
+        fs::create_dir_all(&p.root).unwrap();
+        fs::create_dir_all(&p.inbox).unwrap();
+        fs::create_dir_all(&p.entries).unwrap();
+        fs::create_dir_all(&p.history).unwrap();
+
+        let report = bootstrap_kg_subtree(td.path()).expect("bootstrap must succeed");
+        assert_eq!(
+            report,
+            BootstrapReport::Created,
+            "three-folder pre-amendment subtree must upgrade to Created"
+        );
+        assert!(p.entities.is_dir(), "entities must now exist");
+        assert!(p.projects.is_dir(), "projects must now exist");
     }
 
     /// Paths are composed via `PathBuf::join`; the literal "Knowledge
@@ -327,6 +395,14 @@ mod tests {
         assert_eq!(
             p.history.components().last().unwrap().as_os_str(),
             std::ffi::OsStr::new("History"),
+        );
+        assert_eq!(
+            p.entities.components().last().unwrap().as_os_str(),
+            std::ffi::OsStr::new("Entities"),
+        );
+        assert_eq!(
+            p.projects.components().last().unwrap().as_os_str(),
+            std::ffi::OsStr::new("Projects"),
         );
     }
 

@@ -919,13 +919,24 @@ ahead.** Charter: [ADR 0053](adr/0053-kg-phase-1e-obsidian-as-source-of-truth.md
 Bead epic `mb-imc2`. What's shipped so far:
 
 - **1E.1 — Subtree bootstrap** (`vault::kg_layout`). Idempotent
-  creation of `<vault>/Knowledge Graph/{Inbox,Entries,History}/`
+  creation of `<vault>/Knowledge Graph/{Inbox,Entries,History,Entities,Projects}/`
   at toggle-on + at boot. New `kg_subtree_bootstrap` IPC.
+  *(2026-06-06 amendment `mb-08za`: subtree expanded from 3 → 5
+  folders to host the new auto-generated Entity + Project stub
+  pages per ADR 0053 §D11 / §D12 as amended. Pre-amendment
+  three-folder subtrees upgrade in place on next bootstrap.)*
 - **1E.2 — Markdown serializer** (`vault::markdown_serializer`).
   Pure `KgEntry → (filename, bytes)`. Hand-rolled YAML emitter
   for byte-stable output (deterministic field order, double-
   quoted strings, block-style non-empty lists, LF only, RFC 3339
-  Z timestamps, conditional fields omitted). 5 golden fixtures.
+  Z timestamps, conditional fields omitted). 6 golden fixtures.
+  *(2026-06-06 amendment `mb-08za`: `entities:` field now emits
+  as `"[[Entities/<slug>]]"` Obsidian wiki-links instead of bare
+  strings, deduped by slug at serialize time; same `slugify_title`
+  helper drives both filename slugs and entity slugs. New
+  `wiki_linked_entities.md` golden + 2 property tests pin the
+  shape. Reverse-watcher (1E.5) parses both legacy bare-string
+  and new wiki-link forms; writes always emit canonical wiki-link.)*
 - **1E.3 — Two-phase commit + worker integration**
   (`vault::writer`). KG filing worker writes Markdown to
   `<vault>/Knowledge Graph/Entries/<date>-<slug>__<id8>.md`
@@ -950,6 +961,24 @@ Bead epic `mb-imc2`. What's shipped so far:
   is the on-demand scan surface for sealed-but-not-archived
   sessions + orphan sidecars; read-only. Same non-fatal-to-queue
   philosophy as 1E.3.
+- **Charter amendment 2026-06-06 (`mb-08za`, ADR 0053 amendments)
+  — Entity + Project stub pages auto-generated continuously.**
+  New module `vault::entity_pages` owns `ensure_entity_page` +
+  `ensure_project_page`. On every successful filing, the worker's
+  Phase 4b (post-seal, post-history-archive) iterates the entry's
+  unique entity slugs and idempotently creates a stub `.md` at
+  `Knowledge Graph/Entities/<slug>.md` for every entity; entities
+  classified as `EntityType::Project` ALSO get a stub at
+  `Knowledge Graph/Projects/<slug>.md`. Stubs are **write-once,
+  user-owns-thereafter** (detection is purely existence-on-disk;
+  Mockingbird never overwrites). Stub frontmatter pins
+  `id`/`type`/`schema_version`/`created_at` + per-type field
+  (`aliases: []` for entities, `status: "active"` for projects);
+  body is a Dataview block filtering `contains(entities,
+  "[[Entities/<slug>]]")` so navigating from either page lands the
+  user on the same set of entries. Failure is non-fatal to filing
+  (same retry-budget decoupling as 1E.3 / 1E.4). 19 unit tests in
+  the throwaway-crate suite.
 
 Not yet shipped (Waves 1E.5–1E.9): the **reverse-watcher**
 (file edits → SQLite + FTS reconcile; hash-based loop-

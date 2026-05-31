@@ -383,6 +383,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-06-06 | `[KG Phase 1E charter amendment / mb-08za / ADR 0053 amendments]` | Interstitial wave between 1E.4 and 1E.5 closed the "entities are bare strings, not Obsidian graph nodes" gap surfaced when Dustin opened the live vault. Four ADR 0053 amendments shipped together (subtree 3→5 folders; entities emit as `"[[Entities/<slug>]]"` wiki-links; auto-generated Entity stub pages §D11; auto-generated Project stub pages §D12), plus serializer retrofit + new `vault::entity_pages` module + worker integration. Three findings worth keeping: (1) **Write-once user-owns-thereafter is the only sane contract for auto-generated user-facing artifacts** — detection is pure existence-on-disk (no content hash, no schema upgrade path that mutates user edits); the user can rewrite the entire body of `Entities/maple.md` and Mockingbird never touches it on subsequent filings. This is the same shape 1E.7's first-activation seeds will use; the moment a third callsite wants the same shape, extract it. (2) **Wiki-link round-trip is asymmetric and that's fine** — the canonical OUTBOUND form (DB → file) is always `"[[Entities/<slug>]]"`; the INBOUND parser (file → DB, Wave 1E.5's reverse-watcher) must accept BOTH legacy bare-string entries (pre-amendment) AND the new wiki-link shape, but writes ALWAYS emit the canonical form so the next round-trip converges. Same `slugify_title` helper drives BOTH filename slugs and entity slugs — one source of truth or you get unfindable graph edges. (3) **Backfill is cheaper to defer than to design** — Dustin's four pre-amendment test entries stay in bare-string form; new entries get wiki-links; Dataview queries written defensively (`contains(entities, "<bare>") OR contains(entities, "[[Entities/<bare>]]")`) cover both shapes. Automatic backfill is Phase 1F (or later) work. The amendment ships clean and the user has three painless paths (re-capture / hand-edit / wait). Mid-stride schema migrations on user-owned files are the most expensive class of work in this codebase; not doing one when the cost/benefit is in the noise is the right call. Body, narrow blast radius (KG Phase 1E only). |
 | 2026-06-06 | `[KG Phase 1E hotfix #2 / mb-wzui]` | Vault entry body was `entries[0].body` (segmenter segment 0) instead of the full cleaned transcript — multi-bullet KG notes silently dropped segments 1..N. Root cause was NOT any of the kickoff's three hypotheses (LLM summary / serializer truncation / intermediate mangle) — it was a fourth: the worker's `KgEntry { body: primary.body.clone() }` was using `result.entries[0].body`, which is the *segmenter's first semantic segment* (`kg::pipeline::segment` is reformulating chunker, not substring slicer). Fix: snapshot the `transcripts(stage='final')` row inside the same mutex as the session+settings snapshot, prefer cleaned transcript via new `pick_vault_body` helper with segment[0] fallback for defensive completeness, whitespace-only transcripts fall through to fallback. Three findings: (1) body source-of-truth precedence is final → cleaned → raw matching ALL display surfaces (Dictations view, history archive, vault projection) — extract the cascade as a single helper the moment a second site projects the same DB content. (2) `entries[N].body` is structured pipeline output not faithful source slice — reach for the input column, not for segmenter output, when you want "the original input". (3) Orphan-recovery pattern: `git status --porcelain=v1` caught a prior session's complete-but-uncommitted `pick_vault_body` fix + 4 worker tests sitting in working tree; this iteration's contribution was the complementary serializer-side regression pin (`body_preserves_markdown_bullet_list_verbatim`). Body, narrow blast radius (KG vault projection). |
 | 2026-06-06 | `[KG Phase 1E hotfix / mb-43xw + reconcile_history IPC]` | Pre-1E.3 release exe shipped to live user because Waves 1E.3 + 1E.4 sealed on `test --release --no-run` (correct for gating link validity; does NOT produce a fresh runtime exe). Fix: rebuilt + promoted both deferred reconcile IPCs to the dashboard `ActionsBand` (Open vault + Reconcile vault). Findings: (1) PINNED P13 — test-no-run is not a build substitute when shipping behavior to a live user; AGENTS.md end-of-iteration gate now requires `cargo build --release` after any wave touching migrations / worker pipeline / IPC. (2) Two symmetric reconcile IPCs > one; render combined banner so the operator sees the whole drift picture, not half. (3) Sequential `await` (not `Promise.all`) on identical-gate IPC pairs avoids duplicate error toasts during a toggle-off race. (4) Match Button variants to the existing palette; `tsc` will catch typos like `secondary` against `primary/ghost/danger`. Body, broad-implication (every future migration / worker / IPC wave inherits Finding 1). |
 | 2026-06-05 | `[KG Phase 1E Wave 1E.4 / mb-i14b / ADR 0053 §D7]` | History archive (per-session JSON sidecar + audio move) shipped. Two findings: (1) golden JSON fixtures created via the file-write tool land as CRLF on Windows; byte-identity tests fail with expected.len() = actual.len() + 12 across a 12-line file (one CR per line). Visible content is byte-for-byte identical in the panic message. Fix: rewrite via `[System.IO.File]::WriteAllText` with `UTF8Encoding(false)` after manual `"\`r\`n" -> "\`n"` replace, OR use `MOCKINGBIRD_UPDATE_GOLDENS=1` to regenerate via the runtime serializer. `.gitattributes` already specifies `*.json text eol=lf` so the on-commit normalization is correct; only the local working tree was wrong. (2) `serde_json::to_string_pretty` is LF-deterministic by contract — `PrettyFormatter`'s default constructor uses `b"\n"` directly, so canonical-LF-bytes guarantees come for free on every platform. Safe to lean on for any future JSON-artefact contract. Body, narrow blast radius |
@@ -461,6 +462,150 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+## 2026-06-06 [KG Phase 1E charter amendment / mb-08za / ADR 0053 amendments] Entity pages + Project pages + wiki-link entities shipped as one interstitial wave between 1E.4 and 1E.5 — closes the "entities are dead text, not graph nodes" gap surfaced by Dustin opening the live vault
+
+**Context.** Phase 1E Wave 1E.4 shipped clean (history archive) and Dustin
+opened the live `Knowledge Graph/` vault in Obsidian. The Dictations-view
+UX was great, but the KG side felt flat: entries had `entities:
+  - "Maple"` as bare frontmatter strings, Obsidian rendered them as untyped
+text, and there was no `Entities/Maple.md` page to link TO — so clicking
+an entity went nowhere and Obsidian's graph view didn't see the
+relationships. The promised "all entries mentioning Maple" view that's
+the whole point of the KG didn't exist.
+
+Design discussion converged on three load-bearing calls (Dustin approved
+all three):
+
+1. Auto-generate per-entity AND per-project pages in the vault.
+2. Emit entity references as Obsidian wiki-links (`"[[Entities/<slug>]]"`),
+   not bare strings.
+3. Keep current TaskNotes-compatible field names; no rename churn.
+
+The wave was sized as ADR-chartered lateral epic-LITE: four ADR 0053
+amendments (§D1 expansion + §D3 wiki-links + new §D11 entity pages + new
+§D12 project pages), one serializer retrofit, one new module
+(`vault::entity_pages`), worker integration after the existing seal +
+history-archive phases. Shipped in one iteration.
+
+### Finding 1 — Write-once user-owns-thereafter is the only sane contract for auto-generated user-facing artifacts
+
+The entity / project stub pages live in the same vault tree the user
+edits by hand. Two competing pressures:
+
+- Mockingbird wants to **update** the stub when classification improves
+  ("oh, this entity is actually a Project now; rewrite the frontmatter").
+- The user wants to **own** the file the moment they edit it (add notes,
+  rewrite the Dataview query, change the title).
+
+These are incompatible. Picking "Mockingbird updates" means a user note
+gets clobbered the next time the slug appears. Picking "user owns" means
+classification drift is invisible. The wave picked **user owns,
+unconditionally**:
+
+- Detection is purely existence-on-disk. `Entities/<slug>.md` exists
+  ⇒ skip stub generation. No content hash. No schema-version check.
+  No "upgrade my stub to v2" path.
+- The first write IS the user's file. Subsequent writes never happen.
+- If classification improves later, the stub is stale. That's fine.
+  The user can fix it OR not; not Mockingbird's call.
+
+This is the same shape Wave 1E.7 first-activation seeds will use
+(Dashboard.md / Kanban - Tasks.md / README.md) — the only difference is
+the TRIGGER (toggle-on vs per-filing). The moment a third callsite wants
+the same shape, extract `ensure_user_owned_file(path, default_body)` to
+a shared helper. Until then YAGNI: two callsites with slightly different
+triggers don't yet justify the abstraction.
+
+**Generalization.** Any time Mockingbird wants to auto-generate a file
+in a user-owned directory tree, the default contract should be
+write-once-by-existence. Mutating user-owned files via content-hash
+"reconcile" logic is the path to lost work; don't go there without a
+hard requirement.
+
+### Finding 2 — Wiki-link round-trip is asymmetric, and that's correct
+
+The canonical OUTBOUND form (DB → file, in the serializer) is always
+`"[[Entities/<slug>]]"` — quoted wiki-link, slugified, deduped.
+
+The INBOUND parser (file → DB, Wave 1E.5's reverse-watcher) must accept
+BOTH shapes:
+
+- Legacy bare-string entries (`- "Maple"`) written pre-amendment.
+- The new wiki-link shape (`- "[[Entities/maple]]"`).
+
+But writes ALWAYS emit the canonical form. So the round-trip
+`parse(serialize(entry))` converges to the canonical shape on the next
+write, regardless of how it was written originally. Legacy entries
+upgrade themselves the moment anything touches them.
+
+The slug rule is shared with the filename slug helper
+(`vault::markdown_serializer::slugify_title`) — the same
+ASCII-kebab-case alphabet with the same length cap drives BOTH
+filename slugs and entity wiki-link slugs. There is exactly one
+`fn slugify_title` in the codebase. The amendment's wiki-link writer
+(`write_entity_wiki_link_list`) calls it; the stub generator's
+validator (`vault::entity_pages::validate_slug`) is a
+defense-in-depth re-check of the same alphabet.
+
+**Generalization.** When you have a non-symmetric serializer/parser
+pair (writes canonical form, reads multiple legacy forms), explicitly
+document the asymmetry in module docs and pin the regex of the
+canonical form in a property test. Future readers WILL otherwise
+"helpfully" simplify the parser to only accept the canonical form
+and break existing user data.
+
+### Finding 3 — Backfill is cheaper to defer than to design when the user-cost is in the noise
+
+Dustin has ~4 pre-amendment test entries on disk with bare-string
+entities. Three options for handling them:
+
+- **(A)** Automatic backfill at toggle-on: scan `Entries/`, rewrite
+  entries' `entities:` field to wiki-link form, write Entity/Project
+  stubs for the union of slugs. ~200 LoC + a reconcile sweep + a
+  judge + a manual-test matrix.
+- **(B)** Manual: "hey Dustin, re-capture those four entries."
+- **(C)** Hybrid: ship now, do (A) in Phase 1F if accumulated
+  pre-amendment entries grow into the painful range.
+
+The wave shipped (C). Reasoning: Dustin's four entries are test data,
+Dataview queries can defensively `OR` both shapes
+(`contains(entities, "maple") OR contains(entities,
+"[[Entities/maple]]")`), and a backfill sweep has its own correctness
+hazards (what if the user edited a pre-amendment entry between
+toggle-off and toggle-on? what if the rewrite races a reverse-watcher
+event? what's the rollback story?).
+
+Mid-stride schema migrations on user-owned files are the most
+expensive class of work in this codebase. Not doing one when the
+cost/benefit is in the noise is the right call.
+
+**Generalization.** When facing a "we changed the on-disk shape; what
+about old data?" question, the default answer should be "document
+both shapes, write canonical-form going forward, defer automated
+backfill until the pre-amendment population is BIG ENOUGH to be
+painful and we have a use-case forcing the migration." If the
+pre-amendment population is 4 files, you're inside the noise and the
+user can hand-fix in 30 seconds. Don't build the elaborate solution.
+
+### Mechanics worth noting
+
+- Wave touched the worker pipeline + IPC-adjacent code, so per **PINNED
+  P13** the end-of-iteration gate ran `cargo build --release` (not just
+  `test --no-run`); confirmed the live `target/release/mockingbird.exe`
+  mtime post-seal.
+- 19 new unit tests for `vault::entity_pages` run via the
+  throwaway-crate recipe (LESSONS 2026-05-17 P2). All green.
+- Serializer changes verified by extended golden suite
+  (`wiki_linked_entities.md` is the new golden specifically covering
+  the dedupe + wiki-link emission shape).
+- Two P3 beads filed for the deferred work surfaced by this wave:
+  `mb-zvv3` (entity slug disambiguation + merge UX) and `mb-3hyp`
+  (delete-entry UI affordance on KG screen).
+- No backfill ran; ~4 pre-amendment entries remain in bare-string
+  form per Finding 3.
+
+---
 
 ## 2026-06-06 [KG Phase 1E hotfix #2 / mb-wzui] Vault entry body was `entries[0].body` (one segment of the segmenter's output) instead of the full cleaned transcript — multi-bullet KG notes silently dropped segments 1..N
 

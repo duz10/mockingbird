@@ -77,10 +77,11 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::db::sessions::{self as db_sessions, CaptureKind as DbCaptureKind};
 use crate::error::{AppError, AppResult};
 use crate::settings::{model::SettingKey, Settings};
+use crate::vault::entity_pages::{ensure_entity_page, ensure_project_page, StubPageReport};
 use crate::vault::history::{archive_session_history, HistoryArchiveInput};
 use crate::vault::markdown_serializer::{
-    CaptureKind as VaultCaptureKind, Category as VaultCategory, EntryType as VaultEntryType,
-    KgEntry, Status as VaultStatus,
+    slugify_title, CaptureKind as VaultCaptureKind, Category as VaultCategory,
+    EntryType as VaultEntryType, KgEntry, Status as VaultStatus,
 };
 use crate::vault::writer::{commit_entry_to_vault, CommitOutcome};
 
@@ -458,6 +459,17 @@ fn process_one(
         }
     }
 
+    // ── Entity / Project stub pages (ADR 0053 §D11 / §D12, mb-08za) ─
+    // Phase 4b (parallel to history archive): runs strictly AFTER
+    // seal + mark_done. Each stub call is independently non-fatal.
+    // Stub generation only fires when the entry actually projected
+    // to disk (i.e. `vault_outcome.is_some()`); without that there
+    // is no `Entries/<...>.md` for the stubs' Dataview queries to
+    // reference anyway.
+    if vault_outcome.is_some() {
+        maybe_generate_stub_pages(conn, queue_id, entry_id, &result);
+    }
+
     let total_filing_ms = total_t0.elapsed().as_millis() as u64;
 
     // Phase 1C.0 (`mb-plz9`, ADR 0051) — structured latency event.
@@ -733,6 +745,150 @@ fn maybe_archive_history(
         "history archive step complete"
     );
     Ok(())
+}
+
+/// Entity + Project stub-page generation step (ADR 0053 §D11 / §D12,
+/// amendment `mb-08za`). Phase 4b, runs strictly AFTER the seal +
+/// mark_done transaction commits AND after the history archive. Each
+/// stub call is independently non-fatal: a write failure is logged
+/// via `tracing::warn!` and the next slug continues. Same
+/// retry-budget decoupling as the history archive (failure here
+/// never re-opens the queue row).
+///
+/// Why post-seal: the stub pages reference the entry via Dataview
+/// (`contains(entities, "[[Entities/<slug>]]")`); for that query to
+/// return ANY results the entry's `.md` must already be on disk in
+/// `Entries/`, which is true iff the seal + mark_done txn committed.
+///
+/// Aggregation: we union (slug, EntityType) across
+/// `result.segment_entities` and dedupe by slug. First entity_type
+/// wins for a slug — the exotic case of "the same slug appears as
+/// both Person AND Project in the same dictation" is so unlikely
+/// that picking arbitrarily (= first seen) is fine; the stub is
+/// write-once anyway, so a subsequent classification can't
+/// retroactively flip a Person stub to a Project stub.
+///
+/// `result` is the `PipelineResult` whose entities drove the entry
+/// projection; the slug rule is shared with the serializer via
+/// `vault::markdown_serializer::slugify_title`.
+fn maybe_generate_stub_pages(
+    conn: &Arc<Mutex<Connection>>,
+    queue_id: i64,
+    entry_id: i64,
+    result: &PipelineResult,
+) {
+    // Snapshot vault root under a short-lived lock. If the toggle
+    // flipped off between seal and now, we still write the stubs
+    // (the entry is already on disk; matching stubs is the
+    // user-friendly behaviour). If the vault root is unset we
+    // can't write anything.
+    let vault_root_opt: Option<std::path::PathBuf> = {
+        let lock = conn.lock();
+        let Ok(c) = lock else {
+            tracing::warn!(
+                target: "kg::worker",
+                queue_id,
+                entry_id,
+                "db mutex poisoned in maybe_generate_stub_pages; skipping"
+            );
+            return;
+        };
+        Settings::new(&c)
+            .get::<Option<String>>(SettingKey::VaultPath)
+            .ok()
+            .flatten()
+            .filter(|s| !s.trim().is_empty())
+            .map(std::path::PathBuf::from)
+    };
+    let Some(vault_root) = vault_root_opt else {
+        return; // not configured -- nothing to do
+    };
+
+    // Aggregate (slug, is_project) across all surviving segment
+    // entity outputs. BTreeMap for deterministic iteration order
+    // (eases log-driven debugging + tests).
+    let mut by_slug: std::collections::BTreeMap<String, bool> = std::collections::BTreeMap::new();
+    for seg in &result.segment_entities {
+        for ent in &seg.entities {
+            let slug = slugify_title(&ent.name);
+            // `slugify_title` always returns non-empty ("untitled"
+            // fallback); guard anyway against future contract drift.
+            if slug.is_empty() || slug == "untitled" {
+                // Skip the all-symbols / empty entity name case;
+                // stub for "untitled" would be useless.
+                continue;
+            }
+            let is_project = matches!(ent.entity_type, super::passes::EntityType::Project);
+            // First-seen wins for entity_type. The OR-merge below
+            // means a slug seen as both Person AND Project gets
+            // Project (we DO want the Project stub if any
+            // classification flagged it). This is the only
+            // "merge" semantic; everything else is first-seen.
+            by_slug
+                .entry(slug)
+                .and_modify(|v| *v = *v || is_project)
+                .or_insert(is_project);
+        }
+    }
+
+    let now = chrono::Utc::now();
+    let mut entity_created = 0usize;
+    let mut entity_already = 0usize;
+    let mut project_created = 0usize;
+    let mut project_already = 0usize;
+
+    for (slug, is_project) in &by_slug {
+        match ensure_entity_page(&vault_root, slug, now) {
+            Ok(StubPageReport::Created) => {
+                entity_created += 1;
+            }
+            Ok(StubPageReport::AlreadyExists) => {
+                entity_already += 1;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    target: "kg::worker",
+                    queue_id,
+                    entry_id,
+                    slug,
+                    error = %e,
+                    "entity stub generation failed; continuing"
+                );
+            }
+        }
+        if *is_project {
+            match ensure_project_page(&vault_root, slug, now) {
+                Ok(StubPageReport::Created) => {
+                    project_created += 1;
+                }
+                Ok(StubPageReport::AlreadyExists) => {
+                    project_already += 1;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        target: "kg::worker",
+                        queue_id,
+                        entry_id,
+                        slug,
+                        error = %e,
+                        "project stub generation failed; continuing"
+                    );
+                }
+            }
+        }
+    }
+
+    tracing::info!(
+        target: "kg::worker",
+        queue_id,
+        entry_id,
+        entity_created,
+        entity_already,
+        project_created,
+        project_already,
+        slug_count = by_slug.len(),
+        "stub-page generation complete"
+    );
 }
 
 /// Single-stage transcript fetch. Like `load_dictation_text` but

@@ -23,6 +23,7 @@
 //! `sealed-phases-untouched` judge (Wave 5.3) verifies this
 //! mechanically.
 
+pub mod entity_pages;
 pub mod export_job;
 pub mod history;
 pub mod kg_layout;

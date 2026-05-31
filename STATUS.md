@@ -10,7 +10,7 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-06-06 (**KG Phase 1E hotfix #2 shipped** — vault entry body now sources from `transcripts(stage='final')` cleaned cascade, not `entries[0].body` segmenter output; multi-bullet KG notes no longer drop segments 1..N; closes `mb-wzui`; fresh release exe built). Prior consolidation 2026-06-06 earlier (**KG Phase 1E hotfix #1 shipped** — fresh release binary + `kg_reconcile_vault` + `kg_reconcile_history` IPCs + dashboard "Reconcile vault" button; closes `mb-43xw`; LESSONS PINNED P13 added). Prior consolidation 2026-06-05 (**KG Phase 1E Wave 1E.4 shipped** — `vault::history` module ships per-session JSON sidecar + audio file archive to `History/<YYYY-MM>/<session-uuid>.{json,ext}`; KG worker phase-4 integration; reconcile scan helper. Three golden JSON fixtures locked. All gates green; kg_parity 32/32, source_gate 6/6, graph_off 8/8 GREEN). Prior anchors: 2026-06-04 (Wave 1E.3 two-phase commit shipped); 2026-06-04 earlier (**KG Phase 1D SEALED via ADR 0052 Accepted** — Wave 1D.6 three judges + epic seal); 2026-05-31 (**KG Phase 1C SEALED via ADR 0051 Accepted**); 2026-06-03 (ADR 0050 KG Phase 1B SEALED).
+**Last consolidated:** 2026-06-06 (**KG Phase 1E charter amendment shipped** — four ADR 0053 amendments (subtree → 5 folders; entities emit as `"[[Entities/<slug>]]"` wiki-links; auto-generated entity pages §D11; auto-generated project pages §D12); new `vault::entity_pages` module; serializer retrofit; worker integration; 19 new live tests + 1 new golden + 2 property tests; closes `mb-08za`; fresh release exe built per PINNED P13). Prior consolidation 2026-06-06 (**KG Phase 1E hotfix #2 shipped** — vault entry body now sources from `transcripts(stage='final')` cleaned cascade, not `entries[0].body` segmenter output; multi-bullet KG notes no longer drop segments 1..N; closes `mb-wzui`; fresh release exe built). Prior consolidation 2026-06-06 earlier (**KG Phase 1E hotfix #1 shipped** — fresh release binary + `kg_reconcile_vault` + `kg_reconcile_history` IPCs + dashboard "Reconcile vault" button; closes `mb-43xw`; LESSONS PINNED P13 added). Prior consolidation 2026-06-05 (**KG Phase 1E Wave 1E.4 shipped** — `vault::history` module ships per-session JSON sidecar + audio file archive to `History/<YYYY-MM>/<session-uuid>.{json,ext}`; KG worker phase-4 integration; reconcile scan helper. Three golden JSON fixtures locked. All gates green; kg_parity 32/32, source_gate 6/6, graph_off 8/8 GREEN). Prior anchors: 2026-06-04 (Wave 1E.3 two-phase commit shipped); 2026-06-04 earlier (**KG Phase 1D SEALED via ADR 0052 Accepted** — Wave 1D.6 three judges + epic seal); 2026-05-31 (**KG Phase 1C SEALED via ADR 0051 Accepted**); 2026-06-03 (ADR 0050 KG Phase 1B SEALED).
 
 ## ✅ Sealed (do not re-execute)
 
@@ -72,7 +72,7 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 - All gates green: `fmt --check`, `clippy --release -- -D warnings`, `check`, `test --release --no-run --lib` (link-clean in 4m 11s). UI: `tsc --noEmit`, `npm test` 143/143. **Invariant probes:** `kg_parity` 32/32 GREEN, `kg_source_gate_invariant` 6/6 GREEN, `kg_graph_off_invariant` 8/8 + controls GREEN — no regression from the new phase-4 step. **Live tests:** 35/35 via the LESSONS P2 throwaway-crate recipe (`vault::history` is pure-Rust; no whisper-rs/ort/cuda deps).
 - 1 P3 bead filed: `mb-5lla` (kg worker.rs at 1261 LoC; investigate cohesive split).
 
-**Resume next iteration:** `bd ready -t task` surfaces 1E.5 (`mb-qwfy`, reverse-watcher), 1E.6 (`mb-i46v`, KG-Inbox courier), and 1E.7 (`mb-bgpt`, seeds) as the unblocked parallel set — each depends only on 1E.3 (now closed). 1E.5 is the highest-leverage next pick because the J1 loop-prevention invariant judge (1E.9) blocks on its hash-based dedup ledger landing. 1E.8 docs-only bead is available any time. Dispatch one-liner pattern per LESSONS P8: `implement Wave 1E.5 per docs/phases/phase-1e.md`.
+**Resume next iteration:** `bd ready -t task` surfaces 1E.5 (`mb-qwfy`, reverse-watcher), 1E.6 (`mb-i46v`, KG-Inbox courier), and 1E.7 (`mb-bgpt`, seeds) as the unblocked parallel set — each depends only on 1E.3 (now closed). 1E.5 is the highest-leverage next pick because the J1 loop-prevention invariant judge (1E.9) blocks on its hash-based dedup ledger landing. **1E.5 author MUST read the new ADR 0053 "Amendments" section + the Wave 1E.5 "Amendment 2026-06-06" callout in `docs/phases/phase-1e.md`** — the reverse-watcher's wiki-link parser + entity-page-edit handling come from the amendment, not the original §D5. 1E.8 docs-only bead is available any time. Dispatch one-liner pattern per LESSONS P8: `implement Wave 1E.5 per docs/phases/phase-1e.md`.
 
 ### Wave 1E hotfix — 2026-06-06 (reconcile IPCs + fresh release binary)
 
@@ -113,6 +113,100 @@ Shipped:
   `tsc --noEmit`, `npm test` 143/143, `npm run build` clean.
 - 1 P3 bead closed: `mb-43xw`. `mb-srvh` (timer-driven sweep) stays
   open as planned.
+
+### Wave 1E charter amendment — 2026-06-06 (entity+project pages + wiki-link entities, `mb-08za` / ADR 0053 amendments)
+
+**Trigger:** Dustin opened the live `Knowledge Graph/` vault in Obsidian
+after 1E.4 + the two hotfixes and reported that entities rendered as
+bare untyped text — no per-entity Obsidian pages, no clickable
+wiki-links, no graph-view edges, no "all entries mentioning Maple"
+view. The KG side felt flat compared to the Dictations side. Charter
+amendment shipped as an interstitial wave between 1E.4 and 1E.5,
+before the reverse-watcher locks in the bare-string shape on the
+inbound side.
+
+Shipped (one iteration, one commit reference):
+
+- **ADR 0053 amendments appended** (`docs/adr/0053-...md`, new
+  `## Amendments` section): §D1 expands subtree to 5 folders
+  (`Inbox`, `Entries`, `History`, `Entities`, `Projects`); §D3 swaps
+  `entities:` emission from bare strings to
+  `"[[Entities/<slug>]]"` wiki-links (deduped by slug at serialize
+  time); new §D11 (Entity pages) + §D12 (Project pages) define the
+  auto-generated stub-page contract — write-once,
+  user-owns-thereafter, atomic temp-sibling-rename, canonical-LF
+  bytes, Dataview body filtering on the same `entities` field.
+- **Phase 1E doc updated** (`docs/phases/phase-1e.md`):
+  Wave 1E.5 "Amendment 2026-06-06" callout absorbs the
+  five-folder + wiki-link parsing + entity/project-page-edits-don't-
+  trigger-reverse-sync deltas. Wave 1E.7 callout tightens scope to
+  the root-level seeds (Dashboard / Kanban / README) and notes the
+  per-entity / per-project pages are continuous, not one-shot.
+- `src-tauri/src/vault/kg_layout.rs` — expanded `KgSubtreePaths` +
+  `bootstrap_kg_subtree` to include `Entities/` and `Projects/`.
+  New tests pin pre-amendment three-folder → five-folder upgrade
+  path. Existing tests still green.
+- `src-tauri/src/vault/markdown_serializer.rs` — new
+  `write_entity_wiki_link_list` helper replaces the bare
+  `write_string_list` call for entities. Slug derivation shared
+  with the filename `slugify_title`. Round-trip contract for 1E.5
+  documented in module docs (parser accepts BOTH legacy bare-string
+  AND new wiki-link shape; writes ALWAYS emit canonical wiki-link
+  form). 5 existing golden fixtures updated; new
+  `wiki_linked_entities.md` golden pins the dedupe + wiki-link
+  emission shape. 4 new unit tests + 2 new property tests cover the
+  regex `^\[\[Entities/[a-z0-9-]+\]\]$` + dedupe-by-slug invariant.
+- `src-tauri/src/vault/entity_pages.rs` — NEW module (269 LoC). Public
+  surface: `ensure_entity_page` + `ensure_project_page` (both take
+  `&Path`, pre-slugified `&str`, `DateTime<Utc>`; return
+  `StubPageReport::{Created,AlreadyExists}`; never overwrite an
+  existing file). Internal: slug validator (defense-in-depth
+  ASCII-kebab-case re-check), canonical-form stub renderer (LF only,
+  pinned frontmatter field order, Dataview body), atomic write via
+  `.mb-tmp` sibling rename.
+- `src-tauri/src/vault/entity_pages_tests.rs` — sibling test file (257 LoC;
+  `#[cfg(test)] #[path]` to stay under cap). 19 tests: slug validation
+  matrix (empty / uppercase / path-traversal / slashes /
+  leading-trailing-hyphen / overlong / valid kebab); entity-page
+  write-once contract (writes when missing, no-ops when present,
+  byte-identical user-content preservation, idempotency on
+  back-to-back calls, LF-only canonical bytes, parent-dir
+  defensive create); project-page parallel coverage + status field;
+  entity + project stubs are independent files for the same slug;
+  render-pure unit tests (frontmatter field order, type discrimination,
+  Dataview WHERE clause pin).
+- `src-tauri/src/kg/worker.rs` — new `maybe_generate_stub_pages` helper
+  (~135 LoC) called after the seal + history-archive transaction
+  commits. Aggregates `(slug, is_project)` across all
+  `result.segment_entities`, dedupes by slug (BTreeMap for
+  deterministic order), iterates: every slug gets an entity stub;
+  Project-typed slugs ALSO get a project stub. Each call is
+  independently non-fatal (`tracing::warn!` on error, continue).
+  Worker file now 1409 LoC — `mb-5lla` (cohesive-split investigation,
+  already filed last iteration) covers the refactor backlog.
+- 2 P3 beads filed: `mb-zvv3` (entity slug disambiguation + merge UX,
+  post-v1) and `mb-3hyp` (delete-entry UI affordance on KG screen,
+  Dustin-surfaced gap).
+- All gates green: `fmt --check`, `clippy --release -- -D warnings`,
+  `check`, `test --release --no-run` (link clean in 4m 38s),
+  `cargo build --release` (PINNED P13 — mandatory because this
+  wave touched the worker pipeline; fresh `target/release/mockingbird.exe`
+  mtime post-seal). UI: `tsc --noEmit`, `npm test` 143/143,
+  `npm run build` clean. **Live tests:** 19/19 entity_pages tests
+  via throwaway-crate recipe (LESSONS P2; `entity_pages` is pure-Rust).
+  Golden suite extended by 1 fixture (`wiki_linked_entities.md`).
+  Invariant probes deferred to next live capture — the amendment is
+  additive (new module + new fields; no behaviour change for
+  graph-off path or source-gate path).
+- **Backfill deferred** per kickoff: Dustin's ~4 pre-amendment test
+  entries stay in bare-string form. New entries get wiki-links;
+  Dataview queries can defensively `OR` both shapes; automatic
+  backfill is Phase 1F (or later) work. LESSONS entry covers the
+  three findings: (1) write-once user-owns-thereafter is the only
+  sane contract for auto-generated user-facing artifacts;
+  (2) asymmetric wiki-link round-trip is correct and on-purpose;
+  (3) deferring backfill when the user-cost is in the noise is the
+  right call.
 
 ### Wave 1E hotfix #2 — 2026-06-06 (vault entry body truncation, `mb-wzui`)
 
