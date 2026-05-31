@@ -488,6 +488,55 @@ pub fn kg_ingest_text_note(
         .map_err(into_err)
 }
 
+/// Phase 1E Wave 1E.1 (`mb-e16d`, ADR 0053 D1) -- idempotently
+/// create the `<vault>/Knowledge Graph/{Inbox,Entries,History}/`
+/// subtree.
+///
+/// Reads `SettingKey::VaultPath` (ADR 0046 single source of truth)
+/// and dispatches to [`crate::vault::kg_layout::bootstrap_kg_subtree`].
+/// Invoked by:
+///
+/// 1. **Settings -> KG tab** when the user flips `KgGraphEnabled`
+///    from off to on. The UI calls this AFTER the `kg_settings_set`
+///    write succeeds; if bootstrap fails (e.g. read-only vault),
+///    the UI surfaces the structured error inline and the toggle
+///    state in the DB is left ON -- re-flipping does NOT change
+///    the DB, but the next toggle-on retry (or app boot) will
+///    re-attempt the bootstrap.
+/// 2. **App boot** when both `KgGraphEnabled = true` AND `VaultPath`
+///    is set is handled directly in `lib.rs::run()` -- NOT through
+///    this IPC, since boot doesn't have a Tauri State yet. This IPC
+///    is reserved for the user-driven trigger.
+///
+/// **Cell D handling** (`VaultPath` unset): returns a structured
+/// `Err(String)` that the UI surfaces verbatim. The Settings KG tab
+/// pre-checks the vault-configured state and either shows the cross-
+/// nav button (when unset) or fires this IPC (when set), so the
+/// error here is a belt-and-braces guard for the physically-
+/// impossible case where the UI pre-check raced a clear in another
+/// window.
+#[tauri::command]
+pub fn kg_subtree_bootstrap(
+    db: State<'_, AppStateHandle>,
+) -> Result<crate::vault::kg_layout::BootstrapReport, String> {
+    let conn = lock_db(&db)?;
+    let vault_path: Option<String> = Settings::new(&conn)
+        .get::<Option<String>>(SettingKey::VaultPath)
+        .map_err(into_err)?;
+    drop(conn);
+    let path_str = vault_path.ok_or_else(|| {
+        "vault path is not configured -- set the vault path in Mobile Sync settings before activating the knowledge graph"
+            .to_string()
+    })?;
+    if path_str.trim().is_empty() {
+        return Err(
+            "vault path is empty -- set the vault path in Mobile Sync settings before activating the knowledge graph"
+                .into(),
+        );
+    }
+    crate::vault::kg_layout::bootstrap_kg_subtree(&PathBuf::from(path_str)).map_err(into_err)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -366,6 +366,13 @@ export interface KgSettings {
   kgGraphEnabled: boolean;
 }
 
+/** Phase 1E Wave 1E.1 (`mb-e16d`, ADR 0053 D1) -- result of
+ *  `api.kg_subtree_bootstrap()`. Mirrors the Rust
+ *  `vault::kg_layout::BootstrapReport` enum's camelCase serde
+ *  rendering. Both variants are success; the discriminator drives
+ *  the toast copy + the tracing-log level on the Rust side. */
+export type KgBootstrapReport = "created" | "alreadyExists";
+
 /** Phase 1D Wave 1D.5 (`mb-navi`, ADR 0052) -- typed payload of
  *  `api.kg_vocabularies_get()`. Mirrors the Rust `Vocabularies`
  *  struct in `src-tauri/src/commands/kg.rs`. Both lists are the

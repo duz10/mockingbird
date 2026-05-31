@@ -212,6 +212,7 @@
   "kg.settings.notice.title": "Indexing in progress",
   "kg.settings.notice.body": "Newly recorded dictations are indexed within about a minute. Existing dictations from before you enabled this won\u2019t be indexed until a future update.",
   "kg.settings.saveError": "Couldn’t save: {error}",
+  "kg.settings.bootstrapError": "Couldn’t prepare the Knowledge Graph subtree in your vault: {error}",
 
   "kg.settings.vault.heading": "Vault",
   "kg.settings.vault.pathLabel": "Vault path",

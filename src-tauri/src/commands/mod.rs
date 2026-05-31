@@ -151,6 +151,8 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         // Phase 1D Wave 1D.3 (mb-0gt6) — KG capture surface (ADR 0052).
         dictation::dictation_start_kg_note,
         kg::kg_ingest_text_note,
+        // Phase 1E Wave 1E.1 (mb-e16d) — KG vault subtree bootstrap (ADR 0053 D1).
+        kg::kg_subtree_bootstrap,
         // Phase 10 Wave 1A — Command Center IPC (ADR 0037).
         crate::command_center::ipc::cc_open_via_tray,
         crate::command_center::ipc::cc_dismiss,

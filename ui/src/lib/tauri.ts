@@ -23,6 +23,7 @@ import type {
   FailedFiling,
   InboxRuntimeStatus,
   InsightsSnapshot,
+  KgBootstrapReport,
   KgSettings,
   SearchFilter,
   TagSuggestion,
@@ -300,6 +301,26 @@ export const api = {
    *    Phase 9). */
   kg_launch_obsidian: () => invoke<void>("kg_launch_obsidian"),
 
+  /** Phase 1E Wave 1E.1 (`mb-e16d`, ADR 0053 D1) -- idempotently
+   *  create the `<vault>/Knowledge Graph/{Inbox,Entries,History}/`
+   *  subtree under the configured `VaultPath`. Fires on toggle-on
+   *  from the Settings -> KG tab; also fired internally at app
+   *  boot when both `KgGraphEnabled` and `VaultPath` are set (the
+   *  boot path is Rust-side and does NOT go through this IPC).
+   *
+   *  Returns:
+   *  - `"created"` if at least one subtree directory was missing
+   *    and is now present;
+   *  - `"alreadyExists"` if all four directories were already on
+   *    disk (idempotent no-op).
+   *
+   *  Errors when the vault path is unset / empty / unwritable; the
+   *  Settings KG tab pre-checks `vault_settings_get()` and disables
+   *  the toggle-on path when unconfigured, so this is a belt-and-
+   *  braces guard. */
+  kg_subtree_bootstrap: () =>
+    invoke<KgBootstrapReport>("kg_subtree_bootstrap"),
+
   // Learning loop
   list_learning_runs: (limit: number) =>
     invoke<LearningRun[]>("list_learning_runs", { limit }),
@@ -517,6 +538,14 @@ function fixtureFor<T>(command: string, args?: object): T {
       } as Vocabularies) as T;
     case "kg_launch_obsidian":
       return fixture(command, undefined) as T;
+    case "kg_subtree_bootstrap":
+      // Phase 1E Wave 1E.1 (mb-e16d, ADR 0053 D1) -- browser-preview
+      // default. "alreadyExists" is the steady-state shape (most
+      // toggle-on flips after first activation hit the no-op path),
+      // so design-mode renders see the no-op toast variant by
+      // default. Playwright specs that want the freshly-created
+      // variant override via __MOCKINGBIRD_FIXTURES__.
+      return fixture(command, "alreadyExists" as KgBootstrapReport) as T;
     // Phase 1C Wave 1C.3 — Dictations retrieval fixtures.
     // Defaults match the kgGraphEnabled=false world: empty
     // autocomplete lists, empty entry-id sets, empty summary map.

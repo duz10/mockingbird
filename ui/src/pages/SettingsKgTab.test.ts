@@ -22,7 +22,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { api } from "../lib/tauri";
-import type { FailedFiling, QueueStatus } from "../lib/types";
+import type {
+  FailedFiling,
+  KgBootstrapReport,
+  QueueStatus,
+} from "../lib/types";
 
 describe("api.kg_settings_get_all (fixture mode)", () => {
   it("returns a typed KgSettings snapshot with kgGraphEnabled defined", async () => {
@@ -155,5 +159,36 @@ describe("api.kg_requeue_failed (fixture mode)", () => {
     // doesn't model state, but exercising the call twice guards
     // against any future fixture that throws on a duplicate.
     await expect(api.kg_requeue_failed(1)).resolves.toBeUndefined();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Wave 1E.1 (mb-e16d, ADR 0053 D1) -- vault subtree bootstrap IPC.   */
+/* ------------------------------------------------------------------ */
+
+describe("api.kg_subtree_bootstrap (fixture mode)", () => {
+  it("returns one of the two camelCase report variants", async () => {
+    const report = await api.kg_subtree_bootstrap();
+    // The wire type is the union 'created' | 'alreadyExists'.
+    // Guard both spellings; a drift to PascalCase or snake_case
+    // would break the Rust <-> TS round-trip.
+    expect(report === "created" || report === "alreadyExists").toBe(true);
+  });
+
+  it("defaults to the idempotent 'alreadyExists' shape in browser preview", async () => {
+    // The default fixture is the no-op variant so design-mode renders
+    // see the steady-state toast copy (most toggle-on events after
+    // first activation hit this branch).
+    const report = await api.kg_subtree_bootstrap();
+    expect(report).toBe("alreadyExists");
+  });
+
+  it("honours window.__MOCKINGBIRD_FIXTURES__ overrides for the fresh-create path", async () => {
+    const override: KgBootstrapReport = "created";
+    window.__MOCKINGBIRD_FIXTURES__ = {
+      kg_subtree_bootstrap: override,
+    };
+    const report = await api.kg_subtree_bootstrap();
+    expect(report).toBe("created");
   });
 });

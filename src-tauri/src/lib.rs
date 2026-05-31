@@ -395,6 +395,75 @@ pub fn run() {
                 );
             }
 
+            // Phase 1E Wave 1E.1 (`mb-e16d`, ADR 0053 §D1) — KG
+            // vault subtree bootstrap. Mirrors the toggle-on IPC
+            // (`kg_subtree_bootstrap` in `commands::kg`) for the
+            // case where the user already had `KgGraphEnabled=true`
+            // when the app booted. Fully idempotent; safe to call
+            // on every boot. Best-effort: a failure here is logged
+            // and swallowed — the toggle-on IPC will re-attempt the
+            // bootstrap on the next user-driven flip, and the
+            // graph-off invariant means no KG writes hit the disk
+            // until both the toggle AND the bootstrap have
+            // succeeded.
+            //
+            // Gated on BOTH `KgGraphEnabled` AND `VaultPath` being
+            // set — opted-out / unconfigured users pay zero I/O
+            // here. Mirrors the ADR 0046 inbox runtime's gate
+            // shape (LESSONS P5: don't materialize vault state
+            // until the user explicitly opted in).
+            {
+                let bootstrap_result = {
+                    let conn_guard = shared_conn.lock();
+                    match conn_guard {
+                        Ok(conn) => {
+                            let s = crate::settings::Settings::new(&conn);
+                            let kg_on = s
+                                .get::<bool>(crate::settings::model::SettingKey::KgGraphEnabled)
+                                .unwrap_or(false);
+                            let vault_path = s
+                                .get::<Option<String>>(
+                                    crate::settings::model::SettingKey::VaultPath,
+                                )
+                                .ok()
+                                .flatten()
+                                .filter(|p| !p.trim().is_empty());
+                            match (kg_on, vault_path) {
+                                (true, Some(p)) => Some(p),
+                                _ => None,
+                            }
+                        }
+                        Err(_) => None,
+                    }
+                };
+                if let Some(path) = bootstrap_result {
+                    match crate::vault::kg_layout::bootstrap_kg_subtree(
+                        &std::path::PathBuf::from(&path),
+                    ) {
+                        Ok(report) => {
+                            tracing::info!(
+                                target: "kg::vault_bootstrap",
+                                vault = %path,
+                                ?report,
+                                "\u{1f9e0} KG vault subtree bootstrap (boot-fire) complete"
+                            );
+                        }
+                        Err(e) => {
+                            // Non-fatal: the worker still spawns;
+                            // entries can persist to the DB; the
+                            // user can retry by toggling off/on or
+                            // by fixing the vault path.
+                            tracing::error!(
+                                target: "kg::vault_bootstrap",
+                                vault = %path,
+                                error = ?e,
+                                "KG vault subtree bootstrap (boot-fire) failed; app continues"
+                            );
+                        }
+                    }
+                }
+            }
+
             // Phase 10 Wave 1A — spin up the Command Center after the
             // dictation + meeting runtimes are registered, so the
             // chord-fire → dispatch path can resolve them via managed

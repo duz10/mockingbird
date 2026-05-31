@@ -72,6 +72,11 @@ export function SettingsKgTab({ onOpenMobileSync }: SettingsKgTabProps = {}) {
   const [vocabError, setVocabError] = useState<string | null>(null);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
+  // Phase 1E Wave 1E.1 (mb-e16d, ADR 0053 D1) -- inline error from
+  // the toggle-on bootstrap step. Lives next to savingError so the
+  // user sees "toggle saved but subtree creation failed" as ONE
+  // surface, not two stacked banners.
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
 
   // Phase 1D Wave 1D.2 (ADR 0052) -- broadcast toggle flips to the
   // app store so the Sidebar's KG nav item appears/disappears
@@ -121,6 +126,28 @@ export function SettingsKgTab({ onOpenMobileSync }: SettingsKgTabProps = {}) {
         const fresh = await api.kg_settings_get_all();
         setSnap(fresh);
         setKgGraphEnabledInStore(fresh.kgGraphEnabled);
+        return;
+      }
+      // Phase 1E Wave 1E.1 (mb-e16d, ADR 0053 D1) -- on a successful
+      // OFF -> ON toggle, fire the vault subtree bootstrap. The Rust
+      // side is idempotent + safe to call from boot too, so the
+      // "failed silently because some race" worst case is recovered
+      // on the next app boot. We still surface failures inline so
+      // the user has a clear next action (fix the vault path or
+      // disk perms) without having to restart.
+      if (key === "kgGraphEnabled" && value === true) {
+        try {
+          await api.kg_subtree_bootstrap();
+          setBootstrapError(null);
+        } catch (err) {
+          setBootstrapError(String(err));
+        }
+      } else if (key === "kgGraphEnabled" && value === false) {
+        // Toggle-off leaves the subtree on disk (per ADR 0053 D1:
+        // "user content lives there; never destructively cleaned
+        // up"). Clear any stale bootstrap error so the next on-flip
+        // gets a fresh banner.
+        setBootstrapError(null);
       }
     },
     [setKgGraphEnabledInStore],
@@ -151,6 +178,12 @@ export function SettingsKgTab({ onOpenMobileSync }: SettingsKgTabProps = {}) {
       {savingError ? (
         <div className={styles.errorBanner} role="alert">
           {t("kg.settings.saveError").replace("{error}", savingError)}
+        </div>
+      ) : null}
+
+      {bootstrapError ? (
+        <div className={styles.errorBanner} role="alert">
+          {t("kg.settings.bootstrapError").replace("{error}", bootstrapError)}
         </div>
       ) : null}
 

@@ -61,16 +61,25 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**KG Phase 1E (Obsidian as source of truth) — Wave 1E.0 charter complete; Wave 1E.1 (vault subtree bootstrap) ready next.** Charter ADR [ADR 0053](docs/adr/0053-kg-phase-1e-obsidian-as-source-of-truth.md) authored (Proposed); phase doc at `docs/phases/phase-1e.md` (616 lines, 9 implementation waves + this charter wave + seal wave); bead epic `mb-imc2` minted with 10 sub-beads + dependency chain wired.
+**KG Phase 1E (Obsidian as source of truth) — Waves 1E.0 + 1E.1 shipped; Wave 1E.2 (Markdown serializer) ready next.** Charter ADR [ADR 0053](docs/adr/0053-kg-phase-1e-obsidian-as-source-of-truth.md) Proposed; phase doc at `docs/phases/phase-1e.md`; bead epic `mb-imc2` with 10 sub-beads. 1E.1 landed the idempotent vault subtree bootstrap (`<vault>/Knowledge Graph/{Inbox,Entries,History}/`) per ADR 0053 §D1.
 
-### Wave 1E.0 deliverables shipped (this iteration)
+### Wave 1E.1 deliverables shipped (this iteration)
+
+- `src-tauri/src/vault/kg_layout.rs` — new module (~330 LoC incl. tests). Pure-Rust `kg_subtree_paths` + `bootstrap_kg_subtree` helpers. `BootstrapReport` enum (`Created` / `AlreadyExists`) serialized camelCase. Seven unit tests cover all four idempotency cells from ADR 0053 §D1's contract table + partial-subtree completion + file-at-root error path + Windows-path-with-space discipline + wire-format serialization pin. All 7 verified live via the LESSONS P2 throwaway-crate recipe (cargo test runner blocked on this box).
+- `src-tauri/src/commands/kg.rs` — new `kg_subtree_bootstrap` IPC. Reads `SettingKey::VaultPath` (ADR 0046 single source of truth), surfaces structured `Err(String)` for the vault-unconfigured / empty-path edge cases.
+- `src-tauri/src/lib.rs` — boot-fire path. When both `KgGraphEnabled=true` AND `VaultPath` is set at app boot, fires `bootstrap_kg_subtree` best-effort with `tracing::info!` on success, `tracing::error!` on failure (non-fatal; the toggle-on IPC retries on the next user flip).
+- `ui/src/pages/SettingsKgTab.tsx` — toggle-on flow now calls `api.kg_subtree_bootstrap()` after a successful `kg_settings_set`. New `bootstrapError` inline banner + `kg.settings.bootstrapError` i18n string. Toggle-off is a no-op (per ADR 0053 D1: user content lives in the subtree; never destructively cleaned).
+- `ui/src/lib/{tauri.ts,types.ts}` — typed `KgBootstrapReport` union + fixture stub. UI test file gains 3 fixture-mode contract tests (143 vitest now, was 140).
+- All gates green: `fmt --check`, `clippy --release -- -D warnings`, `test --release --no-run` (links clean — type system + traits + link surface all valid). UI: `tsc --noEmit`, `npm test`.
+
+### Wave 1E.0 deliverables shipped (last iteration)
 
 - `docs/adr/0053-kg-phase-1e-obsidian-as-source-of-truth.md` — Proposed (532 lines). Ten load-bearing decisions (D1–D10): vault subtree shape, filename format (`<date>-<slug>__<id8>.md`), YAML frontmatter shape + versioning, two-phase commit ordering (DB-first then file then DB-seal then queue-seal), reverse-watcher conflict resolution (file-wins; hash-based loop-prevention NOT mtime), KG-Inbox courier shape (sibling to ADR 0046; positional routing per Q2), History archive (per-session JSON sidecar; audio file move-out-of-Inbox), pre-built seeds, Obsidian Tasks emission, iOS Shortcut docs scope.
 - `docs/phases/phase-1e.md` — 616 lines. Wave-by-wave: 1E.1 (subtree bootstrap), 1E.2 (Markdown serializer), 1E.3 (worker writes Markdown + migration 026), 1E.4 (History archive), 1E.5 (reverse-watcher; J1 invariant), 1E.6 (KG-Inbox courier), 1E.7 (seeds), 1E.8 (iOS Shortcut docs), 1E.9 (4 judges + seal).
 - Bead epic `mb-imc2` + 10 sub-beads: 1E.0 `mb-nuba`, 1E.1 `mb-e16d`, 1E.2 `mb-vq8y`, 1E.3 `mb-k2pk`, 1E.4 `mb-i14b`, 1E.5 `mb-qwfy`, 1E.6 `mb-i46v`, 1E.7 `mb-bgpt`, 1E.8 `mb-wnsm`, 1E.9 `mb-kazi`. Dependency chain wired (`bd link` blocks-relationship for serial chain; `--type parent-child` for epic ↔ sub-task). Critical path: 1E.0 → 1E.1 → 1E.2 → 1E.3 → {1E.4, 1E.5, 1E.6, 1E.7} → 1E.9; 1E.8 docs-only (no code deps).
 - This STATUS update.
 
-**Resume next iteration:** `bd ready -t task` will surface 1E.1 (`mb-e16d`) as the lead actionable once `mb-nuba` closes; 1E.8 docs-only bead is available in parallel any time. Dispatch one-liner pattern per LESSONS P8: `implement Wave 1E.1 per docs/phases/phase-1e.md` (no embedded spec).
+**Resume next iteration:** `bd ready -t task` will surface 1E.2 (`mb-vq8y`, Markdown serializer) as the lead actionable now that 1E.1 (`mb-e16d`) is closed; 1E.8 docs-only bead is available in parallel any time. Dispatch one-liner pattern per LESSONS P8: `implement Wave 1E.2 per docs/phases/phase-1e.md` (no embedded spec).
 
 **Standing beads carrying forward** (not blocking Phase 1E waves):
 
