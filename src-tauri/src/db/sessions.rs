@@ -292,6 +292,23 @@ pub struct Session {
     /// in (only for `KgNote` sessions). The Phase 1C retrieval-by-
     /// category surface is its consumer.
     pub category: Option<String>,
+    /// ADR 0053 §D4 + mb-k2pk (KG Phase 1E Wave 1E.3). The KG
+    /// entry's stable UUID (full form, NOT the `__<id8>` filename
+    /// suffix). Populated by the filing worker AFTER the two-phase
+    /// commit's file write succeeds. NULL on every non-KG row and
+    /// on KG rows whose vault projection has not (yet) landed.
+    pub entry_id: Option<String>,
+    /// ADR 0053 §D4 + mb-k2pk. Vault-relative POSIX-style path to
+    /// the markdown projection in `Knowledge Graph/Entries/`. Set
+    /// atomically with `entry_id`. Vault-relative so a Settings
+    /// vault-root relocation doesn't invalidate the row.
+    pub vault_path: Option<String>,
+    /// ADR 0053 §D5 + mb-k2pk. Lowercase hex SHA-256 of the bytes
+    /// written to disk. Pre-recorded BEFORE the file write so the
+    /// reverse-watcher (1E.5) race window is closed. Used to
+    /// distinguish "our own write" from "user touched the file" on
+    /// inbound file-watch events.
+    pub vault_file_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -455,7 +472,8 @@ const SELECT_ALL: &str =
             foreground_window_title, audio_duration_ms, audio_blob_path, \
             prompt_id, dictionary_snapshot_id, example_set_id, \
             stt_latency_ms, cleanup_latency_ms, injection_latency_ms, \
-            injection_status, start_mode, source, capture_kind, category \
+            injection_status, start_mode, source, capture_kind, category, \
+            entry_id, vault_path, vault_file_hash \
      FROM sessions";
 
 fn fetch_one(
@@ -524,7 +542,70 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
             s.as_deref().map(CaptureKind::parse_db).unwrap_or_default()
         },
         category: row.get(23)?,
+        // ADR 0053 + mb-k2pk -- migration 026. NULL on every existing
+        // row + on every dictation row; populated post-vault-write
+        // for KG captures only.
+        entry_id: row.get(24)?,
+        vault_path: row.get(25)?,
+        vault_file_hash: row.get(26)?,
     })
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Vault-linkage update helpers (ADR 0053 §D4 + §D5, mb-k2pk).
+//
+// Step 3 of the two-phase commit (DB-record-hash) and step 5 of the
+// two-phase commit (DB-seal entry_id + vault_path) get one helper
+// each. Keeping them separate so the worker's transactional
+// boundaries are explicit at the call site:
+//
+//   txn A: apply_filed_outcome + record_vault_hash         -> commit
+//   (atomic file write -- NO db lock held here)
+//   txn B: seal_vault_filing + mark_done                   -> commit
+//
+// The hash MUST be durable BEFORE the OS write so the 1E.5 watcher
+// can never see a file event for a hash we haven't recorded yet
+// (closes the watcher race window per ADR 0053 §D5).
+// ──────────────────────────────────────────────────────────────────
+
+/// Record the SHA-256 hash of the soon-to-be-written markdown bytes.
+/// Step 3 of the two-phase commit. Idempotent on `(id, hash)` --
+/// re-recording the same hash is a no-op UPDATE (rusqlite returns 1
+/// rows_changed but the column is bit-identical, so a retry is
+/// safe).
+///
+/// `hash` MUST be the lowercase hex form (the `vault::writer` helper
+/// ensures this via `sha2`'s formatter). The column is TEXT so a
+/// caller passing a binary blob would silently corrupt the loop-
+/// prevention substrate; the writer's pure `compute_artifact` helper
+/// owns the canonical formatter.
+pub fn record_vault_hash(conn: &Connection, id: i64, hash: &str) -> AppResult<()> {
+    conn.execute(
+        "UPDATE sessions SET vault_file_hash = ?1 WHERE id = ?2",
+        params![hash, id],
+    )?;
+    Ok(())
+}
+
+/// Seal the vault projection: record both `entry_id` and
+/// `vault_path` in one UPDATE. Step 5 of the two-phase commit.
+///
+/// Called only after [`record_vault_hash`] has committed AND the
+/// file write has succeeded. Pairs with the queue's `mark_done` in
+/// the same transaction at the call site so a worker crash between
+/// file-write and seal leaves the row as "hash set, paths NULL" --
+/// the canonical reconcile signature for `vault::writer::reconcile`.
+pub fn seal_vault_filing(
+    conn: &Connection,
+    id: i64,
+    entry_id: &str,
+    vault_path: &str,
+) -> AppResult<()> {
+    conn.execute(
+        "UPDATE sessions SET entry_id = ?1, vault_path = ?2 WHERE id = ?3",
+        params![entry_id, vault_path, id],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

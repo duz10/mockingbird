@@ -125,6 +125,15 @@ const MIGRATION_024: &str = include_str!("migrations/024_kg_phase_1b.sql");
 // leftover-token guard only.
 const MIGRATION_025: &str = include_str!("migrations/025_kg_phase_1d_source_gate.sql");
 
+// 026 -- mb-k2pk / ADR 0053 (KG Phase 1E Wave 1E.3). Adds three
+// vault-linkage provenance columns to `sessions` (entry_id,
+// vault_path, vault_file_hash). Pure ADD COLUMN; values stay NULL
+// on existing rows + on dictation captures. Populated by the KG
+// filing worker's two-phase commit (ADR 0053 §D4 + §D5) only for
+// kg-note / kg-note-text sessions whose markdown projection has
+// successfully landed in the vault.
+const MIGRATION_026: &str = include_str!("migrations/026_kg_vault_linkage.sql");
+
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
 ///
@@ -321,6 +330,14 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         let prepared = substitute_prompt_bodies(MIGRATION_025);
         conn.execute_batch(&prepared)?;
     }
+    if current < 26 {
+        // mb-k2pk / ADR 0053 (KG Phase 1E Wave 1E.3). Three additive
+        // sessions columns (entry_id, vault_path, vault_file_hash)
+        // for the vault-as-source-of-truth two-phase commit. Pure
+        // ADD COLUMN. Substituter pass for the leftover-token guard.
+        let prepared = substitute_prompt_bodies(MIGRATION_026);
+        conn.execute_batch(&prepared)?;
+    }
     Ok(())
 }
 
@@ -379,7 +396,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "24");
+        assert_eq!(v, "26");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -398,7 +415,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "24");
+        assert_eq!(v, "26");
     }
 
     /// Migration 024 (mb-geds / ADR 0050 KG Phase 1B Chunk 2) ships
