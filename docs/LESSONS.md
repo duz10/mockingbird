@@ -383,6 +383,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-06-06 | `[KG Phase 1E hotfix #2 / mb-wzui]` | Vault entry body was `entries[0].body` (segmenter segment 0) instead of the full cleaned transcript — multi-bullet KG notes silently dropped segments 1..N. Root cause was NOT any of the kickoff's three hypotheses (LLM summary / serializer truncation / intermediate mangle) — it was a fourth: the worker's `KgEntry { body: primary.body.clone() }` was using `result.entries[0].body`, which is the *segmenter's first semantic segment* (`kg::pipeline::segment` is reformulating chunker, not substring slicer). Fix: snapshot the `transcripts(stage='final')` row inside the same mutex as the session+settings snapshot, prefer cleaned transcript via new `pick_vault_body` helper with segment[0] fallback for defensive completeness, whitespace-only transcripts fall through to fallback. Three findings: (1) body source-of-truth precedence is final → cleaned → raw matching ALL display surfaces (Dictations view, history archive, vault projection) — extract the cascade as a single helper the moment a second site projects the same DB content. (2) `entries[N].body` is structured pipeline output not faithful source slice — reach for the input column, not for segmenter output, when you want "the original input". (3) Orphan-recovery pattern: `git status --porcelain=v1` caught a prior session's complete-but-uncommitted `pick_vault_body` fix + 4 worker tests sitting in working tree; this iteration's contribution was the complementary serializer-side regression pin (`body_preserves_markdown_bullet_list_verbatim`). Body, narrow blast radius (KG vault projection). |
 | 2026-06-06 | `[KG Phase 1E hotfix / mb-43xw + reconcile_history IPC]` | Pre-1E.3 release exe shipped to live user because Waves 1E.3 + 1E.4 sealed on `test --release --no-run` (correct for gating link validity; does NOT produce a fresh runtime exe). Fix: rebuilt + promoted both deferred reconcile IPCs to the dashboard `ActionsBand` (Open vault + Reconcile vault). Findings: (1) PINNED P13 — test-no-run is not a build substitute when shipping behavior to a live user; AGENTS.md end-of-iteration gate now requires `cargo build --release` after any wave touching migrations / worker pipeline / IPC. (2) Two symmetric reconcile IPCs > one; render combined banner so the operator sees the whole drift picture, not half. (3) Sequential `await` (not `Promise.all`) on identical-gate IPC pairs avoids duplicate error toasts during a toggle-off race. (4) Match Button variants to the existing palette; `tsc` will catch typos like `secondary` against `primary/ghost/danger`. Body, broad-implication (every future migration / worker / IPC wave inherits Finding 1). |
 | 2026-06-05 | `[KG Phase 1E Wave 1E.4 / mb-i14b / ADR 0053 §D7]` | History archive (per-session JSON sidecar + audio move) shipped. Two findings: (1) golden JSON fixtures created via the file-write tool land as CRLF on Windows; byte-identity tests fail with expected.len() = actual.len() + 12 across a 12-line file (one CR per line). Visible content is byte-for-byte identical in the panic message. Fix: rewrite via `[System.IO.File]::WriteAllText` with `UTF8Encoding(false)` after manual `"\`r\`n" -> "\`n"` replace, OR use `MOCKINGBIRD_UPDATE_GOLDENS=1` to regenerate via the runtime serializer. `.gitattributes` already specifies `*.json text eol=lf` so the on-commit normalization is correct; only the local working tree was wrong. (2) `serde_json::to_string_pretty` is LF-deterministic by contract — `PrettyFormatter`'s default constructor uses `b"\n"` directly, so canonical-LF-bytes guarantees come for free on every platform. Safe to lean on for any future JSON-artefact contract. Body, narrow blast radius |
 | 2026-06-04 | `[KG Phase 1E Wave 1E.3 / mb-k2pk / ADR 0053]` | Two-phase commit implementation; three findings: (1) vault and KG `EntryType` vocabularies have drifted (kg::schema ships {Task,Research,Idea,Note,Reference}; vault ships {Note,Task,Idea,Question,Decision}) -- Research+Reference lossy-collapse to Note in the projection; filed mb-il83 to reconcile. (2) The vault projection's retry budget MUST decouple from the LLM-filing queue's retry budget -- conflating them means a transient file I/O glitch burns LLM retry attempts and orphans the kg_* rows. Split the seal txns: kg_* rows commit in their own txn, vault projection failure is non-fatal-to-queue, reconcile_vault picks up the "hash set, paths NULL" signature later. (3) clippy::unnecessary_lazy_evaluations fires on `unwrap_or_else(|| Type::CONST)` -- reach for `unwrap_or(value)` first whenever the fallback is a const / cheap field access. Body, narrow blast radius |
@@ -460,6 +461,94 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+## 2026-06-06 [KG Phase 1E hotfix #2 / mb-wzui] Vault entry body was `entries[0].body` (one segment of the segmenter's output) instead of the full cleaned transcript — multi-bullet KG notes silently dropped segments 1..N
+
+**Symptom (Dustin):** cleaned dictation in the Dictations view had the full
+bulleted grocery list ("feta cheese / eggs / milk"), but the Obsidian entry
+body only carried `"Need to make a quick grocery list. I need to get: feta
+cheese"`. Frontmatter `entities:` showed all three items — extraction was
+fine — so the loss was on the body wire, not on the LLM pass.
+
+**Three root-cause hypotheses in the kickoff** ranked LLM-summary (#1, HIGH),
+serializer-truncates (#2, MED-LOW), intermediate-mangle (#3, LOW). All
+three wrong. **The actual root cause was a fourth:** `kg::worker::
+maybe_commit_to_vault` was writing `result.entries[0].body` to the vault
+KgEntry. `entries[0].body` is the *first segment* of the segmenter's
+output (`kg::pipeline::segment` slices the cleaned transcript into N
+semantic segments, each a candidate entry). For a single-fact dictation
+that's identical to the full cleaned text; for a multi-bullet list it's
+only bullet 1. **The cleaned transcript itself was never the lossy
+step** — the segmenter is, by design, lossy on "the rest of the
+transcript" relative to entry[0].
+
+**Fix (`pick_vault_body` helper in `kg/worker.rs`):** snapshot the
+`transcripts(stage='final')` row inside the same mutex acquire as the
+session+settings snapshot, prefer the cleaned transcript over
+`primary.body`, fall back to segment[0] only when no transcript row
+exists (defensive — should never happen for KG captures because
+`dictation/ingest.rs` and `kg/ingest_text.rs` both write transcripts
+before enqueueing). Whitespace-only transcripts fall through to the
+segment fallback so an empty transcript doesn't propagate data-loss
+into the vault file. Helper extracted as a free function so the
+selection rule is trivially unit-testable without standing up a
+Connection + filesystem (4 worker-module tests).
+
+**Three non-obvious findings worth keeping:**
+
+1. **"Body source-of-truth" precedence cascade is final → cleaned → raw,
+   matching the Dictations view + history archive + display surfaces** —
+   the moment the vault projection diverges from that cascade, the
+   Obsidian file and the in-app view show different content for the
+   same session.uuid, which is a P0 user-visible inconsistency. The
+   `load_dictation_text` helper that 1E.4's history archive already uses
+   was the natural reuse target; lifting it into `maybe_commit_to_vault`
+   was a 4-line change. Generalization: whenever multiple subsystems
+   project the same DB-resident user content to different surfaces
+   (UI view, vault file, history JSON, export PDF), the stage-precedence
+   cascade is a load-bearing convention — extract it as a single helper
+   the first time you need it in a second place, BEFORE the second
+   site diverges.
+
+2. **The segmenter's `entries[N].body` is structured pipeline output,
+   NOT a faithful slice of source text** — `kg::pipeline::segment` is
+   semantic chunking, not substring extraction. Each `entries[N].body`
+   is a model-reformulated representation of one fact, suitable for the
+   KG layer's per-entry classification + entity extraction passes. It
+   is NOT round-trippable to the source transcript via concatenation.
+   This was the load-bearing assumption-inversion in the kickoff's #1
+   hypothesis ("skip the summary LLM call; copy cleaned transcript
+   verbatim") — the kickoff thought a summary LLM was generating the
+   body; in fact the segmenter was, and the segmenter's output is
+   intentionally restructured. The fix is not "skip the LLM call" but
+   "don't use segmenter output as the body field — use the cleaned
+   transcript directly." Generalization: when a pipeline produces
+   `entries: Vec<Entry>` and you want "the original input", reach for
+   the input column, not for `entries.iter().map(|e| e.body)
+   .collect::<Vec<_>>().join("\n")`.
+
+3. **Orphan recovery via `git status --porcelain=v1` caught a prior
+   session's complete-but-uncommitted fix sitting in the working tree**
+   — `worker.rs` showed up as M without my having edited it; the diff
+   revealed the prior session had already authored `pick_vault_body`,
+   the snapshot extension, AND 4 unit tests, then crashed/got
+   interrupted before commit. Same orphan-recovery pattern as the
+   2026-06-04 1D.3 wave (LESSONS entry, mb-0gt6); same first-tool-call
+   discipline (`git status` BEFORE deciding to write any new code). My
+   contribution this iteration was the COMPLEMENTARY serializer-side
+   regression pin (`body_preserves_markdown_bullet_list_verbatim` in
+   `vault::markdown_serializer_tests`) — the worker test pins "worker
+   passes the right body"; the serializer test pins "serializer doesn't
+   mangle bullets it's given". Both layers together form the regression
+   net. Generalization: when a kickoff mentions a prior session may
+   have produced orphan work, the first orphan check is `git diff
+   --stat <last-known-good-sha>..` AND `git status --porcelain=v1` AND
+   `git diff <modified-files>` — the working tree is the persistence
+   layer for crashed sessions.
+
+Narrow blast radius (KG vault projection), body not PINNED. The general
+"pipeline-output is not source-content" lesson is reusable but the
+specific projection (`entries[0].body`) is unique to this surface.
 
 ## 2026-06-06 [KG Phase 1E hotfix / mb-43xw + new reconcile_history IPC] Pre-1E.3 release exe shipped to live user because Waves 1E.3+1E.4 sealed on `test --release --no-run` and never rebuilt the runtime artifact; reconcile IPCs promoted from deferred P3 and wired to a dashboard button
 

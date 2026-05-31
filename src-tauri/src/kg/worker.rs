@@ -512,8 +512,13 @@ fn maybe_commit_to_vault(
     result: &PipelineResult,
     captured_iso: &str,
 ) -> AppResult<Option<CommitOutcome>> {
-    // Snapshot the session row + settings under a single lock so
-    // we don't have to round-trip the mutex three times.
+    // Snapshot the session row + settings + transcript under a
+    // single lock so we don't have to round-trip the mutex four
+    // times. The transcript snapshot is what we use for the entry
+    // body (`mb-wzui` fix) -- pre-1E.4 we wrote `entries[0].body`
+    // which is one segment of the segmenter's output, so any KG
+    // session that produced N>1 segments (bullet lists, multi-fact
+    // notes) silently dropped segments 1..N from the vault file.
     let snapshot = {
         let c = conn
             .lock()
@@ -531,9 +536,12 @@ fn maybe_commit_to_vault(
             .ok()
             .flatten();
         let session = db_sessions::get_by_id(&c, session_id)?;
-        (vault_path, session)
+        // final -> cleaned -> raw cascade; same precedence as the
+        // Dictations view + history archive (P0 user-visible text).
+        let transcript = load_dictation_text(&c, session_id)?;
+        (vault_path, session, transcript)
     };
-    let (vault_path_opt, session_opt) = snapshot;
+    let (vault_path_opt, session_opt, transcript_opt) = snapshot;
 
     let vault_path_str = match vault_path_opt {
         Some(s) if !s.trim().is_empty() => s,
@@ -602,13 +610,21 @@ fn maybe_commit_to_vault(
         tags: all_tags,
         entities: all_entities,
         source_session_uuid: Some(session.uuid.clone()),
-        // Use the entry's own body (single segment) so the markdown
-        // file's body matches one segment of the transcript. The
-        // full transcript is recoverable via `sessions.uuid` ->
-        // `transcripts` anyway, and embedding the whole thing here
-        // would duplicate it across N files if multi-entry filing
-        // ever lands.
-        body: primary.body.clone(),
+        // Body = full cleaned transcript, NOT `entries[0].body`
+        // (which is only segment[0] of the segmenter's output --
+        // see `mb-wzui` for the bug this fixes). The cleaned
+        // transcript is what the Dictations view shows to the
+        // user; the vault projection must round-trip the same
+        // bytes so multi-bullet notes don't silently lose items.
+        //
+        // Fallback to `primary.body` when no transcript row exists
+        // (defensive; should never happen for KG captures because
+        // the dictation/ingest_text persistence layer always writes
+        // transcripts before enqueueing). Multi-entry filing is
+        // tracked separately as `mb-ng1o`; until that ships, 1:1
+        // session->file means embedding the full transcript here
+        // doesn't duplicate anything.
+        body: pick_vault_body(transcript_opt.as_deref(), &primary.body),
     };
 
     // Snapshot of mutex traffic: writer takes its own &Connection
@@ -960,6 +976,29 @@ fn load_dictation_text(conn: &Connection, session_id: i64) -> AppResult<Option<S
     Ok(None)
 }
 
+/// Pick the body for the vault projection. Prefers the full cleaned
+/// transcript (what the user sees in the Dictations view); falls
+/// back to the pipeline's first-entry-body only when no transcript
+/// row exists at all.
+///
+/// Extracted as a free function so the body-selection rule is
+/// trivially unit-testable without standing up a Connection +
+/// filesystem. See `mb-wzui` for the bug this fixes (multi-bullet
+/// KG notes were dropping segments 1..N from the vault file because
+/// `entries[0].body` is just one segment of the segmenter's output).
+///
+/// Whitespace-only transcripts fall through to the segment fallback
+/// on the theory that an empty transcript is a data-loss signal we
+/// shouldn't propagate into the vault file. (The serializer would
+/// happily emit a body-less file -- defensible -- but losing the
+/// only available content would be worse.)
+fn pick_vault_body(transcript: Option<&str>, fallback_segment: &str) -> String {
+    match transcript {
+        Some(t) if !t.trim().is_empty() => t.to_string(),
+        _ => fallback_segment.to_string(),
+    }
+}
+
 fn now_iso() -> String {
     iso_from_ms(now_ms())
 }
@@ -1105,6 +1144,53 @@ mod tests {
         let earlier = iso_from_ms(1_700_000_000_000);
         let later = iso_from_ms(1_800_000_000_000);
         assert!(earlier < later, "earlier={earlier} later={later}");
+    }
+
+    #[test]
+    fn pick_vault_body_prefers_cleaned_transcript_over_segment_zero() {
+        // The bug `mb-wzui` fixed: the segmenter slices a bulleted
+        // list into N segments, so `entries[0].body` is just the
+        // first bullet. The cleaned transcript is the full list.
+        let cleaned = "Need to make a quick grocery list. I need to get:\n\
+                       - feta cheese\n\
+                       - eggs\n\
+                       - milk";
+        let seg0 = "Need to make a quick grocery list. I need to get: feta cheese";
+        let body = pick_vault_body(Some(cleaned), seg0);
+        assert_eq!(body, cleaned);
+        // The bug symptom -- segment[0] surviving alone -- must not
+        // recur. Pinning the negation explicitly.
+        assert!(
+            body.contains("eggs") && body.contains("milk"),
+            "body must contain all bullets, got: {body}"
+        );
+    }
+
+    #[test]
+    fn pick_vault_body_falls_back_when_transcript_missing() {
+        let seg0 = "the segment body";
+        assert_eq!(pick_vault_body(None, seg0), seg0);
+    }
+
+    #[test]
+    fn pick_vault_body_falls_back_when_transcript_is_whitespace() {
+        // Defensive: a transcripts row that exists but only carries
+        // whitespace would otherwise produce a body-less vault file
+        // even though the segmenter saw real content.
+        let seg0 = "useful fallback";
+        assert_eq!(pick_vault_body(Some("   \n\t \n"), seg0), seg0);
+    }
+
+    #[test]
+    fn pick_vault_body_round_trips_markdown_bullets_verbatim() {
+        // The serializer trims trailing newlines but preserves the
+        // body content -- so the body we pass MUST be the source of
+        // truth, not a lossy summary.
+        let cleaned = "- one\n- two\n- three\n";
+        let body = pick_vault_body(Some(cleaned), "one");
+        assert!(body.contains("- one"));
+        assert!(body.contains("- two"));
+        assert!(body.contains("- three"));
     }
 
     #[test]

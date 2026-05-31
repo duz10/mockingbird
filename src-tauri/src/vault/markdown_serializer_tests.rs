@@ -466,6 +466,34 @@ fn body_with_trailing_whitespace_normalizes() {
     );
 }
 
+/// Regression for `mb-wzui`: a multi-bullet body must round-trip
+/// every bullet line verbatim. The bug surfaced upstream (worker
+/// was passing `entries[0].body` = segment[0] of the segmenter)
+/// but the serializer is the last hop before disk, so pinning the
+/// invariant here too means any future refactor that re-introduces
+/// body mangling (e.g. "smart" markdown rewriting) trips the test.
+#[test]
+fn body_preserves_markdown_bullet_list_verbatim() {
+    let mut e = minimal_entry();
+    e.body = "Need to make a quick grocery list. I need to get:\n\
+              - feta cheese\n\
+              - eggs\n\
+              - milk"
+        .to_string();
+    let out = serialize_entry(&e);
+    assert!(out.contains("- feta cheese\n"), "missing feta: {out}");
+    assert!(out.contains("- eggs\n"), "missing eggs: {out}");
+    assert!(
+        out.contains("- milk"),
+        "missing milk (final bullet, no trailing \\n required): {out}"
+    );
+    // And the preamble survives too.
+    assert!(
+        out.contains("Need to make a quick grocery list. I need to get:\n"),
+        "missing preamble: {out}"
+    );
+}
+
 // ────────────────────────────────────────────────────────────
 // Frontmatter YAML parses cleanly (sanity check for the
 // future parser at 1E.5)

@@ -10,7 +10,7 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-06-06 (**KG Phase 1E hotfix shipped** — fresh release binary + `kg_reconcile_vault` + `kg_reconcile_history` IPCs + dashboard "Reconcile vault" button; closes `mb-43xw`; LESSONS PINNED P13 added). Prior consolidation 2026-06-05 (**KG Phase 1E Wave 1E.4 shipped** — `vault::history` module ships per-session JSON sidecar + audio file archive to `History/<YYYY-MM>/<session-uuid>.{json,ext}`; KG worker phase-4 integration; reconcile scan helper. Three golden JSON fixtures locked. All gates green; kg_parity 32/32, source_gate 6/6, graph_off 8/8 GREEN). Prior anchors: 2026-06-04 (Wave 1E.3 two-phase commit shipped); 2026-06-04 earlier (**KG Phase 1D SEALED via ADR 0052 Accepted** — Wave 1D.6 three judges + epic seal); 2026-05-31 (**KG Phase 1C SEALED via ADR 0051 Accepted**); 2026-06-03 (ADR 0050 KG Phase 1B SEALED).
+**Last consolidated:** 2026-06-06 (**KG Phase 1E hotfix #2 shipped** — vault entry body now sources from `transcripts(stage='final')` cleaned cascade, not `entries[0].body` segmenter output; multi-bullet KG notes no longer drop segments 1..N; closes `mb-wzui`; fresh release exe built). Prior consolidation 2026-06-06 earlier (**KG Phase 1E hotfix #1 shipped** — fresh release binary + `kg_reconcile_vault` + `kg_reconcile_history` IPCs + dashboard "Reconcile vault" button; closes `mb-43xw`; LESSONS PINNED P13 added). Prior consolidation 2026-06-05 (**KG Phase 1E Wave 1E.4 shipped** — `vault::history` module ships per-session JSON sidecar + audio file archive to `History/<YYYY-MM>/<session-uuid>.{json,ext}`; KG worker phase-4 integration; reconcile scan helper. Three golden JSON fixtures locked. All gates green; kg_parity 32/32, source_gate 6/6, graph_off 8/8 GREEN). Prior anchors: 2026-06-04 (Wave 1E.3 two-phase commit shipped); 2026-06-04 earlier (**KG Phase 1D SEALED via ADR 0052 Accepted** — Wave 1D.6 three judges + epic seal); 2026-05-31 (**KG Phase 1C SEALED via ADR 0051 Accepted**); 2026-06-03 (ADR 0050 KG Phase 1B SEALED).
 
 ## ✅ Sealed (do not re-execute)
 
@@ -113,6 +113,48 @@ Shipped:
   `tsc --noEmit`, `npm test` 143/143, `npm run build` clean.
 - 1 P3 bead closed: `mb-43xw`. `mb-srvh` (timer-driven sweep) stays
   open as planned.
+
+### Wave 1E hotfix #2 — 2026-06-06 (vault entry body truncation, `mb-wzui`)
+
+**Trigger:** Dustin captured a 3-bullet grocery list; the Dictations view
+showed the full bulleted cleaned transcript, but the Obsidian entry body
+carried only `"... I need to get: feta cheese"` — eggs + milk vanished
+(though `entities:` frontmatter listed all three). Symptom traced to
+`kg::worker::maybe_commit_to_vault` writing `result.entries[0].body` to
+the vault `KgEntry`; `entries[0].body` is the *segmenter's first
+semantic segment* (`kg::pipeline::segment` is a reformulating chunker,
+NOT a substring slicer), so any multi-bullet / multi-fact note silently
+dropped segments 1..N from the vault projection.
+
+Shipped:
+
+- `src-tauri/src/kg/worker.rs` — `maybe_commit_to_vault` snapshot now
+  includes the cleaned transcript via `load_dictation_text` (same
+  final → cleaned → raw cascade the Dictations view + 1E.4 history
+  archive use). New free function `pick_vault_body(transcript,
+  fallback_segment)` selects body bytes: prefer non-empty trimmed
+  transcript, fall back to `primary.body` only when no transcript row
+  exists (defensive — KG captures always write transcripts before
+  enqueueing). 4 new worker-module tests pin the helper.
+- `src-tauri/src/vault/markdown_serializer_tests.rs` —
+  `body_preserves_markdown_bullet_list_verbatim` regression test
+  pins the serializer half of the invariant ("don't mangle bullets I
+  give you"); belt-and-suspenders with the worker test ("pass the
+  right body in the first place").
+- All gates green: `fmt --check`, `clippy --release -- -D warnings`,
+  `check`, `test --release --no-run --lib` (link clean), `cargo build
+  --release` (fresh exe per PINNED P13; mtime post-fix). UI:
+  `tsc --noEmit`, `npm test` 143/143, `npm run build` clean.
+- **Orphan recovery:** prior session had already authored the worker
+  fix (helper + snapshot extension + 4 tests) but crashed before
+  commit; surfaced via `git status --porcelain=v1` as first tool call.
+  Combined commit references `mb-wzui`.
+- 1 P1 bead closed: `mb-wzui`. Title-quality follow-up ("Make a
+  grocery list for feta cheese" omits eggs + milk) deferred — likely
+  same root cause (title-generator was likely fed segment[0] too, or
+  it's an LLM judgment call; not investigated this iteration).
+  **Backfill of the existing broken entry:** Dustin to delete + re-
+  capture; no automated force-regenerate this wave per kickoff Step 4.
 
 ### Wave 1E.3 deliverables shipped (last iteration)
 
