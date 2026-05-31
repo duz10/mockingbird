@@ -1,6 +1,6 @@
 # ADR 0052 — KG Phase 1D: source-gated filing + first-class KG screen
 
-- **Status:** Proposed (will flip to Accepted at Wave 1D.6 seal)
+- **Status:** **Accepted (2026-06-04)** — see "Phase 1D SEALED" close-out at the end of this ADR.
 - **Date:** 2026-06-04
 - **Deciders:** Dustin, planning-agent (`planning-agent-f1b5c1`), code-puppy (`code-puppy-925ce4`)
 - **Charter for:** ADR-lateral epic; no `phase-*-complete` tag (per LESSONS PINNED P5)
@@ -15,11 +15,18 @@
 
 ## Status
 
-**Proposed.** Six waves. Wave 1D.0 (this wave) ships the charter, the
-clean-slate verification, the phase doc, and the bead epic. Waves
-1D.1–1D.5 implement; Wave 1D.6 lands judges and flips this ADR to
-**Accepted** in the seal commit. No new `phase-*-complete` tag (lateral
-epic; LESSONS PINNED P5).
+**Accepted (2026-06-04).** Six waves shipped. Wave 1D.0 chartered
+(this ADR + clean-slate verification + phase doc + bead epic).
+Waves 1D.1–1D.5 implemented. Wave 1D.6 (this seal) lands the three
+acceptance-gate judges and flips this ADR to Accepted. No new
+`phase-*-complete` tag (lateral epic; LESSONS PINNED P5). Phase 1D's
+user-visible surface ships as the new sidebar entry "Knowledge Graph"
+with a 5-band dashboard, a capture surface (audio note + text note),
+a retrieval surface (filter chips + concept modal, relocated from
+Dictations), and a Settings panel expansion (vault path + Obsidian
+launch). Default-off binding preserved (migration 025 seed) and
+strengthened by the new source-gated filing: standard dictations
+NEVER enqueue, regardless of toggle state.
 
 ## Context
 
@@ -401,6 +408,117 @@ Dependency chain: 1D.0 → 1D.1 → 1D.2 → 1D.3 → 1D.4 → 1D.5 → 1D.6, an
 
 | Phase | Charter | Status |
 |---|---|---|
-| 1D | this ADR (0052) | Proposed → Accepted at 1D.6 seal |
+| 1D | this ADR (0052) | **Accepted (2026-06-04 via Wave 1D.6 seal)** |
 | 1E | future ADR 0053 | Obsidian-as-source-of-truth (vault projection + reverse-watcher; ADR 0048 Q3) — kickoff after 1D seal |
 | 1F (was 1E) | future ADR 0054 | v1 beta tag; full-system smoke; release wiring |
+
+---
+
+## Phase 1D SEALED — Wave 1D.6 close-out (2026-06-04)
+
+Flipping this ADR to **Accepted**. Phase 1D landed all six waves on
+the original charter shape with no scope drift; the only material
+deviation from the as-proposed text was ADR 0052 §D3's original
+sketch of a "synthetic entry id" for text notes — Wave 1D.3
+(`mb-0gt6`) instead reused the `sessions` + `transcripts` provenance
+path with a new `capture_kind = KgNoteText` discriminator, exactly
+matching the audio capture path's shape (documented in
+`kg/ingest_text.rs`'s module docs).
+
+**Commit chain (Phase 1D arc):**
+
+| Wave | Bead | Commit(s) | Shipped |
+|---|---|---|---|
+| 1D.0 | `mb-qhll` | `b5c17bf` | Charter + clean-slate verify + phase doc + bead epic |
+| 1D.1 | `mb-pxzk` | `f3b9a4a` | Migration 025 + `capture_kind` source-gate (3-gate cascade) |
+| 1D.2 | `mb-j00j` | `37feed7` | KG screen scaffold + 5-band dashboard |
+| 1D.3 | `mb-0gt6` | `846ecd5` | Capture surface (audio + text notes) |
+| 1D.4 | `mb-6hm2` / `mb-f4gn` | `acb8f9a`, `0142ddb` | Chip/modal relocation Dictations → KG |
+| 1D.5 | `mb-navi` | `0cd54ff`, `f9cb27c` | Settings expansion + Obsidian launch |
+| 1D.6 | `mb-q2p1` | (this commit) | Judges + ADR seal + STATUS update |
+
+**Acceptance-gate evidence (§"Acceptance gates" judge bundle):**
+
+- **J1 — `kg-source-gate-invariant`:** authored as deterministic
+  Rust per the charter author-picks option. Lives at
+  `src-tauri/src/kg/source_gate_invariant.rs` + binary shim
+  `src-tauri/src/bin/kg_source_gate_invariant.rs`. Judge doc at
+  `docs/judges/phase-1d/kg-source-gate-invariant.md`. **GREEN:**
+  6/6 corpus cells (3 `capture_kind` values × 2 toggle states)
+  match expected `kg_filing_queue` row counts (0, 0, 0, 1, 0, 1).
+  Per-cell fresh DB so a regression's blame is unambiguous.
+  Drives both entry points (`dictation::try_enqueue_for_kg_filing`
+  AND `kg::ingest_text::ingest_text_note`) — the
+  sibling-of-`kg_graph_off_invariant` posture authorized by
+  §"Acceptance gates" J1.
+
+- **J2 — `kg-dictation-untouched`:** authored as a Phase 1D twin
+  of Phase MC's `mc-dictation-untouched`, formalizing the runtime
+  behavior (Phase MC's judge is a diff judge; this one is a
+  behavior judge). Judge doc at
+  `docs/judges/phase-1d/kg-dictation-untouched.md`. **GREEN:** the
+  J1 probe's cells 1+2 both produce 0 queue rows; the existing
+  `kg_graph_off_invariant` probe sweeps both capture kinds × all
+  8 `InjectionOutcome` variants under toggle-off; only two call
+  sites to `kg::store::enqueue_for_filing` in the entire codebase
+  (the audio path's gated helper + the text-note path's
+  ingest_text_note). The Phase MC do-not-touch sweep is empty
+  over the narrowed file set (i.e. ignoring `dictation*` per the
+  ADR 0052 §D1 supersession).
+
+- **J3 — `kg-graph-off-ui-tightened`:** **no new code shipped at
+  1D.6** — the consolidated Playwright invariant set was already
+  authored across Waves 1D.2 (KG screen walk), 1D.4 (Dictations
+  KG-free assertion after the chip/modal relocation), and 1D.5
+  (vocabularies allowlist). Judge doc at
+  `docs/judges/phase-1d/kg-graph-off-ui-tightened.md` records the
+  consolidated invariant set as fully satisfied. **GREEN:**
+  `npx playwright test kg-graph-off-invariant` reports `1 passed
+  (12.6s)`.
+
+**Cargo + UI gates (Wave 1D.6 full pass):**
+
+- `powershell -File scripts\cargo-with-cuda.ps1 fmt --check` — clean.
+- `powershell -File scripts\cargo-with-cuda.ps1 clippy --release -- -D warnings` — clean.
+- `powershell -File scripts\cargo-with-cuda.ps1 test --release --no-run` — all test binaries link (including the new `kg_source_gate_invariant`). LESSONS P2 fallback (test exec blocked by `STATUS_ENTRYPOINT_NOT_FOUND`).
+- `kg_source_gate_invariant` (NEW) — GREEN, 6/6 cells.
+- `kg_graph_off_invariant` (regression) — GREEN, 8 outcomes × both `capture_kind`s + source-gate negative + positive control.
+- `kg_parity` default — GREEN, 32/32.
+- `kg_parity --persist` — GREEN, 32/32 + immutability triggers fire.
+- `npx tsc --noEmit` — clean.
+- `npm test` — 12 files / 140 tests passed.
+- `npm run build` — clean.
+- `npx playwright test kg-graph-off-invariant` — 1/1 passed.
+
+**Bead closures:**
+
+Wave epic `mb-x7f9` and all six wave beads close with this commit:
+`mb-qhll` (1D.0) → `mb-pxzk` (1D.1) → `mb-j00j` (1D.2) → `mb-0gt6`
+(1D.3) → `mb-6hm2` (1D.4) → `mb-navi` (1D.5) → `mb-q2p1` (1D.6).
+
+**Standing carry-forwards** (not gating seal; carry into Phase 1E
+planning):
+
+- `mb-bbl2` — sonner toast retrofit.
+- `mb-y6pq` — `--status-bad` token sweep.
+- `mb-26aw` — `smoke.spec.ts` ×4 pre-1C Playwright failures.
+- `mb-2wbk` — KG row → Dictations deep-link (P3; filed in 1D.4).
+- `mb-0ui1` — vocab editor (P3; filed in 1D.5).
+
+**What Phase 1D explicitly did NOT ship** (deferred to Phase 1E
+per this ADR §"Out of scope"):
+
+- Markdown projection / `vault/kg-graph/` subtree write-out.
+- Reverse-watcher (filesystem → SQLite ingest).
+- History archive (3-month rollover, lossless export).
+- KG-Inbox courier (vault.kg-inbox → ingest pipeline).
+- Pre-built filter boards (named-search persistence).
+- iOS Shortcut documentation for the text-note IPC.
+- v1 beta tag (Phase 1F territory).
+
+**Phase 1E kickoff posture:** Obsidian-as-source-of-truth is the
+next frontier. The text-note path's `kg/ingest_text.rs` module
+docstring already flags the reverse-watcher seam ("this row was
+authored from the vault, don't re-project") per ADR 0052 §Risks.
+A future ADR 0053 will charter Phase 1E.
+

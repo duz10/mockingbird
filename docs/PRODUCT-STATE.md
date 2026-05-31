@@ -575,7 +575,7 @@ the next graduation window per ADR 0049 §"Sandbox isolation".
 
 ---
 
-### 3.19 `src-tauri/src/kg/` — Knowledge Graph library (Phase 1A graduation + Phase 1B persistence/worker/dictation hook + Phase 1C retrieval UX/activation/concept modal)
+### 3.19 `src-tauri/src/kg/` — Knowledge Graph library (Phase 1A graduation + Phase 1B persistence/worker/dictation hook + Phase 1C retrieval UX/activation/concept modal + Phase 1D source-gated filing + first-class KG screen)
 
 **Status:** library + storage + async filing worker + dictation-tail
 hook + **full retrieval UX surface (5 of 6 axes) + activation toggle
@@ -779,27 +779,155 @@ PINNED P2. Invocations:
   (`kg_list_failed_filings` + `kg_queue_status` fire from
   `SettingsKgFailedFilings` mount).
 
-**Known gaps (carried into Phase 1D):**
+**Phase 1D (sealed 2026-06-04 via ADR 0052 Accepted) — source-gated filing + first-class KG screen:**
 
-- **Category retrieval axis (`mb-oji5`).** The classify pass produces
-  `Entry.category` but Phase 1B schema has no queryable `category`
-  column anywhere (`kg_canonical_tags.category` exists but the table
-  is inert; `EntryRef.category` is always `None` in 1C.4/1C.5).
-  Verified twice — at Wave 1C.3 (`mb-5ly5` LESSONS body) and again
-  at Wave 1C.5 (kickoff prompt's claim of a non-existent
-  `entries.category` column via migration 016). Fix requires a new
-  migration, which ADR 0051 §"Out of scope" explicitly bans. Phase
-  1D's first migration (already needed for the backfill path) is the
-  natural home; add `sessions.category TEXT NULL` and a worker write
-  in `apply_filed_outcome`.
-- **Phase 1D backfill** of pre-Phase-1 dictations (no entity/tag
-  mentions captured pre-1B). At p95=59s per filing, a 500-entry
-  backfill = ~8 hours wall-clock at current throughput.
-- **Phase 1E v1 beta tag** awaits 1D completion.
+Two drift corrections + a first-class home for the subsystem. Both
+the "who triggers filing" semantic and the "where does the user
+live" question were rescoped at the 2026-06-04 source-of-truth
+alignment review against the original product spec §15 + Clark
+article. The standing "Phase 1D = backfill of pre-Phase-1
+dictations" framing is now moot; backfill (if it ships) is a
+post-v1 per-row promote-to-graph affordance on the Dictations page,
+not a bulk operation.
+
+**Charter ADR:** [ADR 0052](adr/0052-knowledge-graph-phase-1d-charter.md)
+(Accepted 2026-06-04). Phase doc:
+[`docs/phases/phase-1d.md`](phases/phase-1d.md). Six waves, no
+`phase-*-complete` tag (lateral epic per LESSONS PINNED P5).
+
+- **Migration 025 + 3-gate cascade** (Wave 1D.1, `mb-pxzk`). Adds
+  `sessions.capture_kind TEXT NOT NULL DEFAULT 'dictation'`
+  (`'dictation'` | `'kg-note'` | `'kg-note-text'`) and
+  `sessions.category TEXT NULL` (consumes the standing `mb-oji5`
+  category-axis defer from Phase 1C), plus the composite index
+  `idx_sessions_capture_kind(capture_kind, started_at DESC)` and
+  a one-transaction `kg_*` mention/queue/entity purge +
+  `kg_graph_enabled` reset. The column was originally proposed as
+  `source` and renamed to `capture_kind` to avoid collision with
+  the pre-existing `sessions.source` from migration 018
+  (audio-origin axis). `dictation::try_enqueue_for_kg_filing` now
+  enforces a **3-gate cascade** (outcome → source → toggle): a
+  standard `Dictation` capture **NEVER** enqueues, regardless of
+  toggle state. The drift this corrects: pre-1D, every successful
+  dictation auto-filed the moment the toggle was on — the user had
+  no per-capture opt-in.
+
+- **KG screen scaffold + 5-band dashboard** (Wave 1D.2, `mb-j00j`).
+  New top-level route `/knowledge-graph` + sidebar entry (gated on
+  `KgGraphEnabled`, reactive to toggle via the zustand store).
+  Read-only dashboard with five bands: Counts, Queue state, Recent
+  activity, Flagged for review, Upcoming due dates. Single new
+  read-only IPC `kg_dashboard_snapshot()` (one round-trip; returns
+  an empty snapshot without DB reads when toggle is off, honoring
+  the graph-off contract). The dashboard composition lives at
+  `kg::dashboard` (pure-Rust, sibling of `kg::latency_bench`) so the
+  IPC layer is a thin wrapper.
+
+- **Capture surface — audio + text notes** (Wave 1D.3, `mb-0gt6`).
+  New `CaptureBand` on the KG dashboard with two lanes.
+  - **Audio note lane:** new IPC `dictation_start_kg_note` flips a
+    sibling `next_start_is_kg_note: Arc<AtomicBool>` flag
+    (independent axis from `next_start_is_programmatic` so plain
+    in-app dictations stay `capture_kind='dictation'`). Orchestrator
+    swap-and-pins `CaptureKind::KgNote` at `start_capture`. Row
+    **dual-writes** into Dictations history AND fires KG enqueue
+    via the 1D.1 source-gate. Stop reuses the existing
+    `dictation_stop` IPC.
+  - **Text note lane:** new IPC `kg_ingest_text_note(text)` routes
+    through `kg::ingest_text::ingest_text_note` (new ~420-line
+    module, sibling of `dictation::ingest`). Bypasses Whisper
+    entirely — the typed string IS raw/cleaned/final transcript;
+    row lands with `capture_kind='kg-note-text'`.
+    `commands/sessions.rs::list_sessions` filters
+    `WHERE capture_kind != 'kg-note-text'` so text notes are
+    KG-only (never surface on the Dictations history page).
+    The module docstring documents the Phase 1E reverse-watcher
+    seam ("this row originated outside the vault" marker).
+
+- **Retrieval surface relocation** (Wave 1D.4, `mb-6hm2`/`mb-f4gn`).
+  The Phase 1C filter chips + concept modal moved off the
+  Dictations page (which lost -211 LoC and reverted to its pre-1C
+  shape: history list + FTS5 search + detail pane) and onto the
+  new KG dashboard as `Retrieval.tsx` (~280 LoC). The single
+  ConceptModal instance lives on the dashboard; both Retrieval
+  rows AND RecentActivityBand rows surface chip clicks via
+  `onConceptOpen`. FlaggedBand gained click-to-retry
+  (`kg_requeue_failed`, idempotent per 1C.5 J3). Category badges
+  were dropped from Dictations rows entirely (would be NULL on
+  100% of `capture_kind='dictation'` rows by definition);
+  Category now lives on the KG screen where its source-gating
+  semantic is the default expectation. `SettingsKgFailedFilings`
+  deleted (FlaggedBand on the dashboard subsumes it).
+
+- **Settings panel expansion + Obsidian launch** (Wave 1D.5,
+  `mb-navi`). Settings → KG tab now carries four read-only
+  reference cards (Vault — read-only mirror of `vaultPath` from
+  the ADR 0046 Mobile Sync settings via the new `onOpenMobileSync`
+  cross-nav callback; Vocabularies — static enum-derived display
+  of `kg::schema::{Category, EntryType}` via new
+  `kg_vocabularies_get()` IPC pinned by the
+  `vocabularies_matches_schema_enums` unit test;
+  Processing-mode — "Ingest mode: silent" indicator per spec
+  §15.5; Dual-write — reminder that KG audio notes also land in
+  Dictations history but text notes are KG-only). New
+  **Launch-into-Obsidian** button shipped on both the Settings
+  tab AND the KG dashboard's `ActionsBand`. Click invokes
+  `kg_launch_obsidian()` (new IPC), which reads
+  `SettingKey::VaultPath` and shells out to
+  `obsidian://open?vault=<encoded-leaf-name>` via new pure-Rust
+  `kg::launcher` module (Windows arm + macOS/Linux stub error
+  arms per Principle 5; minimal 10-line RFC-3986 percent-encoder
+  with unit-pinned space → `%20` (NOT `+`) behavior, added
+  rather than pulling the `url` crate for one call site).
+  Graph-off-UI invariant `OFF_MODE_ALLOWLIST` extended from
+  `{kg_settings_get_all}` to
+  `{kg_settings_get_all, kg_vocabularies_get}` with the explicit
+  comment that the contract is "no graph DATA touched when off",
+  not the literal "no kg_* IPC at all".
+
+- **Wave 1D.6 judges + seal** (`mb-q2p1`). Three acceptance gates
+  per ADR 0052 §"Acceptance gates":
+  - **J1 `kg-source-gate-invariant`** (NEW) — deterministic Rust
+    probe at `kg::source_gate_invariant` + binary
+    `kg_source_gate_invariant`. 6/6 corpus cells
+    (3 `capture_kind` values × 2 toggle states) match expected
+    `kg_filing_queue` row counts (0, 0, 0, 1, 0, 1). Drives both
+    `dictation::try_enqueue_for_kg_filing` AND
+    `kg::ingest_text::ingest_text_note` entry points; sibling of
+    `kg_graph_off_invariant`.
+  - **J2 `kg-dictation-untouched`** — runtime twin of Phase MC's
+    diff-judge of the same name; formalizes the assertion that a
+    standard `Dictation` capture produces zero `kg_*` writes
+    regardless of toggle state.
+  - **J3 `kg-graph-off-ui-tightened`** — documents the
+    consolidated Playwright invariant from Waves 1D.2 (KG screen
+    walk), 1D.4 (Dictations KG-free assertion), 1D.5
+    (vocabularies allowlist) as fully satisfied; no new code
+    shipped at 1D.6 for this judge.
+
+**User-visible behavior post-1D:** KG entries live in the
+Mockingbird DB (no vault projection yet); the user opens the KG
+from the sidebar, sees a read-only dashboard, captures via the
+dedicated KG audio + text note lanes (separate from PTT), filters
++ drills into concepts inline, and can launch Obsidian to the
+configured vault. **Phase 1E (Obsidian as source of truth) is NOT
+YET SHIPPED** — markdown projection of KG entries to
+`<vault>/knowledge-graph/`, the reverse-watcher (vault → SQLite
+ingest), the KG-Inbox courier, the history archive folder, the
+Obsidian Tasks format emission, and the pre-built Kanban/dashboard
+boards are all Phase 1E (future ADR 0053) scope. The v1 beta tag
+awaits Phase 1F.
+
+**Standing carry-forwards** (not gating Phase 1E kickoff):
+`mb-bbl2` (sonner retrofit), `mb-y6pq` (`--status-bad` token
+sweep), `mb-26aw` (`smoke.spec.ts` ×4 pre-1C Playwright failures),
+`mb-2wbk` (KG row → Dictations deep-link, P3, filed in 1D.4),
+`mb-0ui1` (vocabularies editor, P3, filed in 1D.5).
 
 ADR 0051's §"UI sealed-surface authorization" window closed at the
-1C.5 seal — Phase 1D opens its own ADR-0049 §"Sandbox isolation"
-window per the established pattern.
+1C.5 seal; ADR 0052's analog window closed at the 1D.6 seal —
+Phase 1E opens its own ADR-0049 §"Sandbox isolation" window per
+the established pattern.
 
 ---
 

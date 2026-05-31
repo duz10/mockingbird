@@ -121,6 +121,19 @@ pub use parity::{run_parity_probe, run_parity_probe_persist};
 pub(crate) mod graph_off_invariant;
 pub use graph_off_invariant::run_graph_off_invariant_probe;
 
+// Phase 1D Wave 1D.6 (`mb-q2p1`, ADR 0052 §"Acceptance gates" J1) --
+// source-gate invariant probe. Sibling of `graph_off_invariant`:
+// where that probe asserts the off-mode `kg_*`-tables-stay-empty
+// contract across the audio path's 8 InjectionOutcome variants,
+// this probe asserts the cross-path corpus invariant -- that the
+// filing queue receives entries ONLY from a KG capture surface
+// (kg-note / kg-note-text) AND only when the toggle is on. Drives
+// both `dictation::try_enqueue_for_kg_filing` and
+// `kg::ingest_text::ingest_text_note` to cover both entry points.
+// Consumed by `src/bin/kg_source_gate_invariant.rs`.
+pub(crate) mod source_gate_invariant;
+pub use source_gate_invariant::run_source_gate_invariant_probe;
+
 // Phase 1C.0 (`mb-plz9`, ADR 0051) — filing-pipeline latency bench.
 // Drives real Ollama against five representative parity fixtures +
 // emits CSV-on-stdout for the empirical baseline doc. Consumed by
