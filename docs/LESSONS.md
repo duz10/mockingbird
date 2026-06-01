@@ -109,6 +109,55 @@ Added to the end-of-iteration gate checklist in AGENTS.md.
 The `--no-run` fallback is still correct for *gating* (type / trait / link
 validity) — it's just not a substitute for *producing the runtime artifact*.
 
+### P15. Writer-side permissiveness during vocabulary realignments
+
+**Date:** 2026-06-06. **Bead:** `mb-wzcj` (Wave 1E.7 Part 1 hotfix). **Charter:** ADR 0054 §G (nine knowledge shapes).
+
+When realigning a vocabulary, taxonomy, or contract, the WRITER
+(serializer / emitter / projection) must be at least as permissive
+as the SOURCE-of-write (classifier / extractor / upstream producer)
+until the source is also realigned. Otherwise: deterministic failures
+the moment the new writer ships, because the source still emits old
+values that the writer now rejects.
+
+The 2026-06-06 KG type-vocab realignment shipped this trap: Wave 1E.7
+Part 1 tightened the writer-side vocabulary to the nine knowledge
+shapes (`source` / `note` / `concept` / `entity` / `project` /
+`question` / `decision` / `reference` / `observation`) while leaving
+the classifier prompt unchanged (deferred to `mb-qw7n`). The classifier
+still emits the legacy 5-variant set (`task` / `research` / `idea` /
+`note` / `reference`). The worker boundary's `kg_entry_type_to_vault`
+bridge silently downgraded `Task→Note` and `Idea→Observation` — but
+the silence was the trap: when those downgrades misbehaved (or when a
+future pipeline path forgot to call the bridge), failures were
+undebuggable. Hotfix `mb-wzcj` restored symmetry by:
+
+1. Returning a sidecar `Option<&'static str>` from
+   `kg_entry_type_to_vault` carrying the legacy wire label.
+2. Emitting a `tracing::warn!` at the call site whenever the sidecar
+   is `Some(_)`, mirroring the reverse-watcher parser's existing
+   tolerance for legacy `task`/`event`/`idea`.
+3. Upgrading phases 5a/5b/5c "non-fatal continue" `tracing::warn!`
+   sites to `tracing::error!` so silent failures surface during
+   triage (entry sealed; post-seal artifact missing).
+
+**Rule of thumb:** parser-tolerant + serializer-strict is asymmetric
+and dangerous. Either both tolerant + warn (the safe default during
+pivots) or both strict (only after upstream is fully migrated). The
+strict-writer can land in a follow-up wave once `mb-qw7n` (or
+equivalent upstream realignment) confirms the producer no longer
+emits legacy values.
+
+This rule generalizes beyond vocab: ANY contract pivot where writer-
+strictness depends on source-realignment ordering should think through
+deployment order before shipping. The Alignment Wave (docs realignment)
+couldn't catch this because the bug is code-side, not docs-side.
+
+**Removal path:** once `mb-qw7n` ships and the warn count drops to
+zero on a live machine for a representative window, a follow-up wave
+can collapse `kg_entry_type_to_vault` back to a 3-arm pass-through
+(Note/Reference/Research) and the legacy arms become unreachable.
+
 ### P14. The Karpathy/Clark North Star — Mockingbird is the capture layer, NOT the wiki author
 
 **Date:** 2026-06-06. **Charter:** ADR 0054 (Personal Knowledge Engine

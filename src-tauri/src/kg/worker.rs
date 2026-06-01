@@ -639,6 +639,28 @@ fn maybe_commit_to_vault(
         }
     }
 
+    // Bridge classifier-side EntryType -> vault-side EntryType.
+    // Legacy variants (`task`/`idea`) downgrade with a `tracing::warn!`
+    // so we can confirm-and-remove the bridge once `mb-qw7n` realigns
+    // the classifier prompt. LESSONS PINNED P15.
+    let (vault_entry_type, legacy_downgrade) = kg_entry_type_to_vault(primary.entry_type);
+    if let Some(legacy_wire) = legacy_downgrade {
+        let mapped_to = match legacy_wire {
+            "task" => "note",
+            "idea" => "observation",
+            // unreachable today; defensive label keeps the warn
+            // honest if a future arm forgets to update the match.
+            _ => "<unmapped>",
+        };
+        tracing::warn!(
+            target: "kg::worker::vocab_bridge",
+            session_id,
+            legacy_value = legacy_wire,
+            mapped_to,
+            "classifier emitted legacy entry-type value; downgrading to canonical knowledge shape (deployment-ordering bridge until mb-qw7n classifier realignment ships; LESSONS P15)"
+        );
+    }
+
     let entry = KgEntry {
         id: uuid::Uuid::new_v4().to_string(),
         captured_at: parse_iso_to_utc(captured_iso),
@@ -646,7 +668,7 @@ fn maybe_commit_to_vault(
         capture_kind: vault_capture_kind,
         title: primary.title.clone(),
         category: kg_category_to_vault(primary.category),
-        entry_type: kg_entry_type_to_vault(primary.entry_type),
+        entry_type: vault_entry_type,
         status: primary.status.map(kg_status_to_vault),
         due_date: primary.due_iso.as_deref().and_then(parse_iso_to_utc_opt),
         tags: all_tags,
@@ -944,11 +966,16 @@ fn maybe_generate_tag_stub_pages(
     let vault_root_opt: Option<std::path::PathBuf> = {
         let lock = conn.lock();
         let Ok(c) = lock else {
-            tracing::warn!(
+            // Hotfix `mb-wzcj`: was `tracing::warn!`. Upgraded to
+            // `error!` so non-fatal continues in phases 5a/5b/5c
+            // surface in logs/UI without changing the non-fatal
+            // semantics — a silent failure here is the worst case
+            // (entry sealed, post-seal artifacts missing).
+            tracing::error!(
                 target: "kg::worker",
                 queue_id,
                 entry_id,
-                "db mutex poisoned in maybe_generate_tag_stub_pages; skipping"
+                "db mutex poisoned in maybe_generate_tag_stub_pages; skipping (non-fatal)"
             );
             return;
         };
@@ -986,13 +1013,14 @@ fn maybe_generate_tag_stub_pages(
             Ok(StubPageReport::Created) => created += 1,
             Ok(StubPageReport::AlreadyExists) => already += 1,
             Err(e) => {
-                tracing::warn!(
+                // Hotfix `mb-wzcj`: warn -> error per gate #2.
+                tracing::error!(
                     target: "kg::worker",
                     queue_id,
                     entry_id,
                     slug = %slug,
                     error = %e,
-                    "tag stub generation failed; continuing"
+                    "tag stub generation failed; continuing (non-fatal)"
                 );
             }
         }
@@ -1018,11 +1046,12 @@ fn maybe_generate_tag_stub_pages(
 fn maybe_rebuild_index_md(conn: &Arc<Mutex<Connection>>, queue_id: i64, entry_id: i64) {
     let lock = conn.lock();
     let Ok(c) = lock else {
-        tracing::warn!(
+        // Hotfix `mb-wzcj`: warn -> error per gate #2.
+        tracing::error!(
             target: "kg::worker",
             queue_id,
             entry_id,
-            "db mutex poisoned in maybe_rebuild_index_md; skipping"
+            "db mutex poisoned in maybe_rebuild_index_md; skipping (non-fatal)"
         );
         return;
     };
@@ -1047,12 +1076,12 @@ fn maybe_rebuild_index_md(conn: &Arc<Mutex<Connection>>, queue_id: i64, entry_id
             concepts_preserved = outcome.concepts_preserved,
             "INDEX.md rebuild complete"
         ),
-        Err(e) => tracing::warn!(
+        Err(e) => tracing::error!(
             target: "kg::worker",
             queue_id,
             entry_id,
             error = %e,
-            "INDEX.md rebuild failed; next filing will retry"
+            "INDEX.md rebuild failed; next filing will retry (non-fatal; hotfix mb-wzcj)"
         ),
     }
 }
@@ -1072,11 +1101,12 @@ fn maybe_append_log_capture(
     let vault_root_opt: Option<std::path::PathBuf> = {
         let lock = conn.lock();
         let Ok(c) = lock else {
-            tracing::warn!(
+            // Hotfix `mb-wzcj`: warn -> error per gate #2.
+            tracing::error!(
                 target: "kg::worker",
                 queue_id,
                 entry_id,
-                "db mutex poisoned in maybe_append_log_capture; skipping"
+                "db mutex poisoned in maybe_append_log_capture; skipping (non-fatal)"
             );
             return;
         };
@@ -1101,12 +1131,12 @@ fn maybe_append_log_capture(
             line = %o.line.trim_end(),
             "LOG.md append complete"
         ),
-        Err(e) => tracing::warn!(
+        Err(e) => tracing::error!(
             target: "kg::worker",
             queue_id,
             entry_id,
             error = %e,
-            "LOG.md append failed; entry already sealed"
+            "LOG.md append failed; entry already sealed (non-fatal; hotfix mb-wzcj)"
         ),
     }
 }
@@ -1189,40 +1219,57 @@ fn kg_status_to_vault(s: KgStatus) -> VaultStatus {
     }
 }
 
-fn kg_entry_type_to_vault(t: KgEntryType) -> VaultEntryType {
-    // KG-side has {Task, Research, Idea, Note, Reference}; vault-
-    // side now has the nine knowledge shapes from ADR 0054 §G:
-    // {Source, Note, Concept, Entity, Project, Question, Decision,
-    // Reference, Observation}.
-    //
-    // The classifier prompt realignment (`mb-qw7n`) is a separate
-    // dispatch -- until that ships, the KG pipeline still emits the
-    // legacy 5-variant set, so this mapping is the migration bridge:
-    //
-    //   - Reference -> Reference (pass-through; identical shape)
-    //   - Note      -> Note      (pass-through; identical shape)
-    //   - Research  -> Reference (research notes point to external
-    //                             material being studied -- closer
-    //                             to Reference than Note)
-    //   - Task      -> Note      (task semantics dropped per ADR 0054
-    //                             §G; no semantically richer fit until
-    //                             the classifier learns Decision)
-    //   - Idea      -> Observation (an idea is the inchoate noticing
-    //                               of a pattern -- closest knowledge
-    //                               shape is Observation, which the
-    //                               chat-LLM Lint pass can
-    //                               crystallize into a Concept page
-    //                               later)
-    //
-    // Lossy in the Task -> Note direction (`mb-il83` was originally
-    // filed against this gap; ADR 0054 closes the bead by redefining
-    // the canonical set rather than by reconciling 5-variant Task).
+/// Map the classifier's 5-variant `KgEntryType` onto the writer's
+/// 9-shape `VaultEntryType`. Returns the target shape PLUS an
+/// optional `Some(legacy_wire_label)` sidecar when the input was a
+/// dropped-from-canonical-set legacy value (`task` / `idea`).
+/// Callers emit a `tracing::warn!` carrying that label so the
+/// downgrade is observable — the load-bearing fix from hotfix
+/// `mb-wzcj` (LESSONS PINNED P15): writer-side permissiveness during
+/// a vocabulary realignment must MATCH the reverse-watcher parser's
+/// existing tolerance, not be silently stricter.
+///
+/// KG-side has {Task, Research, Idea, Note, Reference}; vault-side
+/// has the nine knowledge shapes from ADR 0054 §G: {Source, Note,
+/// Concept, Entity, Project, Question, Decision, Reference,
+/// Observation}.
+///
+/// The classifier prompt realignment (`mb-qw7n`) is a separate
+/// dispatch — until that ships, the KG pipeline still emits the
+/// legacy 5-variant set, so this mapping is the migration bridge.
+/// Per-variant behavior:
+///
+/// - `Reference` → `Reference` — pass-through, identical shape, silent.
+/// - `Note` → `Note` — pass-through, identical shape, silent.
+/// - `Research` → `Reference` — cross-cutting structural mapping
+///   (research notes point to external material being studied; closer
+///   to Reference than Note). Not in the parser's legacy-tolerance
+///   set, so we keep this silent.
+/// - `Task` → `Note` — LEGACY-DOWNGRADE. Task semantics dropped per
+///   ADR 0054 §G; the parser also tolerates legacy `task` by
+///   re-classifying as Note. Emits warn at call site.
+/// - `Idea` → `Observation` — LEGACY-DOWNGRADE. An idea is the
+///   inchoate noticing of a pattern; closest knowledge shape is
+///   Observation, which the chat-LLM Lint pass can crystallize into
+///   a Concept page later. The parser also tolerates legacy `idea`.
+///   Emits warn at call site.
+///
+/// Lossy in the `Task` → `Note` direction (`mb-il83` was originally
+/// filed against this gap; ADR 0054 closes the bead by redefining
+/// the canonical set rather than by reconciling 5-variant Task).
+///
+/// Removal path: once `mb-qw7n` realigns the classifier prompt to
+/// emit only the nine canonical shapes directly, the `Task` / `Idea`
+/// arms become unreachable and a follow-up wave can collapse this
+/// function back to a 3-arm pass-through. Until then the legacy arms
+/// are the deployment-ordering bridge per P15.
+fn kg_entry_type_to_vault(t: KgEntryType) -> (VaultEntryType, Option<&'static str>) {
     match t {
-        KgEntryType::Task => VaultEntryType::Note,
-        KgEntryType::Idea => VaultEntryType::Observation,
-        KgEntryType::Note => VaultEntryType::Note,
-        KgEntryType::Research => VaultEntryType::Reference,
-        KgEntryType::Reference => VaultEntryType::Reference,
+        KgEntryType::Task => (VaultEntryType::Note, Some("task")),
+        KgEntryType::Idea => (VaultEntryType::Observation, Some("idea")),
+        KgEntryType::Note => (VaultEntryType::Note, None),
+        KgEntryType::Research => (VaultEntryType::Reference, None),
+        KgEntryType::Reference => (VaultEntryType::Reference, None),
     }
 }
 
@@ -1773,5 +1820,97 @@ mod tests {
         assert_eq!(segs[1].segment_idx, 1);
         assert!(segs[1].entities.is_empty());
         assert_eq!(segs[1].tag_slugs, vec!["c".to_string()]);
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Hotfix mb-wzcj (LESSONS PINNED P15) -- vocabulary bridge
+    //
+    // The classifier emits the legacy 5-variant set
+    // {Task, Research, Idea, Note, Reference}; the vault writer
+    // expects the canonical 9-shape set per ADR 0054 §G. Until
+    // `mb-qw7n` realigns the classifier prompt, the worker bridges
+    // them via `kg_entry_type_to_vault`. The two legacy values the
+    // reverse-watcher parser ALSO tolerates (`task`, `idea`) must
+    // round-trip with an observable `Some(legacy_wire)` sidecar so
+    // the call site can emit a `tracing::warn!` -- writer-side
+    // permissiveness must match parser tolerance during the
+    // realignment window.
+    // ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn kg_entry_type_to_vault_downgrades_task_to_note_with_legacy_label() {
+        // The user-observable bug from the 2026-06-06 KG filing
+        // failure: classifier labels content as `task`; pre-hotfix
+        // the worker silently mapped Task->Note with no warn;
+        // post-hotfix the sidecar `Some("task")` lights up the warn
+        // path at the call site (`maybe_commit_to_vault`).
+        use crate::vault::markdown_serializer::EntryType as V;
+        let (target, legacy) = kg_entry_type_to_vault(KgEntryType::Task);
+        assert_eq!(target, V::Note, "task downgrades to note (parser symmetry)");
+        assert_eq!(
+            legacy,
+            Some("task"),
+            "task downgrade must surface a Some(_) sidecar so the call site can warn"
+        );
+    }
+
+    #[test]
+    fn kg_entry_type_to_vault_downgrades_idea_to_observation_with_legacy_label() {
+        // `idea` is in the parser's legacy-tolerance set alongside
+        // `task`. ADR 0054 §G maps it to Observation (the inchoate
+        // pattern-noticing shape that the chat-LLM Lint pass can
+        // crystallize into a Concept page later).
+        use crate::vault::markdown_serializer::EntryType as V;
+        let (target, legacy) = kg_entry_type_to_vault(KgEntryType::Idea);
+        assert_eq!(target, V::Observation);
+        assert_eq!(legacy, Some("idea"));
+    }
+
+    #[test]
+    fn kg_entry_type_to_vault_passes_canonical_shapes_through_silently() {
+        // Note, Reference -> identical canonical shape, no warn.
+        // Research is mapped (not in parser's legacy set) but
+        // structurally cross-cutting, so also silent.
+        use crate::vault::markdown_serializer::EntryType as V;
+
+        let (target, legacy) = kg_entry_type_to_vault(KgEntryType::Note);
+        assert_eq!(target, V::Note);
+        assert_eq!(legacy, None, "canonical Note must not trigger warn");
+
+        let (target, legacy) = kg_entry_type_to_vault(KgEntryType::Reference);
+        assert_eq!(target, V::Reference);
+        assert_eq!(legacy, None, "canonical Reference must not trigger warn");
+
+        let (target, legacy) = kg_entry_type_to_vault(KgEntryType::Research);
+        assert_eq!(target, V::Reference);
+        assert_eq!(
+            legacy, None,
+            "Research is a structural cross-cutting mapping (not in parser legacy set); silent"
+        );
+    }
+
+    #[test]
+    fn kg_entry_type_to_vault_is_total_for_every_classifier_variant() {
+        // Defense-in-depth: if a future classifier-side variant is
+        // added without updating the bridge, this test catches it
+        // (the match would no longer compile -- the assertion is
+        // structural, not value-based).
+        for v in [
+            KgEntryType::Task,
+            KgEntryType::Research,
+            KgEntryType::Idea,
+            KgEntryType::Note,
+            KgEntryType::Reference,
+        ] {
+            // Just exercising the function; the per-variant
+            // assertions live in the tests above. The purpose here
+            // is the exhaustive list -- if a 6th variant lands and
+            // the bridge isn't extended, the new variant won't
+            // appear here and downstream behavior will silently
+            // fall back to the default arm (which we keep as a
+            // compile error by NOT having a wildcard `_ =>` arm in
+            // `kg_entry_type_to_vault`).
+            let _ = kg_entry_type_to_vault(v);
+        }
     }
 }

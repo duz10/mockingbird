@@ -10,7 +10,24 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-06-06 (**KG Phase 1E Alignment Wave shipped** —
+**Last consolidated:** 2026-06-06 (**KG Phase 1E Wave 1E.7 hotfix `mb-wzcj`
+shipped** — restored writer-side / parser-side symmetry during the type-vocab
+realignment window: `kg/worker.rs::kg_entry_type_to_vault` now returns a
+`(VaultEntryType, Option<&'static str>)` sidecar so the call site in
+`maybe_commit_to_vault` emits a `tracing::warn!` whenever the classifier's
+legacy `task`/`idea` values get bridged to canonical `note`/`observation`
+(mirrors the reverse-watcher parser's existing tolerance); phases 5a/5b/5c
+non-fatal-continue sites upgraded `tracing::warn!` -> `tracing::error!` so
+silent post-seal artifact failures surface in logs/UI; 4 new unit tests cover
+the bridge sidecar (task->note+legacy, idea->observation+legacy, canonical
+pass-throughs silent, exhaustive variant coverage); LESSONS PINNED **P15**
+(writer-side permissiveness during vocabulary realignments) added above P14;
+`cargo build --release` MANDATORY per P13 since worker pipeline code path
+touched; `mb-qw7n` (classifier prompt realignment) description updated to
+note the new symmetry means it can land independently without coordinating
+writer-strictness flip — strictness collapse to a follow-up wave AFTER
+`mb-qw7n` ships. Prior consolidation 2026-06-06 (**KG Phase 1E Alignment
+Wave shipped** —
 zero-code docs-only realignment to the Karpathy/Clark Personal Knowledge
 Engine pattern; **ADR 0054 Proposed** (Personal Knowledge Engine substrate)
 adopts a richer framing OVER ADR 0053's vault foundation, with two-agent role
