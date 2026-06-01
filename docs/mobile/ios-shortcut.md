@@ -1,5 +1,11 @@
 # Quick Voice Capture from your iPhone — iOS Shortcut setup
 
+> **For the Knowledge Graph variant** (a sibling Shortcut that files
+> captures into your Personal Knowledge Engine instead of treating
+> them as one-shot dictation): see
+> [`ios-shortcut-kg.md`](./ios-shortcut-kg.md). Same three-action
+> shape; differs only in destination folder and recommended name.
+
 > **Status:** spec + setup walkthrough. The desktop side of this flow (the
 > inbox watcher that ingests `.m4a` files from `<vault>/inbox/`) ships in
 > ADR 0046 Iteration 3's implementation waves. Install the Shortcut now if
