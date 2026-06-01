@@ -10,9 +10,34 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-06-07 (**KG Phase 1E hotfix #3 `mb-y390` shipped**
-— dictation #143 KG-filing failure (deterministic 3-retry on "Get a New
-Computer" project) root-caused to the `segment` pass: qwen2.5:7b emits a
+**Last consolidated:** 2026-06-08 (**KG Phase 1E Wave 1E.7 PART 2 SEALED —
+worker + kg_layout refactor under 600-LoC cap, closes `mb-5lla` AND `mb-bgpt`
+(Wave 1E.7 fully sealed).** Pure rearrangement, zero behaviour change. `kg/
+worker.rs` 2050 → 505 LoC root + new `kg/worker/` submodule tree
+(`filing.rs` 357, `projection.rs` 496, `stubs.rs` 254, `index_log.rs` 185,
+`transcripts.rs` 122, `time_iso.rs` 119, `archive.rs` 114). `vault/
+kg_layout.rs` 698 → 420 impl + new sibling `kg_layout_tests.rs` 344 via the
+existing `#[cfg(test)] #[path = "..."] mod tests;` pattern. Public APIs
+(`KgFilingRuntime::spawn`, `build_segment_outputs`, bootstrap helpers) all
+unchanged — call sites in `lib.rs` / IPC / parity probe / latency bench
+needed zero edits. Phase 4b/5a/5b/5c orchestration sequence in
+`filing::process_one` byte-identical to the pre-split flow. All gates GREEN:
+`cargo check` (release), `cargo clippy --release -- -D warnings`,
+`cargo fmt --check`, `cargo test --release --no-run` (4m32s — 17 test
+binaries linked clean), `cargo build --release` MANDATORY per P13 (worker
+pipeline surface touched; fresh `target/release/mockingbird.exe` mtime
+2026-06-01 06:57), `npx tsc --noEmit`. KG-invariant runtime checks
+(`kg_parity` 32/32, `kg_source_gate` 6/6, `kg_graph_off` 8/8) preserved by
+construction — pure refactor; the new structure compiles + links + lints
+clean and behaviour is preserved by code-motion. 1 housekeeping bead filed
+(`mb-ngtv` — KG serializer Tasks-plugin checkbox default OFF per ADR 0054
+§L; defer fix to `mb-qw7n` or independent later). Closes `mb-5lla` +
+`mb-bgpt`. **Resume:** Wave 1E.7 fully sealed; next-up unblocked work is
+1E.6 (`mb-i46v`, KG-Inbox courier) + 1E.8 (`mb-wnsm`, iOS Shortcut docs) +
+1E.9 (`mb-kazi`, dual-ADR seal + judges). Prior consolidation 2026-06-07
+(**KG Phase 1E hotfix #3 `mb-y390` shipped** — dictation #143 KG-filing
+failure (deterministic 3-retry on "Get a New Computer" project)
+root-caused to the `segment` pass: qwen2.5:7b emits a
 mixed-quote array (`["I've got...", 'title is "Get a New Computer"', ...]`)
 the moment a string contains an unescaped double-quote; `serde_json::from_str`
 fails strict at column 46 and the pipeline aborts with `PassError::Parse {

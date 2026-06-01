@@ -1,20 +1,20 @@
-//! Phase 1E Wave 1E.1 (`mb-e16d`, ADR 0053 §D1) — KG subtree bootstrap.
+//! Phase 1E Wave 1E.1 (`mb-e16d`, ADR 0053 Â§D1) â€” KG subtree bootstrap.
 //!
 //! Owns the idempotent creation of the
 //! `<vault>/Knowledge Graph/{Inbox,Entries,History,Entities,Projects}/`
 //! subtree beneath the user's configured vault root. The folder name
-//! carries a literal space — Obsidian-facing UX per ADR 0053 §D1 /
-//! spec §7.1.
+//! carries a literal space â€” Obsidian-facing UX per ADR 0053 Â§D1 /
+//! spec Â§7.1.
 //!
-//! **Amendment 2026-06-06 (`mb-08za`, ADR 0053 §D1 as amended):**
-//! subtree expanded from 3 → 5 folders to host the new auto-generated
-//! Entity / Project stub pages (§D11 / §D12). The expansion is
-//! purely additive — the original Cell A/B/C semantics still hold;
+//! **Amendment 2026-06-06 (`mb-08za`, ADR 0053 Â§D1 as amended):**
+//! subtree expanded from 3 â†’ 5 folders to host the new auto-generated
+//! Entity / Project stub pages (Â§D11 / Â§D12). The expansion is
+//! purely additive â€” the original Cell A/B/C semantics still hold;
 //! `BootstrapReport::AlreadyExists` now requires ALL five directories
 //! to be present-as-dirs.
 //!
-//! **Amendment 2026-06-06 #2 (`mb-bgpt`, ADR 0054 §C/§D/§E/§F):**
-//! subtree expanded from 5 → 6 folders to host the new auto-generated
+//! **Amendment 2026-06-06 #2 (`mb-bgpt`, ADR 0054 Â§C/Â§D/Â§E/Â§F):**
+//! subtree expanded from 5 â†’ 6 folders to host the new auto-generated
 //! Tag stub pages, AND three vault-resident root files were added
 //! (`SCHEMA.md`, `INDEX.md`, `LOG.md`) for the Personal Knowledge
 //! Engine substrate. Folder expansion follows the same purely-
@@ -23,7 +23,7 @@
 //! they are not folders, so the existing folder-only contract has
 //! no business gating their creation.
 //!
-//! ## Idempotency contract (ADR 0053 §D1)
+//! ## Idempotency contract (ADR 0053 Â§D1)
 //!
 //! | Cell | Pre-state                          | Post-state            | Result          |
 //! |------|------------------------------------|-----------------------|-----------------|
@@ -32,7 +32,7 @@
 //! | C    | subtree present, has user files    | unchanged             | `AlreadyExists` |
 //! | D    | vault path unset / empty / unusable| (caller-side error)   | (caller)        |
 //!
-//! Cell D is enforced one layer up — the IPC wrapper
+//! Cell D is enforced one layer up â€” the IPC wrapper
 //! (`commands::kg::kg_subtree_bootstrap`) is the one that reads
 //! `SettingKey::VaultPath` and surfaces the structured error. The
 //! pure helper here takes a `&Path` directly; that keeps the
@@ -45,9 +45,9 @@
 //! `vault::layout::VaultLayout` owns the **ADR 0046 outbound projection
 //! zones** (`<vault>/history/`, `<vault>/inbox/`, `<vault>/.mockingbird/`).
 //! Those are Mockingbird-DB-canonical, vault-as-disposable-projection
-//! (`docs/adr/0046-...md` §1). The KG subtree under
+//! (`docs/adr/0046-...md` Â§1). The KG subtree under
 //! `<vault>/Knowledge Graph/` is the inverse: **files are canonical,
-//! DB is shadow FTS** (ADR 0048 §Q3 / ADR 0053 §"Context"). Mixing the
+//! DB is shadow FTS** (ADR 0048 Â§Q3 / ADR 0053 Â§"Context"). Mixing the
 //! two zone families on one struct would silently couple the two
 //! source-of-truth axes; keeping them as siblings makes the boundary
 //! visible to future readers and confines the "the file IS the
@@ -57,7 +57,7 @@
 //!
 //! All path assembly via [`PathBuf::join`]; never string
 //! concatenation (per AGENTS.md Principle 5 + ADR 0046 layout
-//! precedent). The "Knowledge Graph" literal — with the space — is
+//! precedent). The "Knowledge Graph" literal â€” with the space â€” is
 //! a `const &'static str` shared between every helper here, so a
 //! future typo can't drift one path off the rest. Windows and
 //! macOS both handle spaces in paths fine; the Wave 1E.1 unit
@@ -69,11 +69,11 @@ use crate::error::{AppError, AppResult};
 
 /// Root folder of the KG subtree, relative to the vault root. The
 /// literal space is **intentional** and user-visible in Obsidian's
-/// file explorer (ADR 0053 §D1 / spec §7.1).
+/// file explorer (ADR 0053 Â§D1 / spec Â§7.1).
 pub const KG_SUBTREE_ROOT_NAME: &str = "Knowledge Graph";
 
 /// Inbox subfolder name (sibling-to-the-ADR-0046 dictation inbox at
-/// `<vault>/inbox/`; the positional routing scheme of ADR 0048 §Q2
+/// `<vault>/inbox/`; the positional routing scheme of ADR 0048 Â§Q2
 /// is what distinguishes them).
 pub const KG_INBOX_NAME: &str = "Inbox";
 
@@ -85,18 +85,18 @@ pub const KG_ENTRIES_NAME: &str = "Entries";
 /// `<YYYY-MM>/<session-uuid>.json` sidecars + audio moves here.
 pub const KG_HISTORY_NAME: &str = "History";
 
-/// Entities subfolder name. Amendment `mb-08za` (ADR 0053 §D11) — the
+/// Entities subfolder name. Amendment `mb-08za` (ADR 0053 Â§D11) â€” the
 /// continuous auto-generation target for entity stub pages. One
 /// `.md` per unique entity slug, write-once + user-owns-thereafter.
 pub const KG_ENTITIES_NAME: &str = "Entities";
 
-/// Projects subfolder name. Amendment `mb-08za` (ADR 0053 §D12) — the
+/// Projects subfolder name. Amendment `mb-08za` (ADR 0053 Â§D12) â€” the
 /// continuous auto-generation target for project stub pages. Same
 /// write-once contract as `Entities/`, scoped to entities classified
 /// as `EntityType::Project` by the pipeline.
 pub const KG_PROJECTS_NAME: &str = "Projects";
 
-/// Tags subfolder name. Amendment `mb-bgpt` (ADR 0054 §F) -- the
+/// Tags subfolder name. Amendment `mb-bgpt` (ADR 0054 Â§F) -- the
 /// auto-generation target for tag stub pages, one `.md` per unique
 /// tag slug. Same write-once + user-owns-thereafter contract as
 /// `Entities/` and `Projects/`; bodies host a Dataview rollup of
@@ -106,12 +106,12 @@ pub const KG_TAGS_NAME: &str = "Tags";
 /// Filename of the operational-contract document. Write-once on
 /// first KG activation, user-owned thereafter. The chat-LLM reads
 /// this file to operate Ingest/Query/Lint over the vault (ADR 0054
-/// §C).
+/// Â§C).
 pub const KG_SCHEMA_MD_NAME: &str = "SCHEMA.md";
 
 /// Filename of the auto-maintained content catalog. Rebuilt from
 /// DB state after every successful KG filing by the worker; ADR
-/// 0054 §D file-wins-vs-DB-wins contract: the DB wins (INDEX.md is
+/// 0054 Â§D file-wins-vs-DB-wins contract: the DB wins (INDEX.md is
 /// a derived catalog, not a primary).
 pub const KG_INDEX_MD_NAME: &str = "INDEX.md";
 
@@ -119,7 +119,7 @@ pub const KG_INDEX_MD_NAME: &str = "INDEX.md";
 /// ever appends `capture` operations; the chat-LLM appends
 /// `ingest`/`query`/`lint` operations. Both append; nobody
 /// rewrites historical lines. Crash-safe via atomic temp-sibling-
-/// rename of the full file on each append. ADR 0054 §E.
+/// rename of the full file on each append. ADR 0054 Â§E.
 pub const KG_LOG_MD_NAME: &str = "LOG.md";
 
 /// Pure path-assembly view over the KG subtree under a given vault
@@ -129,7 +129,7 @@ pub const KG_LOG_MD_NAME: &str = "LOG.md";
 /// Owned (not borrowed) `PathBuf`s because the IPC layer hands these
 /// back through `Result<T, String>` and we want the boundary to be
 /// `'static`-friendly. The allocation cost is negligible
-/// (4 × short paths, one call per toggle-on or app boot).
+/// (4 Ã— short paths, one call per toggle-on or app boot).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KgSubtreePaths {
     /// `<vault>/Knowledge Graph/`
@@ -174,7 +174,7 @@ pub fn kg_root_file_paths(vault_path: &Path) -> KgRootFilePaths {
     }
 }
 
-/// Compose the four KG subtree paths from a vault root. Pure — no
+/// Compose the four KG subtree paths from a vault root. Pure â€” no
 /// I/O, no allocation beyond the four `PathBuf`s.
 ///
 /// Returns paths regardless of whether they exist on disk; the
@@ -205,8 +205,8 @@ pub fn kg_subtree_paths(vault_path: &Path) -> KgSubtreePaths {
 /// right log level (`info!` vs `warn!`) and the UI can render the
 /// right toast copy.
 ///
-/// Both variants are success — neither is an error condition. The
-/// boundary between them is the contract test in ADR 0053 §D1's
+/// Both variants are success â€” neither is an error condition. The
+/// boundary between them is the contract test in ADR 0053 Â§D1's
 /// idempotency table (cells A vs B/C).
 ///
 /// `serde(rename_all = "camelCase")` matches the rest of the KG
@@ -225,14 +225,14 @@ pub enum BootstrapReport {
 }
 
 /// Idempotently create the KG subtree under `vault_path`. Cells A,
-/// B, C of the ADR 0053 §D1 table. Cell D (`VaultPath` unset) is
-/// the caller's responsibility — this helper assumes it has a
+/// B, C of the ADR 0053 Â§D1 table. Cell D (`VaultPath` unset) is
+/// the caller's responsibility â€” this helper assumes it has a
 /// caller-validated path.
 ///
 /// Implementation:
 ///
 /// 1. Compute the four target paths.
-/// 2. Probe whether ALL four already exist as directories — this is
+/// 2. Probe whether ALL four already exist as directories â€” this is
 ///    the discriminator between `Created` and `AlreadyExists`.
 /// 3. `create_dir_all` each path (idempotent; a no-op on existing
 ///    directories per the std-lib contract).
@@ -245,7 +245,7 @@ pub enum BootstrapReport {
 ///   if any `create_dir_all` fails (permission denied, parent path
 ///   does not exist, path component is a file not a directory,
 ///   etc.). The error message names the specific path that
-///   failed — critical for the user-facing toast since "Knowledge
+///   failed â€” critical for the user-facing toast since "Knowledge
 ///   Graph/" is the most common typo / permission-mismatch surface.
 ///
 /// **Does NOT validate `vault_path` itself** (existence, writability,
@@ -308,7 +308,7 @@ pub fn bootstrap_kg_subtree(vault_path: &Path) -> AppResult<BootstrapReport> {
 
 /// Idempotently create the three KG root files under `vault_path`.
 ///
-/// **Write-once contract** (ADR 0054 §C/§E): each file is written
+/// **Write-once contract** (ADR 0054 Â§C/Â§E): each file is written
 /// ONLY when it does not already exist. A user-edited
 /// `SCHEMA.md`, a chat-LLM-appended `LOG.md`, or a freshly
 /// worker-rebuilt `INDEX.md` is NEVER overwritten by this helper.
@@ -416,345 +416,5 @@ pub enum RootFilesReport {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use tempfile::TempDir;
-
-    /// Cell A — pristine vault root, no subtree. Expect `Created`
-    /// and all four directories present on disk.
-    #[test]
-    fn bootstrap_creates_subtree_when_missing() {
-        let td = TempDir::new().unwrap();
-        let report = bootstrap_kg_subtree(td.path()).expect("bootstrap must succeed");
-        assert_eq!(report, BootstrapReport::Created);
-
-        let p = kg_subtree_paths(td.path());
-        assert!(p.root.is_dir(), "root must exist");
-        assert!(p.inbox.is_dir(), "inbox must exist");
-        assert!(p.entries.is_dir(), "entries must exist");
-        assert!(p.history.is_dir(), "history must exist");
-        assert!(p.entities.is_dir(), "entities must exist (mb-08za)");
-        assert!(p.projects.is_dir(), "projects must exist (mb-08za)");
-        assert!(p.tags.is_dir(), "tags must exist (mb-bgpt)");
-    }
-
-    /// Cell B — subtree already exists, empty. Expect
-    /// `AlreadyExists` and no observable changes on disk.
-    #[test]
-    fn bootstrap_is_no_op_when_subtree_exists_empty() {
-        let td = TempDir::new().unwrap();
-        // Pre-create.
-        bootstrap_kg_subtree(td.path()).unwrap();
-        // Second call.
-        let report = bootstrap_kg_subtree(td.path()).expect("second call must succeed");
-        assert_eq!(report, BootstrapReport::AlreadyExists);
-    }
-
-    /// Cell C — subtree exists AND contains user content. The
-    /// bootstrap MUST NOT touch the user's files. This is the
-    /// most important invariant of the wave; failure here would
-    /// silently nuke notes.
-    #[test]
-    fn bootstrap_preserves_user_files_when_subtree_populated() {
-        let td = TempDir::new().unwrap();
-        let p = kg_subtree_paths(td.path());
-
-        // Pre-create with user content in each subfolder.
-        fs::create_dir_all(&p.entries).unwrap();
-        fs::create_dir_all(&p.inbox).unwrap();
-        fs::create_dir_all(&p.history).unwrap();
-
-        let user_entry = p.entries.join("my-precious-note.md");
-        let user_inbox_audio = p.inbox.join("memo.m4a");
-        let user_history_blob = p.history.join("2026-06").join("session.json");
-        fs::write(&user_entry, b"# do not delete me").unwrap();
-        fs::write(&user_inbox_audio, b"\x00\x01\x02fake-audio").unwrap();
-        fs::create_dir_all(user_history_blob.parent().unwrap()).unwrap();
-        fs::write(&user_history_blob, b"{\"keep\":true}").unwrap();
-
-        // Bootstrap.
-        let report = bootstrap_kg_subtree(td.path()).expect("bootstrap must succeed");
-        assert_eq!(report, BootstrapReport::AlreadyExists);
-
-        // Every user file must survive byte-identical.
-        assert_eq!(fs::read(&user_entry).unwrap(), b"# do not delete me");
-        assert_eq!(
-            fs::read(&user_inbox_audio).unwrap(),
-            b"\x00\x01\x02fake-audio"
-        );
-        assert_eq!(fs::read(&user_history_blob).unwrap(), b"{\"keep\":true}");
-    }
-
-    /// Partial-presence variant — `Knowledge Graph/` exists but
-    /// `Entries/` is missing. Bootstrap must fill in the missing
-    /// pieces and report `Created` (something WAS created).
-    #[test]
-    fn bootstrap_completes_partial_subtree_and_reports_created() {
-        let td = TempDir::new().unwrap();
-        let p = kg_subtree_paths(td.path());
-
-        // Only root + inbox present; entries + history + entities +
-        // projects all missing.
-        fs::create_dir_all(&p.root).unwrap();
-        fs::create_dir_all(&p.inbox).unwrap();
-
-        let report = bootstrap_kg_subtree(td.path()).expect("bootstrap must succeed");
-        assert_eq!(
-            report,
-            BootstrapReport::Created,
-            "partial subtree must report Created, not AlreadyExists"
-        );
-        assert!(p.entries.is_dir(), "entries must now exist");
-        assert!(p.history.is_dir(), "history must now exist");
-        assert!(p.entities.is_dir(), "entities must now exist (mb-08za)");
-        assert!(p.projects.is_dir(), "projects must now exist (mb-08za)");
-        assert!(p.tags.is_dir(), "tags must now exist (mb-bgpt)");
-    }
-
-    /// Amendment `mb-bgpt` regression guard: a pre-amendment
-    /// 5-folder subtree (Inbox + Entries + History + Entities +
-    /// Projects present; Tags missing) must report `Created` so the
-    /// upgrade path lifts existing 1E.6-era installs cleanly. The
-    /// older 3-folder upgrade path is still pinned below.
-    #[test]
-    fn bootstrap_upgrades_pre_bgpt_five_folder_subtree() {
-        let td = TempDir::new().unwrap();
-        let p = kg_subtree_paths(td.path());
-
-        fs::create_dir_all(&p.root).unwrap();
-        fs::create_dir_all(&p.inbox).unwrap();
-        fs::create_dir_all(&p.entries).unwrap();
-        fs::create_dir_all(&p.history).unwrap();
-        fs::create_dir_all(&p.entities).unwrap();
-        fs::create_dir_all(&p.projects).unwrap();
-
-        let report = bootstrap_kg_subtree(td.path()).expect("bootstrap must succeed");
-        assert_eq!(
-            report,
-            BootstrapReport::Created,
-            "five-folder pre-bgpt subtree must upgrade to Created when Tags lands"
-        );
-        assert!(p.tags.is_dir(), "tags must now exist");
-    }
-
-    /// Amendment `mb-08za` regression guard: a pre-existing
-    /// three-folder subtree (Inbox + Entries + History present;
-    /// Entities + Projects missing) must report `Created` rather than
-    /// `AlreadyExists`, because the expansion DID create something.
-    /// This is the upgrade path for users who toggled the KG on
-    /// pre-amendment.
-    #[test]
-    fn bootstrap_upgrades_pre_amendment_three_folder_subtree() {
-        let td = TempDir::new().unwrap();
-        let p = kg_subtree_paths(td.path());
-
-        // Plant the pre-amendment shape: only the original three.
-        fs::create_dir_all(&p.root).unwrap();
-        fs::create_dir_all(&p.inbox).unwrap();
-        fs::create_dir_all(&p.entries).unwrap();
-        fs::create_dir_all(&p.history).unwrap();
-
-        let report = bootstrap_kg_subtree(td.path()).expect("bootstrap must succeed");
-        assert_eq!(
-            report,
-            BootstrapReport::Created,
-            "three-folder pre-amendment subtree must upgrade to Created"
-        );
-        assert!(p.entities.is_dir(), "entities must now exist");
-        assert!(p.projects.is_dir(), "projects must now exist");
-        assert!(p.tags.is_dir(), "tags must now exist (mb-bgpt)");
-    }
-
-    /// Paths are composed via `PathBuf::join`; the literal "Knowledge
-    /// Graph" with a space survives. Smoke-tests the cross-platform
-    /// path discipline contract.
-    #[test]
-    fn paths_carry_the_literal_space_in_knowledge_graph() {
-        let root = PathBuf::from(if cfg!(windows) {
-            r"C:\vault"
-        } else {
-            "/tmp/vault"
-        });
-        let p = kg_subtree_paths(&root);
-        // Use the components iterator so the test isn't sensitive
-        // to the platform's separator character.
-        let kg_component = p
-            .root
-            .components()
-            .last()
-            .expect("root must have a leaf component");
-        assert_eq!(
-            kg_component.as_os_str(),
-            std::ffi::OsStr::new("Knowledge Graph"),
-            "root leaf must be the literal 'Knowledge Graph' with the space",
-        );
-        // Sub-leaf names.
-        assert_eq!(
-            p.inbox.components().last().unwrap().as_os_str(),
-            std::ffi::OsStr::new("Inbox"),
-        );
-        assert_eq!(
-            p.entries.components().last().unwrap().as_os_str(),
-            std::ffi::OsStr::new("Entries"),
-        );
-        assert_eq!(
-            p.history.components().last().unwrap().as_os_str(),
-            std::ffi::OsStr::new("History"),
-        );
-        assert_eq!(
-            p.entities.components().last().unwrap().as_os_str(),
-            std::ffi::OsStr::new("Entities"),
-        );
-        assert_eq!(
-            p.projects.components().last().unwrap().as_os_str(),
-            std::ffi::OsStr::new("Projects"),
-        );
-        assert_eq!(
-            p.tags.components().last().unwrap().as_os_str(),
-            std::ffi::OsStr::new("Tags"),
-        );
-    }
-
-    // ----------------------------------------------------------
-    // bootstrap_kg_root_files coverage (amendment `mb-bgpt`).
-    // ----------------------------------------------------------
-
-    /// Cell A for root files -- pristine subtree, no root files.
-    /// All three (SCHEMA, INDEX, LOG) get written and report
-    /// `Created`.
-    #[test]
-    fn root_files_bootstrap_creates_all_three_when_missing() {
-        let td = TempDir::new().unwrap();
-        bootstrap_kg_subtree(td.path()).unwrap();
-
-        let report = bootstrap_kg_root_files(td.path()).expect("root-file bootstrap must succeed");
-        assert_eq!(report, RootFilesReport::Created);
-
-        let r = kg_root_file_paths(td.path());
-        assert!(r.schema_md.is_file(), "SCHEMA.md must exist");
-        assert!(r.index_md.is_file(), "INDEX.md must exist");
-        assert!(r.log_md.is_file(), "LOG.md must exist");
-    }
-
-    /// Cell B for root files -- all three already present. No-op.
-    #[test]
-    fn root_files_bootstrap_is_no_op_when_all_present() {
-        let td = TempDir::new().unwrap();
-        bootstrap_kg_subtree(td.path()).unwrap();
-        bootstrap_kg_root_files(td.path()).unwrap();
-
-        let report = bootstrap_kg_root_files(td.path()).expect("second call must succeed");
-        assert_eq!(report, RootFilesReport::AlreadyExists);
-    }
-
-    /// **Write-once contract** -- the most important invariant.
-    /// User-edited SCHEMA.md / chat-LLM-appended LOG.md must
-    /// survive a re-bootstrap byte-identical.
-    #[test]
-    fn root_files_bootstrap_preserves_user_edits() {
-        let td = TempDir::new().unwrap();
-        bootstrap_kg_subtree(td.path()).unwrap();
-        let r = kg_root_file_paths(td.path());
-
-        let user_schema = b"# my custom SCHEMA\n\nUser edits here.\n";
-        let user_log = b"## [2026-06-06 12:00] capture | hand-written log line\n";
-        fs::write(&r.schema_md, user_schema).unwrap();
-        fs::write(&r.log_md, user_log).unwrap();
-        // INDEX.md still missing -- we want to confirm the helper
-        // writes the missing one without touching the other two.
-
-        let report = bootstrap_kg_root_files(td.path()).expect("bootstrap must succeed");
-        assert_eq!(
-            report,
-            RootFilesReport::Created,
-            "missing INDEX.md must trigger Created even when other two are user-owned"
-        );
-
-        assert_eq!(
-            fs::read(&r.schema_md).unwrap(),
-            user_schema,
-            "SCHEMA.md must survive byte-identical (write-once)"
-        );
-        assert_eq!(
-            fs::read(&r.log_md).unwrap(),
-            user_log,
-            "LOG.md must survive byte-identical (write-once)"
-        );
-        assert!(r.index_md.is_file(), "INDEX.md must have been written");
-    }
-
-    /// Root files use canonical LF line endings -- pinned because
-    /// LESSONS PINNED P12 Finding 1 has bitten previous waves.
-    #[test]
-    fn root_files_have_lf_only_line_endings() {
-        let td = TempDir::new().unwrap();
-        bootstrap_kg_subtree(td.path()).unwrap();
-        bootstrap_kg_root_files(td.path()).unwrap();
-        let r = kg_root_file_paths(td.path());
-
-        for path in [&r.schema_md, &r.index_md, &r.log_md] {
-            let bytes = fs::read(path).unwrap();
-            assert!(
-                !bytes.contains(&b'\r'),
-                "{} must be LF-only on disk; found CR",
-                path.display()
-            );
-        }
-    }
-
-    /// `RootFilesReport` wire-contract test, mirroring
-    /// `report_serializes_camel_case`.
-    #[test]
-    fn root_files_report_serializes_camel_case() {
-        assert_eq!(
-            serde_json::to_string(&RootFilesReport::Created).unwrap(),
-            "\"created\""
-        );
-        assert_eq!(
-            serde_json::to_string(&RootFilesReport::AlreadyExists).unwrap(),
-            "\"alreadyExists\""
-        );
-    }
-
-    /// Error path — a regular file masquerading as the subtree
-    /// root forces `create_dir_all` to fail. The wrapped error
-    /// must name the offending path so the user toast is
-    /// actionable.
-    #[test]
-    fn bootstrap_errors_when_subtree_root_is_a_file() {
-        let td = TempDir::new().unwrap();
-        let p = kg_subtree_paths(td.path());
-        // Plant a regular file at the would-be `Knowledge Graph/`
-        // path. `create_dir_all` should refuse to convert it.
-        fs::write(&p.root, b"i am a file, not a directory").unwrap();
-
-        let err =
-            bootstrap_kg_subtree(td.path()).expect_err("file-at-subtree-root must fail bootstrap");
-        match err {
-            AppError::Vault(msg) => {
-                assert!(
-                    msg.contains("bootstrap_kg_subtree"),
-                    "error must name the helper: {msg}",
-                );
-                assert!(
-                    msg.contains("Knowledge Graph"),
-                    "error must name the offending path: {msg}",
-                );
-            }
-            other => panic!("expected AppError::Vault, got: {other:?}"),
-        }
-    }
-
-    /// `BootstrapReport` serializes to the camelCase shape the UI
-    /// expects. Pin the wire contract here so a future enum
-    /// refactor (e.g. adding a `Partial` variant) doesn't silently
-    /// break the JS side.
-    #[test]
-    fn report_serializes_camel_case() {
-        let created = serde_json::to_string(&BootstrapReport::Created).unwrap();
-        assert_eq!(created, "\"created\"");
-        let exists = serde_json::to_string(&BootstrapReport::AlreadyExists).unwrap();
-        assert_eq!(exists, "\"alreadyExists\"");
-    }
-}
+#[path = "kg_layout_tests.rs"]
+mod tests;

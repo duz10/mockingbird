@@ -517,6 +517,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-06-08 | `[KG Phase 1E Wave 1E.7 Part 2 / mb-5lla / mb-bgpt SEAL]` | Pure-refactor wave brought `kg/worker.rs` (2050 LoC) and `vault/kg_layout.rs` (698 LoC) under 600-LoC cap. worker.rs split into root + 7 cohesive submodules (filing / projection / archive / stubs / index_log / transcripts / time_iso); kg_layout.rs split via existing sibling-tests pattern (`kg_layout_tests.rs`). Zero behaviour change; public API surface preserved by `pub(crate) use submod::symbol;` re-exports at the parent — `kg::parity` + `kg::latency_bench` callers needed zero edits. Four findings: (1) **`[IO.File]::ReadAllText` in PS 5.1 auto-strips BOMs; the naive `if (StartsWith([char]0xFEFF)) Substring(1)` pattern eats the first real character on no-BOM files** — turned every file's `//!` doc comment into `/!` and broke rustfmt across 10 files. Recovery was trivial (one byte prepended) but the failure mode is silent for prose/JSON. Use raw-byte read/write (`ReadAllBytes`/`WriteAllBytes`) when BOM stripping is involved. (2) `pub(crate) use submod::symbol;` at the split parent preserves external public paths through a refactor — write down external use-sites first, choose visibility-modifiers + re-exports to keep them byte-identical, single-minute grep + single-line re-export. (3) `cargo test --release --no-run` is 4m32s on this codebase; the Code Puppy shell tool's 270s execution cap forces `Start-Process -WindowStyle Hidden` background launch + poll loop. Budget 4×Start-Sleep-180 chunks for test-no-run + build-release on a worker/IPC-touching wave. (4) Sibling `#[cfg(test)] #[path = "X_tests.rs"] mod tests;` re-confirmed as the lowest-friction split for cohesive impls (kg_layout 698→420+344). Closes `mb-5lla` AND `mb-bgpt` (Wave 1E.7 fully sealed). Body, narrow blast radius (finding 1 is the only broadly-applicable foot-gun; the others re-affirm known patterns). |
 | 2026-06-06 | `[KG Phase 1E charter amendment / mb-08za / ADR 0053 amendments]` | Interstitial wave between 1E.4 and 1E.5 closed the "entities are bare strings, not Obsidian graph nodes" gap surfaced when Dustin opened the live vault. Four ADR 0053 amendments shipped together (subtree 3→5 folders; entities emit as `"[[Entities/<slug>]]"` wiki-links; auto-generated Entity stub pages §D11; auto-generated Project stub pages §D12), plus serializer retrofit + new `vault::entity_pages` module + worker integration. Three findings worth keeping: (1) **Write-once user-owns-thereafter is the only sane contract for auto-generated user-facing artifacts** — detection is pure existence-on-disk (no content hash, no schema upgrade path that mutates user edits); the user can rewrite the entire body of `Entities/maple.md` and Mockingbird never touches it on subsequent filings. This is the same shape 1E.7's first-activation seeds will use; the moment a third callsite wants the same shape, extract it. (2) **Wiki-link round-trip is asymmetric and that's fine** — the canonical OUTBOUND form (DB → file) is always `"[[Entities/<slug>]]"`; the INBOUND parser (file → DB, Wave 1E.5's reverse-watcher) must accept BOTH legacy bare-string entries (pre-amendment) AND the new wiki-link shape, but writes ALWAYS emit the canonical form so the next round-trip converges. Same `slugify_title` helper drives BOTH filename slugs and entity slugs — one source of truth or you get unfindable graph edges. (3) **Backfill is cheaper to defer than to design** — Dustin's four pre-amendment test entries stay in bare-string form; new entries get wiki-links; Dataview queries written defensively (`contains(entities, "<bare>") OR contains(entities, "[[Entities/<bare>]]")`) cover both shapes. Automatic backfill is Phase 1F (or later) work. The amendment ships clean and the user has three painless paths (re-capture / hand-edit / wait). Mid-stride schema migrations on user-owned files are the most expensive class of work in this codebase; not doing one when the cost/benefit is in the noise is the right call. Body, narrow blast radius (KG Phase 1E only). |
 | 2026-06-06 | `[KG Phase 1E hotfix #2 / mb-wzui]` | Vault entry body was `entries[0].body` (segmenter segment 0) instead of the full cleaned transcript — multi-bullet KG notes silently dropped segments 1..N. Root cause was NOT any of the kickoff's three hypotheses (LLM summary / serializer truncation / intermediate mangle) — it was a fourth: the worker's `KgEntry { body: primary.body.clone() }` was using `result.entries[0].body`, which is the *segmenter's first semantic segment* (`kg::pipeline::segment` is reformulating chunker, not substring slicer). Fix: snapshot the `transcripts(stage='final')` row inside the same mutex as the session+settings snapshot, prefer cleaned transcript via new `pick_vault_body` helper with segment[0] fallback for defensive completeness, whitespace-only transcripts fall through to fallback. Three findings: (1) body source-of-truth precedence is final → cleaned → raw matching ALL display surfaces (Dictations view, history archive, vault projection) — extract the cascade as a single helper the moment a second site projects the same DB content. (2) `entries[N].body` is structured pipeline output not faithful source slice — reach for the input column, not for segmenter output, when you want "the original input". (3) Orphan-recovery pattern: `git status --porcelain=v1` caught a prior session's complete-but-uncommitted `pick_vault_body` fix + 4 worker tests sitting in working tree; this iteration's contribution was the complementary serializer-side regression pin (`body_preserves_markdown_bullet_list_verbatim`). Body, narrow blast radius (KG vault projection). |
 | 2026-06-06 | `[KG Phase 1E hotfix / mb-43xw + reconcile_history IPC]` | Pre-1E.3 release exe shipped to live user because Waves 1E.3 + 1E.4 sealed on `test --release --no-run` (correct for gating link validity; does NOT produce a fresh runtime exe). Fix: rebuilt + promoted both deferred reconcile IPCs to the dashboard `ActionsBand` (Open vault + Reconcile vault). Findings: (1) PINNED P13 — test-no-run is not a build substitute when shipping behavior to a live user; AGENTS.md end-of-iteration gate now requires `cargo build --release` after any wave touching migrations / worker pipeline / IPC. (2) Two symmetric reconcile IPCs > one; render combined banner so the operator sees the whole drift picture, not half. (3) Sequential `await` (not `Promise.all`) on identical-gate IPC pairs avoids duplicate error toasts during a toggle-off race. (4) Match Button variants to the existing palette; `tsc` will catch typos like `secondary` against `primary/ghost/danger`. Body, broad-implication (every future migration / worker / IPC wave inherits Finding 1). |
@@ -596,6 +597,193 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+## 2026-06-08 [KG Phase 1E Wave 1E.7 Part 2 / mb-5lla / mb-bgpt SEAL] Worker + kg_layout refactor under 600-LoC cap; one PowerShell foot-gun cost an hour, two known-good patterns confirmed
+
+**Context.** Pure-refactor wave to bring `kg/worker.rs` (2050 LoC) and
+`vault/kg_layout.rs` (698 LoC) under the 600-LoC HARD cap; closes
+`mb-5lla` and unblocks `bd close mb-bgpt` (Wave 1E.7 seal). Zero
+behaviour change.
+
+Result: worker.rs 2050 → 505 root + 7 cohesive `worker/*` submodules
+(filing 357, projection 496, stubs 254, index_log 185, transcripts
+122, time_iso 119, archive 114); kg_layout.rs 698 → 420 impl + 344
+sibling `kg_layout_tests.rs`. Public API surface unchanged — call
+sites in `lib.rs` / IPC / parity probe / latency bench needed zero
+edits. All cargo gates green (check / clippy --release -D warnings /
+fmt --check / test --release --no-run); `cargo build --release`
+MANDATORY per P13 produced fresh `target/release/mockingbird.exe`.
+
+### Finding 1 — `[IO.File]::ReadAllText` in PS 5.1 auto-strips BOMs; the naive `if ($txt.StartsWith([char]0xFEFF)) { $txt.Substring(1) }` pattern eats the first real character on every no-BOM file
+
+Mid-wave I needed to LF-normalize + de-BOM 10 freshly-created Rust
+files in one sweep. The script:
+
+```powershell
+foreach($f in $files) {
+    $txt = [IO.File]::ReadAllText($f)
+    if($txt.StartsWith([char]0xFEFF)) { $txt = $txt.Substring(1) }
+    $txt = $txt -replace "`r`n", "`n"
+    [IO.File]::WriteAllText($f, $txt, (New-Object Text.UTF8Encoding($false)))
+}
+```
+
+looked obviously correct. It was not. After it ran, every file's
+first line `//! …` had become `/! …` — `rustfmt` failed with
+`unknown start of token` + `expected item, found '/'` and the whole
+tree wouldn't compile. The corruption was uniform: byte 0 (the
+first `/` of `//!`) was missing from every one of the 10 files,
+including the ones that never had a BOM in the first place.
+
+Root cause: `[IO.File]::ReadAllText(path)` with no explicit encoding
+uses a `StreamReader` with BOM auto-detection enabled. **It strips
+the BOM from the decoded string before returning** — the returned
+string never starts with `U+FEFF` even when the file on disk did.
+So the `StartsWith([char]0xFEFF)` guard returned `False` for every
+file, which means `Substring(1)` should NOT have been called.
+Except it was. Hypothesis: in cmd → PowerShell → backtick-escape
+layer the literal `[char]0xFEFF` got mangled into something that
+evaluated truthy against any non-empty string (possibly `[char]0`
+or a bare numeric 0 that PowerShell coerces to `$true` under
+`-eq` to a char zero-position match). I didn't tear the chain
+apart to identify the exact mangling — the lesson is the pattern,
+not the specific PS quoting bug.
+
+**Safer patterns** when you need to remove a BOM and/or normalize
+line endings on Windows:
+
+1. **Operate on raw bytes** — `[IO.File]::ReadAllBytes` → check
+   bytes [0..2] against `0xEF 0xBB 0xBF` literally → slice the
+   byte array → write back via `WriteAllBytes`. No string round-trip,
+   no encoding ambiguity, no BOM auto-strip surprise.
+2. **Use `.NET`'s explicit constructor** —
+   `New-Object IO.StreamReader($f, [Text.UTF8Encoding]::new($false), $false)`
+   passes `detectEncodingFromByteOrderMarks: $false` so the BOM
+   stays in the returned string and the guard works as written.
+3. **Skip the guard entirely if you don't actually need to strip
+   the BOM** — `WriteAllText` with `UTF8Encoding($false)` (the
+   no-BOM encoder) writes whatever string you hand it without
+   prepending one. If `ReadAllText` already stripped the BOM,
+   round-tripping is BOM-free by construction.
+
+Recovery cost in this wave: ~10 min to identify (rustfmt's error
+message was beautifully specific), ~30s to fix (single `foreach`
+that checked for `[byte]47, [byte]33` = `/!` at offset 0/1 and
+prepended `[byte]47` when found). But the failure mode is silent
+for any file whose first character isn't part of an obviously-
+broken syntactic token — if I'd been editing prose or JSON, the
+damage could have shipped unnoticed.
+
+**Promotion candidate**: probably not PINNED — narrow blast radius
+(only bites when a future puppy writes a multi-file BOM/LF-
+normalization sweep in PowerShell). But worth a body entry so the
+next puppy who reaches for this pattern reads it first.
+
+### Finding 2 — `pub(crate) use submod::symbol;` at the split-parent's root preserves external public paths through a split refactor
+
+`kg::parity::pipeline_result_to_value` + `kg::latency_bench` both
+call `kg::worker::build_segment_outputs`. After splitting worker.rs
+into `worker/` + submodules, the function physically lives in
+`kg::worker::filing::build_segment_outputs`, but I want the old
+path to keep resolving so the parity probe + bench need ZERO edits.
+Solution at `worker.rs`:
+
+```rust
+mod filing;  // private submodule
+
+// Re-export the one helper outside callers reach for. Keeping
+// the public path as `kg::worker::build_segment_outputs` means
+// the split is invisible to those modules.
+pub(crate) use filing::build_segment_outputs;
+```
+
+No caller changed. Verified by `git diff --stat HEAD -- src-tauri/`
+showing only the two refactored files + the new submodule tree;
+no changes to `parity.rs`, `latency_bench.rs`, `lib.rs`, or IPC
+handlers. The same pattern handled `DEFAULT_FILING_MODEL` (kept
+`pub(super)` since it's only used inside the worker module), and
+the phase functions (`process_one` / `maybe_commit_to_vault` etc.)
+were all `pub(super)` originally so they didn't need re-export.
+
+Pattern: when splitting a module that exports anything outside its
+own crate-level prefix, write down the **external use-sites first**,
+then choose visibility-modifiers + re-exports at the split parent
+to keep those paths byte-identical. The grep is one minute, the
+re-export is one line, and the diff stays minimal.
+
+### Finding 3 — `cargo test --release --no-run` takes ~4-5 min on this codebase; the shell tool's 270s cap means it MUST go via `Start-Process -WindowStyle Hidden` background launch + poll loop
+
+The documented fallback gate (P2) is `… cargo-with-cuda.ps1 test
+--release --no-run`. Empirically on this codebase + this Windows
+box, that takes 4m32s to link 17 test binaries. The Code Puppy
+shell tool caps individual command execution at 270 seconds
+regardless of the `timeout` parameter passed — `--timeout=1800`
+on a 5-minute cargo command still SIGKILLs at 270s.
+
+Working recipe:
+
+```
+powershell -Command "Start-Process powershell -ArgumentList '-NoProfile','-WindowStyle','Hidden','-Command','& { Set-Location \"<repo>\"; & powershell -File scripts\cargo-with-cuda.ps1 test --release --no-run *> test_norun.log }' -WindowStyle Hidden -PassThru | Select-Object -ExpandProperty Id"
+```
+
+Returns the parent PID immediately. Poll via
+`Get-Process -Id $pid -EA SilentlyContinue` + tail the log;
+`Start-Sleep -Seconds 180` chunks fit inside the 270s shell cap.
+`cargo build --release` is the same shape — both took ~5-7 min
+on this box.
+
+**Implication for end-of-iteration gates**: budget two
+sleep-180 windows for the test-no-run gate and another two for
+the `cargo build --release` gate. The full cargo cycle for a wave
+that touches the worker pipeline (= mandatory P13 build) is 4×180s
+= ~12 minutes of polling overhead on top of the actual compile
+time. Not a problem to know up front; surprise factor if you don't.
+
+### Finding 4 — sibling `#[cfg(test)] #[path = "X_tests.rs"] mod tests;` is the lowest-friction split when the impl is genuinely cohesive (re-confirms 2026-06-06 Finding 2)
+
+`vault/kg_layout.rs` had 698 LoC; ~340 of those were a single
+tests block. Pulling it to `kg_layout_tests.rs` via the existing
+`#[cfg(test)] #[path = "..."] mod tests;` pattern (already used
+by `vault/entity_pages.rs`, `vault/history.rs`, `vault/index_md.rs`,
+`vault/markdown_serializer.rs`) dropped the impl to 420 LoC and the
+tests file to 344 LoC — both under 600. Zero edits to the test
+bodies themselves; the only differences from inline form are
+removing the wrapping `mod tests { ... }` braces and changing
+`use super::*;` to `use super::*;` (semantically identical, lexically
+identical). Pattern is cheap when production code is genuinely
+cohesive (kg_layout is one logical thing: the 6-folder subtree +
+root-files bootstrap). Already documented 2026-06-06 Finding 2;
+this wave re-confirms it.
+
+### Mechanics worth noting
+
+- Submodule cross-deps: `worker/filing.rs` (the orchestrator)
+  imports from `worker/{projection,archive,stubs,index_log,
+  transcripts,time_iso}.rs` via `use super::projection::...` etc.
+  Each sibling is independent of the others. The two shared
+  helpers (transcript SELECTs + ISO-time formatters) got their
+  own tiny modules to avoid duplicating them across phase
+  modules — `worker/transcripts.rs` (~120 LoC) and
+  `worker/time_iso.rs` (~120 LoC).
+- One pre-existing clippy gotcha is now newly-visible to
+  `clippy --release --all-targets -- -D warnings`: the
+  `double_ended_iterator_last` lint fires on
+  `.components().last()` patterns in `kg_layout_tests.rs`. The
+  pattern pre-existed in the inline `mod tests {}` block; the
+  project's gating clippy invocation (the one the brief
+  specifies — no `--all-targets`) doesn't surface test-code
+  lints, so this is not a regression. Filing a follow-up bead
+  would be redundant since the pattern is repeated across the
+  codebase; flag if it becomes a gate.
+- `pub(super)` is the correct visibility for everything called
+  cross-submodule but never out of the worker tree. Used it for
+  `process_one`, the four `maybe_*` phase entry points, the two
+  transcript helpers, the four time/ISO helpers, and
+  `DEFAULT_FILING_MODEL`. Only `build_segment_outputs` is
+  `pub(crate)` because of the external `parity.rs` +
+  `latency_bench.rs` callers.
+
+---
 
 ## 2026-06-07 [KG Phase 1E hotfix #3 / mb-y390] Dictation #143 KG-filing failure was the `segment` JSON pass rejecting Python-style single-quoted strings; root cause was upstream of the worker, the bridge, AND the serializer
 
