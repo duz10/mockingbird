@@ -27,6 +27,15 @@ pub mod entity_pages;
 pub mod export_job;
 pub mod history;
 pub mod index_md;
+// Phase 1E Wave 1E.6 (`mb-i46v`, ADR 0053 Section "KG-Inbox courier"):
+// inbound KG-note audio courier. Sibling of `crate::inbox` (which
+// owns the ADR 0046 mobile-sync inbox); routes
+// `<vault>/Knowledge Graph/Inbox/*.m4a` through headless ingest with
+// `capture_kind = KgNote` so the source-gate enqueues them into the
+// KG filing queue.
+pub mod kg_inbox_courier;
+mod kg_inbox_courier_fs;
+pub mod kg_inbox_runtime;
 pub mod kg_layout;
 pub mod layout;
 pub mod log_md;

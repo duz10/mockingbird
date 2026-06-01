@@ -64,6 +64,8 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use std::sync::Arc;
+
 use crate::commands::{into_err, lock_db, AppStateHandle};
 use crate::kg::dashboard::{self, DashboardSnapshot};
 use crate::kg::launch_obsidian_vault;
@@ -73,6 +75,7 @@ use crate::kg::store::search::{
     self, EntitySuggestion, EntrySummary, SearchFilter, TagDetail, TagSuggestion,
 };
 use crate::settings::{model::SettingKey, Settings};
+use crate::vault::kg_inbox_runtime::KgInboxRuntime;
 
 /// Default cap on [`kg_list_failed_filings`] when the UI omits the
 /// `limit` argument. Matches D1 in the Wave 1C.2 binding parameters.
@@ -160,6 +163,7 @@ pub fn kg_settings_get_all(db: State<'_, AppStateHandle>) -> Result<KgSettingsSn
 #[tauri::command]
 pub fn kg_settings_set(
     db: State<'_, AppStateHandle>,
+    kg_inbox: State<'_, Arc<KgInboxRuntime>>,
     key: String,
     value: serde_json::Value,
 ) -> Result<(), String> {
@@ -169,10 +173,22 @@ pub fn kg_settings_set(
             "setting key {key:?} cannot be written via kg_settings_set"
         ));
     }
-    let conn = lock_db(&db)?;
-    Settings::new(&conn)
-        .set_raw(setting_key, &value)
-        .map_err(into_err)
+    // Drop the conn lock before refreshing the runtime config
+    // (which re-acquires it). Same pattern as `vault_settings_set`.
+    {
+        let conn = lock_db(&db)?;
+        Settings::new(&conn)
+            .set_raw(setting_key, &value)
+            .map_err(into_err)?;
+    }
+    let db_arc = Arc::clone(&db.inner().db);
+    // Phase 1E Wave 1E.6 (`mb-i46v`) -- transition the KG-Inbox
+    // runtime in the same IPC tick the user flipped the toggle, so
+    // the watcher is live (or shut down) by the time the Settings
+    // UI re-reads status. `refresh_config` is idempotent; a no-op
+    // change costs one settings read.
+    kg_inbox.refresh_config(&db_arc).map_err(into_err)?;
+    Ok(())
 }
 
 /// Allowlist for the UI-side KG settings writer.

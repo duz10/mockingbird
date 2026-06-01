@@ -217,6 +217,18 @@ pub fn run() {
                         );
                         progress_bus.set_app_handle(app.handle().clone());
                         app.manage(std::sync::Arc::clone(&progress_bus));
+                        // Type-erased clone so the inbox + kg-inbox
+                        // runtimes can share one bus instance via
+                        // `Arc<dyn IngestProgressBus>` (LESSONS
+                        // 2026-06-08: cloning the concrete
+                        // `Arc<AppIngestProgressBus>` does NOT
+                        // coerce to `dyn` automatically -- coercion
+                        // only fires at the function-boundary move,
+                        // so multi-consumer wiring needs the
+                        // type-erased binding up front).
+                        let progress_bus_dyn: std::sync::Arc<
+                            dyn crate::dictation::ingest_progress::IngestProgressBus,
+                        > = progress_bus;
 
                         // ADR 0046 Iter 3 / mb-3ivf — inbox runtime
                         // (Wave 3.3). Mirrors the vault export-job
@@ -226,8 +238,8 @@ pub fn run() {
                         // zero watcher overhead until the user opts in.
                         let inbox_runtime = Arc::new(
                             crate::inbox::runtime::InboxRuntime::new_with_progress(
-                                headless_ingest_tx,
-                                progress_bus,
+                                headless_ingest_tx.clone(),
+                                Arc::clone(&progress_bus_dyn),
                             ),
                         );
                         if let Err(e) = inbox_runtime.refresh_config(&shared_conn) {
@@ -237,6 +249,29 @@ pub fn run() {
                             );
                         }
                         app.manage(Arc::clone(&inbox_runtime));
+
+                        // Phase 1E Wave 1E.6 (`mb-i46v`, ADR 0053
+                        // Section "KG-Inbox courier") -- the KG-Inbox
+                        // runtime. Sibling of the ADR 0046 inbox
+                        // above; gated by `KgGraphEnabled` +
+                        // `VaultPath` (NOT `MobileSyncEnabled` --
+                        // the KG can be used with desktop-only
+                        // drag-and-drop too). Same off-by-default
+                        // ergonomics.
+                        let kg_inbox_runtime = Arc::new(
+                            crate::vault::kg_inbox_runtime::KgInboxRuntime::new_with_progress(
+                                headless_ingest_tx,
+                                Arc::clone(&shared_conn),
+                                progress_bus_dyn,
+                            ),
+                        );
+                        if let Err(e) = kg_inbox_runtime.refresh_config(&shared_conn) {
+                            tracing::error!(
+                                error = ?e,
+                                "kg-inbox runtime: initial refresh_config failed; KG-Inbox disabled this session"
+                            );
+                        }
+                        app.manage(Arc::clone(&kg_inbox_runtime));
                     }
                     Err(e) => {
                         // Non-fatal: the Tauri shell + IPC still work.

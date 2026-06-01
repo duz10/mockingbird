@@ -517,6 +517,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-06-08 | `[KG Phase 1E Wave 1E.6 / mb-i46v / ADR 0053]` | KG-Inbox courier shipped as sibling module (not generalization) of the ADR 0046 inbox courier. Rooted at `<vault>/Knowledge Graph/Inbox/`, watches for `*.{m4a,wav,mp3}` from iOS Shortcut + desktop drag-and-drop, threads into headless ingest with `capture_kind = KgNote`. Three new vault modules (courier 546 LoC / courier_fs 236 LoC / runtime 448 LoC) + 442-LoC sibling-tests file. Three findings worth keeping: (1) **`Arc<ConcreteImpl>` does NOT auto-coerce to `Arc<dyn Trait>` when passed to `Arc::clone`** — coercion fires at function-boundary MOVE, not at generic-param instantiation. Multi-consumer wiring of an `Arc<ConcreteImpl>` that downstream wants as `Arc<dyn Trait>` requires a type-erased rebind UP FRONT (`let bus_dyn: Arc<dyn Trait> = bus;`); thereafter `Arc::clone` on `bus_dyn` preserves the trait-object inner. Bites whenever you add a second consumer to a service that was previously single-consumer. (2) **Plan production-vs-helpers split BEFORE first `create_file`; rustfmt expands compact hand-drafts in surprising ways and pushes you over 600**. ~580 hand-counted LoC became 734 actual post-fmt (signature line-breaks + format! expansions + blank lines around impl blocks). New vault/inbox/courier-shaped modules with trait + prod impl + non-trivial helpers should default to `policy.rs` + `policy_fs.rs` + `policy_tests.rs` triple from the start. (3) **Idempotency probe BEFORE orchestrator send is the cheapest crash-recovery guard for couriers that don't move-on-success.** KG-Inbox defers file disposition to the worker phase-4 archive, so a crash mid-ingest OR after-ingest-before-archive leaves the file in Inbox/ and the initial-scan could re-emit. Pre-flight `sessions.audio_blob_path` probe short-circuits before the expensive decode + STT. Alternative `INSERT ... ON CONFLICT IGNORE` is fragile (already burned decode cost + orchestrator API contract change). Mechanics: background-launch + Start-Sleep poll pattern for ~9m test build / ~7m exe build (Code Puppy shell tool's 270s cap); `should_consider_path` is inbox-root-agnostic so `_failed/` exclusion reuses cleanly. Body, narrow blast radius. |
 | 2026-06-08 | `[KG Phase 1E Wave 1E.7 Part 2 / mb-5lla / mb-bgpt SEAL]` | Pure-refactor wave brought `kg/worker.rs` (2050 LoC) and `vault/kg_layout.rs` (698 LoC) under 600-LoC cap. worker.rs split into root + 7 cohesive submodules (filing / projection / archive / stubs / index_log / transcripts / time_iso); kg_layout.rs split via existing sibling-tests pattern (`kg_layout_tests.rs`). Zero behaviour change; public API surface preserved by `pub(crate) use submod::symbol;` re-exports at the parent — `kg::parity` + `kg::latency_bench` callers needed zero edits. Four findings: (1) **`[IO.File]::ReadAllText` in PS 5.1 auto-strips BOMs; the naive `if (StartsWith([char]0xFEFF)) Substring(1)` pattern eats the first real character on no-BOM files** — turned every file's `//!` doc comment into `/!` and broke rustfmt across 10 files. Recovery was trivial (one byte prepended) but the failure mode is silent for prose/JSON. Use raw-byte read/write (`ReadAllBytes`/`WriteAllBytes`) when BOM stripping is involved. (2) `pub(crate) use submod::symbol;` at the split parent preserves external public paths through a refactor — write down external use-sites first, choose visibility-modifiers + re-exports to keep them byte-identical, single-minute grep + single-line re-export. (3) `cargo test --release --no-run` is 4m32s on this codebase; the Code Puppy shell tool's 270s execution cap forces `Start-Process -WindowStyle Hidden` background launch + poll loop. Budget 4×Start-Sleep-180 chunks for test-no-run + build-release on a worker/IPC-touching wave. (4) Sibling `#[cfg(test)] #[path = "X_tests.rs"] mod tests;` re-confirmed as the lowest-friction split for cohesive impls (kg_layout 698→420+344). Closes `mb-5lla` AND `mb-bgpt` (Wave 1E.7 fully sealed). Body, narrow blast radius (finding 1 is the only broadly-applicable foot-gun; the others re-affirm known patterns). |
 | 2026-06-06 | `[KG Phase 1E charter amendment / mb-08za / ADR 0053 amendments]` | Interstitial wave between 1E.4 and 1E.5 closed the "entities are bare strings, not Obsidian graph nodes" gap surfaced when Dustin opened the live vault. Four ADR 0053 amendments shipped together (subtree 3→5 folders; entities emit as `"[[Entities/<slug>]]"` wiki-links; auto-generated Entity stub pages §D11; auto-generated Project stub pages §D12), plus serializer retrofit + new `vault::entity_pages` module + worker integration. Three findings worth keeping: (1) **Write-once user-owns-thereafter is the only sane contract for auto-generated user-facing artifacts** — detection is pure existence-on-disk (no content hash, no schema upgrade path that mutates user edits); the user can rewrite the entire body of `Entities/maple.md` and Mockingbird never touches it on subsequent filings. This is the same shape 1E.7's first-activation seeds will use; the moment a third callsite wants the same shape, extract it. (2) **Wiki-link round-trip is asymmetric and that's fine** — the canonical OUTBOUND form (DB → file) is always `"[[Entities/<slug>]]"`; the INBOUND parser (file → DB, Wave 1E.5's reverse-watcher) must accept BOTH legacy bare-string entries (pre-amendment) AND the new wiki-link shape, but writes ALWAYS emit the canonical form so the next round-trip converges. Same `slugify_title` helper drives BOTH filename slugs and entity slugs — one source of truth or you get unfindable graph edges. (3) **Backfill is cheaper to defer than to design** — Dustin's four pre-amendment test entries stay in bare-string form; new entries get wiki-links; Dataview queries written defensively (`contains(entities, "<bare>") OR contains(entities, "[[Entities/<bare>]]")`) cover both shapes. Automatic backfill is Phase 1F (or later) work. The amendment ships clean and the user has three painless paths (re-capture / hand-edit / wait). Mid-stride schema migrations on user-owned files are the most expensive class of work in this codebase; not doing one when the cost/benefit is in the noise is the right call. Body, narrow blast radius (KG Phase 1E only). |
 | 2026-06-06 | `[KG Phase 1E hotfix #2 / mb-wzui]` | Vault entry body was `entries[0].body` (segmenter segment 0) instead of the full cleaned transcript — multi-bullet KG notes silently dropped segments 1..N. Root cause was NOT any of the kickoff's three hypotheses (LLM summary / serializer truncation / intermediate mangle) — it was a fourth: the worker's `KgEntry { body: primary.body.clone() }` was using `result.entries[0].body`, which is the *segmenter's first semantic segment* (`kg::pipeline::segment` is reformulating chunker, not substring slicer). Fix: snapshot the `transcripts(stage='final')` row inside the same mutex as the session+settings snapshot, prefer cleaned transcript via new `pick_vault_body` helper with segment[0] fallback for defensive completeness, whitespace-only transcripts fall through to fallback. Three findings: (1) body source-of-truth precedence is final → cleaned → raw matching ALL display surfaces (Dictations view, history archive, vault projection) — extract the cascade as a single helper the moment a second site projects the same DB content. (2) `entries[N].body` is structured pipeline output not faithful source slice — reach for the input column, not for segmenter output, when you want "the original input". (3) Orphan-recovery pattern: `git status --porcelain=v1` caught a prior session's complete-but-uncommitted `pick_vault_body` fix + 4 worker tests sitting in working tree; this iteration's contribution was the complementary serializer-side regression pin (`body_preserves_markdown_bullet_list_verbatim`). Body, narrow blast radius (KG vault projection). |
@@ -597,6 +598,147 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+## 2026-06-08 [KG Phase 1E Wave 1E.6 / mb-i46v / ADR 0053 Section "KG-Inbox courier"] KG-Inbox courier shipped as a sibling module, not a generalization; two non-obvious findings about `Arc<dyn Trait>` coercion + the 600-LoC discipline
+
+- **Context:** Wire `<vault>/Knowledge Graph/Inbox/*.{m4a,wav,mp3}` to the
+  headless ingest pipeline with `capture_kind = KgNote` so the source-gate
+  routes drops automatically into `kg_filing_queue`. Spec choice: build a
+  sibling courier (`vault::kg_inbox_courier`) next to the ADR 0046
+  inbox courier (`inbox::courier`), reusing only the `inbox::watcher`
+  stability state machine + the `StableInboxFile` event shape.
+
+### Finding 1 — `Arc<ConcreteImpl>` does NOT auto-coerce to `Arc<dyn Trait>` when passed to `Arc::clone`; the coercion only fires at the function-boundary MOVE
+
+- **Context:** Two consumers needed the same `IngestProgressBus`: the
+  ADR 0046 `InboxRuntime` and the new `KgInboxRuntime`. Naive wiring:
+  ```rust
+  let progress_bus = Arc::new(AppIngestProgressBus::new());
+  // ... inbox runtime takes one clone, kg-inbox runtime takes the other:
+  InboxRuntime::new_with_progress(tx.clone(), Arc::clone(&progress_bus));
+  KgInboxRuntime::new_with_progress(tx, db, progress_bus);  // <-- moved
+  ```
+  The second call (move) coerces just fine -- the function signature is
+  `progress: Arc<dyn IngestProgressBus>` and Rust performs the
+  unsized-coercion at the moment of the move. But the first call
+  (`Arc::clone(&progress_bus)`) fails E0308:
+  `expected &Arc<dyn IngestProgressBus>, found &Arc<AppIngestProgressBus>`.
+  `Arc::clone` is generic over the inner type and preserves it; the
+  unsized-coercion is a function-call-boundary mechanism that does NOT
+  participate in generic instantiation.
+- **Finding:** When the SAME `Arc<ConcreteImpl>` needs to feed multiple
+  consumers that all want `Arc<dyn Trait>`, type-erase ONCE up front
+  and clone the trait-object Arc thereafter:
+  ```rust
+  let progress_bus = Arc::new(AppIngestProgressBus::new());
+  app.manage(Arc::clone(&progress_bus));  // concrete for IPC layer
+  let progress_bus_dyn: Arc<dyn IngestProgressBus> = progress_bus;
+  InboxRuntime::new_with_progress(tx.clone(), Arc::clone(&progress_bus_dyn));
+  KgInboxRuntime::new_with_progress(tx, db, progress_bus_dyn);
+  ```
+  The rebind line is the type-erasure; `Arc::clone` on the trait-object
+  Arc preserves the trait-object inner, so both consumers get the
+  expected type. Cost is one extra named binding; benefit is the
+  compiler error vanishes AND the intent is explicit.
+- **Action:** Whenever you introduce a second consumer for an existing
+  `Arc<ConcreteImpl>` that lives downstream of a `Arc<dyn Trait>`
+  function boundary, add the type-erased binding at the manage()
+  site. Do NOT try to make it work via `Arc::clone` on the concrete
+  Arc -- you will burn 10 min discovering this rule.
+
+### Finding 2 — Plan the production-vs-helpers split BEFORE first `create_file`; rustfmt expands compact code in surprising ways and pushes you over 600
+
+- **Context:** My first `kg_inbox_courier.rs` write was ~580 LoC by hand-
+  count (counting `\n`s while drafting). After rustfmt + cargo check, the
+  file came back at 734 LoC. Surprise sources: rustfmt expands
+  multi-arg function calls + signatures across lines (e.g. a 95-char
+  signature gets broken into 4 lines), expands long `format!` patterns,
+  and inserts blank lines around impl blocks. My ~580 estimate became
+  734 actual -- 134 over the 600 hard cap.
+- **Finding:** Production code + helpers in one file is fine for small
+  modules but explodes past 600 quickly when you have: (a) a trait
+  definition, (b) its production impl with verbose error context, AND
+  (c) the policy fn (`process_one`) with detailed inline tracing.
+  Split the trait + helpers into a sibling `*_fs.rs` BEFORE writing
+  even the first draft, not after rustfmt surprises you. The pattern
+  ended up clean:
+  - `kg_inbox_courier.rs` (546 LoC) -- the policy (`process_one`,
+    `courier_loop`, public types, lifecycle).
+  - `kg_inbox_courier_fs.rs` (236 LoC) -- the mechanism (`KgFileOps`
+    trait + `ProductionKgFileOps` + `validate` / `quarantine` /
+    `unique_failed_path` / `split_stem_ext` / `already_ingested`).
+  - `kg_inbox_courier_tests.rs` (440 LoC) -- via the existing
+    `#[cfg(test)] #[path = "..."] mod tests;` sibling-test pattern
+    (LESSONS 2026-06-08 Finding 4).
+  Cross-file dependencies are tiny (the constants `MAX_SIZE_BYTES` +
+  `EXTENSION_ALLOWLIST` + `FAILED_DIR_NAME` get `pub(super)` instead of
+  private; everything else stays private to the courier module pair).
+- **Action:** New vault/inbox/courier-shaped modules with a trait +
+  prod impl + non-trivial helpers should default to the
+  `policy.rs` + `policy_fs.rs` + `policy_tests.rs` triple. Hand-count
+  estimates are unreliable -- err on the side of splitting.
+
+### Finding 3 — Idempotency probe BEFORE orchestrator send is the cheapest crash-recovery guard for couriers that don't move-on-success
+
+- **Context:** The KG-Inbox courier's success path deliberately does NOT
+  move the source file -- the worker phase-4 archive
+  (`vault::history::archive_session_history`) owns disposition. That
+  means after `headless_ingest` writes a session, the file sits in
+  `Knowledge Graph/Inbox/` until the worker drains its queue.
+  Two re-pickup paths could otherwise duplicate: (a) app crash mid-
+  ingest, restart -> initial scan re-emits the file -> second session
+  inserted; (b) app crash AFTER ingest but BEFORE worker archive ->
+  same initial-scan re-emit -> second session inserted.
+- **Finding:** The smallest fix is a pre-flight DB probe on
+  `sessions.audio_blob_path = <path>` BEFORE the headless-ingest send.
+  A hit means a previous run already wrote the session; we short-circuit
+  and let the worker phase-4 archive on its next tick. Costs one
+  indexed SQL query per file; no schema changes (the
+  `audio_blob_path` column already existed for `find_by_audio_blob_path`
+  -- a sibling pattern in the ADR 0046 inbox courier's resume path).
+  Pre-flight, not post-flight, because we want to skip the
+  orchestrator send entirely (decode + STT are expensive).
+- **Action:** Any courier whose success path defers file disposition to
+  a downstream worker MUST have a pre-flight idempotency probe. The
+  alternative -- relying solely on `INSERT ... ON CONFLICT IGNORE` on a
+  unique index in `sessions` -- is fragile because (a) you've already
+  burned the decode + STT cost by the time the conflict fires, and
+  (b) the orchestrator's contract returns `session_id` and an
+  ON-CONFLICT skip would have to return the EXISTING id instead, which
+  is an API contract change rather than a courier-local fix.
+
+### Mechanics worth noting
+
+- The background-shell pattern with `Start-Sleep` polling is now the
+  daily-driver for `cargo build --release` (~7m) + `cargo test
+  --release --no-run` (~9m) since the shell tool's wall-clock cap on a
+  blocking command is ~270s. Pattern (from this iteration):
+  ```
+  powershell -File scripts\cargo-with-cuda.ps1 build --release > build.log 2>&1
+    (background=true; capture pid)
+  powershell -Command "Start-Sleep -Seconds 240; if (Get-Process -Id <pid>
+    -ErrorAction SilentlyContinue) { 'STILL RUNNING'; ... } else { 'DONE'; ... }"
+    (poll in 200s chunks until DONE)
+  ```
+  Re-confirms LESSONS 2026-06-08 Finding 3 (background launch + poll
+  is the only way to drive cargo through the 270s cap).
+
+- The new `should_consider_path` from `inbox::watcher` is
+  inbox-root-agnostic -- it filters by file extension + path
+  segments (`_failed`, `_archive`, `.mb-tmp`), not by which inbox
+  rooted the call. So the KG-Inbox courier's `_failed/` zone is
+  excluded from re-pickup by the SAME filter that protects the ADR
+  0046 inbox's `_failed/`. No new exclusion list needed; reuse paid off.
+
+- **Known limitation (deliberate):** the courier's idempotency guard is
+  path-based, not content-hash-based. Two drops of the SAME audio
+  bytes under different filenames produce two session rows. This
+  mirrors the existing ADR 0046 inbox; ADR 0046 Iter 4 `mb-qxrm` covers
+  the shared `vault_inbox_ledger` SHA-256 table that would close it for
+  both couriers. Filed as a sentence in the module doc-comment; no new
+  bead because `mb-qxrm` already covers the surface area.
+
+---
 
 ## 2026-06-08 [KG Phase 1E Wave 1E.7 Part 2 / mb-5lla / mb-bgpt SEAL] Worker + kg_layout refactor under 600-LoC cap; one PowerShell foot-gun cost an hour, two known-good patterns confirmed
 

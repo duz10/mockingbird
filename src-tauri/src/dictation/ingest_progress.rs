@@ -69,6 +69,11 @@ pub mod source {
     pub const DESKTOP_IMPORT: &str = "desktop-import";
     /// File arrived via the Iter 3 inbox watcher/courier.
     pub const MOBILE_INBOX: &str = "mobile-inbox";
+    /// Wave 1E.6 (`mb-i46v`) -- file arrived via the KG-Inbox
+    /// courier (`<vault>/Knowledge Graph/Inbox/`). Distinct label
+    /// so the React overlay can say "KG note arriving" rather than
+    /// the generic mobile-inbox copy.
+    pub const KG_INBOX: &str = "kg-inbox";
 }
 
 /// Payload shape mirrored by the React `ImportProgressOverlay`.

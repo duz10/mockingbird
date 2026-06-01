@@ -10,7 +10,40 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-06-08 (**KG Phase 1E Wave 1E.7 PART 2 SEALED —
+**Last consolidated:** 2026-06-08 (**KG Phase 1E Wave 1E.6 SEALED —
+KG-Inbox courier shipped (`mb-i46v`). Sibling of the ADR 0046 inbox courier
+rooted at `<vault>/Knowledge Graph/Inbox/` for iOS-Shortcut + desktop
+drag-and-drop audio drops. Three new vault modules:
+`vault/kg_inbox_courier.rs` (546 LoC), `vault/kg_inbox_courier_fs.rs`
+(236 LoC; FileOps trait + helpers split to fit 600-LoC cap),
+`vault/kg_inbox_runtime.rs` (448 LoC; watcher+courier lifecycle gated by
+`KgGraphEnabled` + `VaultPath`). Tests: 442 LoC in
+`vault/kg_inbox_courier_tests.rs` (success-no-move, idempotent-skip,
+failure-quarantines-to-KG-Inbox/_failed, validation matrix, collision
+suffix) + 3 inline runtime tests. **Success path performs ZERO
+filesystem moves** — the worker phase-4 `archive_session_history` owns
+disposition (rename to `History/<YYYY-MM>/<uuid>.<ext>`); fully reuses
+existing `IngestProvenance::mobile_inbox_kg_note` so source-gate enqueues
+automatically into `kg_filing_queue` and 5a/5b/5c (projection / archive /
+stubs / INDEX+LOG+Tags) fire by construction. Idempotency probe checks
+`sessions.audio_blob_path` BEFORE calling headless ingest; crash-recovery
+re-emit + initial-scan re-pickup both short-circuit cleanly. Lifecycle
+refresh wired into both `kg_settings_set` and `vault_settings_set` so
+flipping `KgGraphEnabled` OR changing `VaultPath` starts/stops/restarts
+the watcher pair in the same IPC tick. All gates GREEN: `cargo check`,
+`cargo clippy --release -D warnings`, `cargo fmt --check`,
+`cargo test --release --no-run` (9m00s — 17 binaries linked clean),
+`cargo build --release` MANDATORY per P13 (worker + watcher + IPC
+surface touched; fresh `target/release/mockingbird.exe` mtime 6/1/2026
+9:10:49 AM). KG invariants `kg_parity 32/32` + `kg_source_gate 6/6` +
+`kg_graph_off 8/8` re-run GREEN post-courier-wire (source-gate path
+unchanged; `mobile_inbox_kg_note` provenance already gated correctly).
+LESSONS append for the IngestProgressBus type-erasure gotcha (Arc<dyn T>
+vs Arc<Concrete>) + the 600-LoC split discipline for new vault modules.
+Closes `mb-i46v`. **Resume:** Wave 1E.6 sealed; next-up unblocked is
+1E.8 (`mb-wnsm`, iOS Shortcut docs — docs-only) and 1E.9 (`mb-kazi`,
+dual-ADR seal + judges). Prior consolidation 2026-06-08 (**KG Phase 1E
+Wave 1E.7 PART 2 SEALED —
 worker + kg_layout refactor under 600-LoC cap, closes `mb-5lla` AND `mb-bgpt`
 (Wave 1E.7 fully sealed).** Pure rearrangement, zero behaviour change. `kg/
 worker.rs` 2050 → 505 LoC root + new `kg/worker/` submodule tree

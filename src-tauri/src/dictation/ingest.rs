@@ -81,6 +81,7 @@
 //! - DB write failure -> propagated as `AppError`. The caller is
 //!   the IPC handler, which surfaces a toast.
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
@@ -93,8 +94,11 @@ use crate::db::sessions::{
 };
 use crate::db::transcripts;
 use crate::dictation::events::SessionsEventBus;
-use crate::dictation::{resolve_active_mode_from_db, OrchestratorConfig};
+use crate::dictation::{
+    resolve_active_mode_from_db, try_enqueue_for_kg_filing, OrchestratorConfig,
+};
 use crate::error::{AppError, AppResult};
+use crate::injection::InjectionOutcome;
 use crate::stt::{SpeechToText, TranscribeRequest};
 
 /// Where a headless-ingested session originated.
@@ -104,10 +108,33 @@ use crate::stt::{SpeechToText, TranscribeRequest};
 /// courier imports. PTT sessions never go through this path --
 /// they are always `SessionSource::Desktop`, written by the
 /// orchestrator directly.
+///
+/// ## Phase 1E Wave 1E.6 (`mb-i46v`, ADR 0053 §"KG-Inbox courier")
+///
+/// Two fields were added so the KG-Inbox courier can ride this
+/// same pipeline rather than open a parallel one:
+///
+/// - [`Self::capture_kind`] -- defaults to
+///   [`CaptureKind::Dictation`] for both legacy constructors; the
+///   KG courier uses [`Self::mobile_inbox_kg_note`] to override to
+///   [`CaptureKind::KgNote`]. The downstream
+///   [`crate::dictation::try_enqueue_for_kg_filing`] source-gate
+///   then routes the session into `kg_filing_queue`.
+/// - [`Self::audio_blob_path`] -- defaults to `None`. The KG
+///   courier passes the courier-source path so the worker's
+///   phase-4 history archive (`vault::history::archive_session_history`)
+///   has something to move into
+///   `<vault>/Knowledge Graph/History/<YYYY-MM>/<uuid>.<ext>`.
+///   For the original ADR 0046 inbox + desktop-import flows the
+///   field stays `None` (the courier itself does the post-success
+///   move into `_archive/<YYYY-MM-DD>/`).
 #[derive(Debug, Clone)]
 pub struct IngestProvenance {
     /// `SessionSource::DesktopImport` for the + Audio file button,
-    /// `SessionSource::MobileInbox` for the iOS Shortcut courier.
+    /// `SessionSource::MobileInbox` for the iOS Shortcut courier
+    /// AND the KG-Inbox courier (Wave 1E.6 -- both share the
+    /// "audio arrived from a mobile sync drop" source semantic;
+    /// `capture_kind` is what differentiates routing).
     /// `SessionSource::Desktop` is rejected at call time -- PTT is
     /// not a valid source for this code path.
     pub source: SessionSource,
@@ -124,24 +151,69 @@ pub struct IngestProvenance {
     /// the Dictations list. For + Audio file this is "now"; for
     /// the courier it is the file's mtime at pickup.
     pub received_at_iso: String,
+
+    /// Wave 1E.6 (`mb-i46v`) -- drives `sessions.capture_kind`.
+    /// `Dictation` for the ADR 0046 paths, `KgNote` for the
+    /// KG-Inbox courier. The source-gate (ADR 0052 §D1) reads
+    /// this when deciding whether to enqueue into
+    /// `kg_filing_queue`.
+    pub capture_kind: CaptureKind,
+
+    /// Wave 1E.6 (`mb-i46v`) -- drives `sessions.audio_blob_path`.
+    /// `None` for the legacy paths (the ADR 0046 courier handles
+    /// archive itself); `Some(<courier path>)` for the KG-Inbox
+    /// courier so the worker's phase-4 history archive
+    /// ([`crate::vault::history::archive_session_history`]) has
+    /// the source path to rename into
+    /// `<vault>/Knowledge Graph/History/<YYYY-MM>/`.
+    pub audio_blob_path: Option<PathBuf>,
 }
 
 impl IngestProvenance {
-    /// Sugar for the + Audio file button (Iter 1).
+    /// Sugar for the + Audio file button (Iter 1). `capture_kind`
+    /// defaults to `Dictation` -- the KG source-gate (ADR 0052
+    /// §D1) intentionally never fires for desktop file-imports.
     pub fn desktop_import(original_filename: String, received_at_iso: String) -> Self {
         Self {
             source: SessionSource::DesktopImport,
             original_filename,
             received_at_iso,
+            capture_kind: CaptureKind::Dictation,
+            audio_blob_path: None,
         }
     }
 
-    /// Sugar for the iOS Shortcut courier (Iter 3).
+    /// Sugar for the iOS Shortcut courier (Iter 3) -- the
+    /// ADR 0046 `<vault>/inbox/` flow. Same defaults as
+    /// `desktop_import`; the courier itself archives the audio
+    /// post-success, so `audio_blob_path` stays `None`.
     pub fn mobile_inbox(original_filename: String, received_at_iso: String) -> Self {
         Self {
             source: SessionSource::MobileInbox,
             original_filename,
             received_at_iso,
+            capture_kind: CaptureKind::Dictation,
+            audio_blob_path: None,
+        }
+    }
+
+    /// Sugar for the KG-Inbox courier (Wave 1E.6 / `mb-i46v`,
+    /// ADR 0053 §"KG-Inbox courier"). Pins
+    /// `capture_kind = KgNote` so the source-gate enqueues into
+    /// `kg_filing_queue`, and threads the courier-source path so
+    /// the worker's phase-4 archive moves the audio into
+    /// `History/<YYYY-MM>/<uuid>.<ext>`.
+    pub fn mobile_inbox_kg_note(
+        original_filename: String,
+        received_at_iso: String,
+        courier_path: PathBuf,
+    ) -> Self {
+        Self {
+            source: SessionSource::MobileInbox,
+            original_filename,
+            received_at_iso,
+            capture_kind: CaptureKind::KgNote,
+            audio_blob_path: Some(courier_path),
         }
     }
 }
@@ -401,7 +473,16 @@ fn persist_ingest(
         foreground_app: None,
         foreground_window_title: None,
         audio_duration_ms: p.audio_duration_ms,
-        audio_blob_path: None,
+        // Wave 1E.6 (`mb-i46v`): the KG-Inbox courier threads the
+        // source path through so the worker's phase-4 history
+        // archive can move it into `Knowledge Graph/History/`.
+        // The ADR 0046 inbox + desktop-import paths leave this
+        // `None` and own their own post-success move.
+        audio_blob_path: p
+            .provenance
+            .audio_blob_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned()),
         prompt_id: p.resolved_prompt_id,
         dictionary_snapshot_id: p.dictionary_snapshot_id,
         example_set_id: p.example_set_id,
@@ -411,12 +492,15 @@ fn persist_ingest(
         // foreground paste happened).
         start_mode: StartMode::InApp,
         source: p.provenance.source,
-        // ADR 0052 / mb-pxzk: headless ingest never originates from
-        // the KG screen — file-import sessions are always
-        // `Dictation` for KG source-gate purposes. The KG-note path
-        // is live-mic only (and the text-note path bypasses
-        // sessions entirely per ADR 0052 §D3).
-        capture_kind: CaptureKind::Dictation,
+        // Wave 1E.6 (`mb-i46v`): provenance drives capture_kind.
+        // ADR 0046 file-import paths use the default `Dictation`;
+        // the KG-Inbox courier overrides to `KgNote` via
+        // `IngestProvenance::mobile_inbox_kg_note`, which trips the
+        // source-gate (ADR 0052 §D1) below into the KG filing
+        // queue. The reserved `KgNoteText` variant cannot reach
+        // this code path (text notes bypass `sessions` entirely
+        // per ADR 0052 §D3).
+        capture_kind: p.provenance.capture_kind,
     };
 
     let id = sessions::insert(&conn, &new)?;
@@ -449,6 +533,23 @@ fn persist_ingest(
             injection_status: None,
         },
     )?;
+
+    // Wave 1E.6 (`mb-i46v`) -- run the headless tail through the
+    // KG source-gate (ADR 0052 §D1) so KG-Inbox-courier sessions
+    // enqueue into `kg_filing_queue` while leaving every other
+    // headless ingest untouched. `InAppNoInject` is the closest
+    // semantic match for an outcome (ADR 0045: text exists in the
+    // Dictations list; no inject happened intentionally). The
+    // three-gate cascade inside `try_enqueue_for_kg_filing` then
+    // drops every non-`KgNote` capture_kind and every `KgGraphEnabled=false`
+    // case before touching the queue.
+    try_enqueue_for_kg_filing(
+        &conn,
+        id,
+        InjectionOutcome::InAppNoInject,
+        p.provenance.capture_kind,
+        p.started_at_iso,
+    );
 
     drop(conn);
     events.emit_session_saved(id);
@@ -486,14 +587,27 @@ fn persist_ingest_error(
         foreground_app: None,
         foreground_window_title: None,
         audio_duration_ms: p.audio_duration_ms,
-        audio_blob_path: None,
+        // Wave 1E.6 (`mb-i46v`): same provenance thread-through as
+        // the success path. An STT-failed KG-Inbox session keeps
+        // its `audio_blob_path` so the audio is recoverable from
+        // `Knowledge Graph/Inbox/` for a manual retry / forensic
+        // listen.
+        audio_blob_path: p
+            .provenance
+            .audio_blob_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned()),
         prompt_id: p.resolved_prompt_id,
         dictionary_snapshot_id: p.dictionary_snapshot_id,
         example_set_id: p.example_set_id,
         start_mode: StartMode::InApp,
         source: p.provenance.source,
-        // ADR 0052 / mb-pxzk: see success path above.
-        capture_kind: CaptureKind::Dictation,
+        // Wave 1E.6 (`mb-i46v`): provenance drives capture_kind on
+        // the failure branch too. A KG-Inbox-courier session that
+        // STT-failed is still a KgNote row -- we just don't
+        // enqueue (the source-gate above only fires from the
+        // success path).
+        capture_kind: p.provenance.capture_kind,
     };
 
     let id = sessions::insert(&conn, &new)?;
@@ -547,8 +661,32 @@ mod tests {
     fn ingest_provenance_constructors_set_source() {
         let dimp = IngestProvenance::desktop_import("a.m4a".into(), "2026-05-25T00:00:00Z".into());
         assert_eq!(dimp.source, SessionSource::DesktopImport);
+        assert_eq!(dimp.capture_kind, CaptureKind::Dictation);
+        assert!(dimp.audio_blob_path.is_none());
         let mob = IngestProvenance::mobile_inbox("b.m4a".into(), "2026-05-25T00:00:00Z".into());
         assert_eq!(mob.source, SessionSource::MobileInbox);
+        assert_eq!(mob.capture_kind, CaptureKind::Dictation);
+        assert!(mob.audio_blob_path.is_none());
+    }
+
+    // Wave 1E.6 (`mb-i46v`) -- KG-Inbox courier provenance pins
+    // `capture_kind = KgNote` AND carries the courier-source path
+    // so the worker's phase-4 history archive has something to move.
+    #[test]
+    fn ingest_provenance_mobile_inbox_kg_note_pins_kind_and_path() {
+        let courier_path =
+            PathBuf::from("C:/Users/x/Vault/Knowledge Graph/Inbox/2026-06-08-Memo.m4a");
+        let prov = IngestProvenance::mobile_inbox_kg_note(
+            "Memo.m4a".into(),
+            "2026-06-08T00:00:00Z".into(),
+            courier_path.clone(),
+        );
+        assert_eq!(prov.source, SessionSource::MobileInbox);
+        assert_eq!(prov.capture_kind, CaptureKind::KgNote);
+        assert_eq!(
+            prov.audio_blob_path.as_deref(),
+            Some(courier_path.as_path())
+        );
     }
 
     #[test]

@@ -30,6 +30,7 @@ use crate::commands::{into_err, lock_db, AppStateHandle};
 use crate::inbox::runtime::InboxRuntime;
 use crate::settings::{model::SettingKey, Settings};
 use crate::vault::export_job::{ReconciliationSummary, VaultRuntime};
+use crate::vault::kg_inbox_runtime::KgInboxRuntime;
 use crate::vault::layout::{detect_nested_vault, suggest_sibling_vault, VaultLayout};
 
 // --------------------------------------------------------------------
@@ -109,6 +110,7 @@ pub fn vault_settings_set(
     db: State<'_, AppStateHandle>,
     vault: State<'_, Arc<VaultRuntime>>,
     inbox: State<'_, Arc<InboxRuntime>>,
+    kg_inbox: State<'_, Arc<KgInboxRuntime>>,
     key: String,
     value: serde_json::Value,
 ) -> Result<(), String> {
@@ -134,6 +136,13 @@ pub fn vault_settings_set(
     // projection, so it needs the same refresh on every settings
     // write. start/stop transitions happen inside refresh_config.
     inbox.refresh_config(&db_arc).map_err(into_err)?;
+    // Phase 1E Wave 1E.6 (`mb-i46v`) -- the KG-Inbox runtime is
+    // gated by `KgGraphEnabled` + `VaultPath`. Writes that flip
+    // `VaultPath` (or any other vault key the user happens to
+    // change before flipping `KgGraphEnabled`) need to thread
+    // through here too so a path change starts/restarts the
+    // KG-Inbox watcher in lockstep with the ADR 0046 inbox.
+    kg_inbox.refresh_config(&db_arc).map_err(into_err)?;
     // Fire-and-forget backfill so a freshly-enabled vault populates
     // without the user needing to click "Export now". Coalesces if
     // a worker is already running.

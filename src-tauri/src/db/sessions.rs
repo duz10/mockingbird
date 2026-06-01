@@ -371,6 +371,21 @@ pub fn get_by_uuid(conn: &Connection, uuid: &str) -> AppResult<Option<Session>> 
     fetch_one(conn, "WHERE uuid = ?1", params![uuid])
 }
 
+/// Phase 1E Wave 1E.6 (`mb-i46v`) -- find any session whose
+/// `audio_blob_path` matches `path`. Used by the KG-Inbox courier
+/// for crash-recovery idempotency: if a stale file is still sitting
+/// in `Knowledge Graph/Inbox/` because the previous app run crashed
+/// between `headless_ingest` and the worker's phase-4 archive, the
+/// initial-scan re-emit would otherwise create a duplicate session.
+///
+/// Equality is a literal string compare on the path (no
+/// canonicalization). Callers pass the same string they stored at
+/// insert time -- typically `path.to_string_lossy().into_owned()`
+/// for both sides, so cross-platform path encoding agrees.
+pub fn find_by_audio_blob_path(conn: &Connection, path: &str) -> AppResult<Option<Session>> {
+    fetch_one(conn, "WHERE audio_blob_path = ?1", params![path])
+}
+
 pub fn list_recent(conn: &Connection, limit: usize) -> AppResult<Vec<Session>> {
     let sql = format!("{} ORDER BY started_at DESC LIMIT ?1", SELECT_ALL);
     let mut stmt = conn.prepare(&sql)?;
