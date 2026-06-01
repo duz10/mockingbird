@@ -10,8 +10,38 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-06-06 (**KG Phase 1E Wave 1E.7 hotfix `mb-wzcj`
-shipped** — restored writer-side / parser-side symmetry during the type-vocab
+**Last consolidated:** 2026-06-07 (**KG Phase 1E hotfix #3 `mb-y390` shipped**
+— dictation #143 KG-filing failure (deterministic 3-retry on "Get a New
+Computer" project) root-caused to the `segment` pass: qwen2.5:7b emits a
+mixed-quote array (`["I've got...", 'title is "Get a New Computer"', ...]`)
+the moment a string contains an unescaped double-quote; `serde_json::from_str`
+fails strict at column 46 and the pipeline aborts with `PassError::Parse {
+pass: "segment" }`. Fix: pass-layer `relax_pythonish_quotes` + `parse_pass_json`
+helpers in `src-tauri/src/kg/passes/mod.rs` — strict serde first, relaxed
+Python-style re-quote on fallback; cold path on parity corpus. Wired into
+`segment` + `extract` + `extract_entities` (no change to `classify` — its
+responses don't carry user-quoted noun phrases). 6 inline tests including a
+live-fire reproducer of the literal dictation #143 raw bytes. UI: new
+`<details>` expander on Flagged-for-review rows surfaces the `last_error`
+inline (snippet up to 140 chars in summary, full text in mono-pre body) so
+future filing failures don't require host-side DB diagnosis; 2 new i18n keys
+(`kg.failed.errorSummary` / `kg.failed.errorReveal`) + `flaggedErrorDetails`/
+`flaggedErrorSummary`/`flaggedErrorFull` CSS classes; `lastError` field was
+already on the FailedFiling IPC payload from Phase 1C Wave 1C.2 so zero IPC
+churn. Retry-flow audit (Phase 4 of brief): `kg_retry_failed_filing` IPC
+resets `attempt_count`→0 and re-enqueues — semantics correct; the bug is
+deterministic, not retry-related. All gates green incl. `cargo build
+--release` per P13 (worker pipeline code path touched); fresh exe at
+`target/release/mockingbird.exe` mtime 2026-06-01 00:20; `kg_parity` 32/32 +
+`kg_source_gate_invariant` 6/6 + `kg_graph_off_invariant` 8/8 GREEN.
+LESSONS body entry appended (4 findings: corpus blind-spot for adversarial
+input characters; relaxer-vs-prompt-tuning tradeoff; throwaway-crate recipe
+re-pays; `beforeBuildCommand` doesn't fire under plain `cargo build`). Closes
+`mb-y390`. **User: relaunch `scripts\run-mockingbird.ps1` to pick up the new
+exe + UI; on the Flagged row for #143 click Retry once — if it still fails,
+the error text now appears inline under the row.** Prior consolidation
+2026-06-06 (**KG Phase 1E Wave 1E.7 hotfix `mb-wzcj` shipped** — restored
+writer-side / parser-side symmetry during the type-vocab
 realignment window: `kg/worker.rs::kg_entry_type_to_vault` now returns a
 `(VaultEntryType, Option<&'static str>)` sidecar so the call site in
 `maybe_commit_to_vault` emits a `tracing::warn!` whenever the classifier's

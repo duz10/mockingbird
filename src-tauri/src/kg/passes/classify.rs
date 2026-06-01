@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::super::ollama::{GenerateOptions, OllamaDispatcher};
 use super::super::schema::{Category, EntryType};
-use super::{strip_json_envelope, PassError};
+use super::{parse_pass_json, strip_json_envelope, PassError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Classification {
@@ -28,11 +28,7 @@ pub fn classify<D: OllamaDispatcher>(
     let prompt = format!("{prompt_body}\n\nSEGMENT:\n{segment}\n");
     let raw = dispatcher.generate(model, &prompt, None, options)?;
     let candidate = strip_json_envelope(&raw);
-    let parsed: Classification = serde_json::from_str(candidate).map_err(|e| PassError::Parse {
-        pass: "classify",
-        error: e.to_string(),
-        raw: raw.clone(),
-    })?;
+    let parsed: Classification = parse_pass_json(&raw, candidate, "classify")?;
     Ok(parsed)
 }
 

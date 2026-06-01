@@ -597,6 +597,129 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 ## 📜 Body (chronological)
 
+## 2026-06-07 [KG Phase 1E hotfix #3 / mb-y390] Dictation #143 KG-filing failure was the `segment` JSON pass rejecting Python-style single-quoted strings; root cause was upstream of the worker, the bridge, AND the serializer
+
+**Context.** User-blocking bug: dictation #143 ("Get a New Computer"
+project with embedded double quotes in the title) failed KG filing 3x
+deterministically, then 3 more after manual Retry. Audio saved fine,
+latency normal, cleaned transcript shown — failure was entirely
+downstream in the worker pipeline.
+
+Prior commit `442a87e` had patched what looked like the obvious
+suspect (the worker bridge silently downgrading legacy `task` to
+`Note` so the serializer never saw it). That patch was directionally
+correct for ITS bug but did not touch THIS bug. The real failure was
+one pass earlier in the pipeline: `segment` was getting back
+`["I've got a test project I need to create", 'title is "Get a New
+Computer"', '...']` — a mixed-quote-style array where qwen2.5:7b
+flipped to single quotes the moment one of the strings contained an
+unescaped double quote. `serde_json::from_str::<Vec<String>>` fails
+hard at column 46 (the first `'`). Pipeline aborted with
+`PassError::Parse { pass: "segment", ... }`. Three attempts, all
+identical, because the model output was deterministic at temp=0.
+
+### Finding 1 — Mixed-quote arrays from local models are a real and reproducible failure mode that does NOT show up in fixture corpora
+
+The Wave 0.5.4 parity corpus (32 fixtures, seed-42) has zero entries
+where a string contains an unescaped double quote inside the
+requested-title. Manual KG entries the user has been filing for weeks
+also happen not to have embedded quotes. So the model's actual
+behavior on this input — "if the array contains a string-with-quotes,
+switch the *whole array* to Python-style single quotes" — was invisible
+to the parity gate.
+
+This is the corpus-blind-spot pattern PINNED P9/P12 has called out
+before but in a new dimension: it's not under-budgeted *prompt
+difficulty*, it's under-budgeted *input character distribution*. The
+parity corpus needs at least one fixture with a literal double-quote
+in a noun-phrase the user is naming. Filed as a follow-up bead.
+
+### Finding 2 — One-time JSON relaxer beats prompt-tuning for syntactic adversarial inputs
+
+First instinct was to harden the segment prompt: "output VALID JSON,
+use \" not '". Resisted, because (a) we've already learned (PINNED
+P10/P12) that prompt-hard-gates that work on one model class don't
+transfer across model classes — every model-class addition would
+break the gate; (b) prompt fixes don't protect against *the next*
+syntactic adversary (smart quotes, trailing commas, comment lines,
+...); (c) the fix needs to ship today, not after a full prompt-tuning
+loop on the corpus.
+
+Instead added a single `relax_pythonish_quotes` helper at the pass-
+layer (`src-tauri/src/kg/passes/mod.rs`) that re-quotes a candidate
+string assuming Python-style escaping rules, plus a `parse_pass_json`
+helper that tries strict serde_json first and only falls back to the
+relaxer if strict fails. Strict-pass inputs (the parity corpus's 32
+fixtures) take the exact same code path as before — relaxer is
+cold. Adversarial inputs (like dictation #143) get one
+relaxation attempt; if THAT fails, the existing `PassError::Parse`
+fires with the original-strict error message and raw output, so
+future diagnosis still sees what the model actually emitted.
+
+This kept the change to ~70 LoC of pass-layer plumbing + 6 inline
+tests, with zero prompt churn and zero parity-corpus shift. The
+dictation #143 raw bytes (`I've got a test project ...` etc.) are
+locked in as an inline test in `mod.rs` so any future regression
+immediately re-trips on this exact input.
+
+### Finding 3 — Throwaway-crate recipe (LESSONS P2) absolutely earns its keep when validating string-parsing helpers
+
+The `relax_pythonish_quotes` + `parse_pass_json` pair is pure-Rust
+with only `serde_json` + `thiserror` as deps — exact-fit shape for
+the throwaway-crate recipe. Six tests + a live-fire main, ~80
+seconds end-to-end (compile + run), no whisper-rs / ort / cuda link,
+no `STATUS_ENTRYPOINT_NOT_FOUND` (P2). Strict-vs-relaxed parse
+behavior verified against the literal failing input before touching
+the real codebase. This is now the second time the throwaway recipe
+has paid off on a pass-layer string-handling fix; the recipe pattern
+is durable.
+
+### Finding 4 — `cargo build --release` runs `beforeBuildCommand` if and only if invoked as `cargo tauri build`; plain `cargo build --release` ships a stale UI bundle
+
+Mid-iteration discovery while running the P13 gate. We had:
+1. Edited Dashboard.tsx + en.json (Phase 3 UI affordance).
+2. Ran `powershell -File scripts\cargo-with-cuda.ps1 build --release`
+   in background.
+3. Ran `npm run build` shortly after.
+4. Verified new mtime on `target/release/mockingbird.exe`.
+
+What we missed: Tauri 2 embeds `frontendDist: ../ui/dist` via
+`tauri::generate_context!()` at compile time. The `beforeBuildCommand`
+in `tauri.conf.json` ONLY runs under `cargo tauri build`, not under
+plain `cargo build --release` (which is what our wrapper invokes).
+The exe built at step 2 embedded the *pre-UI-edit* `ui/dist/`,
+because `npm run build` hadn't been run yet.
+
+Fix in-iteration: re-ran `cargo build --release` AFTER `npm run
+build`. Cargo correctly detected the changed `ui/dist/` mtimes and
+relinked. Confirmed exe mtime advanced again (00:10 → 00:20).
+
+Lesson: when a wave changes BOTH Rust and UI (i.e. "the IPC surface
+or worker pipeline" — P13 trigger — AND any UI files), the correct
+order is **UI build first, Rust build second**. Or use
+`cargo tauri build` which handles the dependency. P13 should be
+amended to call this out specifically; today's recipe was right on
+the Rust side but the embedded-bundle dependency is invisible from
+the Rust gate alone.
+
+### Mechanics worth noting
+
+- Bug-fix path was a bead-only container (no ADR, no judges, no tag
+  amendment): `mb-y390`, P1, root cause + fix + one targeted unit
+  test reproducing dictation #143's exact byte sequence.
+- Phase 3 (UI affordance to surface `last_error` inline in the
+  Flagged-for-review card) bundled into the same bead — the user
+  explicitly asked for this in the brief, and the `lastError: string`
+  field was already on the `FailedFiling` IPC payload (Phase 1C Wave
+  1C.2). So this was a UI-only change, ~30 LoC + CSS + 2 i18n keys.
+- Phase 4 retry audit: confirmed `kg_retry_failed_filing` IPC resets
+  `attempt_count` to 0 and re-enqueues — semantically clean, just
+  deterministically re-runs through the broken pipeline. No fix
+  needed; the retry semantics are correct.
+- Three parity probes (`kg_parity`, `kg_source_gate_invariant`,
+  `kg_graph_off_invariant`) all green post-fix as expected — the
+  relaxer is dormant on the corpus's 32 fixtures.
+
 ## 2026-06-06 [KG Phase 1E Wave 1E.7 part 1 / mb-bgpt / ADR 0054 §C/§D/§E/§F/§G] Substrate + worker wiring shipped; refactor (worker.rs + kg_layout.rs over 600-LoC cap) deferred to a follow-up iteration — three findings worth keeping
 
 **Context.** Wave 1E.7 (RESCOPED per `phase-1e.md` Amendment 2026-06-06

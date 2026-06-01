@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use super::super::ollama::{GenerateOptions, OllamaDispatcher};
 use super::classify::Classification;
-use super::{strip_json_envelope, PassError};
+use super::{parse_pass_json, strip_json_envelope, PassError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Extraction {
@@ -68,11 +68,7 @@ pub fn extract<D: OllamaDispatcher>(
 
     let raw = dispatcher.generate(model, &prompt, None, options)?;
     let candidate = strip_json_envelope(&raw);
-    let parsed: Extraction = serde_json::from_str(candidate).map_err(|e| PassError::Parse {
-        pass: "extract",
-        error: e.to_string(),
-        raw: raw.clone(),
-    })?;
+    let parsed: Extraction = parse_pass_json(&raw, candidate, "extract")?;
 
     // Validate: title non-empty.
     if parsed.title.trim().is_empty() {

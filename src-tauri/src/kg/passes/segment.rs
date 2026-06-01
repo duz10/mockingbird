@@ -9,7 +9,7 @@
 //! Graduated verbatim from the sandbox — import-path rewrites only.
 
 use super::super::ollama::{GenerateOptions, OllamaDispatcher};
-use super::{strip_json_envelope, PassError};
+use super::{parse_pass_json, strip_json_envelope, PassError};
 
 /// Run the segment pass for one dictation. Returns the (verbatim
 /// or lightly stitched) text of each candidate entry. Empty vec is
@@ -34,11 +34,7 @@ pub fn segment<D: OllamaDispatcher>(
     let raw = dispatcher.generate(model, &prompt, None, options)?;
     let candidate = strip_json_envelope(&raw);
 
-    let parsed: Vec<String> = serde_json::from_str(candidate).map_err(|e| PassError::Parse {
-        pass: "segment",
-        error: e.to_string(),
-        raw: raw.clone(),
-    })?;
+    let parsed: Vec<String> = parse_pass_json(&raw, candidate, "segment")?;
 
     // Light validation: drop empty / whitespace-only strings — the
     // model occasionally pads its output with stray `""` entries.

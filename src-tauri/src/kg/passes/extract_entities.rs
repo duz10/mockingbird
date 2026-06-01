@@ -31,7 +31,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::ollama::{GenerateOptions, OllamaDispatcher};
-use super::{strip_json_envelope, PassError};
+use super::{parse_pass_json, strip_json_envelope, PassError};
 
 /// Output of one `extract_entities` call.
 ///
@@ -122,12 +122,7 @@ pub fn extract_entities<D: OllamaDispatcher>(
 
     let raw = dispatcher.generate(model, &prompt, None, options)?;
     let candidate = strip_json_envelope(&raw);
-    let mut parsed: EntityExtraction =
-        serde_json::from_str(candidate).map_err(|e| PassError::Parse {
-            pass: "extract_entities",
-            error: e.to_string(),
-            raw: raw.clone(),
-        })?;
+    let mut parsed: EntityExtraction = parse_pass_json(&raw, candidate, "extract_entities")?;
 
     // Validate every row.
     for ent in &parsed.entities {

@@ -265,6 +265,8 @@
   "kg.failed.retry.success": "Filing requeued",
   "kg.failed.retry.error": "Couldn’t requeue: {error}",
   "kg.failed.loadError": "Couldn’t load failed filings: {error}",
+  "kg.failed.errorSummary": "Why: {snippet}",
+  "kg.failed.errorReveal": "Show full error",
 
   "kg.filter.heading": "Filter by",
   "kg.filter.entities.label": "Entities",

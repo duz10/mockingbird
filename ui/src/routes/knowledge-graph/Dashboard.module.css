@@ -170,6 +170,50 @@
   flex: 0 0 auto;
 }
 
+/* --- Flagged-row error disclosure (mb-y390, dictation #143) ----- */
+
+.flaggedErrorDetails {
+  margin: 0;
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+}
+
+.flaggedErrorSummary {
+  cursor: pointer;
+  /* Keep the summary on one line in the collapsed state -- the
+   * snippet is server-capped at 140 chars so this stays readable. */
+  list-style: none;
+  user-select: none;
+}
+
+.flaggedErrorSummary::-webkit-details-marker {
+  display: none;
+}
+
+.flaggedErrorSummary::before {
+  content: "\25B8"; /* right-pointing triangle */
+  display: inline-block;
+  margin-right: var(--s-1);
+  transition: transform 120ms ease;
+}
+
+.flaggedErrorDetails[open] .flaggedErrorSummary::before {
+  transform: rotate(90deg);
+}
+
+.flaggedErrorFull {
+  margin: var(--s-1) 0 0 0;
+  padding: var(--s-2);
+  background: var(--surf-2, var(--surf-1));
+  border-radius: var(--r-1);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 0.78rem;
+  max-height: 16rem;
+  overflow: auto;
+}
+
 /* --- FlaggedBand retry-toast (Wave 1D.4 relocation) -------------- */
 
 .toastOk,

@@ -446,9 +446,29 @@ function FlaggedRow({
           formatTimestamp(row.failedIso),
         )}
       </span>
+      {row.lastError ? (
+        <details className={styles.flaggedErrorDetails}>
+          <summary className={styles.flaggedErrorSummary}>
+            {t("kg.failed.errorSummary").replace(
+              "{snippet}",
+              row.lastError.length > FAILED_ERROR_SNIPPET_LEN
+                ? row.lastError.slice(0, FAILED_ERROR_SNIPPET_LEN).trimEnd() +
+                  "\u2026"
+                : row.lastError,
+            )}
+          </summary>
+          <pre className={styles.flaggedErrorFull}>{row.lastError}</pre>
+        </details>
+      ) : null}
     </li>
   );
 }
+
+/** Inline-summary length cap for the Flagged-for-review error
+ *  preview. The full text is always available behind the `<details>`
+ *  expander; the snippet just keeps the collapsed row at a sane
+ *  height regardless of how long the model's raw output was. */
+const FAILED_ERROR_SNIPPET_LEN = 140;
 
 /* ------------------------------------------------------------------ */
 /* Upcoming-due band -- 1D.2 placeholder; Phase 1E populates.         */
