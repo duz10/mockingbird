@@ -10,7 +10,25 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-06-08 (**KG Phase 1E Wave 1E.6 SEALED —
+**Last consolidated:** 2026-06-08 (**KG Phase 1E Wave 1E.8 SEALED —
+iOS Shortcut docs for KG-Inbox shipped (`mb-wnsm`). New file
+`docs/mobile/ios-shortcut-kg.md` (372 LoC, LF, ASCII-only, no BOM) mirrors
+ADR 0046 §8 / `docs/mobile/ios-shortcut.md` for the Knowledge Graph
+destination. Same three-action shape (Record Audio -> Save File -> Open
+App: Obsidian); save destination is `<vault>/Knowledge Graph/Inbox/` and
+recommended Shortcut name is `Mockingbird Quick Capture (Knowledge
+Graph)`. KG-specific framing: Layer 1 raw destination per ADR 0054 §H
+(chat-LLM Ingest crystallizes to Layer 2 in Phase 2); positional routing
+per ADR 0048 Q2; audio preserved in `History/<YYYY-MM>/` post-ingest
+(diverges from standard courier which discards); `_failed/` quarantine
+path documented; two-Shortcut coexistence story up front. Cross-link
+integrity bidirectional: precedent doc got a 5-line additive pointer at
+the top to the KG variant. Pure docs wave - no Rust, no UI, no cargo/tsc
+gates needed. Closes `mb-wnsm`. **Resume:** Wave 1E.8 sealed; next-up is
+1E.9 (`mb-kazi`, dual ADR 0053+0054 seal + judges J1-J4 reverse-watcher-
+loop-prevention / file-wins-on-conflict / subtree-bootstrap-idempotent /
+serializer-golden-roundtrip). Prior consolidation 2026-06-08 (**KG Phase
+1E Wave 1E.6 SEALED —
 KG-Inbox courier shipped (`mb-i46v`). Sibling of the ADR 0046 inbox courier
 rooted at `<vault>/Knowledge Graph/Inbox/` for iOS-Shortcut + desktop
 drag-and-drop audio drops. Three new vault modules:
