@@ -1,6 +1,7 @@
 # ADR 0053 — KG Phase 1E: Obsidian as source of truth (vault projection + reverse-watcher + KG-Inbox courier)
 
-- **Status:** **Proposed (2026-06-04)** — flips to **Accepted** at Wave 1E.9 seal.
+- **Status:** **Accepted (2026-06-08)** — sealed jointly with [ADR 0054](0054-personal-knowledge-engine-substrate.md) at Wave 1E.9 (per ADR 0054 §L joint-seal mechanic).
+- **Prior status:** Proposed (2026-06-04) — superseded by this Accepted flip on 2026-06-08.
 - **Date:** 2026-06-04
 - **Deciders:** Dustin, code-puppy (`code-puppy-b1aefd`)
 - **Charter for:** ADR-lateral epic; no `phase-*-complete` tag (per LESSONS PINNED P5).
@@ -14,17 +15,35 @@
 
 ## Status
 
-**Proposed (2026-06-04).** Phase 1E's nine implementation waves are
-chartered here. Wave 1E.0 (this wave) lands the charter + phase doc +
-bead epic. Waves 1E.1–1E.8 implement; Wave 1E.9 seals the epic and
-flips this ADR to Accepted. No new `phase-*-complete` tag (lateral
-epic; LESSONS PINNED P5). Phase 1E's user-visible surface: every KG
-entry persists as a human-readable `.md` file under
+**Accepted (2026-06-08).** All nine implementation waves (1E.0 → 1E.9)
+landed. Wave 1E.9's four-judge bundle (J1 `kg-reverse-watcher-loop-prevention`,
+J2 `kg-file-wins-on-conflict`, J3 `kg-subtree-bootstrap-idempotent`,
+J4 `kg-serializer-golden-roundtrip`) all GREEN; the three standing
+invariants (`kg_parity` 32/32, `kg_source_gate` 6/6, `kg_graph_off` 8/8)
+remain GREEN. ADR 0053 flips Proposed → Accepted in the same commit
+as [ADR 0054](0054-personal-knowledge-engine-substrate.md) per its §L
+joint-seal mechanic (the two ADRs are joined-at-the-hip via
+supersession-by-reference and acceptance has to be atomic). No new
+`phase-*-complete` git tag — lateral epic per LESSONS PINNED P5;
+the seal is this ADR + ADR 0054 going Accepted + STATUS.md /
+PRODUCT-STATE.md updates landing in one commit.
+
+Phase 1E's user-visible surface (now shipped): every KG entry
+persists as a human-readable `.md` file under
 `<vault>/Knowledge Graph/Entries/`; user edits in Obsidian flow back
-into Mockingbird via a reverse-watcher; mobile captures land via a
-sibling iOS Shortcut into `<vault>/Knowledge Graph/Inbox/`; first KG
-activation seeds a Kanban board + dashboard notes so the user gets a
-working board on day one.
+into Mockingbird via the reverse-watcher; mobile captures land via
+a sibling iOS Shortcut into `<vault>/Knowledge Graph/Inbox/`; first
+KG activation seeds a Kanban board + dashboard notes so the user
+gets a working board on day one. Entity pages + Project pages
+(§D11 + §D12 amendments) and the Karpathy/Clark substrate
+user-facing notes (ADR 0054) all ship with this seal.
+
+### Prior status
+
+**Proposed (2026-06-04).** Phase 1E's nine implementation waves
+chartered here. Wave 1E.0 (initial wave) landed the charter + phase
+doc + bead epic. Waves 1E.1–1E.8 implemented; Wave 1E.9 sealed the
+epic and flipped this ADR to Accepted.
 
 ## Context
 

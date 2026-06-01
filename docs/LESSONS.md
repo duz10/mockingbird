@@ -599,6 +599,110 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 ## 📜 Body (chronological)
 
+## 2026-06-08 [KG Phase 1E Wave 1E.9 / mb-kazi / PHASE 1E SEAL via dual ADR 0053 + 0054 Accepted] Authoring four invariant judges surfaced two non-obvious findings worth keeping: a slug-vs-canonical-name column trap in `kg_entity_mentions`, and a clippy needless-borrow trap that's specific to `impl Display` error-helper functions
+
+- **Context:** Wave 1E.9 was the seal wave for Phase 1E. The deliverable
+  was four invariant judges (J1 reverse-watcher loop-prevention, J2
+  file-wins-on-conflict, J3 subtree-bootstrap-idempotent, J4 serializer-
+  golden-roundtrip) plus the joint ADR 0053 + ADR 0054 Accepted flip.
+  Pattern mirrors Phase MC's five-judge bundle: deterministic Rust
+  probes returning `exit 0 = green, exit 1 = fail`, with the probe
+  bodies in a sibling `vault::judges_phase_1e` module (so they can
+  reach `vault::watcher_reconcile::reconcile_entry_file`,
+  `vault::kg_layout::*`, and `markdown_serializer/parser` without
+  widening any public surface) and bin shims that just
+  `std::process::exit(run_*_probe())`.
+
+### Finding 1 — `kg_entity_mentions.surface_form` stores the SLUGGED entity name, not the canonical name. The first iteration of J2 asserted against canonical names and failed loudly; the fix is correctness on the test side, not the production side.
+
+- **Symptom:** J2's first run failed with
+  `entity mentions diverged from file: got ["acme-corp", "mockingbird", "mom"], wanted ["Acme Corp", "Mockingbird", "Mom"]`.
+  The judge had set up a file with frontmatter
+  `entities: - "[[Entities/acme-corp|acme-corp]]" - ...`, run
+  `reconcile_entry_file`, and then asserted that `surface_form` rows
+  contained the canonical-cased names. They didn't — they contained
+  the slugs.
+- **Root cause:** the serializer emits each entity as
+  `[[Entities/<slug>|<slug>]]` where `slug = slugify_title(name)`,
+  and `markdown_parser::parse_entity_slug_from_wiki_link` extracts
+  the slug-only on read. So the file on disk only contains slugs;
+  canonical names are NOT recoverable from the file at parse time.
+  The reverse-watcher consequently writes the slug into
+  `kg_entity_mentions.surface_form` — which is correct, because that
+  column is named `surface_form` for a reason (it's "the exact text
+  the model emitted" per the migration 024 comment, but "the model"
+  in the reverse-watcher's frame of reference is the file). Canonical
+  names live in `kg_entities.name`, which is the master vocabulary
+  table; mention rows just record what was on disk.
+- **Action:** seed the J2 file fixture with already-slugged entity
+  values and assert against those. The contract being verified is
+  "DB now mirrors the file", not "DB preserves a canonical name the
+  file no longer carries." The test is correctness on the assertion
+  side, not the production side. (Generalized lesson: whenever a
+  reverse-watcher reads from a lossy projection format, the DB column
+  it populates is in the projection's namespace, not the original
+  source's namespace. Tests must seed in the projection's namespace.)
+- **For future judges in this space:** if you're asserting against
+  `kg_entity_mentions`, use slugged names. If you're asserting against
+  `kg_entities`, use canonical names. They are deliberately different
+  vocabularies and conflating them in a single test fixture is a
+  category error.
+
+### Finding 2 — `clippy::needless_borrows_for_generic_args` fires on `io_err(&format!("..."))` when `io_err` takes `impl Display` — the `&` is redundant because `String: Display`. Bulk-fixable in one PowerShell `-replace`.
+
+- **Symptom:** `cargo clippy --release --bins -- -D warnings` exploded
+  with 21 errors of the shape:
+  ```
+  error: the borrowed expression implements the required traits
+     --> src-tauri\src\vault\judges_phase_1e\file_wins.rs:78:62
+      |
+   78 |     let conn = Connection::open(&db_file).map_err(|e| io_err(&format!("open db: {e}")))?;
+      |                                                              ^^^^^^^^^^^^^^^^^^^^^^^^ help: change this to: `format!("open db: {e}")`
+  ```
+  All in the new `vault/judges_phase_1e/*.rs` probe files. Every site
+  used `io_err(&format!(...))` where `io_err` was a local helper with
+  signature `fn io_err(msg: impl std::fmt::Display) -> AppError`.
+- **Root cause:** `format!()` produces an owned `String`, which
+  already implements `Display`. Borrowing it with `&` produces
+  `&String`, which also implements `Display` (via deref coercion to
+  `&str`), but the `&` is dead-code from the compiler's perspective.
+  Clippy's `needless_borrows_for_generic_args` lint correctly flags
+  that the borrow is doing nothing useful.
+- **Action — bulk fix in one PowerShell shot:**
+  ```
+  powershell -Command "$files = @('src-tauri/src/vault/judges_phase_1e/loop_prevention.rs','src-tauri/src/vault/judges_phase_1e/file_wins.rs'); foreach ($f in $files) { $c = Get-Content -Raw -LiteralPath $f; $c = $c -replace 'io_err\(&format!', 'io_err(format!'; Set-Content -LiteralPath $f -Value $c -NoNewline }"
+  ```
+  21 sites fixed in one command. (Caveat: this works because the
+  helper sig is exactly `impl Display`; if it had taken `&str` then
+  `&format!(...)` would be the correct call shape — the borrow
+  produces `&String` which derefs to `&str` for that signature.)
+- **For future probe authoring:** prefer helpers that take owned
+  `String` or `impl Display` over helpers that take `&str` — the
+  `impl Display` shape allows both `format!()` (no borrow) AND
+  `"static str"` (no allocation) at the call site without dragging
+  in a clippy fight.
+
+### Mechanics worth noting
+
+- **Build time on the four-bin add was 9 minutes** even with
+  incremental compilation. The shell tool's 270s cap meant every
+  build had to go via `Start-Process -WindowStyle Hidden` background
+  launch + poll loop (LESSONS 2026-06-08 Finding 3 in the
+  worker-split entry covers this; it's still the canonical pattern
+  on this box).
+- **All four judges ran in under 2 seconds total** once built.
+  Probe-style judges that do not touch whisper-rs / ort / cuda are
+  cheap to live-fire; no fallback needed.
+- **Joint-seal mechanic worked cleanly.** ADR 0053 + ADR 0054 both
+  flipped Proposed → Accepted in this commit, with §L of ADR 0054
+  extended to document WHY — supersession-by-reference into 0053
+  means an intermediate state (0054 Accepted + 0053 Proposed) would
+  leave readers of 0053 unaware that the type vocabulary had been
+  swapped out. Documented the mechanic explicitly so future
+  joint-sealed ADR pairs have a precedent to point at.
+
+---
+
 ## 2026-06-08 [KG Phase 1E Wave 1E.6 / mb-i46v / ADR 0053 Section "KG-Inbox courier"] KG-Inbox courier shipped as a sibling module, not a generalization; two non-obvious findings about `Arc<dyn Trait>` coercion + the 600-LoC discipline
 
 - **Context:** Wire `<vault>/Knowledge Graph/Inbox/*.{m4a,wav,mp3}` to the

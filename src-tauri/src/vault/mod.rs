@@ -33,6 +33,7 @@ pub mod index_md;
 // `<vault>/Knowledge Graph/Inbox/*.m4a` through headless ingest with
 // `capture_kind = KgNote` so the source-gate enqueues them into the
 // KG filing queue.
+pub mod judges_phase_1e;
 pub mod kg_inbox_courier;
 mod kg_inbox_courier_fs;
 pub mod kg_inbox_runtime;

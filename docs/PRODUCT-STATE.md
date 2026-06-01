@@ -1,14 +1,18 @@
 # Mockingbird — Product State
 
-**Snapshot date:** 2026-06-06 (Karpathy/Clark Personal Knowledge Engine pivot;
-KG Phase 1E Wave 1E.5 shipped; Phase 10 sealed; MC sealed; ADR 0054 Proposed)
-**Branch:** `main` (commit `c70a5d7` — Wave 1E.5 seal)
+**Snapshot date:** 2026-06-08 (**KG Phase 1E SEALED via dual ADR 0053 + ADR 0054
+Accepted — full Karpathy/Clark Personal Knowledge Engine substrate shipped**;
+Phase 10 sealed; MC sealed)
+**Branch:** `main` (Wave 1E.9 seal commit — see `git log --grep='Phase 1E SEALED'`)
 **Maturity:** Phase 0-4 + Phase 8 + Phase 10 sealed; Meeting Capture (MC) sealed;
-Knowledge Graph Phase 1A–1E in flight under ADR 0049 lineage (Phases 1A–1D sealed;
-1E waves 1E.0–1E.5 + entity/project amendment + two hotfixes shipped; 1E.6 / 1E.7 /
-1E.8 / 1E.9 unblocked). Phases 5/6/7 (polish, windows, signing) and Phase 9 (macOS)
-remain ahead. Phase 2 (Personal Knowledge Engine substrate enrichments) chartered
-under ADR 0054 (Proposed); detailed sequencing in a future ADR 0055.
+Knowledge Graph Phase 1A → 1E **fully sealed** under ADR 0049 lineage (Phase 1A
+sealed via ADR 0049 Accepted; Phase 1B sealed via ADR 0050 Accepted; Phase 1C sealed
+via ADR 0051 Accepted; Phase 1D sealed via ADR 0052 Accepted; Phase 1E sealed via
+dual ADR 0053 + ADR 0054 Accepted on 2026-06-08, all ten waves shipped including
+Alignment Wave + four 1E.9 judges). Phases 5/6/7 (polish, windows, signing) and
+Phase 9 (macOS) remain ahead. Phase 2 (chat-LLM-side Ingest / Query / Lint authoring
+against the now-shipped vault substrate) is the natural next epic; charter draft
+tracked as `mb-fqg1`.
 
 This is the durable "what does the app actually do today?" reference. Update when a
 subsystem ships or materially changes — NOT every iteration. For session-by-session
@@ -1069,15 +1073,19 @@ the established pattern.
 
 ### 3.20 Knowledge Graph / Personal Knowledge Engine substrate (ADR 0049 → 0053 → 0054)
 
-**Status:** in flight. Phases 1A–1D sealed; Phase 1E Waves 1E.0–1E.5 +
-entity/project page amendment + two hotfixes shipped on `main` at
-`c70a5d7`; Waves 1E.6 / 1E.7 / 1E.8 / 1E.9 remain. Architectural
-north star pivoted 2026-06-06 to the Karpathy/Clark Personal
-Knowledge Engine pattern via **ADR 0054** (Proposed) — a richer
-framing OVER the ADR 0053 vault-substrate foundation, not a
-supersession of it. Load-bearing context: **LESSONS PINNED P14**.
+**Status:** **SHIPPED.** Phases 1A → 1E fully sealed. ADR 0053 + ADR 0054
+both Accepted on 2026-06-08 via the joint-seal mechanic (Wave 1E.9 / `mb-kazi`).
+All ten 1E waves landed: 1E.0 (charter) / 1E.1 (markdown projection layer) /
+1E.2 (serializer goldens) / 1E.3 (two-phase commit) / 1E.4 (History archive +
+reconcile scan) / Alignment Wave (ADR 0054 Proposed reframing as the Karpathy/
+Clark Personal Knowledge Engine substrate) / 1E.5 (reverse-watcher, Obsidian
+edits flow back) / 1E.6 (KG-Inbox courier) / 1E.7 (SCHEMA.md + INDEX.md +
+LOG.md + Tags subtree + nine-knowledge-shape type vocab + worker refactor
+under 600 LoC) / 1E.8 (iOS Shortcut docs for KG-Inbox) / 1E.9 (four invariant
+judges + dual ADR seal). Load-bearing context: **LESSONS PINNED P14**
+(Karpathy/Clark north star).
 
-**What ships today (as of 2026-06-06):**
+**What ships today (as of 2026-06-08, all of these are LIVE on `main`):**
 
 - **Capture path** — `capture_kind` source-gate (ADR 0052 D3) so
   default PTT + in-app dictations NEVER auto-file. The KG screen
@@ -1101,9 +1109,12 @@ supersession of it. Load-bearing context: **LESSONS PINNED P14**.
   `"[[Entities/<slug>|<slug>]]"`. Auto-generated stub pages for
   every entity + Project-typed entity mention (write-once;
   user-owns-thereafter).
-- **Five-folder subtree** — `Knowledge Graph/{Inbox, Entries,
-  History, Entities, Projects}` (`Tags/` added in upcoming Wave
-  1E.7). Idempotent bootstrap via `vault::kg_layout`.
+- **Six-folder subtree** — `Knowledge Graph/{Inbox, Entries,
+  History, Entities, Projects, Tags}` plus the three root files
+  (`SCHEMA.md` / `INDEX.md` / `LOG.md`). Idempotent bootstrap via
+  `vault::kg_layout::{bootstrap_kg_subtree, bootstrap_kg_root_files}`;
+  write-once-if-missing semantics for user-owned files (J3
+  `kg-subtree-bootstrap-idempotent` enforces).
 - **History archive** (`vault::history`, ADR 0053 §D7) — per-session
   JSON sidecar + audio file move to
   `History/<YYYY-MM>/<session-uuid>.{json,wav,mp3,...}`.
@@ -1117,23 +1128,78 @@ supersession of it. Load-bearing context: **LESSONS PINNED P14**.
   with 5 status bands (Recent / Failed / Filed / Retrieval /
   Actions). Actions band hosts "Reconcile vault" + "Open vault in
   Obsidian" buttons.
+- **SCHEMA.md** (write-once, user-owned; `vault::schema_md`) — the
+  operational contract the chat-LLM reads at session start.
+  Documents folder structure, page templates, frontmatter conventions,
+  INDEX/LOG format specs, the three-operation Ingest/Query/Lint
+  workflow, and seed user preferences.
+- **INDEX.md** (auto-rebuilt after every filing; `vault::index_md`) —
+  five-section catalog (Sources / Entities / Projects / Tags /
+  Concepts). Concepts section preserved verbatim across rebuilds
+  (file-wins-against-chat-LLM contract). Byte-deterministic for a
+  fixed snapshot.
+- **LOG.md** (append-only ops log; `vault::log_md`) — format
+  `## [YYYY-MM-DD HH:MM] kind | subject`. Mockingbird appends only
+  `Capture`; chat-LLM appends `Ingest` / `Query` / `Lint`.
+- **KG-Inbox courier** (`vault::kg_inbox_courier`,
+  `vault::kg_inbox_runtime`) — sibling to the ADR 0046 dictation-
+  inbox courier rooted at `<vault>/Knowledge Graph/Inbox/` for
+  iOS-Shortcut + desktop drag-and-drop audio drops. Reuses
+  `IngestProvenance::mobile_inbox_kg_note` so source-gate enqueues
+  into the KG filing queue automatically; success path performs
+  zero filesystem moves (the worker's phase-4 `archive_session_history`
+  owns disposition).
+- **iOS Shortcut for KG-Inbox** (`docs/mobile/ios-shortcut-kg.md`) —
+  same three-action shape as the dictation-inbox shortcut, save
+  destination `<vault>/Knowledge Graph/Inbox/`; two-Shortcut
+  coexistence story documented.
+- **Reverse-watcher loop-prevention** — J1 `kg-reverse-watcher-loop-prevention`
+  is GREEN: Mockingbird's own writes trigger `LoopPrevented` (zero
+  mention-row churn, hash unchanged); user edits trigger `Reconciled`
+  (mention rows refreshed, hash updated). Verified across own-write,
+  external-edit, and re-fire-on-stable cases.
+- **File-wins-on-conflict** — J2 `kg-file-wins-on-conflict` is GREEN:
+  when the DB and the file disagree, the file content wins.
+  `kg_entity_mentions.surface_form` mirrors what's actually on disk
+  (the slugged form post-`[[Entities/<slug>|<slug>]]` round-trip);
+  canonical entity names live in `kg_entities`, which is preserved
+  as master vocabulary across reconciles.
+- **Serializer/parser byte-identical round-trip** — J4
+  `kg-serializer-golden-roundtrip` is GREEN across 7 fixtures
+  (minimal / full_task / doing_task / done_task / special_chars /
+  wiki_linked_entities / knowledge_shape_diversity). Parse(disk) →
+  serialize → bytes-equal(disk); structural-equal reparse catches
+  drift even when both sides agree but diverge from disk.
 - **Standing regression gates** — `kg_parity` 32/32 bit-identical
   (default + `--persist`); `kg_source_gate_invariant` 6/6;
-  `kg_graph_off_invariant` 8/8 + controls.
+  `kg_graph_off_invariant` 8/8 + controls. All GREEN as of seal.
 
-**What's upcoming (1E.6 → seal):**
+**Wave 1E.9 judges (`src-tauri/src/vault/judges_phase_1e/`):**
 
-- **Wave 1E.6** — KG-Inbox courier (sibling to ADR 0046 inbox).
-- **Wave 1E.7** — rescoped per ADR 0054 §J: drops `Kanban-Tasks.md`
-  seed (task-flavored, off-axis); ADDS `SCHEMA.md` (write-once
-  user-owned operational contract), `INDEX.md` (auto-maintained
-  catalog), `LOG.md` (append-only operations log, format `##
-  [YYYY-MM-DD HH:MM] operation | title`), `Tags/` subtree (parallel
-  to Entities/Projects/, auto-generated tag pages with Dataview
-  rollups), type vocabulary realignment in serializer + goldens.
-- **Wave 1E.8** — iOS Shortcut docs (`docs/mobile/ios-shortcut-kg.md`).
-- **Wave 1E.9** — four judges (J1–J4 per ADR 0053; extended scope
-  per ADR 0054 §J) + ADR 0053 + 0054 seal.
+Probe implementations live in a sibling vault module so they can
+reach `watcher_reconcile::reconcile_entry_file`, `kg_layout::*`,
+and `markdown_serializer/parser` without widening public surface.
+Bin shims under `src-tauri/src/bin/kg_*.rs` are one-liners that
+`std::process::exit(run_*_probe())`.
+
+- `loop_prevention.rs` (J1) → `kg_reverse_watcher_loop_prevention.exe`
+- `file_wins.rs` (J2) → `kg_file_wins_on_conflict.exe`
+- `bootstrap_idempotent.rs` (J3) → `kg_subtree_bootstrap_idempotent.exe`
+- `serializer_golden.rs` (J4) → `kg_serializer_golden_roundtrip.exe`
+
+**Upcoming (post-Phase-1E):**
+
+The substrate is shipped; the next epic is **Phase 2** — chat-LLM-
+side Ingest / Query / Lint authoring against the now-shipped
+vault, plus optional Mockingbird-side enrichments (concept
+extraction, source-summary distinction, optional lint-hint
+surfacing, "Open in chat-LLM" launcher, incremental
+INDEX.md/LOG.md refinements). Charter draft tracked as `mb-fqg1`.
+Standing follow-ups: `mb-qw7n` (classifier prompt realignment to
+the nine-shape vocab — currently the parser tolerates legacy
+`task`/`event` on read; this bead collapses writer-side strictness
+back once the prompt ships), `mb-ngtv` (Tasks-plugin checkbox
+default OFF per ADR 0054 §L de-emphasis).
 
 **Two-agent role separation (ADR 0054 §B):**
 
@@ -1169,10 +1235,12 @@ Obsidian" (April 2026).
   modal (Accepted)
 - ADR 0052 — Phase 1D source-gated filing + first-class KG screen
   (Accepted)
-- ADR 0053 — Phase 1E Obsidian as source of truth (Proposed;
-  amendments + partial supersession by ADR 0054)
-- ADR 0054 — Personal Knowledge Engine substrate (Proposed;
-  Karpathy/Clark adoption)
+- ADR 0053 — Phase 1E Obsidian as source of truth (Accepted
+  2026-06-08, joint seal with ADR 0054; entity/project page amendments
+  + partial supersession by ADR 0054 §G/§J)
+- ADR 0054 — Personal Knowledge Engine substrate (Accepted
+  2026-06-08, joint seal with ADR 0053; Karpathy/Clark adoption; §L
+  joint-seal mechanic documents WHY both ADRs flip together)
 
 ---
 

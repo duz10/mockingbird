@@ -1,6 +1,7 @@
 # ADR-0054: Personal Knowledge Engine substrate (Karpathy/Clark adoption)
 
-- **Status:** Proposed
+- **Status:** **Accepted (2026-06-08)** — sealed jointly with [ADR 0053](0053-kg-phase-1e-obsidian-as-source-of-truth.md) at Wave 1E.9 per §L joint-seal mechanic.
+- **Prior status:** Proposed (2026-06-06) — superseded by this Accepted flip on 2026-06-08.
 - **Date:** 2026-06-06
 - **Deciders:** Dustin (project lead), Bernard (code-puppy, implementor)
 - **Charters:** `mb-rik9` (Phase 1E Alignment Wave)
@@ -672,6 +673,19 @@ archive D7, iOS Shortcut docs D10, entity pages D11, project pages
 D12) carries forward unchanged. The amendments to D1 (five-folder
 subtree) and D3 (wiki-link entity emission) from the 2026-06-06
 charter amendment also carry forward unchanged.
+
+### Joint-seal mechanic (Wave 1E.9, sealed 2026-06-08)
+
+Because this ADR supersedes-by-reference into ADR 0053 (rather
+than supplanting it wholesale), the two ADRs are joined-at-the-hip:
+an intermediate state where 0054 is Accepted and 0053 is still
+Proposed (or vice versa) would be confusing -- a reader of 0053
+Proposed would not realize the type vocabulary had been swapped
+out. To avoid that intermediate state, **both ADRs flip Proposed
+-> Accepted in a single atomic seal commit at the end of Wave
+1E.9.** STATUS.md and PRODUCT-STATE.md updates land in the same
+commit. No `phase-*-complete` git tag (lateral epic per LESSONS
+PINNED P5).
 
 ---
 

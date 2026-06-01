@@ -10,7 +10,55 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-06-08 (**KG Phase 1E Wave 1E.8 SEALED —
+**Last consolidated:** 2026-06-08 (**KG PHASE 1E SEALED via dual ADR 0053 +
+ADR 0054 Accepted (Wave 1E.9 / `mb-kazi`).** All four judges shipped + GREEN:
+J1 `kg-reverse-watcher-loop-prevention` (sibling-module Rust probe in
+`vault/judges_phase_1e/loop_prevention.rs`; bin `kg_reverse_watcher_loop_prevention`;
+three cases — own-write LoopPrevented, external-edit Reconciled, re-fire stable
+LoopPrevented), J2 `kg-file-wins-on-conflict` (`vault/judges_phase_1e/file_wins.rs`;
+bin `kg_file_wins_on_conflict`; seeds DB with stale tag + entity rows + wrong
+file_hash, drops a fresh file with different tags + entities, runs
+`reconcile_entry_file`, asserts DB now mirrors the FILE — stale rows gone,
+canonical entity row preserved (kg_entities is master vocab), hash refreshed),
+J3 `kg-subtree-bootstrap-idempotent` (`vault/judges_phase_1e/bootstrap_idempotent.rs`;
+bin `kg_subtree_bootstrap_idempotent`; four cells — missing/empty/populated/partial
+subtrees, each gets bootstrap + re-bootstrap; asserts Created→AlreadyExists,
+user-edited bytes preserved verbatim, single-file gaps filled without
+touching neighbours), J4 `kg-serializer-golden-roundtrip`
+(`vault/judges_phase_1e/serializer_golden.rs`; bin `kg_serializer_golden_roundtrip`;
+parse(disk)→serialize→bytes-equal(disk) over all 7 golden fixtures +
+structural-equality reparse check). Probe implementations live in the
+`vault::judges_phase_1e` sibling module so they can call
+`watcher_reconcile::reconcile_entry_file` + `vault::kg_layout::*` +
+`markdown_serializer/parser` without widening any public surface; bins are
+thin shims that just `std::process::exit(run_*_probe())`. Three standing
+regression gates re-confirmed GREEN: `kg_parity` 32/32, `kg_source_gate` 6/6,
+`kg_graph_off` 8/8. ADR 0053 + ADR 0054 BOTH flipped Proposed → Accepted in
+this seal commit (joint-seal mechanic per ADR 0054 §L — independent
+acceptance would create a confusing intermediate state where readers of 0053
+Proposed would not realize the type vocabulary had been swapped out); §L
+updated with explicit joint-seal subsection. ADR 0053 §Status block extended
+with full Wave 1E.0→1E.9 close-out. **No `phase-*-complete` git tag** —
+lateral epic per LESSONS PINNED P5; Phase 1E is a lateral ADR-chartered
+epic (ADR 0049 → 0053 → 0054), not a numbered PLAN §10 phase. Phase tags
+stay reserved for PLAN §10 (currently 0/1/2/3/4/8 + `phase-mc-complete` +
+`phase-10-complete`). All gates GREEN: `cargo check` / `clippy --release -D
+warnings` / `fmt --check` / `test --release --no-run` / `build --release`
+(fresh `target/release/mockingbird.exe` mtime post-seal per P13 — judge bins
++ vault module link surface touched). PRODUCT-STATE.md §3.20 KG subsystem
+framing flipped from "in-flight" → "shipped" for all 1E waves. LESSONS
+appended for the two non-obvious findings: (1) `surface_form` column trap —
+the reverse-watcher stores SLUGGED entity names in `kg_entity_mentions.surface_form`
+because that's all the file recovers post-`[[Entities/<slug>|<slug>]]`
+round-trip; canonical names live in `kg_entities`, mention rows just
+record what was on disk; (2) clippy `needless_borrows_for_generic_args`
+trap on `io_err(&format!(...))` — `io_err` takes `impl Display` so the `&`
+is dead-code; bulk-rewrite via `(Get-Content … -Raw) -replace 'io_err\(&format!','io_err(format!'`
+fixed all 21 sites in one shot. Closes `mb-kazi`. **Phase 1E is fully
+shipped.** Resume: next available work is Phase 2 charter draft
+(`mb-fqg1`); standing follow-ups `mb-qw7n` (classifier prompt realignment),
+`mb-ngtv` (Tasks-plugin checkbox default OFF), `mb-y5ln`, `mb-5oxg`.
+Prior consolidation 2026-06-08 (**KG Phase 1E Wave 1E.8 SEALED —
 iOS Shortcut docs for KG-Inbox shipped (`mb-wnsm`). New file
 `docs/mobile/ios-shortcut-kg.md` (372 LoC, LF, ASCII-only, no BOM) mirrors
 ADR 0046 §8 / `docs/mobile/ios-shortcut.md` for the Knowledge Graph
@@ -186,6 +234,7 @@ Prior consolidation 2026-06-06 (**KG Phase 1E Wave 1E.5 shipped** — reverse-wa
 - ADR 0042 — Activity Capture retention cascade (Accepted, sealed in `phase-10-complete`)
 - ADR 0043 — Activity Capture exclusion list + built-in rules (Accepted, sealed in `phase-10-complete`)
 - ADR 0044 — Activity Capture PDF export via `printpdf` (Accepted, sealed in `phase-10-complete`)
+- **ADR 0053 + ADR 0054 — KG Phase 1E vault projection + Personal Knowledge Engine substrate** (sealed jointly 2026-06-08 as lateral epic under ADR 0049 § "Sandbox isolation"; ten waves shipped: 1E.0 charter / 1E.1 markdown projection layer / 1E.2 serializer goldens / 1E.3 two-phase commit / 1E.4 History archive + reconcile / Alignment Wave (ADR 0054 Proposed reframing as Karpathy/Clark PKE substrate) / 1E.5 reverse-watcher (Obsidian-edits-flow-back) / 1E.6 KG-Inbox courier / 1E.7 SCHEMA.md + INDEX.md + LOG.md + Tags subtree + nine-knowledge-shape type vocab + worker refactor under 600 LoC / 1E.8 iOS Shortcut docs for KG-Inbox / 1E.9 (this seal) four judges + dual ADR Accepted). Joint-seal mechanic per ADR 0054 §L — independent acceptance would leave an intermediate state where readers of 0053 Proposed didn't realize the type vocabulary had been swapped out. Four Wave 1E.9 judges all GREEN: J1 `kg-reverse-watcher-loop-prevention`, J2 `kg-file-wins-on-conflict`, J3 `kg-subtree-bootstrap-idempotent`, J4 `kg-serializer-golden-roundtrip` (probe implementations in `src-tauri/src/vault/judges_phase_1e/{loop_prevention,file_wins,bootstrap_idempotent,serializer_golden}.rs`; thin bin shims at `src-tauri/src/bin/kg_*.rs`). Three standing regression invariants remain GREEN: `kg_parity` 32/32, `kg_source_gate` 6/6, `kg_graph_off` 8/8. Charter ADRs: `docs/adr/0053-kg-phase-1e-obsidian-as-source-of-truth.md` (Accepted 2026-06-08, §Status carries close-out) + `docs/adr/0054-personal-knowledge-engine-substrate.md` (Accepted 2026-06-08, §L joint-seal subsection added). Phase doc: `docs/phases/phase-1e.md`. Bead epic `mb-imc2` + Wave 1E.9 bead `mb-kazi` closed; Wave beads closed across the epic: `mb-qhll` (1E.0), `mb-qwfy` (1E.5), `mb-08za` (charter amendment), `mb-43xw` (hotfix #1), `mb-wzui` (hotfix #2), `mb-y390` (hotfix #3), `mb-wzcj` (hotfix #4), `mb-rik9` (Alignment Wave), `mb-i46v` (1E.6), `mb-bgpt` + `mb-5lla` (1E.7 part 1 + part 2), `mb-wnsm` (1E.8). **Standing follow-ups carried forward** (not gating seal): `mb-qw7n` (classifier prompt realignment to nine knowledge shapes), `mb-ngtv` (Tasks-plugin checkbox default OFF per ADR 0054 §L), `mb-y5ln`, `mb-5oxg`, `mb-fqg1` (Phase 2 charter draft). **No new `phase-*-complete` git tag** — lateral epic per LESSONS PINNED P5.
 - **ADR 0052 — KG Phase 1D source-gated filing + first-class KG screen** (sealed 2026-06-04 as lateral epic under ADR 0049 §"Sandbox isolation"). Six waves shipped: 1D.0 (`b5c17bf`, charter + clean-slate verify + phase doc + bead epic), 1D.1 (`f3b9a4a`, migration 025 + `capture_kind` source-gate + 3-gate cascade), 1D.2 (`37feed7`, KG screen scaffold + 5-band dashboard + new `kg_dashboard_snapshot` IPC), 1D.3 (`846ecd5`, capture surface — audio + text notes via new `kg::ingest_text` module + `dictation_start_kg_note` + `kg_ingest_text_note` IPCs), 1D.4 (`acb8f9a`+`0142ddb`, chip/modal relocation Dictations → KG dashboard — -211 LoC from Dictations, +Retrieval band on KG screen, click-to-modal wired, FlaggedBand click-to-retry), 1D.5 (`0cd54ff`+`f9cb27c`, Settings KG tab expansion — Vault/Vocabularies/ProcessingMode/Dual-write cards + Obsidian launcher via new `kg::launcher` module + `kg_launch_obsidian` IPC). Wave 1D.6 (this seal) lands three judges + ADR seal + STATUS update. **Two drift corrections shipped:** (1) ADR 0050's dictation-tail auto-file replaced by 3-gate cascade (outcome → source → toggle); standard PTT + in-app dictations NEVER enqueue regardless of toggle. (2) KG promoted from "filter chips on Dictations" to first-class sidebar destination per spec §15.3. Acceptance gates: **J1 `kg-source-gate-invariant` (NEW) GREEN** — deterministic Rust probe (`src-tauri/src/kg/source_gate_invariant.rs` + binary `kg_source_gate_invariant`); 6/6 corpus cells (3 `capture_kind`s × 2 toggle states); drives both `try_enqueue_for_kg_filing` AND `ingest_text_note` entry points. **J2 `kg-dictation-untouched` GREEN** — runtime twin of Phase MC's diff-judge of the same name; cells 1+2 of J1 + cross-check that only two `kg::store::enqueue_for_filing` call sites exist. **J3 `kg-graph-off-ui-tightened` GREEN** — no new code; consolidated Playwright invariant from Waves 1D.2/1D.4/1D.5 documented as fully satisfied; `npx playwright test kg-graph-off-invariant` 1/1 passed. Regression: `kg_graph_off_invariant` 8/8 + controls; `kg_parity` 32/32 default + `--persist`. Charter: `docs/adr/0052-knowledge-graph-phase-1d-charter.md` (Accepted 2026-06-04, §"Phase 1D SEALED" carries close-out). Judge docs: `docs/judges/phase-1d/`. Phase doc: `docs/phases/phase-1d.md`. Beads closed: `mb-x7f9` (epic) + `mb-qhll` (1D.0) + `mb-pxzk` (1D.1) + `mb-j00j` (1D.2) + `mb-0gt6` (1D.3) + `mb-6hm2`+`mb-f4gn` (1D.4) + `mb-navi` (1D.5) + `mb-q2p1` (1D.6) + `mb-oji5` (category-axis, consumed at 1D.1). **Standing beads carried forward** (not gating seal): `mb-bbl2` (sonner retrofit), `mb-y6pq` (`--status-bad` token sweep), `mb-26aw` (`smoke.spec.ts` ×4 pre-1C Playwright failures), `mb-2wbk` (KG row → Dictations deep-link, P3, filed in 1D.4), `mb-0ui1` (vocab editor, P3, filed in 1D.5). **No new `phase-*-complete` tag** — lateral epic per LESSONS P5.
 - **ADR 0051 — KG Phase 1C retrieval UX + activation toggle + concept modal** (sealed 2026-05-31 as lateral epic under ADR 0049 §"Sandbox isolation"). Six waves shipped: 1C.0 (charter + empirical p95=59s latency baseline + `PassTimings` instrumentation), 1C.1 (Settings KG tab + activation toggle + worker boot-vs-poll promotion), 1C.2 (failed-filings UX + queue-status line + idempotent `kg_requeue_failed`), 1C.3 (Dictations retrieval UX — 5 of 6 axes: entity + tag + free-text + per-row chip strip + filing-state pills), 1C.4 (concept modal for entity + tag drill-down + click-to-open chips), 1C.5 (graph-off-UI invariant Playwright judge via opt-in `__KG_IPC_SPY__` hook on `lib/tauri.ts::invoke` + `SettingsKgTab` `role="status"` a11y scoping + this seal). Acceptance gates: **`kg-graph-off-ui-untouched` (J1) GREEN** (Playwright spy records exactly `{kg_settings_get_all}` across Settings/KG tab + Dictations page + row-click walks; positive-control flip ON lights up `kg_list_failed_filings`+`kg_queue_status`); **`kg-retrieval-correct` (J2) GREEN** via the 1C.3 Playwright spec; **`kg-failed-filing-retry-idempotent` (J3) GREEN** via the 1C.2 Rust-side throwaway + UI-side disable-on-click. Parity probe 32/32 in both default and `--persist` modes (no `kg/store` regression — 1C.5 changes are UI + test-only). Wave brief: `docs/knowledge-graph/phase-1c-brief.md`. Charter: `docs/adr/0051-kg-phase-1c-retrieval-ux-and-activation.md` (Accepted 2026-05-31, §"Phase 1C SEALED" carries the close-out). Commit chain `113e848..<seal-hash>` (Wave 1C.0..1C.5). Beads closed: `mb-j368` (epic) + `mb-plz9` (1C.0) + `mb-ucmx`/`mb-s6a8`/`mb-7w5f` (1C.1) + `mb-9ufg`/`mb-j3t1` (1C.2) + `mb-5ly5` (1C.3) + `mb-sx6p` (1C.4) + `mb-f4gn` (1C.5) + `mb-b3jy` (discharged 1C.0). **Deferred (not shipped):** `mb-oji5` (category-axis persistence — verified twice that Phase 1B schema has no queryable `category` column; ADR 0051 §"Out of scope" bans new migrations in 1C; punted to Phase 1D where the backfill path already needs a schema-touching migration). **Standing beads carried forward:** `mb-bbl2` (sonner retrofit), `mb-y6pq` (`--status-bad` token sweep), `mb-26aw` (`smoke.spec.ts` ×4 pre-1C Playwright failures). **No new `phase-*-complete` tag** — lateral epic per LESSONS P5.
 - **ADR 0050 — KG Phase 1B persistence + async filing worker + dictation-tail hook** (sealed 2026-06-03 as lateral epic under ADR 0049 §"Sandbox isolation"). KG library now persists entity + tag mentions per-segment to SQLite (migration 024: `kg_entities`, `kg_canonical_tags` (v1.1 inert), `kg_entity_mentions`, `kg_tag_mentions`, `kg_filing_queue`, two concept-page VIEWs, two `BEFORE UPDATE` immutability triggers on the mention tables, `kg_graph_enabled=false` seed). Async filing worker (`kg::worker::KgFilingRuntime`) spawns at app boot when `SettingKey::KgGraphEnabled=true` (default `false`); drains FIFO with crash-recovery sweep + 30-day done-row reap. Single dictation-tail enqueue point at `dictation.rs::persist_complete` outcome-gated (`Ok` / `OkClipboardNotRestored` / `InAppNoInject`) with ignore-error semantics. `extract_entities` wired as the 5th pipeline pass in Chunk 3 (the kickoff discovered ADR 0049 §6 had been silently violated — production was 4-pass-only; closed the gap with an additive `PipelineResult.segment_entities` field). Acceptance gates: **`kg_parity` default 32/32 + `kg_parity --persist` 32/32 + `kg_graph_off_invariant` 8/8** (every InjectionOutcome variant + positive control). Wave brief: `docs/knowledge-graph/phase-1b-brief.md`. Charter: `docs/adr/0050-kg-phase-1b-persistence-and-dictation-hook.md` (Accepted 2026-06-03, §"Phase 1B SEALED" carries the close-out paragraph). Commit chain `0fed8e3..<seal-hash>`. Beads closed: `mb-bjni` (epic) + `mb-go9l` + `mb-geds` + `mb-eke8` + `mb-ryq4` + `mb-k17a`. **No new `phase-*-complete` tag** — lateral epic per LESSONS P5.
@@ -202,15 +251,123 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**KG Phase 1E (Obsidian as source of truth, reframed as Personal Knowledge
-Engine substrate per ADR 0054) — Waves 1E.0 + 1E.1 + 1E.2 + 1E.3 + 1E.4 +
-1E.5 + entity/project amendment + two hotfixes + Alignment Wave +
-**1E.7 implementation (part 1: substrate + worker wiring) shipped** —
-Waves 1E.6 (KG-Inbox courier) and 1E.7 refactor follow-up (worker split
-under 600 LoC) unblocked; 1E.8 (iOS Shortcut docs) docs-only available
-any time; 1E.9 seals both ADR 0053 + ADR 0054 together.**
+**Nothing is in flight.** KG Phase 1E sealed jointly via ADR 0053 +
+ADR 0054 Accepted (Wave 1E.9, 2026-06-08, `mb-kazi` closed). All
+four Wave 1E.9 judges GREEN, three standing regression invariants
+GREEN, dual ADR seal landed in a single atomic commit per the
+joint-seal mechanic.
 
-### Wave 1E.7 implementation deliverables shipped (this iteration; mb-bgpt PART 1 — substrate + worker wiring)
+**Available next-up work** (pick one; none are urgent):
+
+- `mb-fqg1` — Phase 2 charter draft (chat-LLM Ingest / Query / Lint
+  authoring against the now-shipped vault substrate). Largest
+  available container; will want its own ADR.
+- `mb-qw7n` — classifier prompt realignment to the nine-knowledge-shape
+  vocabulary (§G of ADR 0054). Currently the parser tolerates legacy
+  `task`/`event` values; this bead collapses the writer-side strictness
+  back. Standing P2.
+- `mb-ngtv` — Tasks-plugin checkbox emission default OFF per ADR 0054
+  §L de-emphasis. Small. Standing P3.
+- `mb-y5ln`, `mb-5oxg` — see `bd ready` for current framing.
+
+### Wave 1E.9 deliverables shipped (this iteration; closes `mb-kazi`, seals Phase 1E)
+
+Four invariant judges authored per `docs/phases/phase-1e.md` §1E.9
+spec, mirroring Phase MC's five-judge precedent (deterministic
+Rust probes returning exit 0 = green / 1 = fail; one bin shim per
+judge; probe bodies live in a sibling `vault::judges_phase_1e`
+module so they can reach `vault::watcher_reconcile` +
+`vault::kg_layout` + `markdown_serializer/parser` without widening
+any public surface):
+
+- **J1 `kg-reverse-watcher-loop-prevention`** —
+  `src-tauri/src/vault/judges_phase_1e/loop_prevention.rs` (probe) +
+  `src-tauri/src/bin/kg_reverse_watcher_loop_prevention.rs` (shim).
+  Three sub-cases against a freshly-bootstrapped scratch vault +
+  in-memory-on-disk SQLite: (A) Mockingbird's own projection write
+  -> reconcile -> `LoopPrevented` (zero mention rows touched, hash
+  unchanged); (B) external edit that flips tags + entities -> reconcile
+  -> `Reconciled` (mention rows wiped + reinserted to mirror file,
+  hash refreshed to new SHA); (C) re-fire on the now-stable bytes ->
+  `LoopPrevented` again (no DB churn).
+- **J2 `kg-file-wins-on-conflict`** —
+  `src-tauri/src/vault/judges_phase_1e/file_wins.rs` (probe) +
+  `src-tauri/src/bin/kg_file_wins_on_conflict.rs` (shim). Seeds the
+  DB with stale tag-mention + entity-mention rows + a wrong
+  `file_hash`, drops a fresh entry file with three *different* tags
+  + three *different* entity slugs, runs `reconcile_entry_file`,
+  asserts: stale `stale-db-tag-*` rows are gone; surviving rows
+  exactly match the file's frontmatter; canonical `kg_entities`
+  row is preserved (entity vocabulary is master, mention rows just
+  record what was on disk); `file_hash` refreshed to the actual
+  SHA-256 of the new bytes. Surfaced the LESSONS finding that
+  `kg_entity_mentions.surface_form` stores SLUGGED names because
+  that's all the file recovers post-`[[Entities/<slug>|<slug>]]`
+  round-trip.
+- **J3 `kg-subtree-bootstrap-idempotent`** —
+  `src-tauri/src/vault/judges_phase_1e/bootstrap_idempotent.rs`
+  (probe) + `src-tauri/src/bin/kg_subtree_bootstrap_idempotent.rs`
+  (shim). Four cells covering the four user-visible bootstrap
+  states: (1) missing — first call returns `Created`, second
+  returns `AlreadyExists`; (2) empty `Knowledge Graph/` parent —
+  same shape; (3) populated — re-bootstrap is a no-op AND a
+  user-edited byte sequence inside an existing subtree file is
+  preserved verbatim (write-once-if-missing contract); (4) partial
+  — single-file gap is filled while neighbouring files stay byte-
+  identical, then a third call is the expected no-op. Covers both
+  `bootstrap_kg_subtree` (six folders) AND `bootstrap_kg_root_files`
+  (SCHEMA.md / INDEX.md / LOG.md).
+- **J4 `kg-serializer-golden-roundtrip`** —
+  `src-tauri/src/vault/judges_phase_1e/serializer_golden.rs`
+  (probe) + `src-tauri/src/bin/kg_serializer_golden_roundtrip.rs`
+  (shim). For each of the seven goldens under
+  `tests/fixtures/markdown_golden/` (minimal / full_task / doing_task /
+  done_task / special_chars / wiki_linked_entities /
+  knowledge_shape_diversity): asserts the disk bytes contain no
+  CR (autocrlf guard), then `parse_entry(disk) -> serialize_entry ->
+  bytes-equal(disk)`, then `parse_entry(reserialized) ->
+  structural-equal(parsed)`. The bytes-equal direction catches
+  parser/serializer drift; the structural-equal reparse catches
+  the failure mode where parse + serialize are mutually consistent
+  but both wrong relative to disk.
+
+**Dual ADR seal** (single atomic commit):
+
+- `docs/adr/0053-kg-phase-1e-obsidian-as-source-of-truth.md` —
+  status header flipped to Accepted (2026-06-08); prior-status line
+  records the Proposed → Accepted transition; `## Status` block
+  rewritten to enumerate the ten waves (1E.0 → 1E.9) + the four-judge
+  bundle pass results + the three standing invariants + the
+  joint-seal mechanic; "Prior status" subsection preserves the
+  original Proposed framing.
+- `docs/adr/0054-personal-knowledge-engine-substrate.md` — status
+  header flipped to Accepted (2026-06-08); §L extended with explicit
+  "Joint-seal mechanic" subsection documenting WHY the two ADRs flip
+  together (supersession-by-reference -> intermediate state where
+  0054 Accepted + 0053 still Proposed would mislead readers about the
+  type vocabulary swap).
+
+**Acceptance gates (all GREEN):**
+
+- `powershell -File scripts\cargo-with-cuda.ps1 check` -- GREEN
+- `… clippy --release -- -D warnings` -- GREEN (after one bulk fix:
+  the new probes used `io_err(&format!(...))` which clippy flags
+  as `needless_borrows_for_generic_args` since `io_err` takes
+  `impl Display`; one-line PowerShell `-replace` swept 21 sites)
+- `… fmt --check` -- GREEN (after `cargo fmt` ran cleanup)
+- `… build --release` -- GREEN; all four judge bins linked in
+  `target/release/`; refreshed `mockingbird.exe` per P13
+- All four judge bins executed live and returned exit 0 with the
+  green summary line
+- Standing regression bins live-fired GREEN:
+  - `kg_parity` 32/32
+  - `kg_source_gate_invariant` 6/6
+  - `kg_graph_off_invariant` 8/8
+
+See `docs/PRODUCT-STATE.md` §3.20 (Knowledge Graph / Personal
+Knowledge Engine substrate) for the durable subsystem map.
+
+### Prior in-flight (now historical): Wave 1E.7 implementation deliverables (mb-bgpt PART 1 — substrate + worker wiring)
 
 Implements the bulk of ADR 0054 §C/§D/§E/§F/§G end-to-end. **mb-bgpt
 remains OPEN** because gate #4 (worker refactor under 600 LoC, closes
