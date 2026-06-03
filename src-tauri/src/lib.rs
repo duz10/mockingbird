@@ -135,6 +135,17 @@ pub fn run() {
             // WAL mode (set in Database::open) makes parallel access safe.
             let shared_conn = Arc::new(Mutex::new(database.conn));
             app.manage(AppState::new(shared_conn.clone()));
+            // mb-9rgx — boot-time diagnostic so future repros of
+            // "state not managed for field db" can be triaged from
+            // the log alone. AppState is the load-bearing DB-handle
+            // state every IPC depends on; logging it here proves it
+            // entered the StateManager before any window/IPC could
+            // fire (windows are constructed AFTER setup returns Ok).
+            tracing::info!(
+                state = "AppState",
+                site = "lib.rs:setup",
+                "managed-state registered"
+            );
 
             // mb-0gt6 / Wave 1D.3 — publish the orchestrator config
             // as managed state so the KG text-note IPC
