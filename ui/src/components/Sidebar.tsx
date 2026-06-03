@@ -69,6 +69,11 @@ export function Sidebar() {
   // KG nav item never "flashes visible" before the boot fetch
   // completes -- safer than the reverse.
   const kgGraphEnabled = useAppStore((s) => s.kgGraphEnabled);
+  // `mb-v7pd` (v0.2.0-beta.1 smoke fix Bug 3) -- runtime app version
+  // from Tauri's `getVersion()`, hydrated at App boot. We display
+  // a thin-space placeholder (NOT `v0.1.0`) while null so the
+  // footer doesn't reflow when the value resolves a tick later.
+  const appVersion = useAppStore((s) => s.appVersion);
   const activeModeLabel = useMemo(() => {
     if (!activeModeSlug) return null;
     return modes.find((m) => m.slug === activeModeSlug)?.label ?? activeModeSlug;
@@ -127,7 +132,7 @@ export function Sidebar() {
       </nav>
       <div className={styles.footer}>
         <span className={styles.version} aria-label="App version">
-          v0.1.0
+          {appVersion ? `v${appVersion}` : "\u2009"}
         </span>
       </div>
     </aside>

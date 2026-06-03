@@ -517,6 +517,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-06-08 | `[v0.2.0-beta.1 smoke fix / mb-v7pd]` | Three sidebar smoke bugs from end-user QA of the v0.2.0-beta.1 release exe. Bug 1 (sidebar Active Mode label absent on launch) + Bug 2 (sidebar KG nav item absent on launch with toggle ON) share root cause: App boot used `Promise.all` over 4 IPCs, so any single rejection skipped ALL setters; per-page effects in Modes.tsx + SettingsKgTab.tsx re-hydrate the same store on visit, masking the failure unless you watch the sidebar pre-navigation. Bug 3 (footer shows `v0.1.0` instead of `v0.2.0-beta.1`) was a literal hardcoded JSX string that survived the release manifest bump. Three findings worth keeping: (1) `Promise.all` short-circuit + per-page re-hydration is a near-invisible app-boot failure mode; fix is `Promise.allSettled` + per-result dispatch, extracted to a pure `bootApp(api, setters)` helper for unit testability. (2) `cargo build --release` IS mandatory for pure-UI fixes on this Tauri app because `frontendDist: "../ui/dist"` embeds the bundle into the exe at build time; the smoke brief's "skip cargo build for pure UI" guidance was wrong, this is an extension of PINNED P13 spirit ("don't leave a stale exe") that should be promoted as P13 category (d). (3) Hardcoded version strings in UI source are a predictable stale-display incident; Tauri's `getVersion()` (`plugin:app|version` IPC, `@tauri-apps/api/app::getVersion`) is the runtime SoT and reads from the SAME `tauri.conf.json` that stamps the exe's `ProductVersion`, so manifest bumps flow to UI display with no JSX-audit step. Body, broad-implication (Finding 2 retroactively applies to every prior UI-only fix; Finding 1 generalizes to any multi-IPC boot fetch; Finding 3 is the load-bearing version-display contract for the project's life). Should consider promoting Finding 2 to PINNED. |
 | 2026-06-08 | `[KG Phase 1E Wave 1E.6 / mb-i46v / ADR 0053]` | KG-Inbox courier shipped as sibling module (not generalization) of the ADR 0046 inbox courier. Rooted at `<vault>/Knowledge Graph/Inbox/`, watches for `*.{m4a,wav,mp3}` from iOS Shortcut + desktop drag-and-drop, threads into headless ingest with `capture_kind = KgNote`. Three new vault modules (courier 546 LoC / courier_fs 236 LoC / runtime 448 LoC) + 442-LoC sibling-tests file. Three findings worth keeping: (1) **`Arc<ConcreteImpl>` does NOT auto-coerce to `Arc<dyn Trait>` when passed to `Arc::clone`** — coercion fires at function-boundary MOVE, not at generic-param instantiation. Multi-consumer wiring of an `Arc<ConcreteImpl>` that downstream wants as `Arc<dyn Trait>` requires a type-erased rebind UP FRONT (`let bus_dyn: Arc<dyn Trait> = bus;`); thereafter `Arc::clone` on `bus_dyn` preserves the trait-object inner. Bites whenever you add a second consumer to a service that was previously single-consumer. (2) **Plan production-vs-helpers split BEFORE first `create_file`; rustfmt expands compact hand-drafts in surprising ways and pushes you over 600**. ~580 hand-counted LoC became 734 actual post-fmt (signature line-breaks + format! expansions + blank lines around impl blocks). New vault/inbox/courier-shaped modules with trait + prod impl + non-trivial helpers should default to `policy.rs` + `policy_fs.rs` + `policy_tests.rs` triple from the start. (3) **Idempotency probe BEFORE orchestrator send is the cheapest crash-recovery guard for couriers that don't move-on-success.** KG-Inbox defers file disposition to the worker phase-4 archive, so a crash mid-ingest OR after-ingest-before-archive leaves the file in Inbox/ and the initial-scan could re-emit. Pre-flight `sessions.audio_blob_path` probe short-circuits before the expensive decode + STT. Alternative `INSERT ... ON CONFLICT IGNORE` is fragile (already burned decode cost + orchestrator API contract change). Mechanics: background-launch + Start-Sleep poll pattern for ~9m test build / ~7m exe build (Code Puppy shell tool's 270s cap); `should_consider_path` is inbox-root-agnostic so `_failed/` exclusion reuses cleanly. Body, narrow blast radius. |
 | 2026-06-08 | `[KG Phase 1E Wave 1E.7 Part 2 / mb-5lla / mb-bgpt SEAL]` | Pure-refactor wave brought `kg/worker.rs` (2050 LoC) and `vault/kg_layout.rs` (698 LoC) under 600-LoC cap. worker.rs split into root + 7 cohesive submodules (filing / projection / archive / stubs / index_log / transcripts / time_iso); kg_layout.rs split via existing sibling-tests pattern (`kg_layout_tests.rs`). Zero behaviour change; public API surface preserved by `pub(crate) use submod::symbol;` re-exports at the parent — `kg::parity` + `kg::latency_bench` callers needed zero edits. Four findings: (1) **`[IO.File]::ReadAllText` in PS 5.1 auto-strips BOMs; the naive `if (StartsWith([char]0xFEFF)) Substring(1)` pattern eats the first real character on no-BOM files** — turned every file's `//!` doc comment into `/!` and broke rustfmt across 10 files. Recovery was trivial (one byte prepended) but the failure mode is silent for prose/JSON. Use raw-byte read/write (`ReadAllBytes`/`WriteAllBytes`) when BOM stripping is involved. (2) `pub(crate) use submod::symbol;` at the split parent preserves external public paths through a refactor — write down external use-sites first, choose visibility-modifiers + re-exports to keep them byte-identical, single-minute grep + single-line re-export. (3) `cargo test --release --no-run` is 4m32s on this codebase; the Code Puppy shell tool's 270s execution cap forces `Start-Process -WindowStyle Hidden` background launch + poll loop. Budget 4×Start-Sleep-180 chunks for test-no-run + build-release on a worker/IPC-touching wave. (4) Sibling `#[cfg(test)] #[path = "X_tests.rs"] mod tests;` re-confirmed as the lowest-friction split for cohesive impls (kg_layout 698→420+344). Closes `mb-5lla` AND `mb-bgpt` (Wave 1E.7 fully sealed). Body, narrow blast radius (finding 1 is the only broadly-applicable foot-gun; the others re-affirm known patterns). |
 | 2026-06-06 | `[KG Phase 1E charter amendment / mb-08za / ADR 0053 amendments]` | Interstitial wave between 1E.4 and 1E.5 closed the "entities are bare strings, not Obsidian graph nodes" gap surfaced when Dustin opened the live vault. Four ADR 0053 amendments shipped together (subtree 3→5 folders; entities emit as `"[[Entities/<slug>]]"` wiki-links; auto-generated Entity stub pages §D11; auto-generated Project stub pages §D12), plus serializer retrofit + new `vault::entity_pages` module + worker integration. Three findings worth keeping: (1) **Write-once user-owns-thereafter is the only sane contract for auto-generated user-facing artifacts** — detection is pure existence-on-disk (no content hash, no schema upgrade path that mutates user edits); the user can rewrite the entire body of `Entities/maple.md` and Mockingbird never touches it on subsequent filings. This is the same shape 1E.7's first-activation seeds will use; the moment a third callsite wants the same shape, extract it. (2) **Wiki-link round-trip is asymmetric and that's fine** — the canonical OUTBOUND form (DB → file) is always `"[[Entities/<slug>]]"`; the INBOUND parser (file → DB, Wave 1E.5's reverse-watcher) must accept BOTH legacy bare-string entries (pre-amendment) AND the new wiki-link shape, but writes ALWAYS emit the canonical form so the next round-trip converges. Same `slugify_title` helper drives BOTH filename slugs and entity slugs — one source of truth or you get unfindable graph edges. (3) **Backfill is cheaper to defer than to design** — Dustin's four pre-amendment test entries stay in bare-string form; new entries get wiki-links; Dataview queries written defensively (`contains(entities, "<bare>") OR contains(entities, "[[Entities/<bare>]]")`) cover both shapes. Automatic backfill is Phase 1F (or later) work. The amendment ships clean and the user has three painless paths (re-capture / hand-edit / wait). Mid-stride schema migrations on user-owned files are the most expensive class of work in this codebase; not doing one when the cost/benefit is in the noise is the right call. Body, narrow blast radius (KG Phase 1E only). |
@@ -598,6 +599,128 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 ---
 
 ## 📜 Body (chronological)
+
+## 2026-06-08 [v0.2.0-beta.1 smoke fix / mb-v7pd] Three sidebar bugs (mode label absent on launch, KG nav item absent on launch, hardcoded v0.1.0 footer) — two share a `Promise.all` short-circuit root cause; Bug 3 is a hardcoded literal; AND cargo build --release IS needed for pure-UI fixes on a Tauri app because the dist is embedded into the exe at build time
+
+- **Context:** Three sidebar smoke bugs surfaced during e2e of the
+  `v0.2.0-beta.1` tagged build (commit `e9e7f8c`). Bug 1: sidebar
+  "Active mode" label invisible until user visits /modes. Bug 2:
+  sidebar Knowledge Graph nav item invisible until user visits
+  Settings -> Knowledge Graph (toggle was already ON). Bug 3: sidebar
+  footer reads `v0.1.0` instead of `v0.2.0-beta.1` despite all four
+  manifests being bumped + exe ProductVersion stamped correctly.
+- **Finding 1 — `Promise.all` short-circuits on first reject and
+  skips ALL downstream setters; per-page effects that re-hydrate
+  the same store make this near-invisible until cold-start QA.**
+  The original `App.tsx` boot effect was:
+  ```ts
+  const [modes, settings, activeMode, kgSettings] = await Promise.all([...]);
+  setModes(modes);
+  setSettings(settings);
+  setActiveModeSlug(activeMode.slug);
+  setKgGraphEnabled(kgSettings.kgGraphEnabled);
+  applyTheme(settings.theme);
+  ```
+  If ANY one of those four IPCs rejected (e.g. `get_active_mode`
+  returns no row on a clean install, or `kg_settings_get_all` races
+  a late-registered command on cold-start), control flow jumped to
+  the catch block and NONE of the setters fired. The bug stayed
+  invisible because every page that needs one of those slots
+  (`Modes.tsx` re-hydrates `activeModeSlug` + `modes`, `SettingsKgTab.tsx`
+  re-hydrates `kgGraphEnabled`) has its own boot effect that fixes
+  the symptom IF the user visits that page. So you don't notice
+  the boot failure unless you watch the sidebar before visiting any
+  hydrating page. Pattern fix: `Promise.allSettled` + per-result
+  `if (status === "fulfilled")` dispatch. Each setter is
+  independent; a single IPC failure can't suppress siblings.
+  Generalization: any "hydrate cross-route state at app boot from N
+  IPCs" pattern wants `Promise.allSettled`, not `Promise.all`. The
+  failure modes are independent, the recovery should be too.
+  Extracted to a pure `bootApp(api, setters)` helper for direct
+  unit-testability (this codebase has no `@testing-library/react`;
+  tests target data/logic layer).
+- **Finding 2 — `cargo build --release` IS required for pure-UI
+  fixes on a Tauri app because `frontendDist: "../ui/dist"` embeds
+  the bundle into the exe.** The smoke brief said "if pure UI fix,
+  the existing exe is still valid; skip cargo build." That's wrong
+  for this codebase: `src-tauri/tauri.conf.json` sets
+  `"frontendDist": "../ui/dist"`, and `cargo build --release` is
+  what copies the dist into the binary's bundled resources. The
+  existing exe carries the *previous* dist (with the hardcoded
+  `v0.1.0`); relaunching it after `npm run build` shows the OLD UI
+  bundle. To actually ship a UI fix to a user who relaunches the
+  release exe, you MUST rerun `cargo build --release` after the
+  dist update. This is an extension of PINNED P13's spirit
+  ("don't leave Dustin to relaunch a stale exe"); P13's literal
+  text enumerates Rust-side change categories (migrations / worker
+  pipeline / IPC) but the actual invariant is "if the user's
+  relaunched exe won't carry the fix without a rebuild, rebuild."
+  For Tauri apps with embedded dist, that includes EVERY UI change
+  that touches `ui/dist/` output. Should be a category (d) added
+  to P13.
+- **Finding 3 — Hardcoded version literals in UI source are a
+  predictable stale-display incident. Tauri's runtime
+  `getVersion()` is the source-of-truth, and reading it via the
+  app boot path makes the manifest the only place a version can
+  live.** The pre-fix sidebar had a literal `v0.1.0` in JSX. The
+  v0.2.0-beta.1 release wave bumped all four manifests + rebuilt
+  the UI bundle + rebuilt the exe + verified ProductVersion via
+  PE metadata — but did NOT audit JSX literals because there's
+  no obvious reason to. Hardcoded version strings are
+  grep-discoverable in principle but easy to miss in practice.
+  Tauri exposes `getVersion()` from `@tauri-apps/api/app` (IPC
+  `plugin:app|version`), which reads from the same
+  `tauri.conf.json` that stamps ProductVersion on the exe. Using
+  it as the runtime source-of-truth means manifest bumps
+  automatically flow to UI display with no JSX-audit step.
+  Vite-import from `package.json` is the second-best option
+  (build-time accuracy + zero IPC roundtrip) but loses the
+  guarantee that the displayed string matches the OS-stamped
+  `ProductVersion`. Pattern: for any value that is also baked
+  into binary metadata, prefer the runtime API that reads the
+  same source over a build-time import.
+- **Action (mechanical):**
+  1. Replace `Promise.all` in App boot with `Promise.allSettled` +
+     extract to a pure `bootApp(api, setters, options)` helper
+     for unit testability.
+  2. Add an `appVersion: string | null` store slice hydrated via
+     `fetchAppVersion()` which dynamic-imports
+     `@tauri-apps/api/app::getVersion` when `isTauri()`, falls
+     back to `"dev"` otherwise, honors
+     `window.__MOCKINGBIRD_FIXTURES__.app_version` for tests.
+  3. Sidebar reads `appVersion` from the store; renders
+     `v${appVersion}` or a thin-space (`\u2009`) placeholder while
+     null (no reflow on resolution).
+  4. AGENTS.md / LESSONS P13 should grow a category (d): "if the
+     wave touched `ui/**` output AND a user is expected to launch
+     the release exe, `cargo build --release` IS mandatory because
+     Tauri's `frontendDist` embeds the bundle at build time."
+- **Files touched:** `ui/src/lib/appVersion.ts` (new, 45 LoC),
+  `ui/src/lib/appVersion.test.ts` (new, 47 LoC),
+  `ui/src/lib/bootApp.ts` (new, 132 LoC),
+  `ui/src/lib/bootApp.test.ts` (new, 222 LoC),
+  `ui/src/lib/store.ts` (+18 LoC: appVersion slice),
+  `ui/src/App.tsx` (-30/+27 LoC: delegate to bootApp),
+  `ui/src/components/Sidebar.tsx` (-3/+9 LoC: read store, drop literal).
+- **Gates:** `npx tsc --noEmit` GREEN, `npm test` GREEN (143 prior
+  + 4 appVersion + 7 bootApp = **154/154**), `npm run build` GREEN,
+  `cargo fmt --check` GREEN, `cargo clippy --release -- -D warnings`
+  GREEN, `cargo check --release --tests` GREEN,
+  `cargo build --release` GREEN (3m 28s; fresh exe mtime 6/3 10:02,
+  beating prior release exe at 6/3 06:42; ProductVersion confirmed
+  `0.2.0-beta.1`). Bundle inspection confirms new `app-*.js` chunk
+  contains `plugin:app|version` IPC call AND `findstr v0.1.0` over
+  `ui/dist/assets/*.js` returns empty (no hardcoded literal
+  survived).
+- **Body, broad-implication** — Finding 2 retroactively applies to
+  every prior UI-only fix on this Tauri app (the smoke brief's
+  guidance was wrong; treat any UI dist update as P13-triggering);
+  Finding 1 (`Promise.all` short-circuit + per-page hydration
+  masking) generalizes to ANY app with a multi-IPC boot fetch;
+  Finding 3 (runtime version IPC over hardcoded literal) is the
+  load-bearing version-display contract for the life of the
+  project. Should consider promoting Finding 2 to PINNED as an
+  expansion of P13.
 
 ## 2026-06-08 [KG Phase 1E Wave 1E.9 / mb-kazi / PHASE 1E SEAL via dual ADR 0053 + 0054 Accepted] Authoring four invariant judges surfaced two non-obvious findings worth keeping: a slug-vs-canonical-name column trap in `kg_entity_mentions`, and a clippy needless-borrow trap that's specific to `impl Display` error-helper functions
 

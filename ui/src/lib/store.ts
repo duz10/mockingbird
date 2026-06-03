@@ -34,6 +34,14 @@ interface AppState {
    * without an app restart.
    */
   kgGraphEnabled: boolean | null;
+  /**
+   * `mb-v7pd` (v0.2.0-beta.1 smoke fix Bug 3) — runtime-resolved app
+   * version string (e.g. `"0.2.0-beta.1"`). Sourced from Tauri's
+   * `getVersion()` IPC at app boot so the sidebar can never display
+   * a hardcoded stale literal again. `null` until boot resolves;
+   * see `lib/appVersion.ts`.
+   */
+  appVersion: string | null;
   // History view's selected session detail (cleared on route change away).
   selectedSession: SessionDetail | null;
 
@@ -41,6 +49,7 @@ interface AppState {
   setActiveModeSlug: (slug: string | null) => void;
   setSettings: (settings: SettingsSnapshot | null) => void;
   setKgGraphEnabled: (on: boolean | null) => void;
+  setAppVersion: (v: string | null) => void;
   setSelectedSession: (s: SessionDetail | null) => void;
   applyTheme: (theme: ThemeChoice) => void;
 }
@@ -50,11 +59,13 @@ export const useAppStore = create<AppState>((set) => ({
   activeModeSlug: null,
   settings: null,
   kgGraphEnabled: null,
+  appVersion: null,
   selectedSession: null,
   setModes: (modes) => set({ modes }),
   setActiveModeSlug: (slug) => set({ activeModeSlug: slug }),
   setSettings: (settings) => set({ settings }),
   setKgGraphEnabled: (on) => set({ kgGraphEnabled: on }),
+  setAppVersion: (v) => set({ appVersion: v }),
   setSelectedSession: (s) => set({ selectedSession: s }),
   applyTheme: (theme) => {
     if (typeof document === "undefined") return;
