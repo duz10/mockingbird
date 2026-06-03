@@ -10,7 +10,44 @@
 
 # Mockingbird — STATUS
 
-**Last consolidated:** 2026-06-08 (**KG PHASE 1E SEALED via dual ADR 0053 +
+**Last consolidated:** 2026-06-08 (**v0.2.0-beta.1 TAGGED — first public beta**;
+Phase 1F / `mb-udkb`). Bumps `0.1.0` -> `0.2.0-beta.1` across all four
+project manifests (`Cargo.toml`, `ui/package.json`, `ui/package-lock.json`,
+`src-tauri/tauri.conf.json`). CHANGELOG.md rewritten from stale
+"Unreleased / v0.1.0 ships at end of Phase 7" stub into a proper
+Keep-a-Changelog entry summarizing the full shipped surface across
+Phases 0/1/2/3/4/8/10 + Phase MC + ADR-chartered lateral epics including
+the full KG epic (ADRs 0049 -> 0050 -> 0051 -> 0052 -> 0053 + 0054).
+README.md moderate-polished to current shipped state: dropped the
+"phase-0-groundwork / pre-alpha" badges + callout, replaced "What it is"
+with the three-capability framing (dictation + meeting capture + PKE
+capture substrate) plus the load-bearing two-agent role separation
+(Mockingbird = capture + first-pass synthesis layer; user's chat-LLM =
+wiki author; Obsidian vault = knowledge codebase) per LESSONS PINNED
+P14, refreshed Quickstart to use the `run-mockingbird.ps1` launcher +
+models-dir convention, updated repo layout to reflect current on-disk
+structure. All gates GREEN: `npm run build` + `npx tsc --noEmit` + `npm
+test` (143/143) + `cargo fmt --check` + `cargo clippy --release -- -D
+warnings` + `cargo check` + `cargo test --release --no-run` (20 test
+binaries linked clean including all four Wave 1E.9 KG judges) + `cargo
+build --release` MANDATORY per PINNED P13 (workspace `Cargo.toml`
+version touched). Fresh `target/release/mockingbird.exe` stamped
+`ProductVersion: 0.2.0-beta.1` + `FileVersion: 0.2.0-beta.1`. Three
+standing KG regression invariants re-confirmed GREEN: `kg_parity` 32/32,
+`kg_source_gate_invariant` 6/6 (2 enqueues across 6 corpus cells —
+Dictation NEVER enqueues regardless of toggle, kg-note + toggle-on
+enqueues), `kg_graph_off_invariant` 8/8 InjectionOutcome variants ×
+(Dictation, KgNote) + positive control. Annotated tag
+`v0.2.0-beta.1` placed (`git tag -a`). Three follow-up beads filed +
+linked to `mb-udkb`: Phase 1F (b) Win11 smoke matrix, (c) installer +
+updater verification, (d) marketing-shaped privacy + docs polish.
+`mb-udkb` closed. **No `phase-*-complete` tag** — this is a release
+marker, not a PLAN §10 phase (per LESSONS PINNED P5). **Resume:** ready
+for end-user smoke on the beta build. Next available work is Phase 2
+charter draft (`mb-fqg1`) + the three new 1F follow-up beads + standing
+follow-ups (`mb-qw7n` classifier prompt realignment, `mb-ngtv`
+Tasks-plugin checkbox default OFF, `mb-y5ln`, `mb-5oxg`). Prior
+consolidation 2026-06-08 (**KG PHASE 1E SEALED via dual ADR 0053 +
 ADR 0054 Accepted (Wave 1E.9 / `mb-kazi`).** All four judges shipped + GREEN:
 J1 `kg-reverse-watcher-loop-prevention` (sibling-module Rust probe in
 `vault/judges_phase_1e/loop_prevention.rs`; bin `kg_reverse_watcher_loop_prevention`;
@@ -216,6 +253,7 @@ Prior consolidation 2026-06-06 (**KG Phase 1E Wave 1E.5 shipped** — reverse-wa
 | `phase-mc-complete`      | Meeting Capture subsystem: chord activation, twin-stream capture, long-form chunked Whisper, deterministic formatter, two-channel merge, ephemeral LLM pass, overlay UI, Meetings/MeetingDetail pages, 5 invariant judges. |
 | `stable-alpha-v0.1`      | First user-visible stable build. MC subsystem at UX parity with PLAN (start/pause/stop/cancel/rename/auto-title/search/delete/export). Insights two-tab redesign. On-demand LLM pass on dictations. Reference checkpoint for distinguishing pre-/post-enhancement work in future sessions. |
 | `phase-10-complete`      | Activity Capture sibling subsystem (ADR 0036). Foreground polling + idle tracking + UIA v2 snapshots → LLM block summarization → optional per-block audio transcription → retention sweep + crash recovery + PDF export + capture-time exclusion. Unified Recording Command Center (ADR 0037) as the front door for both Dictation and Meeting Capture. 22 modules under `src-tauri/src/activity/`, migrations 012-015, 6 invariant judges (`docs/judges/phase-10/`) gated the seal. **Live-fire Win11 smoke test pending Dustin — judges don't catch live-OS regressions (LESSONS P7 pattern).** ADR 0038 (encryption-at-rest) RESERVED for v0.2. |
+| `v0.2.0-beta.1` (release)| **First publicly-tagged build** (2026-06-08, `mb-udkb` / Phase 1F). Bumps `0.1.0` → `0.2.0-beta.1` across `Cargo.toml`, `ui/package.json`, `ui/package-lock.json`, `src-tauri/tauri.conf.json`. Captures the full shipped surface at this snapshot: Phases 0/1/2/3/4/8/10 + Phase MC + ADR-chartered lateral epics including the full KG epic (ADRs 0049 → 0050 → 0051 → 0052 → 0053 + 0054). Annotated tag (`git tag -a v0.2.0-beta.1`). Exe `target/release/mockingbird.exe` ProductVersion + FileVersion both stamped `0.2.0-beta.1`. Three follow-ups filed against this release (Win11 smoke matrix, installer/updater verification, marketing-shaped privacy + docs polish). |
 
 **Lateral epics accepted via ADR** (no new phase tag — see `docs/adr/`):
 
@@ -251,17 +289,22 @@ the conflict before any tool call. See `.code_puppy/AGENTS.md` § "Permanently s
 
 ## 🟢 Currently active
 
-**Nothing is in flight.** KG Phase 1E sealed jointly via ADR 0053 +
-ADR 0054 Accepted (Wave 1E.9, 2026-06-08, `mb-kazi` closed). All
-four Wave 1E.9 judges GREEN, three standing regression invariants
-GREEN, dual ADR seal landed in a single atomic commit per the
-joint-seal mechanic.
+**Nothing is in flight.** `v0.2.0-beta.1` tagged 2026-06-08 (Phase 1F /
+`mb-udkb` closed). All gates GREEN, fresh release binary stamped
+`ProductVersion: 0.2.0-beta.1`, three standing KG regression invariants
+GREEN (`kg_parity` 32/32, `kg_source_gate` 6/6, `kg_graph_off` 8/8).
+Ready for end-user smoke on the beta build.
 
 **Available next-up work** (pick one; none are urgent):
 
+- **Phase 1F follow-ups** (filed against `v0.2.0-beta.1` release; linked
+  to `mb-udkb`):
+  - `mb-jbi0` — Win11 smoke matrix verification across Win11 builds. P2.
+  - `mb-h1n9` — Installer + updater verification (MSI + auto-update). P2.
+  - `mb-n40v` — Marketing-shaped privacy + docs polish for v1 launch. P3.
 - `mb-fqg1` — Phase 2 charter draft (chat-LLM Ingest / Query / Lint
-  authoring against the now-shipped vault substrate). Largest
-  available container; will want its own ADR.
+  authoring against the now-shipped vault substrate). Largest available
+  container; will want its own ADR.
 - `mb-qw7n` — classifier prompt realignment to the nine-knowledge-shape
   vocabulary (§G of ADR 0054). Currently the parser tolerates legacy
   `task`/`event` values; this bead collapses the writer-side strictness

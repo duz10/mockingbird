@@ -1,9 +1,10 @@
 # Mockingbird — Product State
 
-**Snapshot date:** 2026-06-08 (**KG Phase 1E SEALED via dual ADR 0053 + ADR 0054
-Accepted — full Karpathy/Clark Personal Knowledge Engine substrate shipped**;
-Phase 10 sealed; MC sealed)
-**Branch:** `main` (Wave 1E.9 seal commit — see `git log --grep='Phase 1E SEALED'`)
+**Snapshot date:** 2026-06-08 (**v0.2.0-beta.1 TAGGED — first public beta**;
+KG Phase 1E sealed via dual ADR 0053 + ADR 0054 Accepted — full Karpathy/Clark
+Personal Knowledge Engine substrate shipped; Phase 10 sealed; MC sealed)
+**Current released version:** `v0.2.0-beta.1` (2026-06-08, first publicly-tagged build)
+**Branch:** `main` (release tag at `v0.2.0-beta.1`; Wave 1E.9 seal commit — see `git log --grep='Phase 1E SEALED'`)
 **Maturity:** Phase 0-4 + Phase 8 + Phase 10 sealed; Meeting Capture (MC) sealed;
 Knowledge Graph Phase 1A → 1E **fully sealed** under ADR 0049 lineage (Phase 1A
 sealed via ADR 0049 Accepted; Phase 1B sealed via ADR 0050 Accepted; Phase 1C sealed
