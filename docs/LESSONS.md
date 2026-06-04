@@ -6615,3 +6615,109 @@ Four small things that bit during 1C.3 backend authoring + qa-spec authoring (qa
 - **No-version-bump:** This is a diagnostic + triage wave on top of mb-v7pd / v0.2.0-beta.1. Same tag.
 - **What the next repro needs to include:** (a) exe mtime at time of error; (b) the Rust-side log file from the same session (especially the `managed-state registered state=AppState site=lib.rs:setup` line); (c) the JS-side console output if devtools are open (`App boot: <command> failed` warnings from `bootApp`'s default logger).
 - **Tag:** triage, static-analysis, anti-pattern, ralph-discipline, repro-provenance, tauri, state-management, sidebar, mb-v7pd-followup
+
+---
+
+
+## 2026-06-04 [mb-1z0m / v0.2.0-beta.1 Round 3] Symptom-vs-runtime conflict: instrument before refactoring, even when the prior round said "fix works"
+
+- **Context:** Round 2 (mb-9rgx) shipped the bootApp `Promise.allSettled` fix
+  + a single `tracing::info!` post-`app.manage(AppState)` as a triage
+  breadcrumb. Round 2.5 audited the runtime log, found the breadcrumb fired
+  cleanly on the 16:37 / 16:55 boots, and concluded the fix shipped + the
+  bug screenshots were stale-binary artifacts. Round 3 arrived with: a
+  fresh screenshot (Dustin had just relaunched) STILL showing "state not
+  managed for field `db` on command `insights_snapshot`" in the Insights
+  page body, sidebar mode label absent, KG tab absent. So the runtime
+  UI contradicted the static-analysis-plus-runtime-log conclusion.
+
+- **Finding:** When static analysis on HEAD says "no bug here" and the
+  runtime log shows clean setup-completion but the user's screenshot
+  disagrees, the right move is NEITHER "the user is wrong, stale screenshot"
+  NOR "refactor on a hypothesis". The right move is ADDITIVE instrumentation
+  whose presence/absence in the log disambiguates the runtime state. The
+  Round 2 breadcrumb (`managed-state registered`) only proved THE CODE
+  LINE FIRED. It did NOT prove (a) the State extractor can retrieve
+  AppState afterward, (b) nothing nukes AppState between line 137 and
+  end-of-setup, (c) IPC handlers fire their function body. Each is a
+  separate observable, each needs its own diagnostic line.
+
+- **Action:** Round 3 shipped four ADDITIVE diagnostics, no refactor:
+  1. `app.try_state::<AppState>()` probe immediately after
+     `app.manage(...)` (`post_manage_probe` field on the existing
+     tracing::info!). Distinguishes "manage call ran" from "StateManager
+     holds AppState retrievable by TypeId".
+  2. Second `try_state` probe at end-of-setup (`end_setup_probe`).
+     Catches mid-setup nuking (a second manage of a different type
+     masking the slot, a replaced StateManager, etc.).
+  3. `tracing::info!` at the first line of `insights_snapshot`'s
+     function body. Proves the `State<AppStateHandle>` extractor succeeded
+     (if extractor fails, the function body never runs and this line
+     is absent from the log).
+  4. New state-free `report_ipc_status(label, ok, reason)` IPC +
+     JS-side wiring in `bootApp.ts` + `Insights.tsx`. Mirrors every
+     boot IPC outcome AND Insights' outcome into the Rust log so JS-side
+     `console.warn` failures stop being DevTools-only (the P3
+     observability papercut from Round 2.5 retro). State-free signature
+     is deliberate: the command dispatches even when the AppState slot
+     is the broken thing we're diagnosing.
+
+- **Process meta-lesson:** Round 2.5's "fix works, relaunch" verdict was
+  defensible at the time, but the diagnostic set in place was thin
+  (one breadcrumb, one observable). Whenever a round's repro report
+  CONTRADICTS the prior round's static-analysis conclusion, do not
+  re-litigate static analysis. The contradiction itself is the signal
+  that the OBSERVABLE SET IS TOO SPARSE. The fix is more observables,
+  not more hypotheses. The 5-attempt rule and the "instrument before
+  refactor" discipline (mb-9rgx LESSONS entry) compose: round N+1 of
+  a triage spiral should add observables proportional to the
+  hypothesis surface area, not jump to a refactor on the first
+  intuition.
+
+- **Files touched:** `src-tauri/src/lib.rs` (+18: 2 try_state probes +
+  tracing fields), `src-tauri/src/commands/system.rs` (+22:
+  report_ipc_status), `src-tauri/src/commands/mod.rs` (+2: register),
+  `src-tauri/src/commands/insights.rs` (+10: function-entry
+  tracing::info!), `ui/src/lib/tauri.ts` (+17: wrapper + fixture),
+  `ui/src/lib/bootApp.ts` (+25: reportStatus option, 5 success
+  mirrors, 5 failure mirrors), `ui/src/App.tsx` (+13: wire
+  reportStatus), `ui/src/pages/Insights.tsx` (+10: mirror
+  insights_snapshot outcome).
+
+- **Gates (all GREEN):** `cargo fmt --check`, `cargo clippy --release
+  -- -D warnings`, `cargo test --release --no-run` (link surface OK
+  for all 21 test bins), `cargo build --release` (fresh exe at
+  2026-06-03 19:39:40, 53,634,048 bytes -- P13 mandatory because the
+  IPC surface gained one entry), `npx tsc --noEmit`, `npm test`
+  (154/154), `npm run build` (vite OK, 448 modules transformed).
+
+- **No-version-bump:** Diagnostic-additive on top of mb-9rgx /
+  v0.2.0-beta.1. Same tag. The new `report_ipc_status` command stays
+  even after the root cause is identified -- it's load-bearing
+  observability per the P3 papercut.
+
+- **What the next repro needs:** Dustin relaunches via
+  `scripts\run-mockingbird.ps1 -Force` (Force kills any stale instance),
+  reproduces Bug 4 (navigate to Insights, screenshot the error), then
+  shares the corresponding `mockingbird.log.<today>` lines. The log
+  will EITHER show:
+  * `post_manage_probe=true end_setup_probe=true` + `ipc::report
+    list_modes rejected reason=state not managed` (== root cause is
+    post-setup IPC dispatch, NOT setup-time wiring -- next round
+    investigates Tauri 2 internals like webview-bound state isolation,
+    multi-window state-manager scoping, or a Tauri 2 IPC-dispatch race
+    we haven't predicted), OR
+  * `post_manage_probe=true end_setup_probe=false` (== something
+    between line 137 and end-of-setup nukes AppState -- audit
+    intervening code: dictation runtime spawn, vault runtime
+    construction, command-center wiring), OR
+  * `post_manage_probe=false` (== `app.manage()` silently doesn't
+    register against the same TypeId the extractor uses -- a Tauri 2
+    bug or a duplicate-AppState-definition smell, NEITHER of which
+    static analysis on HEAD currently sees), OR
+  * No log lines from this boot at all (== Dustin's launcher is still
+    pointing at a stale exe -- run `Get-Item target\release\mockingbird.exe
+    | Select LastWriteTime` against 2026-06-03 19:39:40).
+
+- **Tag:** triage, instrumentation, ralph-discipline, tauri,
+  state-management, observability, mb-9rgx-followup, mb-1z0m

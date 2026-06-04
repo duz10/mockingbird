@@ -135,15 +135,22 @@ pub fn run() {
             // WAL mode (set in Database::open) makes parallel access safe.
             let shared_conn = Arc::new(Mutex::new(database.conn));
             app.manage(AppState::new(shared_conn.clone()));
-            // mb-9rgx — boot-time diagnostic so future repros of
-            // "state not managed for field db" can be triaged from
-            // the log alone. AppState is the load-bearing DB-handle
-            // state every IPC depends on; logging it here proves it
-            // entered the StateManager before any window/IPC could
-            // fire (windows are constructed AFTER setup returns Ok).
+            // mb-9rgx + mb-1z0m (Round 3) — boot-time diagnostic so future
+            // repros of "state not managed for field db" can be triaged from
+            // the log alone. AppState is the load-bearing DB-handle state
+            // every IPC depends on; logging it here proves it entered the
+            // StateManager before any window/IPC could fire (windows are
+            // constructed AFTER setup returns Ok). The `post_manage_probe`
+            // value below is the Round 3 add: it round-trips the freshly-
+            // registered state through `try_state::<AppState>()` so we
+            // distinguish "manage call ran" from "StateManager actually
+            // holds AppState retrievable by TypeId". They SHOULD be the
+            // same; if they ever diverge that's the smoking gun.
+            let post_manage_probe = app.try_state::<AppState>().is_some();
             tracing::info!(
                 state = "AppState",
                 site = "lib.rs:setup",
+                post_manage_probe,
                 "managed-state registered"
             );
 
@@ -551,6 +558,22 @@ pub fn run() {
             // is_meeting_hotkey_paused()` to set the initial checkmark
             // on "Pause Meeting Hotkey".
             tray::register(app).map_err(box_err)?;
+
+            // mb-1z0m (Round 3) — end-of-setup probe. If `post_manage`
+            // succeeded but THIS one fails, something between line 137
+            // and here nuked AppState (a duplicate manage of a different
+            // type masking the slot, a replaced StateManager, etc.). If
+            // BOTH succeed but UI-time IPCs still see "state not managed",
+            // the failure is post-setup (IPC dispatcher / window bound
+            // state isolation) — the next round investigates Tauri 2
+            // internals, not setup-time wiring.
+            let end_setup_probe = app.try_state::<AppState>().is_some();
+            tracing::info!(
+                state = "AppState",
+                site = "lib.rs:end_of_setup",
+                end_setup_probe,
+                "managed-state end-of-setup probe"
+            );
 
             Ok(())
         });

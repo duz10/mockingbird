@@ -24,6 +24,15 @@ const TYPING_WPM: f64 = 40.0;
 
 #[tauri::command]
 pub fn insights_snapshot(db: State<'_, AppStateHandle>) -> Result<InsightsSnapshot, String> {
+    // mb-1z0m (Round 3) -- the Tauri State<AppStateHandle> extractor
+    // ran successfully if we reached this line. If the log shows
+    // `insights_snapshot: entered` but the UI still renders the
+    // "state not managed" string, the bug is JS-side (stale error
+    // displayed by Insights React state) or a different IPC failing
+    // first that the screenshot misattributes. If this line is
+    // ABSENT from the log on a boot the UI shows the error, the
+    // State extractor failed (the smoking-gun runtime confirmation).
+    tracing::info!(target: "ipc::insights", "insights_snapshot: entered");
     let conn = lock_db(&db)?;
 
     let today = today_block(&conn).map_err(into_err)?;

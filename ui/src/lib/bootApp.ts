@@ -69,6 +69,12 @@ interface BootOptions {
   /** Logger for individual IPC failures. Defaults to `console.warn`.
    *  Tests pass `() => {}` to keep output clean. */
   log?: (msg: string, err: unknown) => void;
+  /** mb-1z0m (Round 3) -- fire-and-forget per-IPC outcome reporter,
+   *  invoked for BOTH fulfilled and rejected results. Defaults to a
+   *  no-op so tests don't need an IPC mock. Production wires this to
+   *  `api.report_ipc_status` so each boot IPC's outcome lands in
+   *  `mockingbird.log` (not just DevTools). */
+  reportStatus?: (label: string, ok: boolean, reason?: string) => void;
 }
 
 /**
@@ -88,6 +94,7 @@ export async function bootApp(
     console.warn(msg, err);
   });
   const fetchVersion = options.fetchVersion ?? fetchAppVersion;
+  const reportStatus = options.reportStatus ?? (() => {});
 
   const [modesRes, settingsRes, activeModeRes, kgSettingsRes, versionRes] =
     await Promise.allSettled([
@@ -98,35 +105,55 @@ export async function bootApp(
       fetchVersion(),
     ]);
 
+  // mb-1z0m (Round 3) -- mirror EACH outcome into the Rust log via
+  // `reportStatus`. Two reasons we report both `fulfilled` and
+  // `rejected`:
+  //   1) Diagnosing a state-extractor failure needs to distinguish
+  //      "all 4 DB-state IPCs failed but fetchAppVersion succeeded"
+  //      (== AppState slot broken) from "everything failed" (==
+  //      something deeper) from "nothing failed" (== stale-screenshot
+  //      misattribution after all).
+  //   2) The success line is a load-bearing breadcrumb for future
+  //      "why did this IPC not log anything?" investigations.
   if (modesRes.status === "fulfilled") {
     setters.setModes(modesRes.value);
+    reportStatus("list_modes", true);
   } else {
     log("App boot: list_modes failed", modesRes.reason);
+    reportStatus("list_modes", false, String(modesRes.reason));
   }
 
   if (settingsRes.status === "fulfilled") {
     setters.setSettings(settingsRes.value);
     setters.applyTheme(settingsRes.value.theme);
+    reportStatus("get_settings", true);
   } else {
     log("App boot: get_settings failed", settingsRes.reason);
+    reportStatus("get_settings", false, String(settingsRes.reason));
   }
 
   if (activeModeRes.status === "fulfilled") {
     setters.setActiveModeSlug(activeModeRes.value.slug);
+    reportStatus("get_active_mode", true);
   } else {
     log("App boot: get_active_mode failed", activeModeRes.reason);
+    reportStatus("get_active_mode", false, String(activeModeRes.reason));
   }
 
   if (kgSettingsRes.status === "fulfilled") {
     setters.setKgGraphEnabled(kgSettingsRes.value.kgGraphEnabled);
+    reportStatus("kg_settings_get_all", true);
   } else {
     log("App boot: kg_settings_get_all failed", kgSettingsRes.reason);
+    reportStatus("kg_settings_get_all", false, String(kgSettingsRes.reason));
   }
 
   if (versionRes.status === "fulfilled") {
     setters.setAppVersion(versionRes.value);
+    reportStatus("fetchAppVersion", true);
   } else {
     log("App boot: fetchAppVersion failed", versionRes.reason);
+    reportStatus("fetchAppVersion", false, String(versionRes.reason));
   }
 
   return {

@@ -45,8 +45,17 @@ export function InsightsPage() {
       try {
         const s = await api.insights_snapshot();
         if (!cancelled) setSnap(s);
+        // mb-1z0m (Round 3) -- mirror success to the Rust log so we
+        // can correlate UI symptoms against the actual IPC outcome.
+        void api.report_ipc_status("insights_snapshot", true).catch(() => {});
       } catch (e) {
         if (!cancelled) setErr(String(e));
+        // mb-1z0m (Round 3) -- mirror failure with the rejection
+        // string so the Rust log shows the exact Tauri error message
+        // (e.g. "state not managed for field `db` ...").
+        void api
+          .report_ipc_status("insights_snapshot", false, String(e))
+          .catch(() => {});
       }
     })();
     return () => {

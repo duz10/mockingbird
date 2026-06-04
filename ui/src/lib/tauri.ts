@@ -363,6 +363,19 @@ export const api = {
   list_installed_models: () =>
     invoke<string[]>("list_installed_models"),
 
+  /**
+   * mb-1z0m (Round 3) -- fire-and-forget IPC-outcome mirror so JS-side
+   * `console.warn` failures also land in `mockingbird.log`. Takes no
+   * managed state on the Rust side, so it dispatches even when the
+   * AppState slot is the broken thing we're diagnosing.
+   *
+   * Callers should NOT await this and should swallow its own errors --
+   * losing the diagnostic line is strictly less bad than crashing
+   * boot on a meta-diagnostic failure.
+   */
+  report_ipc_status: (label: string, ok: boolean, reason?: string) =>
+    invoke<void>("report_ipc_status", { label, ok, reason: reason ?? null }),
+
   /** ADR 0045 — programmatic dictation start. Equivalent to pressing
    *  Right Alt (push-to-talk); the orchestrator runs the same code
    *  path. Returns once the synthetic event has been queued; the
@@ -648,6 +661,9 @@ function fixtureFor<T>(command: string, args?: object): T {
         "qwen2.5:3b-instruct-q4_K_M",
         "gemma2:2b-instruct-q4_K_M",
       ]) as T;
+    case "report_ipc_status":
+      // mb-1z0m (Round 3) -- fire-and-forget; nothing to fixture.
+      return fixture(command, null) as T;
     case "dictation_run_llm_pass":
       return fixture(command, {
         id: "fixture-dictation-llm-pass-id",

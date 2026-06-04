@@ -65,6 +65,38 @@ pub fn app_paths() -> Result<AppPaths, String> {
     })
 }
 
+/// mb-1z0m (Round 3) — fire-and-forget JS→Rust mirror so IPC outcomes
+/// (success AND failure) land in `mockingbird.log` instead of only in
+/// DevTools' `console.warn`. Deliberately takes NO `State<>` parameter
+/// so it dispatches even when the AppState-managed-state slot is the
+/// broken thing we're trying to diagnose.
+///
+/// Used by:
+///   * `ui/src/lib/bootApp.ts` — mirrors each of the 5 boot IPC outcomes.
+///   * `ui/src/pages/Insights.tsx` — mirrors the `insights_snapshot` outcome.
+///
+/// Labels are free-form short ASCII strings (IPC name); reasons are the
+/// stringified rejection (or `None` on success). `tracing::info!` on
+/// success keeps the boot trail readable; `tracing::warn!` on failure
+/// so the line is greppable as a problem.
+///
+/// Once Round 3's diagnosis lands and the bug is fixed, this command
+/// stays (it's load-bearing observability per the recent-context P3
+/// papercut: IPC failures should not be DevTools-only).
+#[tauri::command]
+pub fn report_ipc_status(label: String, ok: bool, reason: Option<String>) {
+    if ok {
+        tracing::info!(target: "ipc::report", %label, "boot/IPC fulfilled");
+    } else {
+        tracing::warn!(
+            target: "ipc::report",
+            %label,
+            reason = reason.as_deref().unwrap_or("<no reason>"),
+            "boot/IPC rejected"
+        );
+    }
+}
+
 /// List the local Ollama tags via `GET /api/tags`. Used by the Modes
 /// editor's per-mode model dropdown — UI populates the `<select>`
 /// options with whatever the user actually has installed, so we

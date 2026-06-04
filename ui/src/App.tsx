@@ -35,14 +35,26 @@ export function App({ children }: AppProps) {
   // item absent on launch); see `lib/bootApp.ts` for the full
   // pattern-fix rationale.
   useEffect(() => {
-    void bootApp(api, {
-      setModes,
-      setSettings,
-      setActiveModeSlug,
-      setKgGraphEnabled,
-      setAppVersion,
-      applyTheme,
-    });
+    void bootApp(
+      api,
+      {
+        setModes,
+        setSettings,
+        setActiveModeSlug,
+        setKgGraphEnabled,
+        setAppVersion,
+        applyTheme,
+      },
+      {
+        // mb-1z0m (Round 3) -- mirror every boot-IPC outcome to the
+        // Rust log via `report_ipc_status`. Fire-and-forget; if the
+        // mirror itself rejects we deliberately swallow it (failing
+        // the diagnostic is strictly less bad than crashing boot).
+        reportStatus: (label, ok, reason) => {
+          void api.report_ipc_status(label, ok, reason).catch(() => {});
+        },
+      },
+    );
   }, [
     setModes,
     setSettings,
