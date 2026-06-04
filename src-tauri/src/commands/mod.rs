@@ -127,6 +127,8 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         system::list_installed_models,
         // mb-1z0m (Round 3) — JS→Rust IPC-outcome mirror.
         system::report_ipc_status,
+        // mb-1z0m (Round 4) — React mount beacon (no state, no args).
+        system::react_mounted,
         // Meetings (Phase MC Wave 4 — 10 commands per Section MC.6;
         // Phase MC Wave 5 — +2 for the tray pause-toggle wiring).
         meetings::meeting_probe_sources,

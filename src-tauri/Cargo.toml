@@ -101,6 +101,15 @@ proptest  = { workspace = true }
 mockall   = { workspace = true }
 criterion = { workspace = true }
 
+# mb-1z0m Round 4 fix gate — enables `tauri::test::mock_builder` /
+# `mock_context` / `noop_assets` for the `state_extractor_sees_*`
+# regression test in `src-tauri/src/lib.rs`. Dev-dep + workspace
+# resolver=2 means the `test` feature does NOT leak into the
+# `cargo build --release` graph — only `cargo test`/`--no-run`
+# pulls it in. See lib.rs::tests for the exact failure-mode the
+# gate protects against.
+tauri     = { workspace = true, features = ["test"] }
+
 # Phase 10 Wave 6 — PDF round-trip verification for the
 # `pdf-renders-correct-block-count` judge (ADR 0044). Test-only;
 # the runtime binary has no business parsing PDFs.

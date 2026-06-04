@@ -376,6 +376,14 @@ export const api = {
   report_ipc_status: (label: string, ok: boolean, reason?: string) =>
     invoke<void>("report_ipc_status", { label, ok, reason: reason ?? null }),
 
+  /** mb-1z0m (Round 4) -- React-mount beacon. Fired from a useEffect
+   *  at the top of `App.tsx` as the FIRST thing after the React root
+   *  commits. If a `ipc::react` line appears in `mockingbird.log`,
+   *  React rendered. If not, the React tree never mounted (and any
+   *  state-not-managed UI symptoms in screenshots are from a prior
+   *  process, not this boot). No state, no params, no return. */
+  react_mounted: () => invoke<void>("react_mounted"),
+
   /** ADR 0045 — programmatic dictation start. Equivalent to pressing
    *  Right Alt (push-to-talk); the orchestrator runs the same code
    *  path. Returns once the synthetic event has been queued; the
@@ -663,6 +671,9 @@ function fixtureFor<T>(command: string, args?: object): T {
       ]) as T;
     case "report_ipc_status":
       // mb-1z0m (Round 3) -- fire-and-forget; nothing to fixture.
+      return fixture(command, null) as T;
+    case "react_mounted":
+      // mb-1z0m (Round 4) -- fire-and-forget beacon; nothing to fixture.
       return fixture(command, null) as T;
     case "dictation_run_llm_pass":
       return fixture(command, {

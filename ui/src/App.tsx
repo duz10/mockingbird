@@ -28,6 +28,16 @@ export function App({ children }: AppProps) {
   const setAppVersion = useAppStore((s) => s.setAppVersion);
   const applyTheme = useAppStore((s) => s.applyTheme);
 
+  // mb-1z0m (Round 4) -- React-mount beacon. Fires the no-state
+  // `react_mounted` IPC the FIRST thing after the root commits,
+  // BEFORE bootApp's 5-call fan-out. If a future `ipc::react` line
+  // appears in `mockingbird.log` we know React rendered; if not,
+  // chasing IPC-state bugs is looking under the wrong streetlight.
+  // Fire-and-forget; do NOT block boot on the diagnostic.
+  useEffect(() => {
+    void api.react_mounted().catch(() => {});
+  }, []);
+
   // Boot — hydrate cross-route state from IPC. Each setter fires
   // independently in `bootApp`: a single rejected IPC does NOT
   // suppress the others. This is the `mb-v7pd` smoke fix for Bug 1

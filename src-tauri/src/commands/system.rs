@@ -97,6 +97,31 @@ pub fn report_ipc_status(label: String, ok: bool, reason: Option<String>) {
     }
 }
 
+/// mb-1z0m (Round 4) — no-state "React first useEffect fired" beacon.
+///
+/// Round 3's `report_ipc_status` mirror only fires for outcomes of
+/// OTHER IPCs. If the React tree never mounts (or mounts but doesn't
+/// reach the useEffect that calls bootApp / insights_snapshot), the
+/// log shows zero JS-originated activity — and we can't distinguish
+/// "the React app never ran" from "the React app ran but every IPC
+/// silently failed before report_ipc_status got a chance to mirror."
+///
+/// This command is the cheapest possible disambiguator: it takes no
+/// state, no parameters, returns nothing. The JS-side caller is a
+/// `useEffect(() => { void api.react_mounted(); }, [])` at the top
+/// of `App.tsx` — the FIRST thing that fires after the React root
+/// commits. If this line lands in the log, React rendered. If it
+/// doesn't, React never mounted (and chasing IPC-state bugs is
+/// looking under the wrong streetlight).
+///
+/// Once mb-1z0m is closed and React-mount has been confirmed in the
+/// wild, this can stay as cheap boot telemetry or be removed; the
+/// pattern is the lesson, not this specific command.
+#[tauri::command]
+pub fn react_mounted() {
+    tracing::info!(target: "ipc::react", "react_mounted: shell useEffect fired");
+}
+
 /// List the local Ollama tags via `GET /api/tags`. Used by the Modes
 /// editor's per-mode model dropdown — UI populates the `<select>`
 /// options with whatever the user actually has installed, so we

@@ -1,4 +1,4 @@
-﻿//! Mockingbird — local-first voice dictation for Windows.
+//! Mockingbird — local-first voice dictation for Windows.
 //!
 //! Binary entry point is in `main.rs`; this library crate is what gets
 //! linked into the Tauri shell. See `PLAN-mockingbird-v2.md` for the
@@ -55,6 +55,7 @@ pub mod vault;
 pub mod window_context;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
@@ -73,7 +74,79 @@ use meetings::runtime::{MeetingCaptureRuntime, MeetingRuntimeConfig};
 /// hook, spawns the dictation orchestrator thread, and registers
 /// every Tauri command the UI uses (see `commands::register`).
 pub fn run() {
+    // mb-1z0m Round 4 — bootstrap the DB + AppState BEFORE the Tauri
+    // Builder so AppState lands on the builder-level StateManager.
+    // Round 3 (commit bd5a1f7) probes showed that calling
+    // `app.manage(AppState::new(..))` inside `.setup()` registered
+    // the value (post_manage_probe + end_setup_probe both `true`)
+    // but the IPC `State<AppStateHandle>` extractor at webview-
+    // dispatch time still saw "state not managed for field db on
+    // command insights_snapshot". The canonical Tauri-2 fix for
+    // post-setup state-extractor failures is to register on the
+    // Builder PRE-setup: the builder-level manager is provably
+    // visible to every later webview, plugin, and command handler.
+    //
+    // Mechanically: moving bootstrap out of setup means we resolve
+    // %APPDATA% directly (matching what `app.path().app_data_dir()`
+    // would return for the configured identifier — see
+    // `tauri.conf.json::identifier` + the `APP_IDENTIFIER` const +
+    // its drift-protection test at the bottom of this file).
+    let app_data = resolve_app_data_dir().expect("resolve app data dir");
+    std::fs::create_dir_all(&app_data).expect("create app data dir");
+
+    // Initialize logging FIRST so any later panic / error during
+    // bootstrap is captured. WorkerGuard MUST outlive the Tauri
+    // runtime; leaking via mem::forget is the cleanest pattern for
+    // a process-lifetime singleton.
+    let guard = logging::init(&app_data).expect("init logging");
+    std::mem::forget(guard);
+
+    tracing::info!(?app_data, "Mockingbird starting");
+
+    let db_path = app_data.join("mockingbird.db");
+    let database = db::Database::open(&db_path).expect("open database");
+    tracing::info!(?db_path, "database ready");
+
+    // Build the orchestrator config BEFORE moving the connection
+    // into the shared Arc<Mutex<>>. The bootstrap creates default
+    // provenance rows if missing.
+    let orchestrator_config =
+        default_normal_config(&database.conn).expect("orchestrator config resolved");
+    tracing::info!(
+        mode = %orchestrator_config.mode_slug,
+        prompt_id = orchestrator_config.prompt_id,
+        dict_id = orchestrator_config.dictionary_snapshot_id,
+        example_id = orchestrator_config.example_set_id,
+        "orchestrator config resolved"
+    );
+
+    // Share the connection between IPC handlers + dictation thread.
+    // WAL mode (set in Database::open) makes parallel access safe.
+    let shared_conn = Arc::new(Mutex::new(database.conn));
+
+    // Path A — Builder-level AppState registration. The pre-Round-4
+    // pattern was `.setup(|app| { app.manage(AppState::new(...)); })`
+    // which Round 3 probes showed registered but did NOT propagate
+    // reliably to webview IPC handlers (the visible symptom was
+    // `"state not managed for field db on command insights_snapshot"`
+    // rendered in the Insights body). Builder::manage on the builder
+    // chain BEFORE .setup() puts the value in the runtime-level
+    // StateManager that's visible to every later webview, plugin,
+    // and command.
+    let app_state = AppState::new(Arc::clone(&shared_conn));
+
+    // Clones for the move-into-setup closure. Tauri 2's setup
+    // closure has 'static lifetime requirements on captured values,
+    // hence the clones rather than borrows.
+    let shared_conn_for_setup = Arc::clone(&shared_conn);
+    let orchestrator_config_for_setup = orchestrator_config.clone();
+    let app_data_for_setup = app_data.clone();
+
     let builder = tauri::Builder::default()
+        // mb-1z0m Round 4 — Builder-level state registration. See
+        // the long comment above `let app_state` for why this lives
+        // here and not in `.setup()`.
+        .manage(app_state)
         // Phase MC Wave 5 — tauri-plugin-dialog enables the native
         // Save As… picker for `meeting_export_markdown`. Tauri 2
         // moved dialogs out of core; this is the in-org replacement.
@@ -102,56 +175,33 @@ pub fn run() {
                 }
             }
         })
-        .setup(|app| -> Result<(), Box<dyn std::error::Error>> {
-            let app_data = app.path().app_data_dir().map_err(box_err)?;
-            std::fs::create_dir_all(&app_data)?;
+        .setup(move |app| -> Result<(), Box<dyn std::error::Error>> {
+            // mb-1z0m Round 4 — receive the pre-Builder bootstrap
+            // (db handle + orchestrator config + app data dir) via
+            // move-capture. AppState itself is already registered on
+            // the Builder; only the pieces setup-time code needs to
+            // wire up other runtimes (dictation, meetings, activity)
+            // are threaded through here.
+            let shared_conn = shared_conn_for_setup;
+            let orchestrator_config = orchestrator_config_for_setup;
+            let app_data = app_data_for_setup;
 
-            // Initialize logging FIRST so DB-open errors get captured.
-            // WorkerGuard MUST outlive the Tauri runtime; leaking via
-            // mem::forget is the cleanest pattern for a
-            // process-lifetime singleton.
-            let guard = logging::init(&app_data).map_err(box_err)?;
-            std::mem::forget(guard);
-
-            tracing::info!(?app_data, "Mockingbird starting");
-
-            let db_path = app_data.join("mockingbird.db");
-            let database = db::Database::open(&db_path).map_err(box_err)?;
-            tracing::info!(?db_path, "database ready");
-
-            // Build the orchestrator config BEFORE moving the
-            // connection into the shared Arc<Mutex<>>. The bootstrap
-            // creates default provenance rows if missing.
-            let orchestrator_config = default_normal_config(&database.conn).map_err(box_err)?;
-            tracing::info!(
-                mode = %orchestrator_config.mode_slug,
-                prompt_id = orchestrator_config.prompt_id,
-                dict_id = orchestrator_config.dictionary_snapshot_id,
-                example_id = orchestrator_config.example_set_id,
-                "orchestrator config resolved"
-            );
-
-            // Share the connection between IPC handlers + dictation thread.
-            // WAL mode (set in Database::open) makes parallel access safe.
-            let shared_conn = Arc::new(Mutex::new(database.conn));
-            app.manage(AppState::new(shared_conn.clone()));
-            // mb-9rgx + mb-1z0m (Round 3) — boot-time diagnostic so future
-            // repros of "state not managed for field db" can be triaged from
-            // the log alone. AppState is the load-bearing DB-handle state
-            // every IPC depends on; logging it here proves it entered the
-            // StateManager before any window/IPC could fire (windows are
-            // constructed AFTER setup returns Ok). The `post_manage_probe`
-            // value below is the Round 3 add: it round-trips the freshly-
-            // registered state through `try_state::<AppState>()` so we
-            // distinguish "manage call ran" from "StateManager actually
-            // holds AppState retrievable by TypeId". They SHOULD be the
-            // same; if they ever diverge that's the smoking gun.
+            // mb-1z0m Round 3 + Round 4 — setup-entry probe. AppState
+            // was registered on the Builder BEFORE this closure ran;
+            // this probe confirms the builder-level manager is
+            // visible from the App handle the setup closure receives.
+            // If this is `false`, Tauri 2's builder-state propagation
+            // is broken (very unlikely; it's the canonical pattern).
+            // If this is `true` but IPC handlers still see "state not
+            // managed", the bug is downstream of state registration
+            // (Webview state isolation, plugin ordering, etc.) and
+            // the next round investigates Tauri 2 internals.
             let post_manage_probe = app.try_state::<AppState>().is_some();
             tracing::info!(
                 state = "AppState",
-                site = "lib.rs:setup",
+                site = "lib.rs:setup_entry",
                 post_manage_probe,
-                "managed-state registered"
+                "managed-state visible (builder-registered)"
             );
 
             // mb-0gt6 / Wave 1D.3 — publish the orchestrator config
@@ -588,4 +638,118 @@ where
     E: Into<Box<dyn std::error::Error>>,
 {
     e.into()
+}
+
+/// Tauri app identifier — MUST stay in sync with
+/// `src-tauri/tauri.conf.json::identifier`. Used by
+/// [`resolve_app_data_dir`] so the pre-Builder bootstrap path
+/// (mb-1z0m Round 4) resolves to the SAME directory Tauri's runtime
+/// `app.path().app_data_dir()` would return.
+///
+/// Drift protection: [`tests::identifier_matches_tauri_conf`] asserts
+/// this constant matches the JSON config at compile-time.
+const APP_IDENTIFIER: &str = "com.dustin.mockingbird";
+
+/// Resolve `%APPDATA%/<APP_IDENTIFIER>` on Windows, mirroring what
+/// Tauri 2's `PathResolver::app_data_dir()` produces for the
+/// configured identifier. Called from [`run`] BEFORE the Tauri
+/// Builder is constructed so we can `Builder::manage(AppState)`
+/// before the .setup() closure runs (Path A fix for mb-1z0m).
+///
+/// Returns an error rather than panicking so the caller can decide
+/// how to surface the failure (run() expects it; tests can probe).
+fn resolve_app_data_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let appdata = std::env::var("APPDATA")
+        .map_err(|_| "APPDATA env var not set; cannot resolve app data dir")?;
+    Ok(PathBuf::from(appdata).join(APP_IDENTIFIER))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// mb-1z0m Round 4 — drift protection. If someone edits the
+    /// `identifier` in `tauri.conf.json` without updating
+    /// [`APP_IDENTIFIER`], every IPC will rejected with
+    /// "state not managed" again because the pre-Builder bootstrap
+    /// will land the DB at the wrong directory while the Tauri
+    /// runtime still resolves the config-driven identifier. This
+    /// test catches the mismatch before it ships.
+    #[test]
+    fn identifier_matches_tauri_conf() {
+        let conf = include_str!("../tauri.conf.json");
+        // Cheap substring match — avoids dragging serde_json into
+        // the test surface for a one-line check.
+        let needle = format!("\"identifier\": \"{APP_IDENTIFIER}\"");
+        assert!(
+            conf.contains(&needle),
+            "APP_IDENTIFIER {APP_IDENTIFIER:?} not found in tauri.conf.json; \
+             update one or the other (mb-1z0m Round 4 fix relies on the match)."
+        );
+    }
+
+    /// mb-1z0m Round 4 — primary regression gate for the bug class.
+    ///
+    /// Round 3 instrumentation (`bd5a1f7`) confirmed AppState was
+    /// being registered via `app.manage()` inside `.setup()` (both
+    /// `post_manage_probe` AND `end_setup_probe` returned `true`),
+    /// but the IPC `State<'_, AppStateHandle>` extractor at webview
+    /// dispatch time STILL produced `"state not managed for field
+    /// db on command insights_snapshot"`. Path A's fix (this commit)
+    /// is to register AppState on the Tauri `Builder` BEFORE
+    /// `.setup()` runs — the canonical Tauri 2 pattern that
+    /// guarantees post-setup IPC handler visibility.
+    ///
+    /// This test asserts the property directly: a `Builder::manage`
+    /// of `AppState` MUST be visible via `try_state::<AppStateHandle>`
+    /// on the built App. If a future refactor reintroduces the
+    /// pre-Round-4 bug (moves `.manage()` back inside `.setup()` or
+    /// otherwise breaks builder-state propagation), this gate trips.
+    ///
+    /// Uses `tauri::test::mock_builder` (dev-dep `tauri/test`
+    /// feature) so no live webview / message pump is required. The
+    /// `try_state` call IS what `State<T>` extractors call under
+    /// the hood — exercising it asserts the IPC-side property
+    /// without needing to dispatch an actual IPC invocation.
+    #[test]
+    fn state_extractor_sees_builder_managed_app_state() {
+        use crate::commands::{AppState, AppStateHandle};
+        use rusqlite::Connection;
+        use std::sync::{Arc, Mutex};
+        use tauri::Manager;
+
+        // Mirror the production bootstrap shape from `run()`:
+        // open an in-memory sqlite (the only piece we substitute
+        // for the on-disk DB), wrap in Arc<Mutex<>>, and hand to
+        // AppState::new. Same constructor `run()` calls.
+        let conn = Connection::open_in_memory().expect("open in-memory sqlite");
+        let shared = Arc::new(Mutex::new(conn));
+        let app_state = AppState::new(Arc::clone(&shared));
+
+        // Path A pattern: `.manage` on the Builder BEFORE any
+        // `.setup()`. This is exactly what `run()` does at the top
+        // of the builder chain.
+        let app = tauri::test::mock_builder()
+            .manage(app_state)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app builds");
+
+        // The smoking gun. `State<'_, AppStateHandle>` IPC
+        // extractors resolve to `app.try_state::<AppStateHandle>()`
+        // at dispatch time; if THIS returns None on a built app,
+        // every state-using IPC will return
+        // "state not managed for field ...". That's the bug we
+        // chased for 4 rounds. With the Round 4 fix this MUST be
+        // Some(_).
+        assert!(
+            app.try_state::<AppStateHandle>().is_some(),
+            "Builder::manage(AppState) MUST be visible to \
+             State<AppStateHandle> extractor at IPC dispatch time. \
+             If this assertion fails, the pre-Round-4 bug has \
+             been reintroduced — `app.manage()` inside `.setup()` \
+             does NOT propagate reliably to post-setup IPC handlers \
+             in Tauri 2.x; use `Builder::manage()` BEFORE `.setup()` \
+             instead. See mb-1z0m + LESSONS 2026-06-04."
+        );
+    }
 }

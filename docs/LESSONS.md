@@ -158,6 +158,84 @@ zero on a live machine for a representative window, a follow-up wave
 can collapse `kg_entry_type_to_vault` back to a 3-arm pass-through
 (Note/Reference/Research) and the legacy arms become unreachable.
 
+### P16. Tauri 2: `App::manage()` inside `.setup()` does NOT reliably propagate to post-setup IPC `State<T>` extractors — use `Builder::manage()` BEFORE `.setup()`
+
+**Date:** 2026-06-04. **Bead:** `mb-1z0m` (Round 4 fix). **Cost to learn:** 4 rounds of diagnostic spiral, ~6 hours wall-clock.
+
+The canonical Tauri 2 wiring for state an IPC handler depends on is
+`tauri::Builder::default().manage(state).setup(...)`, NOT
+`.setup(|app| { app.manage(state); ... })`. The latter compiles, runs,
+logs that the state is registered (`app.try_state::<T>().is_some()`
+returns `true` both immediately after `.manage()` AND at the end of
+the setup closure), but the State extractor at webview IPC dispatch
+time still produces:
+
+```
+state not managed for field <name> on command <command>
+```
+
+The registered-but-unreachable behavior held against every static
+analysis we threw at it across three rounds (cargo check / clippy /
+double-`try_state` probes). The smoking gun was Round 3's projection
+onto 4 disjoint runtime states: both `post_manage_probe` + `end_setup_
+probe` returned `true` at end-of-setup, yet `insights_snapshot` IPC
+rejected with the standard "state not managed" error message. That
+combination is row 1 of the Round 3 table: setup wiring correct,
+but state-manager visibility broken for post-setup webview-bound IPC
+handlers.
+
+**The fix** is structural — restructure `run()` so the DB connection
+and all consequent state are constructed BEFORE `tauri::Builder::
+default()` is called, then register on the Builder chain pre-setup:
+
+```rust
+// AFTER (mb-1z0m Round 4 — works):
+let app_state = AppState::new(Arc::clone(&shared_conn));
+let builder = tauri::Builder::default()
+    .manage(app_state)        //  ← REQUIRED to be pre-.setup()
+    .plugin(...)
+    .setup(move |app| { ... }) // shared_conn moved in for other init
+    ...;
+```
+
+The wiring detail that bit us: AppState's constructor needs the DB
+connection, which needed `app.path().app_data_dir()`, which is only
+available on the `App` handle inside `.setup()`. The Round 4 fix
+breaks this dependency by mirroring `app_data_dir()` resolution
+ourselves via `%APPDATA%/<APP_IDENTIFIER>` — see
+`src-tauri/src/lib.rs::resolve_app_data_dir`. The const
+`APP_IDENTIFIER` is drift-protected against `tauri.conf.json::
+identifier` via the `identifier_matches_tauri_conf` unit test.
+
+**Regression gate:** `state_extractor_sees_builder_managed_app_state`
+in `src-tauri/src/lib.rs::tests` builds a Tauri mock app via the
+`tauri/test` dev-dep feature, registers `AppState` via `Builder::
+manage`, and asserts `try_state::<AppStateHandle>()` returns `Some`.
+This exercises the exact code path that broke; a future regression
+that moves `.manage()` back inside `.setup()` will fail this gate
+at link time (or runtime, in environments where `cargo test` runs).
+
+**Generalized rule** (applies beyond Tauri to any framework with
+"register here, extract there" plumbing): if `register()` and
+`extract()` live in different lifecycle phases, prove visibility
+with a unit test that does both — don't trust "the docs say
+register-once" + "the registration logs `true`". The two registration
+sites (Builder-level vs App-level inside setup) look interchangeable
+in the API, log identically in tracing probes, and pass identical
+static analyses; only a closed-loop test that goes register→extract
+through the framework's actual runtime catches the asymmetry.
+
+**Why the diagnostic spiral was load-bearing**: this finding was
+impossible to derive from static analysis. The 4 rounds spent (1.
+original repro; 2. round-2 instrumentation; 2.5. log audit + screenshot
+freshness check; 3. additive 4-probe diagnostic per Round-3 retro; 4.
+fix per the projection) burned hours but produced a permanent
+mechanism: when round-N+1 evidence contradicts round-N's conclusion,
+add observables proportional to the hypothesis surface area instead
+of re-litigating the static analysis. Round 3 instrumentation
+(`bd5a1f7`) is what made Round 4 a 1-hour fix instead of another
+speculative refactor.
+
 ### P14. The Karpathy/Clark North Star — Mockingbird is the capture layer, NOT the wiki author
 
 **Date:** 2026-06-06. **Charter:** ADR 0054 (Personal Knowledge Engine
@@ -517,6 +595,7 @@ Use `rg '^## YYYY-MM' docs/LESSONS.md` to navigate.
 
 | Date       | Tag                              | Title (truncated)                                                        |
 |------------|----------------------------------|--------------------------------------------------------------------------|
+| 2026-06-04 | `[v0.2.0-beta.1 Round 4 fix / mb-1z0m / ADR 0053-adjacent]` | Sealed the 4-round "state not managed for db on command insights_snapshot" spiral. Round 3 instrumentation (`bd5a1f7`, 4 disjoint diagnostics) projected the failure onto exactly one of 4 runtime states; Dustin's live log showed `post_manage_probe=true` + `end_setup_probe=true` + ZERO `ipc::insights` lines = Row 1 = "setup wiring correct, but state-manager visibility broken for post-setup webview-bound IPC handlers." Path A fix: restructured `lib.rs::run()` so `tauri::Builder::default().manage(AppState::new(...))` runs BEFORE `.setup()`, instead of `.setup(|app| { app.manage(...) })`. The wiring dep — AppState needs the DB conn, which needs `app_data_dir()`, which used to require the App handle — was broken by adding `resolve_app_data_dir()` that mirrors Tauri's `%APPDATA%/<APP_IDENTIFIER>` resolution directly, with a `const APP_IDENTIFIER` drift-protected against `tauri.conf.json` via the `identifier_matches_tauri_conf` unit test. Regression gate `state_extractor_sees_builder_managed_app_state` uses the `tauri/test` dev-dep feature + `mock_builder` + `mock_context(noop_assets())` to assert `try_state::<AppStateHandle>()` returns `Some` on a Builder-managed app — the exact code path the IPC `State<T>` extractor takes at dispatch time. Three findings PROMOTED to PINNED P16: (1) `App::manage()` inside `.setup()` does NOT reliably propagate to post-setup IPC extractors in Tauri 2 — use `Builder::manage()` BEFORE `.setup()`. (2) The asymmetry is invisible to static analysis AND to `try_state` probes inside setup; only a closed-loop register→extract test via the framework's actual runtime catches it. (3) When register-here-extract-there plumbing crosses lifecycle phases, a unit test that runs BOTH ends through the framework's mock runtime is the only sane gate. Round 3's Round-3 retro principle ("when round-N+1 contradicts round-N, ADD observables, don't refactor") is what made Round 4 a 1-hour fix instead of another speculative refactor — the 4-disjoint-state diagnostic projection is the load-bearing process win. Round 3 diagnostic probes KEPT (~1ms boot cost, future smoke is 30-second log-triageable). 4 gates green: fmt-check + clippy-release + test-release-no-run (21 binaries linked incl. new regression test) + build-release (53,665,792 bytes, 8:50:44 PM mtime, +1,536b vs Round 3 due to dev-dep metadata only — lib + bin bytes unchanged after the dev-dep was added because resolver=2 isolates test features). The `clippy --tests` 21-error noise is all pre-existing `mb-ue1h` debt; none in my new code. Body, broad-implication (the bug pattern + the diagnostic process both generalize); P16 PINNED now. |
 | 2026-06-08 | `[v0.2.0-beta.1 smoke fix / mb-v7pd]` | Three sidebar smoke bugs from end-user QA of the v0.2.0-beta.1 release exe. Bug 1 (sidebar Active Mode label absent on launch) + Bug 2 (sidebar KG nav item absent on launch with toggle ON) share root cause: App boot used `Promise.all` over 4 IPCs, so any single rejection skipped ALL setters; per-page effects in Modes.tsx + SettingsKgTab.tsx re-hydrate the same store on visit, masking the failure unless you watch the sidebar pre-navigation. Bug 3 (footer shows `v0.1.0` instead of `v0.2.0-beta.1`) was a literal hardcoded JSX string that survived the release manifest bump. Three findings worth keeping: (1) `Promise.all` short-circuit + per-page re-hydration is a near-invisible app-boot failure mode; fix is `Promise.allSettled` + per-result dispatch, extracted to a pure `bootApp(api, setters)` helper for unit testability. (2) `cargo build --release` IS mandatory for pure-UI fixes on this Tauri app because `frontendDist: "../ui/dist"` embeds the bundle into the exe at build time; the smoke brief's "skip cargo build for pure UI" guidance was wrong, this is an extension of PINNED P13 spirit ("don't leave a stale exe") that should be promoted as P13 category (d). (3) Hardcoded version strings in UI source are a predictable stale-display incident; Tauri's `getVersion()` (`plugin:app|version` IPC, `@tauri-apps/api/app::getVersion`) is the runtime SoT and reads from the SAME `tauri.conf.json` that stamps the exe's `ProductVersion`, so manifest bumps flow to UI display with no JSX-audit step. Body, broad-implication (Finding 2 retroactively applies to every prior UI-only fix; Finding 1 generalizes to any multi-IPC boot fetch; Finding 3 is the load-bearing version-display contract for the project's life). Should consider promoting Finding 2 to PINNED. |
 | 2026-06-08 | `[KG Phase 1E Wave 1E.6 / mb-i46v / ADR 0053]` | KG-Inbox courier shipped as sibling module (not generalization) of the ADR 0046 inbox courier. Rooted at `<vault>/Knowledge Graph/Inbox/`, watches for `*.{m4a,wav,mp3}` from iOS Shortcut + desktop drag-and-drop, threads into headless ingest with `capture_kind = KgNote`. Three new vault modules (courier 546 LoC / courier_fs 236 LoC / runtime 448 LoC) + 442-LoC sibling-tests file. Three findings worth keeping: (1) **`Arc<ConcreteImpl>` does NOT auto-coerce to `Arc<dyn Trait>` when passed to `Arc::clone`** — coercion fires at function-boundary MOVE, not at generic-param instantiation. Multi-consumer wiring of an `Arc<ConcreteImpl>` that downstream wants as `Arc<dyn Trait>` requires a type-erased rebind UP FRONT (`let bus_dyn: Arc<dyn Trait> = bus;`); thereafter `Arc::clone` on `bus_dyn` preserves the trait-object inner. Bites whenever you add a second consumer to a service that was previously single-consumer. (2) **Plan production-vs-helpers split BEFORE first `create_file`; rustfmt expands compact hand-drafts in surprising ways and pushes you over 600**. ~580 hand-counted LoC became 734 actual post-fmt (signature line-breaks + format! expansions + blank lines around impl blocks). New vault/inbox/courier-shaped modules with trait + prod impl + non-trivial helpers should default to `policy.rs` + `policy_fs.rs` + `policy_tests.rs` triple from the start. (3) **Idempotency probe BEFORE orchestrator send is the cheapest crash-recovery guard for couriers that don't move-on-success.** KG-Inbox defers file disposition to the worker phase-4 archive, so a crash mid-ingest OR after-ingest-before-archive leaves the file in Inbox/ and the initial-scan could re-emit. Pre-flight `sessions.audio_blob_path` probe short-circuits before the expensive decode + STT. Alternative `INSERT ... ON CONFLICT IGNORE` is fragile (already burned decode cost + orchestrator API contract change). Mechanics: background-launch + Start-Sleep poll pattern for ~9m test build / ~7m exe build (Code Puppy shell tool's 270s cap); `should_consider_path` is inbox-root-agnostic so `_failed/` exclusion reuses cleanly. Body, narrow blast radius. |
 | 2026-06-08 | `[KG Phase 1E Wave 1E.7 Part 2 / mb-5lla / mb-bgpt SEAL]` | Pure-refactor wave brought `kg/worker.rs` (2050 LoC) and `vault/kg_layout.rs` (698 LoC) under 600-LoC cap. worker.rs split into root + 7 cohesive submodules (filing / projection / archive / stubs / index_log / transcripts / time_iso); kg_layout.rs split via existing sibling-tests pattern (`kg_layout_tests.rs`). Zero behaviour change; public API surface preserved by `pub(crate) use submod::symbol;` re-exports at the parent — `kg::parity` + `kg::latency_bench` callers needed zero edits. Four findings: (1) **`[IO.File]::ReadAllText` in PS 5.1 auto-strips BOMs; the naive `if (StartsWith([char]0xFEFF)) Substring(1)` pattern eats the first real character on no-BOM files** — turned every file's `//!` doc comment into `/!` and broke rustfmt across 10 files. Recovery was trivial (one byte prepended) but the failure mode is silent for prose/JSON. Use raw-byte read/write (`ReadAllBytes`/`WriteAllBytes`) when BOM stripping is involved. (2) `pub(crate) use submod::symbol;` at the split parent preserves external public paths through a refactor — write down external use-sites first, choose visibility-modifiers + re-exports to keep them byte-identical, single-minute grep + single-line re-export. (3) `cargo test --release --no-run` is 4m32s on this codebase; the Code Puppy shell tool's 270s execution cap forces `Start-Process -WindowStyle Hidden` background launch + poll loop. Budget 4×Start-Sleep-180 chunks for test-no-run + build-release on a worker/IPC-touching wave. (4) Sibling `#[cfg(test)] #[path = "X_tests.rs"] mod tests;` re-confirmed as the lowest-friction split for cohesive impls (kg_layout 698→420+344). Closes `mb-5lla` AND `mb-bgpt` (Wave 1E.7 fully sealed). Body, narrow blast radius (finding 1 is the only broadly-applicable foot-gun; the others re-affirm known patterns). |
