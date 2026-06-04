@@ -89,8 +89,8 @@
     "targets": "all",
     "category": "Utility",
     "copyright": "Copyright (c) 2026 Dustin Boyd",
-    "shortDescription": "Local-first voice dictation",
-    "longDescription": "Local-first, system-wide voice dictation for Windows. A privacy-respecting, self-improving replacement for Wispr Flow.",
+    "shortDescription": "Local-first voice dictation, meeting capture, and knowledge graph capture for Windows.",
+    "longDescription": "Local-first voice dictation, meeting capture, and knowledge graph capture for Windows. Fully on-device. Privacy-respecting. Zero telemetry.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -102,7 +102,6 @@
   "plugins": {
     "updater": {
       "active": false,
-      "_phase7_note": "Set active=true and add endpoints + pubkey in Phase 7. Pubkey already generated; see STATUS.md.",
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ5N0E1MTkzODYzNTBGQTEKUldTaER6V0drMUY2MlNiS2g5anF0Vjl6UEkyODRQTlZlS0FMRjNuNWcvdEpJUC9RRG1QVm5Ja04K",
       "endpoints": []
     }
