@@ -31,7 +31,7 @@ pre-commit:
         - merge
         - rebase
     py-syntax:
-      glob: "scripts/hooks/*.py"
+      glob: "scripts/dev/hooks/*.py"
       run: python -m py_compile {staged_files}
 
 pre-push:

@@ -59,7 +59,7 @@ if ($Force) {
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $exe      = Join-Path $repoRoot 'target\release\mockingbird.exe'
 if (-not (Test-Path -LiteralPath $exe)) {
-    throw "mockingbird.exe not found at $exe -- run ``pwsh scripts/cargo-with-cuda.ps1 build --release`` first."
+    throw "mockingbird.exe not found at $exe -- run ``pwsh scripts/dev/cargo-with-cuda.ps1 build --release`` first."
 }
 
 # 2. CUDA bin on PATH (whisper-rs cuda feature dlopens cudart at startup).

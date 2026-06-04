@@ -1,1 +1,0 @@
-Couple things on my mind. The Henderson invoice is still unpaid, gonna have to call him about that, it's been thirty days. Need to check if my insurance certificate is up to date — actually wait, when does that renew? Whatever, I'll look it up. And I want to start tracking jobs in a better system than this notebook, maybe one of those apps.

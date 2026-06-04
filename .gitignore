@@ -56,3 +56,48 @@ Code-Puppy-Capabilities-Insight.docx
 
 scratch/
 
+# ---------------------------------------------------------------------------
+# v1 Public Launch Readiness (LR.1) -- internal maintainer artifacts.
+#
+# These files live on the maintainer's local disk and drive day-to-day
+# development, but they reference internal methodology (Code Puppy hooks,
+# beads, judges, phase choreography) that is intentionally hidden from
+# the public repo. See ADR 0055 and docs/audits/v1-public-launch-security.md
+# Check 8 for the exposure map.
+# ---------------------------------------------------------------------------
+
+# Internal maintainer docs (hidden from public repo)
+AGENTS.md
+PLAN-mockingbird-v2.md
+STATUS.md
+mockingbird-activity-capture-plan.md
+mockingbird-logo-motion.html
+verify_iter1_schema.py
+docs/LESSONS.md
+docs/PRODUCT-STATE.md
+docs/DATA_MODEL.md
+docs/SETTINGS.md
+docs/CONTRIBUTING.md
+docs/adr/
+docs/phases/
+docs/judges/
+docs/knowledge-graph/
+docs/historical/
+docs/archive/
+docs/audits/
+docs/reviews/
+docs/spikes/
+docs/cleanup/
+docs/design/
+
+# Internal R&D harness (KG Phase 0/0.5 sandbox; corpus + harness + iter logs)
+experimental/
+
+# Internal visual-regression baselines (Phase 5 phase-locked PNG snapshots)
+playwright-results/
+
+# Methodology tooling (Code Puppy + beads): hidden by design
+.code_puppy/
+.beads/
+.beads-credential-key
+

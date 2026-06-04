@@ -18,7 +18,7 @@ $ErrorActionPreference = "Continue"
 # don't rely on $PSScriptRoot in param defaults; compute in body).
 $RepoRoot       = Resolve-Path (Join-Path $PSScriptRoot "..")
 $VerifyScript   = Join-Path $PSScriptRoot "verify-environment.ps1"
-$SeedJudges     = Join-Path $PSScriptRoot "seed-judges.ps1"
+$SeedJudges     = Join-Path $PSScriptRoot "dev\seed-judges.ps1"
 
 Write-Host "=== Mockingbird dev setup ===" -ForegroundColor Cyan
 Write-Host "Repo root: $RepoRoot"

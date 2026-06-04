@@ -1,1 +1,0 @@
-Okay so two things. One, I need to pick up that replacement valve from the supply house before Friday because the Hendersons are expecting me Saturday morning. And two, just an idea, what if I started offering free quotes through the website? Might bring in more leads.

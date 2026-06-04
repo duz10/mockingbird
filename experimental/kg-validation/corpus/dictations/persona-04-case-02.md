@@ -1,1 +1,0 @@
-Three things I keep forgetting. The CPA wants my Q2 numbers by next Friday for the side business, gotta send those over. Need to RSVP yes to Becca's wedding by the end of the month. And on the business side, what if I started a YouTube channel for the craft tutorials, could drive Etsy traffic.

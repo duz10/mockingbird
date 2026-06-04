@@ -1,1 +1,0 @@
-Things I gotta remember. Need to call the dentist back about Madison's appointment, they left a voicemail. The car's making that grinding noise again, gonna take it to Joe's Monday. And the parent-teacher thing for Brandon is Wednesday night, can't forget that.

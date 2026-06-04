@@ -1,1 +1,0 @@
-Quick brain dump before I forget. One, the slide deck for the all-hands needs a revision pass before Thursday morning. Two, what about a Wednesday team coffee thing instead of formal standups, might be better for morale. And three, I want to research the new Notion AI features for the team docs migration, just to see if it's worth piloting.

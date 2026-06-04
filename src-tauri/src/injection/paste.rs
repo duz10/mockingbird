@@ -5,7 +5,7 @@
 //! This file is the **only** location in the workspace permitted to
 //! call `SetClipboardData` / `OpenClipboard` / `EmptyClipboard` /
 //! `CloseClipboard`. PLAN §12 #17 binding; the shell-side hook
-//! `scripts/hooks/warn-bare-clipboard-set.py` flags violations.
+//! `scripts/dev/hooks/warn-bare-clipboard-set.py` flags violations.
 //!
 //! ## Public API
 //!

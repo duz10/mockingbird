@@ -1,1 +1,0 @@
-Okay, the freelance website redesign for Sarah — I told her I'd have v1 mockups ready by Saturday but I haven't even started yet. Need to block out tomorrow evening for that. This is what I get for saying yes to side work in the middle of Q2.

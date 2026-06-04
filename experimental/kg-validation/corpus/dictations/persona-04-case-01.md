@@ -1,1 +1,0 @@
-Reminder to order more of that craft vinyl from the wholesaler, I'm running low and I have those custom shirt orders to finish before the weekend. Also need to update the Etsy listings with new photos, the old ones look terrible.

@@ -27,7 +27,7 @@
 //!
 //! ### Hook surface
 //!
-//! `scripts/hooks/warn-bare-clipboard-set.py` warns on shell-side
+//! `scripts/dev/hooks/warn-bare-clipboard-set.py` warns on shell-side
 //! clipboard writes (`clip.exe`, `Set-Clipboard`, `pbcopy`). It does
 //! not gate Rust-source `SetClipboardData` calls — that static check
 //! is deferred to a clippy lint per LESSONS 2026-05-17 Wave-1

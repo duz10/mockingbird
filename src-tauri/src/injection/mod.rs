@@ -19,7 +19,7 @@
 //! `injection/paste.rs` is the **only** file in this workspace that
 //! is permitted to call `SetClipboardData`. The save/restore protocol
 //! lives there (ADR 0018). The shell-side hook
-//! `scripts/hooks/warn-bare-clipboard-set.py` flags violations.
+//! `scripts/dev/hooks/warn-bare-clipboard-set.py` flags violations.
 //!
 //! ## Secure input
 //!

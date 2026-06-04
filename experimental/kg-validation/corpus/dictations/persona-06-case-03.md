@@ -1,1 +1,0 @@
-Three quick things. I owe Jamie twenty bucks from dinner Friday, gotta Venmo her back. Update my resume with the Stripe interview project before I lose track of what I built. And honestly, I should start meal prepping on Sundays, eating out four times a week is killing my budget.

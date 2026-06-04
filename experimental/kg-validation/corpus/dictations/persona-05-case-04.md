@@ -1,1 +1,0 @@
-Reminder — I told Pat I'd help coordinate the school auction silent items by July first. Need to email her and confirm I'm still on for that. Honestly committing to this was probably a mistake, but here we are.
