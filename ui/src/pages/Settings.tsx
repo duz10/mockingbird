@@ -17,12 +17,16 @@ import { useCallback, useEffect, useState } from "react";
 import { Button, Card, PageHeader, Spinner } from "../components/primitives";
 import { CATEGORIES } from "../components/UnsplashBackground/categories";
 import {
+  clearUnsplashApiKey,
   getPrefs,
+  getUnsplashApiKey,
   PREFS_EVENT,
   setPref,
+  setUnsplashApiKey,
   type BackgroundPrefs,
   type CurationMode,
 } from "../components/UnsplashBackground/prefs";
+import { toast } from "sonner";
 import { FolderIcon } from "../design/Icon";
 import { t } from "../i18n";
 import { useAppStore } from "../lib/store";
@@ -305,29 +309,47 @@ function GeneralPanel({
 }
 
 /* ------------------------------------------------------------------ */
-/* Background photo card — Unsplash-powered ambient background.        */
+/* Background photo card -- Unsplash-powered ambient background.       */
 /*                                                                    */
-/* Storage: prefs go through `prefs.ts` (localStorage today, future   */
-/* DPAPI + settings table). This card reads on mount, subscribes to   */
-/* the `PREFS_EVENT` so external writes propagate, and writes back    */
-/* on each control change.                                            */
+/* Storage:                                                           */
+/* - Non-secret display prefs (enabled/mode/categories/overlay) go    */
+/*   through `prefs.ts` -> localStorage.                              */
+/* - API key goes through `prefs.ts` async accessors -> DPAPI         */
+/*   (LR.0.B / mb-hiar, ADR 0055).                                    */
+/*                                                                    */
+/* This card reads both on mount, subscribes to `PREFS_EVENT` so      */
+/* external writes propagate, and writes back on control change.      */
 /* ------------------------------------------------------------------ */
 
 function BackgroundCard() {
   const [prefs, setPrefsState] = useState<BackgroundPrefs>(() => getPrefs());
-  // Local mirror of the API-key input so we can save on blur rather
-  // than firing a write on every keystroke. The committed value is
-  // still `prefs.apiKey`.
-  const [keyDraft, setKeyDraft] = useState(prefs.apiKey);
+  // The committed API key, hydrated async from DPAPI. Empty string
+  // when not yet loaded OR not configured; both states gate the
+  // "key configured?" affordance to false, which is the safe default.
+  const [apiKey, setApiKeyState] = useState<string>("");
+  // Local mirror of the API-key input so we save on blur rather
+  // than firing a DPAPI write on every keystroke.
+  const [keyDraft, setKeyDraft] = useState("");
 
   useEffect(() => {
-    const onChange = () => {
-      const next = getPrefs();
-      setPrefsState(next);
-      setKeyDraft((d) => (d === "" ? next.apiKey : d));
+    let cancelled = false;
+    const refresh = () => {
+      setPrefsState(getPrefs());
+      void getUnsplashApiKey().then((k) => {
+        if (cancelled) return;
+        setApiKeyState(k);
+        // Only overwrite the draft when the user hasn't started
+        // typing yet; we don't want a PREFS_EVENT from elsewhere
+        // to clobber an in-progress edit.
+        setKeyDraft((d) => (d === "" ? k : d));
+      });
     };
-    window.addEventListener(PREFS_EVENT, onChange);
-    return () => window.removeEventListener(PREFS_EVENT, onChange);
+    refresh();
+    window.addEventListener(PREFS_EVENT, refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(PREFS_EVENT, refresh);
+    };
   }, []);
 
   const update = <K extends keyof BackgroundPrefs>(
@@ -338,6 +360,28 @@ function BackgroundCard() {
     setPrefsState((p) => ({ ...p, [key]: value }));
   };
 
+  const commitApiKey = (next: string) => {
+    const trimmed = next.trim();
+    if (trimmed === apiKey) return; // No-op, don't bother with IPC.
+    if (trimmed.length === 0) {
+      void clearUnsplashApiKey()
+        .then(() => setApiKeyState(""))
+        .catch((err) => {
+          // eslint-disable-next-line no-console
+          console.warn("[unsplash] clear api key failed", err);
+          toast.error(t("settings.general.bg.apiKey.saveFailed"));
+        });
+      return;
+    }
+    void setUnsplashApiKey(trimmed)
+      .then(() => setApiKeyState(trimmed))
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn("[unsplash] set api key failed", err);
+        toast.error(t("settings.general.bg.apiKey.saveFailed"));
+      });
+  };
+
   const toggleCategory = (slug: string) => {
     const has = prefs.categories.includes(slug);
     const next = has
@@ -346,7 +390,7 @@ function BackgroundCard() {
     update("categories", next);
   };
 
-  const keyConfigured = prefs.apiKey.length > 0;
+  const keyConfigured = apiKey.length > 0;
 
   return (
     <Card title={t("settings.general.bg.title")}>
@@ -384,9 +428,7 @@ function BackgroundCard() {
             type="password"
             value={keyDraft}
             onChange={(e) => setKeyDraft(e.target.value)}
-            onBlur={() => {
-              if (keyDraft !== prefs.apiKey) update("apiKey", keyDraft.trim());
-            }}
+            onBlur={() => commitApiKey(keyDraft)}
             placeholder={t("settings.general.bg.apiKey.placeholder")}
             spellCheck={false}
             autoComplete="off"

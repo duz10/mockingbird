@@ -266,6 +266,42 @@ mod tests {
     }
 
     #[test]
+    fn unsplash_key_round_trips_via_real_dpapi() {
+        // LR.0.B (ADR 0055 / mb-hiar) — Unsplash access key shape:
+        // 43-char alphanumeric Client-ID. Round-trips through the
+        // same DPAPI surface as the Claude key.
+        let s = temp_store();
+        let secret = "abcd1234efgh5678ijkl9012mnop3456qrst7890uvw";
+        s.put(SecretKind::UnsplashApiKey, secret).unwrap();
+        assert_eq!(
+            s.get(SecretKind::UnsplashApiKey).unwrap().as_deref(),
+            Some(secret)
+        );
+    }
+
+    #[test]
+    fn unsplash_and_claude_keys_are_isolated_on_disk() {
+        // Distinct filenames per kind — writing one must not
+        // overwrite the other. Guard against future enum-collapse
+        // refactors that would silently lose one of the secrets.
+        let s = temp_store();
+        s.put(SecretKind::ClaudeApiKey, "sk-ant-claude").unwrap();
+        s.put(SecretKind::UnsplashApiKey, "unsplash-key").unwrap();
+        assert_eq!(
+            s.get(SecretKind::ClaudeApiKey).unwrap().as_deref(),
+            Some("sk-ant-claude")
+        );
+        assert_eq!(
+            s.get(SecretKind::UnsplashApiKey).unwrap().as_deref(),
+            Some("unsplash-key")
+        );
+        assert_ne!(
+            s.path_for(SecretKind::ClaudeApiKey),
+            s.path_for(SecretKind::UnsplashApiKey)
+        );
+    }
+
+    #[test]
     fn large_secret_round_trips() {
         let s = temp_store();
         // 100 KB secret — well above the Windows Credential Manager's

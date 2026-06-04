@@ -13,6 +13,7 @@ import { UnsplashBackground } from "./components/UnsplashBackground";
 import { bootApp } from "./lib/bootApp";
 import { api } from "./lib/tauri";
 import { useAppStore } from "./lib/store";
+import { migrateUnsplashApiKey } from "./lib/unsplashKeyMigration";
 
 import styles from "./App.module.css";
 
@@ -36,6 +37,19 @@ export function App({ children }: AppProps) {
   // Fire-and-forget; do NOT block boot on the diagnostic.
   useEffect(() => {
     void api.react_mounted().catch(() => {});
+  }, []);
+
+  // LR.0.B / mb-hiar (ADR 0055) -- one-shot migration of the
+  // Unsplash access key from legacy localStorage into DPAPI. Safe to
+  // call on every boot; first-launch-after-update does the work,
+  // subsequent boots short-circuit on "no-legacy-value". Fire-and-
+  // forget; the migration helper never throws and the worst case
+  // (DPAPI write fails) is that the user re-enters their key in
+  // Settings. Dispatches PREFS_EVENT internally on success so the
+  // background component picks up the migrated value without a
+  // refresh.
+  useEffect(() => {
+    void migrateUnsplashApiKey();
   }, []);
 
   // Boot — hydrate cross-route state from IPC. Each setter fires

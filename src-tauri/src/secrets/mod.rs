@@ -1,31 +1,41 @@
 //! Secrets storage abstraction.
 //!
-//! v1 stores one secret (the Anthropic API key) on Windows via DPAPI
-//! ([`windows::WinDpapiSecretStore`]). Cross-platform stubs in
-//! [`stub::NullSecretStore`] for tests + CI.
+//! v1 stores user-supplied API keys (Anthropic + Unsplash) on Windows
+//! via DPAPI ([`windows::WinDpapiSecretStore`]). Cross-platform stubs
+//! in [`stub::NullSecretStore`] for tests + CI + non-Windows dev
+//! builds.
 //!
 //! ## Why a trait
 //!
-//! macOS Keychain (Phase 9) plugs in via the same trait. Settings UI
-//! holds a `Box<dyn SecretStore>` so it never directly touches the
-//! OS surface — keeps the UI testable.
+//! macOS Keychain (Phase 9) plugs in via the same trait. The Tauri
+//! IPC layer holds an [`Arc<dyn SecretStore>`] ([`SecretStoreHandle`])
+//! so command handlers never directly touch the OS surface — keeps
+//! the UI testable + the platform seam clean.
 //!
 //! ## What's NOT here
 //!
 //! - The Anthropic API key wire-format. That's `cleanup::ClaudeProvider`'s
 //!   business; the secret store just round-trips opaque bytes.
+//! - The Unsplash Client-ID wire-format. That's the JS-side fetch
+//!   wrapper's business; same opaque-bytes contract.
 //! - User credentials of any kind. Mockingbird has no accounts.
 //! - The Whisper / Ollama model files. Those are content-addressable
 //!   downloads, not secrets.
 
+use std::sync::Arc;
+
 use crate::error::AppResult;
 
 /// Tag a stored secret. Distinct tags so a future Phase-7 OAuth flow
-/// can store its tokens without clashing with the Claude key.
+/// can store its tokens without clashing with existing keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SecretKind {
     /// User-supplied Anthropic API key (Phase 4).
     ClaudeApiKey,
+    /// User-supplied Unsplash access key (a.k.a. Client-ID), used by
+    /// the photo background feature. LR.0.B (ADR 0055) moved this
+    /// off localStorage onto DPAPI.
+    UnsplashApiKey,
     /// Reserved for Phase 7+ — future cloud-provider keys.
     #[allow(dead_code)]
     Reserved2,
@@ -37,6 +47,7 @@ impl SecretKind {
     pub fn id(self) -> &'static str {
         match self {
             SecretKind::ClaudeApiKey => "claude_api_key",
+            SecretKind::UnsplashApiKey => "unsplash_api_key",
             SecretKind::Reserved2 => "reserved2",
         }
     }
@@ -66,20 +77,62 @@ pub mod stub;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
-/// Construct the platform-default secret store.
+/// Tauri-managed handle for a [`SecretStore`]. `Arc<dyn …>` so the
+/// concrete platform impl is hidden behind the trait + the same
+/// handle can be cloned cheaply into any command extractor that
+/// wants it.
 ///
-/// Windows: DPAPI-backed (per-user encryption keys, no extra prompt).
-/// Other: panics in production (Phase 9 fills in macOS / Linux).
-/// Tests should construct `NullSecretStore` directly.
-pub fn make_default_store() -> AppResult<Box<dyn SecretStore>> {
+/// Registered on `tauri::Builder::manage` PRE-`.setup()` per
+/// LESSONS PINNED P16 (the AppState propagation pattern). Commands
+/// extract via `tauri::State<'_, SecretStoreHandle>`.
+pub type SecretStoreHandle = Arc<dyn SecretStore>;
+
+/// Construct the platform-default secret store wrapped in the
+/// shareable [`SecretStoreHandle`].
+///
+/// - Windows: DPAPI-backed (per-user encryption keys, no extra prompt).
+/// - Other targets: falls back to the in-memory [`stub::NullSecretStore`].
+///   v1 ships Windows-only, but `cargo check`/`clippy` on dev macs
+///   still need to compile cross-platform. Phase 9 will swap the
+///   non-Windows branch for a real macOS Keychain impl.
+///
+/// Tests should construct [`stub::NullSecretStore`] directly rather
+/// than going through this helper.
+pub fn make_default_store() -> AppResult<SecretStoreHandle> {
     #[cfg(target_os = "windows")]
     {
-        Ok(Box::new(windows::WinDpapiSecretStore::new()?))
+        Ok(Arc::new(windows::WinDpapiSecretStore::new()?))
     }
     #[cfg(not(target_os = "windows"))]
     {
-        Err(crate::error::AppError::Secrets(
-            "secret store: Phase 9 will add non-Windows backends".into(),
-        ))
+        // Non-Windows dev builds get a non-persistent in-memory
+        // store so the binary still links + the trait seam stays
+        // exercised. Production ships Windows-only in v1.
+        Ok(Arc::new(stub::NullSecretStore::new()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secret_kinds_have_distinct_ids() {
+        // Filename collisions on disk would silently overwrite
+        // unrelated secrets, so this is load-bearing.
+        let ids = [
+            SecretKind::ClaudeApiKey.id(),
+            SecretKind::UnsplashApiKey.id(),
+            SecretKind::Reserved2.id(),
+        ];
+        let unique: std::collections::HashSet<_> = ids.iter().collect();
+        assert_eq!(unique.len(), ids.len(), "SecretKind ids must be unique");
+    }
+
+    #[test]
+    fn unsplash_kind_id_is_canonical_snake_case() {
+        // Pins the wire format — changing this would orphan any
+        // already-stored DPAPI files on user disks post-upgrade.
+        assert_eq!(SecretKind::UnsplashApiKey.id(), "unsplash_api_key");
     }
 }

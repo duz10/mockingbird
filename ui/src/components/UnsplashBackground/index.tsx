@@ -47,7 +47,12 @@ import {
   type Photo,
 } from "./fetchPhoto";
 import { pickRandomCategory } from "./categories";
-import { getPrefs, PREFS_EVENT, type BackgroundPrefs } from "./prefs";
+import {
+  getPrefs,
+  getUnsplashApiKey,
+  PREFS_EVENT,
+  type BackgroundPrefs,
+} from "./prefs";
 
 import styles from "./styles.module.css";
 
@@ -62,25 +67,41 @@ const PREFETCH_LEAD_MS = 8000;
 
 export function UnsplashBackground() {
   // Prefs are reactive: we re-read on the `PREFS_EVENT` custom event
-  // (fired from `setPref()` whenever Settings UI changes anything).
-  // This avoids a global store dependency for what is otherwise an
-  // isolated component.
+  // (fired from prefs-module writes whenever Settings UI changes
+  // anything, AND from the LR.0.B migration). This avoids a global
+  // store dependency for what is otherwise an isolated component.
   const [prefs, setPrefs] = useState<BackgroundPrefs>(() => getPrefs());
 
+  // LR.0.B / mb-hiar (ADR 0055) -- the API key lives in DPAPI, not
+  // localStorage. We async-load on mount + on every PREFS_EVENT so
+  // a Settings save (or a first-launch migration) propagates here
+  // without a refresh. Empty string is the "not yet loaded" AND
+  // "not configured" sentinel; that ambiguity is fine because both
+  // states gate `active` to false.
+  const [apiKey, setApiKey] = useState<string>("");
+
   useEffect(() => {
-    const onChange = () => setPrefs(getPrefs());
-    window.addEventListener(PREFS_EVENT, onChange);
-    // Also listen to cross-tab `storage` events for completeness —
+    let cancelled = false;
+    const refresh = () => {
+      setPrefs(getPrefs());
+      void getUnsplashApiKey().then((k) => {
+        if (!cancelled) setApiKey(k);
+      });
+    };
+    refresh();
+    window.addEventListener(PREFS_EVENT, refresh);
+    // Also listen to cross-tab `storage` events for completeness;
     // not strictly necessary in a single-window Tauri app, but
     // costs nothing and helps the preview build (multiple tabs).
-    window.addEventListener("storage", onChange);
+    window.addEventListener("storage", refresh);
     return () => {
-      window.removeEventListener(PREFS_EVENT, onChange);
-      window.removeEventListener("storage", onChange);
+      cancelled = true;
+      window.removeEventListener(PREFS_EVENT, refresh);
+      window.removeEventListener("storage", refresh);
     };
   }, []);
 
-  const active = prefs.enabled && prefs.apiKey.length > 0;
+  const active = prefs.enabled && apiKey.length > 0;
 
   // Flag the document root while a photo is on screen. The design
   // system's glass tokens (--glass-tint-*) are tuned to refract
@@ -126,14 +147,14 @@ export function UnsplashBackground() {
 
     let cancelled = false;
 
-    // Helper that does one fetch using the current prefs.
+    // Helper that does one fetch using the current prefs + key.
     const fetchOne = async (): Promise<Photo | null> => {
       const ctrl = new AbortController();
       abortRef.current = ctrl;
       const query = resolveQuery(prefs);
       try {
         const photo = await fetchRandomPhoto({
-          accessKey: prefs.apiKey,
+          accessKey: apiKey,
           query,
           signal: ctrl.signal,
         });
@@ -170,7 +191,7 @@ export function UnsplashBackground() {
           return;
         }
         setIncoming(next);
-        triggerDownload(next, prefs.apiKey);
+        triggerDownload(next, apiKey);
 
         // Wait the remaining time to the actual boundary, then
         // crossfade.
@@ -191,13 +212,13 @@ export function UnsplashBackground() {
       }, prefetchAt);
     };
 
-    // Initial fetch — render the first photo as fast as possible,
+    // Initial fetch -- render the first photo as fast as possible,
     // then start the rotation loop.
     void (async () => {
       const first = await fetchOne();
       if (cancelled || !first) return;
       setCurrent(first);
-      triggerDownload(first, prefs.apiKey);
+      triggerDownload(first, apiKey);
       scheduleNext();
     })();
 
@@ -214,11 +235,11 @@ export function UnsplashBackground() {
         timerRef.current = null;
       }
     }
-    // We deliberately key on `active` + the prefs values that
-    // influence fetching. apiKey and mode trigger a full reset;
-    // overlay alone doesn't (it's a pure visual layer).
+    // We deliberately key on `active` + the values that influence
+    // fetching. apiKey and mode trigger a full reset; overlay alone
+    // doesn't (it's a pure visual layer).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, prefs.apiKey, prefs.mode, prefs.categories.join(",")]);
+  }, [active, apiKey, prefs.mode, prefs.categories.join(",")]);
 
   if (!active) return null;
 

@@ -135,6 +135,19 @@ pub fn run() {
     // and command.
     let app_state = AppState::new(Arc::clone(&shared_conn));
 
+    // LR.0.B / mb-hiar (ADR 0055) — DPAPI-backed secret store for
+    // user-entered API keys (Claude + Unsplash). Registered on the
+    // Builder PRE-`.setup()` for the same reason as AppState: the
+    // `State<'_, SecretStoreHandle>` extractor at IPC dispatch time
+    // must see the value, and `.setup()`-time `.manage()` calls do
+    // not propagate reliably to webview handlers (mb-1z0m Round 3
+    // post-mortem; LESSONS PINNED P16). Failure to construct the
+    // store is fatal — on Windows this means LOCALAPPDATA is missing
+    // or unwritable, which would brick every other write path too.
+    let secret_store: secrets::SecretStoreHandle =
+        secrets::make_default_store().expect("build secret store");
+    tracing::info!(backend = secret_store.backend_name(), "secret store ready");
+
     // Clones for the move-into-setup closure. Tauri 2's setup
     // closure has 'static lifetime requirements on captured values,
     // hence the clones rather than borrows.
@@ -147,6 +160,9 @@ pub fn run() {
         // the long comment above `let app_state` for why this lives
         // here and not in `.setup()`.
         .manage(app_state)
+        // LR.0.B / mb-hiar — Builder-level SecretStore registration.
+        // Same propagation reasoning as AppState above.
+        .manage(secret_store)
         // Phase MC Wave 5 — tauri-plugin-dialog enables the native
         // Save As… picker for `meeting_export_markdown`. Tauri 2
         // moved dialogs out of core; this is the in-org replacement.

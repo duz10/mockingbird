@@ -182,6 +182,16 @@ export const api = {
   update_setting: (key: string, value: string) =>
     invoke<void>("update_setting", { key, value }),
 
+  // LR.0.B / mb-hiar (ADR 0055) -- Unsplash access key, DPAPI-backed.
+  // Get returns null when never set; the prefs module normalises
+  // that to "" so callers can keep using `.length > 0` semantics.
+  unsplash_get_api_key: () =>
+    invoke<string | null>("unsplash_get_api_key"),
+  unsplash_set_api_key: (key: string) =>
+    invoke<void>("unsplash_set_api_key", { key }),
+  unsplash_clear_api_key: () =>
+    invoke<void>("unsplash_clear_api_key"),
+
   /**
    * Phase 10 Wave 1A/1B — read/write the typed `SettingKey` registry
    * (`settings/model.rs`). Distinct from the legacy `update_setting`
@@ -867,6 +877,13 @@ function fixtureFor<T>(command: string, args?: object): T {
     // browser-preview entry doesn't spew unhandled rejections.
     case "meeting_debug_listener_ping":
       return fixture(command, undefined as unknown as T);
+    // LR.0.B / mb-hiar -- Unsplash key fixtures. The getter returns
+    // null (no key set) by default; tests override via
+    // `window.__MOCKINGBIRD_FIXTURES__.unsplash_get_api_key = "…"`.
+    // Set/clear are write commands and fall through to the write-
+    // command no-op block below.
+    case "unsplash_get_api_key":
+      return fixture(command, null as unknown as T);
     // Write commands — no-op in fixture mode.
     case "delete_session":
     case "mark_session_as_example":
@@ -900,6 +917,9 @@ function fixtureFor<T>(command: string, args?: object): T {
     case "activity_exclusion_delete":
     case "activity_retention_set":
     case "activity_export_pdf":
+    // LR.0.B / mb-hiar -- write-side Unsplash key commands.
+    case "unsplash_set_api_key":
+    case "unsplash_clear_api_key":
       return fixture(command, undefined as unknown as T);
     case "kg_ingest_text_note":
       // Phase 1D Wave 1D.3 (`mb-0gt6`) -- browser-preview stub.

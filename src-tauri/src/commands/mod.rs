@@ -29,6 +29,8 @@ pub mod sessions;
 pub mod settings;
 pub mod system;
 pub mod types;
+// LR.0.B / mb-hiar (ADR 0055) — Unsplash key DPAPI surface.
+pub mod unsplash;
 pub mod vault;
 
 use std::sync::{Arc, Mutex};
@@ -212,6 +214,12 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         // ADR 0046 Iter 4 / mb-3xww — nested-vault guided dialog.
         vault::vault_check_path,
         vault::vault_ensure_dir,
+        // LR.0.B / mb-hiar (ADR 0055) — Unsplash key DPAPI surface.
+        // Three commands matching the existing SecretStore put/get/
+        // delete trio so the JS side never has to know DPAPI exists.
+        unsplash::unsplash_set_api_key,
+        unsplash::unsplash_get_api_key,
+        unsplash::unsplash_clear_api_key,
     ])
 }
 

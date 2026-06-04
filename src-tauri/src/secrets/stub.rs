@@ -110,5 +110,34 @@ mod tests {
     #[test]
     fn kinds_have_distinct_ids() {
         assert_ne!(SecretKind::ClaudeApiKey.id(), SecretKind::Reserved2.id());
+        assert_ne!(
+            SecretKind::ClaudeApiKey.id(),
+            SecretKind::UnsplashApiKey.id()
+        );
+        assert_ne!(SecretKind::UnsplashApiKey.id(), SecretKind::Reserved2.id());
+    }
+
+    #[test]
+    fn unsplash_key_isolated_from_claude_in_stub() {
+        // The in-memory stub is keyed by `SecretKind::id()` — pin
+        // that writing one kind does not leak into another.
+        let s = NullSecretStore::new();
+        s.put(SecretKind::ClaudeApiKey, "claude-v").unwrap();
+        s.put(SecretKind::UnsplashApiKey, "unsplash-v").unwrap();
+        assert_eq!(
+            s.get(SecretKind::ClaudeApiKey).unwrap().as_deref(),
+            Some("claude-v")
+        );
+        assert_eq!(
+            s.get(SecretKind::UnsplashApiKey).unwrap().as_deref(),
+            Some("unsplash-v")
+        );
+        s.delete(SecretKind::ClaudeApiKey).unwrap();
+        assert_eq!(s.get(SecretKind::ClaudeApiKey).unwrap(), None);
+        // Deleting one kind must NOT affect the other.
+        assert_eq!(
+            s.get(SecretKind::UnsplashApiKey).unwrap().as_deref(),
+            Some("unsplash-v")
+        );
     }
 }
