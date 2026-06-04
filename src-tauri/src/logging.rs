@@ -75,8 +75,18 @@ fn user_profile_dir() -> String {
 }
 
 /// Compiled scrubber set. Construct once, share via `Arc`.
+///
+/// Patterns are applied in order; an earlier hit consumes the bytes and
+/// prevents a later pattern from over-matching the redacted placeholder.
+/// Specifically `api_key` runs before `hex40` so an `sk-ant-...` token
+/// never gets re-classified as a hex blob, and `bearer` runs before
+/// `hex40` so a `Bearer <40-char-hex>` token gets the bearer placeholder
+/// (which carries more context for log readers) instead of the hex one.
 struct ScrubberSet {
     api_key: Regex,
+    github_pat: Regex,
+    bearer: Regex,
+    hex40: Regex,
     email: Regex,
     user_profile_path: String,
 }
@@ -88,6 +98,21 @@ impl ScrubberSet {
             // and any future provider using the same shape. The {20,} guard avoids
             // false positives on short tokens.
             api_key: Regex::new(r"sk-[A-Za-z0-9_\-]{20,}").expect("compile api_key regex"),
+            // GitHub PAT shapes: `ghp_`, `ghs_` (server), with the documented
+            // 36-char base62 body. We exclude `gho_`, `ghu_`, `ghr_` because
+            // those are OAuth/user/refresh tokens not normally pasted into
+            // log lines, but the same shape would still trip `api_key` only
+            // if they started with `sk-` (they do not), so adding them later
+            // is purely a coverage decision.
+            github_pat: Regex::new(r"gh[ps]_[A-Za-z0-9]{36}").expect("compile github_pat regex"),
+            // Generic `Bearer <token>` shape. RFC 6750 token68 alphabet plus
+            // `=` padding. {20,} keeps it off of stub words like `Bearer x`.
+            bearer: Regex::new(r"Bearer\s+[A-Za-z0-9\-._~+/]{20,}=*")
+                .expect("compile bearer regex"),
+            // 40-char hex blob. Matches Unsplash access-key shape (and Git
+            // SHA-1 commit hashes, which we do not log intentionally, so the
+            // false-positive surface is negligible).
+            hex40: Regex::new(r"(?i)\b[a-f0-9]{40}\b").expect("compile hex40 regex"),
             email: Regex::new(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
                 .expect("compile email regex"),
             user_profile_path,
@@ -96,6 +121,9 @@ impl ScrubberSet {
 
     fn scrub(&self, s: &str) -> String {
         let s = self.api_key.replace_all(s, "sk-<REDACTED>");
+        let s = self.github_pat.replace_all(&s, "gh<REDACTED>");
+        let s = self.bearer.replace_all(&s, "Bearer <REDACTED>");
+        let s = self.hex40.replace_all(&s, "<HEX40_REDACTED>");
         let s = self.email.replace_all(&s, "<EMAIL>");
         if self.user_profile_path.is_empty() {
             s.into_owned()
@@ -179,6 +207,66 @@ mod tests {
         );
         // Short tokens shouldn't trigger.
         assert_eq!(scrub("not-a-key sk-short"), "not-a-key sk-short");
+    }
+
+    #[test]
+    fn scrubber_redacts_github_pat() {
+        // 36-char body after `ghp_` / `ghs_` per GitHub PAT docs.
+        assert_eq!(
+            scrub("PAT=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"),
+            "PAT=gh<REDACTED>"
+        );
+        assert_eq!(
+            scrub("srv=ghs_abcdefghijklmnopqrstuvwxyz0123456789AB"),
+            "srv=gh<REDACTED>"
+        );
+        // Not-a-PAT cases: wrong prefix, too short.
+        assert_eq!(
+            scrub("gho_unsupportedprefix000000000000000000"),
+            "gho_unsupportedprefix000000000000000000"
+        );
+        assert_eq!(scrub("ghp_tooshort"), "ghp_tooshort");
+    }
+
+    #[test]
+    fn scrubber_redacts_bearer_tokens() {
+        // RFC-6750-shape token, base64-ish with `=` padding.
+        assert_eq!(
+            scrub("auth: Bearer abcdefghijklmnopqrstuvwx=="),
+            "auth: Bearer <REDACTED>"
+        );
+        // Short bearer should not match (token body < 20 chars).
+        assert_eq!(scrub("x = Bearer abc"), "x = Bearer abc");
+        // Tab whitespace between `Bearer` and the token still scrubs.
+        assert_eq!(
+            scrub("h:\tBearer\tAAAAAAAAAAAAAAAAAAAAAAAA"),
+            "h:\tBearer <REDACTED>"
+        );
+        // Bearer ahead of a 40-hex blob: `bearer` runs first and wins.
+        // The placeholder text contains `<REDACTED>` not `<HEX40_REDACTED>`.
+        assert_eq!(
+            scrub("h: Bearer 0123456789abcdef0123456789abcdef01234567"),
+            "h: Bearer <REDACTED>"
+        );
+    }
+
+    #[test]
+    fn scrubber_redacts_hex40_blobs() {
+        // Unsplash access-key shape: 40 lowercase hex.
+        assert_eq!(
+            scrub("key=0123456789abcdef0123456789abcdef01234567 done"),
+            "key=<HEX40_REDACTED> done"
+        );
+        // Mixed case still hits (case-insensitive).
+        assert_eq!(
+            scrub("DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF"),
+            "<HEX40_REDACTED>"
+        );
+        // 39-char hex must NOT hit; 41-char hex must NOT hit on the boundary.
+        let nine = "123456789abcdef0123456789abcdef012345678"; // 39 chars
+        assert_eq!(scrub(nine), nine);
+        let one = "123456789abcdef0123456789abcdef0123456789a"; // 41 chars
+        assert_eq!(scrub(one), one);
     }
 
     #[test]
