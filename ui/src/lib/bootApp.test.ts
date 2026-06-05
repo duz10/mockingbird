@@ -19,6 +19,7 @@ import type {
   KgSettings,
   ModeRow,
   SettingsSnapshot,
+  ThemeChoice,
 } from "./types";
 
 /* ------------------------------------------------------------------ */
@@ -53,22 +54,18 @@ function makeApi(overrides: Partial<BootApi> = {}): BootApi {
   };
 }
 
-function makeSetters(): BootSetters & {
-  // Re-typed call arrays so individual assertions stay terse.
-  setModes: ReturnType<typeof vi.fn>;
-  setSettings: ReturnType<typeof vi.fn>;
-  setActiveModeSlug: ReturnType<typeof vi.fn>;
-  setKgGraphEnabled: ReturnType<typeof vi.fn>;
-  setAppVersion: ReturnType<typeof vi.fn>;
-  applyTheme: ReturnType<typeof vi.fn>;
-} {
+// Vitest 4 tightened the `Mock<T>` generic so the default `vi.fn()`
+// no longer auto-assigns to a typed function slot. We pass the
+// function signature explicitly so each mock keeps both its callable
+// type AND the `.mock` API surface the matchers read.
+function makeSetters(): BootSetters {
   return {
-    setModes: vi.fn(),
-    setSettings: vi.fn(),
-    setActiveModeSlug: vi.fn(),
-    setKgGraphEnabled: vi.fn(),
-    setAppVersion: vi.fn(),
-    applyTheme: vi.fn(),
+    setModes: vi.fn<(m: ModeRow[]) => void>(),
+    setSettings: vi.fn<(s: SettingsSnapshot | null) => void>(),
+    setActiveModeSlug: vi.fn<(slug: string | null) => void>(),
+    setKgGraphEnabled: vi.fn<(on: boolean | null) => void>(),
+    setAppVersion: vi.fn<(v: string | null) => void>(),
+    applyTheme: vi.fn<(theme: ThemeChoice) => void>(),
   };
 }
 

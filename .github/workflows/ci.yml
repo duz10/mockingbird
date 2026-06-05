@@ -1,0 +1,101 @@
+# Mockingbird CI
+#
+# Gates pushes to main and runs read-only on PRs (default token scopes;
+# will not write back to fork branches).
+#
+# Why no `cargo test`:
+#   The test binaries link clean locally (`cargo test --release --no-run`
+#   passes) but exec hits a known DLL ABI mismatch on the maintainer's
+#   Windows + CUDA box (LESSONS 2026-05-17). CI behavior on GitHub
+#   runners is untested and would add a debugging burden disproportionate
+#   to its value during the beta. We rely on `cargo check` + local
+#   `--no-run` validation + manual QA matrix instead.
+#
+# Why no `--release` on clippy:
+#   Local dev pins `--release` to reuse whisper-rs-sys CUDA artifacts.
+#   CI has no CUDA, no cached artifacts, and runs in debug. Clippy in
+#   debug still validates the full type and trait surface.
+#
+# Why no cargo-with-cuda wrapper:
+#   GitHub runners have no MSVC vcvars / CUDA installation to import.
+#   The wrapper is dev-box specific. Plain cargo works fine in CI.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # `--ignore-scripts` is mandatory per repo hook policy
+      # (block-unsafe-npm). Mini Shai-Hulud guard.
+      - name: Install UI deps
+        working-directory: ui
+        run: npm ci --ignore-scripts
+
+      - name: UI type check
+        working-directory: ui
+        run: npx tsc --noEmit
+
+      - name: UI tests
+        working-directory: ui
+        run: npm test
+
+      - name: UI build
+        working-directory: ui
+        run: npm run build
+
+      - name: Cargo fmt check
+        run: cargo fmt --all -- --check
+
+      - name: Cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Cargo check
+        run: cargo check --workspace --all-targets
+
+      # cargo-audit is warn-only: advisories surface in the job log as
+      # warnings but do not fail the build. The maintainer reviews
+      # findings periodically and bumps deps as appropriate. This
+      # prevents transient upstream advisories from blocking unrelated
+      # PRs.
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Cargo audit (warn-only)
+        continue-on-error: true
+        run: cargo audit

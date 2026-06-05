@@ -1,0 +1,87 @@
+# Mockingbird Release
+#
+# Fires on version tags (`v*.*.*` and pre-release variants like
+# `v0.2.0-beta.1`) or manual dispatch. Builds the Tauri bundle on
+# every matrix entry and attaches artifacts to a DRAFT GitHub Release.
+# The maintainer reviews and publishes the draft manually so a
+# misconfigured tag cannot accidentally ship a public release.
+#
+# Matrix is intentionally shaped for cross-platform from day one even
+# though only Windows is active in v1. The macOS slot is commented out
+# and will be enabled when Phase 9 lands. Source-build remains the
+# documented path for users outside Windows until then.
+#
+# No code-signing secrets are wired for the beta. Bundles ship unsigned
+# per charter. Future signing will plug in via
+# TAURI_SIGNING_PRIVATE_KEY + TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+      - "v*.*.*-*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundle: msi,nsis
+          # - os: macos-latest
+          #   target: aarch64-apple-darwin
+          #   bundle: dmg,app
+          # macOS slot: enable when Phase 9 lands. Source-build path
+          # is the documented user route per docs/research/.
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install UI deps
+        working-directory: ui
+        run: npm ci --ignore-scripts
+
+      - name: UI build
+        working-directory: ui
+        run: npm run build
+
+      - name: Build and bundle
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Code-signing intentionally omitted for beta releases.
+          # Future:
+          #   TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Mockingbird ${{ github.ref_name }}"
+          releaseBody: "See CHANGELOG.md for release notes."
+          releaseDraft: true
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') || contains(github.ref_name, 'alpha') }}
+          args: --target ${{ matrix.target }}

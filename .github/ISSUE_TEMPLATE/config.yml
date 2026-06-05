@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussion / Question / Idea
+    url: https://github.com/duz10/mockingbird/discussions
+    about: For anything that is not a confirmed bug. Most non-bug interaction belongs here.
+  - name: Security vulnerability
+    url: https://github.com/duz10/mockingbird/security/advisories/new
+    about: Private vulnerability reporting via GitHub Security Advisories.

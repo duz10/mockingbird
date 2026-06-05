@@ -86,7 +86,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["msi", "nsis"],
     "category": "Utility",
     "copyright": "Copyright (c) 2026 Dustin Boyd",
     "shortDescription": "Local-first voice dictation, meeting capture, and knowledge graph capture for Windows.",
