@@ -227,12 +227,8 @@ pub fn run_latency_bench() -> i32 {
     );
 
     let mut rows: Vec<BenchRow> = Vec::with_capacity(selected.len());
-    let mut next_entry_id: i64 = 1;
 
-    for dict in &selected {
-        let entry_id = next_entry_id;
-        next_entry_id += 1;
-
+    for (entry_id, dict) in (1_i64..).zip(selected.iter()) {
         if let Err(e) = seed_session_row(&conn, entry_id, &dict.dictation_id) {
             eprintln!(
                 "kg_latency_bench: seed sessions row failed for {}: {e}",
