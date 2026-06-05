@@ -6,10 +6,30 @@
 # The maintainer reviews and publishes the draft manually so a
 # misconfigured tag cannot accidentally ship a public release.
 #
-# Matrix is intentionally shaped for cross-platform from day one even
-# though only Windows is active in v1. The macOS slot is commented out
-# and will be enabled when Phase 9 lands. Source-build remains the
-# documented path for users outside Windows until then.
+# Matrix shape:
+#
+#   * windows-latest + variant=cpu  -> Mockingbird-Setup-x.y.z.msi
+#       Whisper runs on CPU. Works on any 64-bit Windows machine.
+#       Roughly 50 MB download, 80 MB installed.
+#
+#   * windows-latest + variant=cuda -> Mockingbird-CUDA-Setup-x.y.z.msi
+#       Whisper runs on NVIDIA GPU via cuBLAS. The bundle includes
+#       cudart64_12.dll + cublas64_12.dll + cublasLt64_12.dll from the
+#       CUDA 12.x runtime so the user does not need to install the
+#       CUDA Toolkit separately. Roughly 250 MB download, 770 MB
+#       installed. Driver-supplied nvcuda.dll is the only user-side
+#       prereq and ships with every NVIDIA driver via Windows Update
+#       or GeForce Experience.
+#
+# The CUDA variant uses a separate Tauri config overlay
+# (src-tauri/tauri.cuda.conf.json) that overrides productName to
+# Mockingbird-CUDA so installer filenames and Add/Remove Programs
+# entries are unambiguous, and lists the three runtime DLLs in
+# bundle.resources so they ship inside the MSI.
+#
+# macOS slot is commented out and will be enabled when Phase 9 lands.
+# Source-build remains the documented path for users outside Windows
+# until then.
 #
 # No code-signing secrets are wired for the beta. Bundles ship unsigned
 # per charter. Future signing will plug in via
@@ -34,10 +54,16 @@ jobs:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            bundle: msi,nsis
+            variant: cpu
+            tauri_args: --target x86_64-pc-windows-msvc
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            variant: cuda
+            tauri_args: --target x86_64-pc-windows-msvc --config src-tauri/tauri.cuda.conf.json --features mockingbird/cuda
           # - os: macos-latest
           #   target: aarch64-apple-darwin
-          #   bundle: dmg,app
+          #   variant: cpu
+          #   tauri_args: --target aarch64-apple-darwin
           # macOS slot: enable when Phase 9 lands. Source-build path
           # is the documented user route per docs/research/.
 
@@ -61,6 +87,25 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          # Distinct cache keys per variant. The cuda variant compiles
+          # whisper-rs-sys with the cuda feature which produces a
+          # different artifact set than the cpu variant; sharing the
+          # cache across variants would force a full rebuild on every
+          # run and cause stale-artifact confusion.
+          key: ${{ matrix.variant }}
+
+      - name: Install CUDA Toolkit 12.8
+        if: matrix.variant == 'cuda'
+        uses: Jimver/cuda-toolkit@v0.2.19
+        with:
+          cuda: "12.8.0"
+          # Only need the bits required to compile whisper-rs-sys/cuda
+          # and stage runtime DLLs. The full toolkit is ~3.5 GB; this
+          # subset is closer to 1.5 GB and shaves several minutes off
+          # the CI run.
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "thrust", "visual_studio_integration"]'
+          method: "network"
 
       - name: Install UI deps
         working-directory: ui
@@ -69,6 +114,12 @@ jobs:
       - name: UI build
         working-directory: ui
         run: npm run build
+
+      - name: Stage CUDA runtime DLLs
+        if: matrix.variant == 'cuda'
+        shell: pwsh
+        run: |
+          powershell -File scripts\dev\stage-cuda-runtime.ps1
 
       - name: Build and bundle
         uses: tauri-apps/tauri-action@v0
@@ -84,4 +135,4 @@ jobs:
           releaseBody: "See CHANGELOG.md for release notes."
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') || contains(github.ref_name, 'alpha') }}
-          args: --target ${{ matrix.target }}
+          args: ${{ matrix.tauri_args }}

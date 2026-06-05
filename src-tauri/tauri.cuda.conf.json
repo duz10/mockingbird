@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.tauri.app/config/2.0.0",
+  "productName": "Mockingbird-CUDA",
+  "bundle": {
+    "resources": [
+      "cuda-runtime/cudart64_12.dll",
+      "cuda-runtime/cublas64_12.dll",
+      "cuda-runtime/cublasLt64_12.dll"
+    ],
+    "longDescription": "Local-first voice dictation, meeting capture, and knowledge graph capture for Windows with bundled NVIDIA CUDA runtime for fast GPU transcription. Fully on-device. Privacy-respecting. Zero telemetry."
+  }
+}

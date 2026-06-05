@@ -28,12 +28,14 @@ Capture quick text or voice notes from your iPhone and have them land in Mocking
 
 The fastest path:
 
-1. Download the latest `Mockingbird-Setup-x.y.z.msi` from the [Releases](../../releases) page.
+1. Open the [Releases](../../releases) page and pick the MSI for your hardware:
+   - `Mockingbird-Setup-x.y.z.msi` (about 50 MB download, about 80 MB installed) for CPU-only transcription on any 64-bit Windows machine.
+   - `Mockingbird-CUDA-Setup-x.y.z.msi` (about 250 MB download, about 770 MB installed) for fast NVIDIA GPU transcription. Bundles the CUDA runtime libraries so no separate Toolkit install is needed; only an NVIDIA driver is required and that ships with every NVIDIA GPU.
 2. Run it. On first launch SmartScreen may warn that the app is unsigned. Click "More info" then "Run anyway".
-3. The first launch downloads a Whisper model (~500 MB to 2 GB depending on which variant you pick in Settings).
+3. The first launch downloads a Whisper model (about 500 MB to 2 GB depending on which variant you pick in Settings).
 4. Press Right Alt and start talking. Release to paste into the focused app.
 
-See [`INSTALL.md`](./INSTALL.md) for the standard and from-source paths, including the optional Ollama integration for local LLM cleanup.
+See [`INSTALL.md`](./INSTALL.md) for the standard and from-source paths, including the optional Ollama integration for local LLM cleanup, and [`PREREQS.md`](./PREREQS.md) for the full hardware and OS requirements.
 
 ## How it works (high level)
 

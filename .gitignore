@@ -28,6 +28,11 @@ dist/
 build/
 src-tauri/target/
 
+# CUDA runtime DLLs staged by scripts/dev/stage-cuda-runtime.ps1 for the
+# Mockingbird-CUDA MSI variant. Pulled from the local CUDA Toolkit install
+# (or the Jimver/cuda-toolkit step on CI) at build time; never committed.
+src-tauri/cuda-runtime/
+
 # IDE / OS noise
 .vscode/
 .idea/

@@ -24,11 +24,16 @@ Older Windows 10 builds (pre-19041) lack the WebView2 APIs and modern audio capt
 
 ## Optional but recommended
 
-### GPU acceleration
+### GPU acceleration (NVIDIA)
 
-Mockingbird ships with CUDA support for NVIDIA GPUs baked into the MSI. If you have an NVIDIA GPU with a current driver (it came with your GPU and auto-updates via Windows Update or GeForce Experience), Mockingbird detects the GPU at launch and uses it automatically for fast transcription. You do NOT need to install the CUDA Toolkit separately. The runtime libraries Mockingbird needs are bundled next to the executable.
+Mockingbird ships in two installer variants on the [Releases](../../releases) page. Pick the one that matches your hardware.
 
-On systems without an NVIDIA GPU (AMD, Intel integrated, or no GPU at all), Mockingbird falls back to CPU transcription automatically. CPU mode is slower than GPU mode, but it works on any 64-bit Windows machine that meets the rest of the prerequisites.
+- **`Mockingbird-Setup-x.y.z.msi`** (about 50 MB download, about 80 MB installed). CPU-only Whisper. Runs on any 64-bit Windows machine that meets the rest of the prerequisites. Transcription is slower than GPU mode but works everywhere.
+- **`Mockingbird-CUDA-Setup-x.y.z.msi`** (about 250 MB download, about 770 MB installed). NVIDIA GPU Whisper via cuBLAS. The MSI bundles the NVIDIA CUDA runtime libraries (cudart, cublas, cublasLt) so you do NOT need to install the CUDA Toolkit separately. The only user-side prereq is an NVIDIA driver, which ships with every NVIDIA GPU and auto-updates via Windows Update or GeForce Experience.
+
+The CUDA variant requires an NVIDIA GPU. On a machine with an AMD GPU, Intel integrated graphics, or no GPU, install the CPU variant instead. Installing the CUDA variant on a non-NVIDIA machine will produce a launch failure with a missing-DLL error.
+
+The two variants install side by side under distinct Add/Remove Programs entries (`Mockingbird` and `Mockingbird-CUDA`) so switching between them does not require uninstalling the other first.
 
 If you are building from source and want to compile WITH CUDA support, see [`INSTALL.md`](./INSTALL.md) Tier 3. CUDA Toolkit 12.8 is required at build time only; runtime requirements are unchanged.
 
