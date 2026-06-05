@@ -291,8 +291,8 @@ mod tests {
     use crate::settings::{model::SettingKey, Settings};
 
     fn fresh_db() -> Arc<Mutex<Connection>> {
-        let mut conn = Connection::open_in_memory().unwrap();
-        apply_all(&mut conn).unwrap();
+        let conn = Connection::open_in_memory().unwrap();
+        apply_all(&conn).unwrap();
         bootstrap_provenance_rows(&conn).unwrap();
         Arc::new(Mutex::new(conn))
     }

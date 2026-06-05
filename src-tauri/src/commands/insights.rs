@@ -649,8 +649,9 @@ mod tests {
     ///  - 2 never-injected sessions (NULL) -- must drop out.
     ///  - 1 injected session aged 60 days -- in lifetime, out of
     ///    last-30-days.
+    ///
     /// Expected: lifetime = 4 injected / 3 edit-free (75%);
-    ///           last30d  = 3 injected / 2 edit-free (~66.6%).
+    /// last30d  = 3 injected / 2 edit-free (~66.6%).
     #[test]
     fn edit_free_send_excludes_null_and_windows_correctly() {
         let db = Database::open_in_memory().unwrap();

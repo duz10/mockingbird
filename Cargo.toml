@@ -70,12 +70,22 @@ ort            = { version = "=2.0.0-rc.10", default-features = false, features 
 
 # whisper-rs — Phase 2 Wave 4 / Wave 5 GPU re-enable.
 #
-# CUDA feature ON, built against CUDA 12.8 installed side-by-side with
-# the existing CUDA 13.2 (the chocolatey-default). CUDA_PATH points at
-# v12.8 to win the find_package(CUDAToolkit) lookup. ADR 0011's runtime
-# CPU fallback still applies if GPU init fails at app launch (driver
-# missing, OOM, etc) — see WhisperStt::new.
-whisper-rs     = { version = "0.16", features = ["cuda"] }
+# Workspace dep is CPU-only by default. The `cuda` Cargo feature on the
+# `mockingbird` package (src-tauri/Cargo.toml) opts in to whisper-rs's
+# CUDA build, which compiles against CUDA 12.8 installed side-by-side
+# with the existing CUDA 13.2 (the chocolatey-default). CUDA_PATH must
+# point at v12.8 (see ADR 0011 + scripts/dev/cargo-with-cuda.ps1).
+# Local-dev cargo invocations go through that wrapper, which injects
+# `--features mockingbird/cuda` automatically for build-y verbs. CI
+# runs vanilla cargo with no features, so the windows-latest runner
+# (no CUDA toolkit) builds CPU-only.
+#
+# ADR 0011's runtime CPU fallback still applies at app launch: with
+# the cuda feature on, GPU init is attempted first and falls back to
+# CPU if the driver is missing, OOM, etc; with the cuda feature off,
+# WhisperContextParameters::use_gpu(true) is a no-op and we get a CPU
+# context directly (see WhisperStt::new).
+whisper-rs     = { version = "0.16" }
 
 # Phase 2 — Benchmarks.
 criterion      = { version = "0.5", features = ["html_reports"] }

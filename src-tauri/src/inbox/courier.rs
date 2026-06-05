@@ -1054,13 +1054,18 @@ mod tests {
         ));
     }
 
+    /// Recorded progress-bus emit: (stage, source, session_id, error).
+    /// Tuple form keeps the test-local capturing bus throwaway-crate
+    /// friendly (LESSONS P2) without needing the real event type.
+    type RecordedEmit = (&'static str, &'static str, Option<i64>, Option<String>);
+
     /// In-test progress bus that records every emit in order.
     /// Mirrors the capturing bus in `dictation/ingest_progress.rs`'s
     /// own tests; kept local here so this file stays
     /// throwaway-crate friendly (LESSONS P2).
     #[derive(Default)]
     struct RecordingBus {
-        events: StdMutex<Vec<(&'static str, &'static str, Option<i64>, Option<String>)>>,
+        events: StdMutex<Vec<RecordedEmit>>,
     }
 
     impl IngestProgressBus for RecordingBus {

@@ -197,7 +197,7 @@ mod tests {
         // Secondary monitor at (1920, 0), 1280x720.
         let p = bottom_center_rect(area(1920, 0, 1280, 720), 440, 64);
         assert_eq!(p.x, 1920 + (1280 - 440) / 2);
-        assert_eq!(p.y, 0 + 720 - 64 - MARGIN_BOTTOM_PX);
+        assert_eq!(p.y, 720 - 64 - MARGIN_BOTTOM_PX);
     }
 
     #[test]

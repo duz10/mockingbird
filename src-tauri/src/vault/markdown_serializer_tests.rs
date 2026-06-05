@@ -716,9 +716,9 @@ fn arb_entry() -> impl Strategy<Value = KgEntry> {
     let body = prop::collection::vec(prop::char::any(), 0..200)
         .prop_map(|chars| chars.into_iter().collect::<String>());
     let tags = prop::collection::vec("[a-z][a-z0-9-]{0,20}", 0..5)
-        .prop_map(|v| v.into_iter().map(String::from).collect::<Vec<_>>());
+        .prop_map(|v| v.into_iter().collect::<Vec<_>>());
     let entities = prop::collection::vec("[A-Za-z][A-Za-z0-9 -]{0,30}", 0..5)
-        .prop_map(|v| v.into_iter().map(String::from).collect::<Vec<_>>());
+        .prop_map(|v| v.into_iter().collect::<Vec<_>>());
     let day = 1u32..28;
     let month = 1u32..13;
     let year = 2000i32..2099;

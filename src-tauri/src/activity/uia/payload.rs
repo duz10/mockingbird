@@ -374,9 +374,7 @@ mod tests {
     fn multi_byte_glyphs_are_truncated_safely() {
         // Each emoji is multi-byte in UTF-8. Slicing on bytes would
         // panic; we MUST slice on chars.
-        let s: String = std::iter::repeat('🐦')
-            .take(MAX_FRAGMENT_CHARS + 10)
-            .collect();
+        let s: String = "🐦".repeat(MAX_FRAGMENT_CHARS + 10);
         let r = ProbeResult {
             visible_text_fragments: vec![s],
             ..Default::default()

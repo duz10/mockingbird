@@ -166,6 +166,17 @@ path = "src/bin/kg_parity.rs"
 default          = ["custom-protocol"]
 custom-protocol  = ["tauri/custom-protocol"]
 audible-beeps    = []
+# Opt-in CUDA acceleration for whisper-rs.
+#
+# Default build (vanilla `cargo build`) is CPU-only so CI runners and
+# downstream packagers without the CUDA toolkit installed can compile.
+# Local dev on the Windows + CUDA 12.8 box turns this on via the
+# `scripts/dev/cargo-with-cuda.ps1` wrapper, which auto-injects
+# `--features mockingbird/cuda` for build-y cargo verbs. Runtime
+# behaviour: with this feature off, `WhisperContextParameters::use_gpu(true)`
+# is a no-op and we run on CPU; with it on, GPU init is attempted and
+# falls back to CPU if the driver is missing or OOM (ADR 0011).
+cuda             = ["whisper-rs/cuda"]
 
 # Notes:
 # - Phase 2 Wave 4 added `whisper-rs` (currently CPU-only; see bd mb-ltq).

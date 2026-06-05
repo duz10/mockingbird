@@ -742,8 +742,10 @@ mod tests {
 
     #[test]
     fn vault_config_active_requires_both_flag_and_path() {
-        let mut c = VaultConfig::default();
-        c.enabled = true;
+        let mut c = VaultConfig {
+            enabled: true,
+            ..VaultConfig::default()
+        };
         assert!(!c.is_active(), "enabled alone isn't enough -- need a path");
         c.vault_path = Some(PathBuf::from("/tmp/vault"));
         assert!(c.is_active());

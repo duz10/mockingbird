@@ -192,7 +192,7 @@ fn serialize_sidecar_uses_lf_only_with_single_trailing_newline() {
         "no CRLF allowed in canonical sidecar"
     );
     assert!(
-        !bytes.iter().any(|b| *b == b'\r'),
+        !bytes.contains(&b'\r'),
         "no CR allowed in canonical sidecar"
     );
     assert_eq!(bytes.last(), Some(&b'\n'), "must end with newline");

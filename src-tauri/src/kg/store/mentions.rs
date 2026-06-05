@@ -64,8 +64,8 @@ mod tests {
     use rusqlite::Connection;
 
     /// Sets up the FK-graph minimum: sessions stub + kg_entities stub
-    /// + the two mention tables with the real UNIQUE constraints. FK
-    /// targets are stubs (no audit triggers etc.) -- we're testing
+    /// and the two mention tables with the real UNIQUE constraints.
+    /// FK targets are stubs (no audit triggers etc.) -- we're testing
     /// the mention-table behaviour in isolation.
     fn make_test_conn() -> Connection {
         let conn = Connection::open_in_memory().unwrap();

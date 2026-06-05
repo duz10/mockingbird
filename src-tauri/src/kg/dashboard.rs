@@ -335,7 +335,7 @@ mod tests {
     fn entity_type_count_orders_by_count_desc_then_name_asc() {
         // Deterministic ordering is the property the UI's counts band
         // depends on; this pins the SQL `ORDER BY` clause.
-        let mut rows = vec![
+        let mut rows = [
             EntityTypeCount {
                 entity_type: "place".into(),
                 count: 2,

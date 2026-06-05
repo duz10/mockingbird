@@ -167,7 +167,7 @@ fn paths_carry_the_literal_space_in_knowledge_graph() {
     let kg_component = p
         .root
         .components()
-        .last()
+        .next_back()
         .expect("root must have a leaf component");
     assert_eq!(
         kg_component.as_os_str(),
@@ -176,27 +176,27 @@ fn paths_carry_the_literal_space_in_knowledge_graph() {
     );
     // Sub-leaf names.
     assert_eq!(
-        p.inbox.components().last().unwrap().as_os_str(),
+        p.inbox.components().next_back().unwrap().as_os_str(),
         std::ffi::OsStr::new("Inbox"),
     );
     assert_eq!(
-        p.entries.components().last().unwrap().as_os_str(),
+        p.entries.components().next_back().unwrap().as_os_str(),
         std::ffi::OsStr::new("Entries"),
     );
     assert_eq!(
-        p.history.components().last().unwrap().as_os_str(),
+        p.history.components().next_back().unwrap().as_os_str(),
         std::ffi::OsStr::new("History"),
     );
     assert_eq!(
-        p.entities.components().last().unwrap().as_os_str(),
+        p.entities.components().next_back().unwrap().as_os_str(),
         std::ffi::OsStr::new("Entities"),
     );
     assert_eq!(
-        p.projects.components().last().unwrap().as_os_str(),
+        p.projects.components().next_back().unwrap().as_os_str(),
         std::ffi::OsStr::new("Projects"),
     );
     assert_eq!(
-        p.tags.components().last().unwrap().as_os_str(),
+        p.tags.components().next_back().unwrap().as_os_str(),
         std::ffi::OsStr::new("Tags"),
     );
 }

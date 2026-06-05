@@ -495,9 +495,7 @@ mod tests {
         push_fragment(&mut out, "   ".into());
         assert_eq!(out.len(), 1);
 
-        let huge: String = std::iter::repeat('x')
-            .take(FRAGMENT_CHAR_CAP + 50)
-            .collect();
+        let huge: String = "x".repeat(FRAGMENT_CHAR_CAP + 50);
         push_fragment(&mut out, huge);
         assert!(out.last().unwrap().ends_with('…'));
         assert_eq!(out.last().unwrap().chars().count(), FRAGMENT_CHAR_CAP + 1);

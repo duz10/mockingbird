@@ -104,7 +104,38 @@ if (-not $env:CMAKE_BUILD_PARALLEL_LEVEL) {
     $env:CMAKE_BUILD_PARALLEL_LEVEL = '4'
 }
 
-# --- 5. Invoke cargo --------------------------------------------------------
+# --- 5. Auto-inject `--features mockingbird/cuda` for build-y verbs --------
+# The workspace's `whisper-rs` dep is CPU-only by default so CI can
+# build on stock windows-latest (no CUDA toolkit). Local dev via this
+# wrapper wants CUDA. We inject the feature flag transparently for the
+# cargo subcommands that accept it, so existing call sites
+# (CI, contributor docs, lefthook, etc.) keep working unchanged.
+#
+# Sniff the first non-flag positional arg as the cargo subcommand.
+# Skip injection if (a) the verb doesn't take --features, (b) the user
+# already passed --features themselves, or (c) MOCKINGBIRD_NO_CUDA=1.
+$cargoVerb = $null
+foreach ($a in $args) {
+    if ($a -notlike '-*') { $cargoVerb = $a; break }
+}
+$featureCapableVerbs = @('build', 'check', 'clippy', 'test', 'run', 'bench', 'doc', 'rustc', 'rustdoc', 'tree', 'install')
+$userPassedFeatures  = ($args -contains '--features') -or ($args | Where-Object { $_ -like '--features=*' }).Count -gt 0
+$noCudaOverride      = $env:MOCKINGBIRD_NO_CUDA -eq '1'
+
+$effectiveArgs = @($args)
+if ($cargoVerb -and ($featureCapableVerbs -contains $cargoVerb) -and -not $userPassedFeatures -and -not $noCudaOverride) {
+    # Insert right after the verb so it lands inside the cargo flag set,
+    # not after the `--` arg-passthrough boundary for test/clippy.
+    $idx = [Array]::IndexOf($effectiveArgs, $cargoVerb)
+    $head = $effectiveArgs[0..$idx]
+    $tail = @()
+    if (($idx + 1) -lt $effectiveArgs.Length) {
+        $tail = $effectiveArgs[($idx + 1)..($effectiveArgs.Length - 1)]
+    }
+    $effectiveArgs = @($head) + @('--features', 'mockingbird/cuda') + @($tail)
+}
+
+# --- 6. Invoke cargo --------------------------------------------------------
 # Cargo writes diagnostics to stderr in the normal course of business.
 # PowerShell's pipeline treats native-command stderr as non-terminating
 # errors that, under various $ErrorActionPreference / Tee-Object / redirect
@@ -113,7 +144,7 @@ if (-not $env:CMAKE_BUILD_PARALLEL_LEVEL) {
 # *outside* PowerShell, so the parent shell sees a single text stream
 # regardless of how stdout/stderr are mixed.
 $ErrorActionPreference = 'Continue'
-$argString = ($args | ForEach-Object {
+$argString = ($effectiveArgs | ForEach-Object {
     if ($_ -match '\s') { '"' + $_ + '"' } else { $_ }
 }) -join ' '
 & cmd.exe /c "cargo $argString 2>&1"
