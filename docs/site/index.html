@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mockingbird - Local-first voice dictation for Windows</title>
+  <meta name="description" content="Local-first voice dictation, meeting capture, and knowledge graph capture for Windows. Fully on-device. Privacy-respecting. Zero telemetry.">
+  <meta name="color-scheme" content="light dark">
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="styles.css">
+
+  <meta property="og:title" content="Mockingbird - Local-first voice dictation for Windows">
+  <meta property="og:description" content="Local-first voice dictation, meeting capture, and knowledge graph capture for Windows. Fully on-device. Privacy-respecting. Zero telemetry.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://duz10.github.io/mockingbird/">
+  <meta property="og:image" content="https://duz10.github.io/mockingbird/favicon.svg">
+  <meta name="twitter:card" content="summary">
+</head>
+<body>
+  <main>
+
+    <header class="hero">
+      <img class="hero-mark" src="favicon.svg" alt="" aria-hidden="true" width="72" height="72">
+      <h1>Mockingbird</h1>
+      <p class="tagline">Local-first voice dictation, meeting capture, and knowledge graph capture for Windows.</p>
+      <p class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/duz10/mockingbird/releases">Download for Windows</a>
+        <a class="btn btn-secondary" href="https://github.com/duz10/mockingbird">View on GitHub</a>
+      </p>
+      <p class="hero-note">Beta release. Windows 10+ required. macOS support is source-build only; see the research doc on GitHub.</p>
+    </header>
+
+    <section class="maintainer" aria-labelledby="maintainer-h">
+      <h2 id="maintainer-h">A note from the maintainer</h2>
+      <p>
+        This is a reference implementation built for one developer's daily use and published freely.
+        Pull requests are welcomed but not prioritized. If you want a feature or fix that has not
+        been shipped, the recommended path is to fork the project.
+      </p>
+    </section>
+
+    <section class="features" aria-labelledby="features-h">
+      <h2 id="features-h">What it does</h2>
+      <div class="feature-grid">
+
+        <article class="feature-card">
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="3" width="6" height="12" rx="3"/>
+              <path d="M5 11a7 7 0 0 0 14 0"/>
+              <path d="M12 18v3"/>
+            </svg>
+          </div>
+          <h3>Voice dictation</h3>
+          <p>
+            Press a global hotkey, speak, and the transcript pastes into whatever app has
+            focus. Speech-to-text runs locally via Whisper. Optional cleanup polishes
+            disfluencies and applies your custom dictionary.
+          </p>
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="6" width="13" height="12" rx="2"/>
+              <path d="m16 10 5-3v10l-5-3z"/>
+            </svg>
+          </div>
+          <h3>Meeting capture</h3>
+          <p>
+            Records the microphone and system audio on separate channels, transcribes each
+            locally, then merges them with speaker attribution. A post-call summary is
+            available if you opt in to a local or cloud LLM.
+          </p>
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="6" cy="6" r="2.5"/>
+              <circle cx="18" cy="6" r="2.5"/>
+              <circle cx="12" cy="18" r="2.5"/>
+              <path d="M7.5 7.5 11 16"/>
+              <path d="M16.5 7.5 13 16"/>
+              <path d="M8 6h8"/>
+            </svg>
+          </div>
+          <h3>Knowledge graph capture</h3>
+          <p>
+            A fast-note mode that extracts entities and tags from every snippet, then
+            projects them into wiki-linked Markdown. Optional Obsidian vault sync turns
+            captured fragments into a navigable knowledge base.
+          </p>
+        </article>
+
+      </div>
+    </section>
+
+    <section class="privacy" aria-labelledby="privacy-h">
+      <h2 id="privacy-h">Privacy promise</h2>
+      <p>
+        Mockingbird runs entirely on your machine. No telemetry. No analytics. No phone-home.
+        API keys for optional cloud surfaces (Claude, Unsplash) are encrypted via Windows DPAPI
+        and never leave your computer except in the direct API call you opted into.
+      </p>
+    </section>
+
+    <section class="quickstart" aria-labelledby="quickstart-h">
+      <h2 id="quickstart-h">Quick start</h2>
+      <ol class="steps">
+        <li>
+          <strong>Download the MSI</strong> from the
+          <a href="https://github.com/duz10/mockingbird/releases">Releases page</a>.
+        </li>
+        <li>
+          <strong>Run the installer.</strong> Windows SmartScreen will show a warning because the beta
+          is not yet code-signed. That is normal for indie Windows software. Click
+          <code>More info</code>, then <code>Run anyway</code>.
+        </li>
+        <li>
+          <strong>Press the dictation hotkey and start speaking.</strong> The transcript pastes
+          into the app that had focus.
+        </li>
+      </ol>
+      <p class="note">
+        Full installation walkthrough including model setup and optional cloud LLM
+        configuration: <a href="https://github.com/duz10/mockingbird/blob/main/INSTALL.md">INSTALL.md</a>.
+      </p>
+    </section>
+
+    <section class="faq" aria-labelledby="faq-h">
+      <h2 id="faq-h">FAQ</h2>
+
+      <details>
+        <summary>Why is there a SmartScreen warning?</summary>
+        <p>
+          The beta is not code-signed. Windows treats unsigned installers as unknown
+          publishers and prompts you to confirm. This is the same friction every indie
+          Windows app hits before paying for a code-signing certificate. See
+          <a href="https://github.com/duz10/mockingbird/blob/main/SECURITY.md">SECURITY.md</a>
+          for details on what we do and do not sign.
+        </p>
+      </details>
+
+      <details>
+        <summary>Does it work on macOS?</summary>
+        <p>
+          Not yet, not as a packaged build. The codebase is structured for cross-platform
+          support behind trait boundaries, but macOS-specific integrations (audio capture,
+          paste injection, secrets) are not wired up. Source builds may work for the curious;
+          see
+          <a href="https://github.com/duz10/mockingbird/blob/main/docs/research/macos-implementation-notes.md">the macOS research note</a>.
+        </p>
+      </details>
+
+      <details>
+        <summary>Where does my data live?</summary>
+        <p>
+          Locally, in <code>%LOCALAPPDATA%\Mockingbird</code>. Transcripts, settings, the
+          SQLite database, and any vault projection all stay on your machine. Full detail
+          in
+          <a href="https://github.com/duz10/mockingbird/blob/main/PRIVACY.md">PRIVACY.md</a>.
+        </p>
+      </details>
+
+      <details>
+        <summary>Can I use my own LLM for cleanup and summarization?</summary>
+        <p>
+          Yes. Mockingbird talks to a local
+          <a href="https://ollama.com/">Ollama</a> server out of the box and works with
+          any chat model Ollama supports. Cloud providers (Claude) are optional and
+          opt-in.
+        </p>
+      </details>
+
+      <details>
+        <summary>Is this open source?</summary>
+        <p>
+          Yes, MIT licensed. Source at
+          <a href="https://github.com/duz10/mockingbird">github.com/duz10/mockingbird</a>.
+        </p>
+      </details>
+
+      <details>
+        <summary>I want to contribute.</summary>
+        <p>
+          Read
+          <a href="https://github.com/duz10/mockingbird/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>
+          first. Mockingbird is a reference implementation; the maintainer ships features on
+          their own schedule. Forks are the recommended path for anyone who needs something
+          that has not been built.
+        </p>
+      </details>
+    </section>
+
+    <section class="stack" aria-labelledby="stack-h">
+      <h2 id="stack-h">Tech stack</h2>
+      <p>
+        Built with Tauri 2, Rust, React 19, TypeScript, Tailwind v4, SQLite, whisper.cpp,
+        Silero VAD, and ONNX Runtime.
+      </p>
+    </section>
+
+    <footer>
+      <p>
+        <a href="https://github.com/duz10/mockingbird/blob/main/LICENSE">MIT licensed</a>
+        &middot;
+        <a href="https://github.com/duz10/mockingbird">github.com/duz10/mockingbird</a>
+      </p>
+      <p class="footer-fineprint">Built solo with substantial AI coding assistance.</p>
+    </footer>
+
+  </main>
+</body>
+</html>

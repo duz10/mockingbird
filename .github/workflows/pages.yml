@@ -1,0 +1,47 @@
+# Mockingbird GitHub Pages deploy
+#
+# Publishes the static landing site at docs/site/ to GitHub Pages on push
+# to main. Path filter keeps the workflow from firing on unrelated commits
+# (every Rust / UI change does NOT redeploy the site).
+#
+# Pages source must be set to "GitHub Actions" in repo settings for this
+# to work. The deploy-pages action consumes the uploaded artifact; no
+# branch-based publishing is involved.
+#
+# Visibility note: on private repos, Pages requires GitHub Pro or above.
+# The workflow will run green either way, but the published URL only
+# becomes reachable once the repo is public.
+
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/site
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Mockingbird brand mark — canonical app/tray icon source.
+
+  This SVG is the rasterisation source for the Windows app icon + tray
+  icon. It MUST stay visually identical to the in-app React mark at
+  ui/src/design/components/MockingbirdMark.tsx (state="static").
+
+  Design Language v1, ADR 0023.
+  3 vertical ellipses + a play triangle, terracotta gradient
+  (#DDA17A → #944730). The ellipse heights encode a soft
+  equaliser silhouette — reads as "voice / waveform / play".
+
+  If you regenerate this from the React component, preserve the
+  viewBox 0 0 256 256 and the geometry below 1:1; the Tauri CLI
+  rasterises to 16/32/64/128/256/512/1024 from this single source.
+
+  Regenerate the icon set via:
+    powershell -File scripts/dev/generate-icons.ps1
+    (or: cargo tauri icon assets/icons/mockingbird.svg)
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 256 256"
+     width="256"
+     height="256"
+     role="img"
+     aria-label="Mockingbird">
+  <defs>
+    <linearGradient id="mb-grad"
+                    x1="0" y1="0" x2="256" y2="256"
+                    gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#DDA17A"/>
+      <stop offset="100%" stop-color="#944730"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#mb-grad)">
+    <!-- Three equaliser-style ellipses. Order matches MockingbirdMark.tsx. -->
+    <ellipse cx="42"  cy="128" rx="18" ry="72"/>
+    <ellipse cx="104" cy="128" rx="26" ry="100"/>
+    <ellipse cx="163" cy="128" rx="15" ry="40"/>
+    <!-- Play triangle (right-pointing, rounded apex) -->
+    <path d="M196 105 L196 151 Q196 157 201 153 L229 132 Q234 128 229 124 L201 103 Q196 99 196 105 Z"/>
+  </g>
+</svg>
