@@ -1,4 +1,4 @@
-# Quick Knowledge-Graph Capture from your iPhone — iOS Shortcut setup
+# Quick Knowledge-Graph Capture from your iPhone - iOS Shortcut setup
 
 > **Status:** spec + setup walkthrough. The desktop side of this flow (the
 > KG-Inbox courier that ingests `.m4a` files from
@@ -14,7 +14,7 @@
 > dictation Shortcut from
 > [`ios-shortcut.md`](./ios-shortcut.md), do that one first and
 > get comfortable with it. The KG variant has the same three-action
-> shape and the same trigger options — only the save destination and
+> shape and the same trigger options - only the save destination and
 > the recommended name change. Both Shortcuts can coexist on the same
 > phone; pick which one to fire per capture based on whether the
 > recording is dictation (one-shot text you want pasted somewhere) or a
@@ -26,7 +26,7 @@
 
 This Shortcut lets you record a voice memo on your iPhone with one tap
 and have it filed into your Personal Knowledge Engine on your desktop
-automatically — distinct from the regular dictation Shortcut, which
+automatically - distinct from the regular dictation Shortcut, which
 treats captures as one-shot text-to-paste.
 
 The flow is:
@@ -35,7 +35,7 @@ The flow is:
    or Action Button).
 2. The phone records audio and prompts you to save the file.
 3. You tap to confirm the save destination (your Obsidian vault's
-   `Knowledge Graph/Inbox/` folder — note the space, and the capital
+   `Knowledge Graph/Inbox/` folder - note the space, and the capital
    letters).
 4. Obsidian Sync ferries the file to your desktop within ~30 seconds.
 5. Mockingbird's **KG-Inbox courier** (sibling of the standard inbox
@@ -48,11 +48,11 @@ The flow is:
    auto-created for anything the entry mentions.
 7. The audio file is moved out of `Inbox/` into
    `Knowledge Graph/History/<YYYY-MM>/<session-uuid>.m4a` for archive
-   (this is correct behavior — it's not lost, just filed).
+   (this is correct behavior - it's not lost, just filed).
 
 Mockingbird's processing stays 100% local. The only network hop is
 Obsidian Sync moving the audio file from your phone to your desktop
-through Obsidian's servers — encrypted end-to-end if you've set an
+through Obsidian's servers - encrypted end-to-end if you've set an
 encryption password on the vault (recommended; see the POC config in
 ADR 0046).
 
@@ -60,7 +60,7 @@ The chat-LLM Ingest step (the half of the Personal Knowledge Engine
 that crystallizes Layer 1 raw entries into Layer 2 wiki pages) is
 chartered under ADR 0054 §H and runs in your chat-LLM (Claude Code /
 Cursor / OpenCode / etc.), not in Mockingbird. Until Phase 2 ships,
-your raw entries pile up cleanly in `Entries/` and `INDEX.md` —
+your raw entries pile up cleanly in `Entries/` and `INDEX.md` -
 nothing is lost, the chat-LLM just isn't yet wired to read
 `SCHEMA.md` and synthesize across them on a cron.
 
@@ -76,10 +76,10 @@ Before building the Shortcut, confirm all four of these:
   once (initial sync needs to complete).
 - **The `Knowledge Graph/Inbox/` folder exists in the vault.** Open
   Obsidian Mobile, open `mockingbird-vault`, expand the file tree on
-  the left — you should see a `Knowledge Graph/` top-level folder with
+  the left - you should see a `Knowledge Graph/` top-level folder with
   `Inbox/`, `Entries/`, `History/`, `Entities/`, `Projects/`, and
   `Tags/` beneath it. If the `Knowledge Graph/` subtree is missing,
-  the desktop side hasn't bootstrapped it yet — open Mockingbird on
+  the desktop side hasn't bootstrapped it yet - open Mockingbird on
   the desktop, go to Settings → Knowledge Graph, and toggle
   **Knowledge Graph** on so the subtree gets created (this is
   idempotent; flipping it on twice has no effect).
@@ -90,7 +90,7 @@ Before building the Shortcut, confirm all four of these:
   is not spawned.
 - **The standard mobile sync prerequisite (Obsidian Sync running on
   the phone, vault opened at least once)** from
-  [`ios-shortcut.md`](./ios-shortcut.md) also applies here — the
+  [`ios-shortcut.md`](./ios-shortcut.md) also applies here - the
   transport is identical, only the watched folder differs.
 
 ---
@@ -103,7 +103,7 @@ apps. The shape is identical to the dictation Shortcut, locked at
 this pattern per ADR 0046 §8 + ADR 0046 Iter 3 Wave 0 spike findings
 (see "Why this design" at the bottom of this doc).
 
-> **Important — three actions, not two.** Same caveat as the
+> **Important - three actions, not two.** Same caveat as the
 > dictation Shortcut. Without the third **Open App** action, files
 > saved by the Shortcut sit in Obsidian Mobile's iOS sandbox for
 > 5-15 minutes before being pushed to Sync. The third action drops
@@ -118,7 +118,7 @@ this pattern per ADR 0046 §8 + ADR 0046 Iter 3 Wave 0 spike findings
 3. Tap **Add Action**. Search for **Record Audio**. Tap it to add it.
 4. Configure the Record Audio action:
    - **Audio Quality:** Low (32 kbps AAC mono). Same reasoning as the
-     dictation Shortcut — the 5 MB Obsidian Sync Standard cap is the
+     dictation Shortcut - the 5 MB Obsidian Sync Standard cap is the
      binding constraint, and Low gets you ~20 min per recording.
    - **Start Recording:** **On Tap**. Tap red to start, tap stop when
      done.
@@ -128,14 +128,14 @@ this pattern per ADR 0046 §8 + ADR 0046 Iter 3 Wave 0 spike findings
 6. Configure the Save File action:
    - **Service:** Files.
    - **Ask Where to Save:** **ON**. (One confirmation tap per
-     capture — same trade-off as the dictation Shortcut, same
+     capture - same trade-off as the dictation Shortcut, same
      reasoning under "Why this design".)
    - **Destination Path:** leave blank. The iOS Files picker will
      pop up at run time; you'll navigate to the vault's
      `Knowledge Graph/Inbox/` folder (NOT the standard `inbox/`!)
      and tap Save. iOS remembers the last destination, so after
      the first use it's a single confirmation tap.
-   - **Overwrite If File Exists:** OFF (default — the auto-generated
+   - **Overwrite If File Exists:** OFF (default - the auto-generated
      filename includes a timestamp so collisions don't happen).
 7. Tap **Add Action** a third time. Search for **Open App**. Tap it
    to add it. Configure:
@@ -144,7 +144,7 @@ this pattern per ADR 0046 §8 + ADR 0046 Iter 3 Wave 0 spike findings
    **This third action is critical, same as in the dictation
    Shortcut.** Without it, Obsidian Mobile stays backgrounded after
    the save and doesn't notice the new file in its sandbox until
-   iOS schedules a BGAppRefresh window — typically 5-15 minutes,
+   iOS schedules a BGAppRefresh window - typically 5-15 minutes,
    sometimes longer. Foregrounding Obsidian forces an immediate
    sandbox rescan and Sync push, reducing end-to-end latency from
    "done speaking" to "entry filed on desktop" to about 30-60
@@ -163,7 +163,7 @@ The Shortcut is now installed and ready to bind to a trigger.
 
 ## Pick a trigger
 
-Same three options as the dictation Shortcut. **Pick one** — they all
+Same three options as the dictation Shortcut. **Pick one** - they all
 work the same way, just different ergonomics. If you already have the
 dictation Shortcut bound to one trigger, pick a different one for
 the KG variant so you can fire either at will.
@@ -171,7 +171,7 @@ the KG variant so you can fire either at will.
 ### Option A: Home Screen icon (recommended for the KG variant)
 
 Most visible, no special hardware needed. Recommended because the
-visual icon makes it obvious which Shortcut you're firing — a meaningful
+visual icon makes it obvious which Shortcut you're firing - a meaningful
 difference when you have two Shortcuts that look identical at trigger
 time.
 
@@ -201,7 +201,7 @@ Now triple-tapping the back of the phone launches the KG recorder.
 ### Option C: Action Button (iPhone 15 Pro / 16 / 17)
 
 Same setup as the dictation Shortcut. The Action Button only binds
-to a single Shortcut — pick whichever variant you fire most often,
+to a single Shortcut - pick whichever variant you fire most often,
 and use a Home Screen icon for the other.
 
 ---
@@ -216,7 +216,7 @@ and use a Home Screen icon for the other.
    **On My iPhone → Obsidian → mockingbird-vault → Knowledge Graph →
    Inbox**. Tap **Save** (or **Open** depending on iOS version) at
    the top right.
-4. iOS remembers the destination — **second and subsequent uses are
+4. iOS remembers the destination - **second and subsequent uses are
    single-tap confirmations**, no navigation needed.
 5. **Obsidian Mobile opens automatically** (the third Shortcut
    action). You can leave it open or swipe back to whatever you were
@@ -237,11 +237,11 @@ and use a Home Screen icon for the other.
 > alongside a JSON sidecar. This is so the chat-LLM Ingest pass can
 > reach back to the original audio if it ever needs to (per ADR 0054
 > §H). If you check `Inbox/` after a successful capture and the file
-> is gone — that's the success path, not a bug.
+> is gone - that's the success path, not a bug.
 
 ---
 
-## Known limitations (read these — they save real headaches)
+## Known limitations (read these - they save real headaches)
 
 ### The 5 MB Obsidian Sync Standard cap
 
@@ -263,7 +263,7 @@ in the tree), the file syncs but lands in the wrong courier:
   it as a knowledge-graph note (`capture_kind = 'kg-note'`) and
   files it into `Entries/`.
 
-This is **positional routing** per ADR 0048 Q2 and ADR 0053 §D6 —
+This is **positional routing** per ADR 0048 Q2 and ADR 0053 §D6 -
 the destination folder *is* the intent signal. iOS Files remembers
 your last destination, so after the first save to the right place
 it's sticky; but if you ever save to the wrong place, the remembered
@@ -281,7 +281,7 @@ vault, which we explicitly do not do.
 
 If the desktop Settings → Knowledge Graph toggle is OFF, the courier
 is not running and your captures pile up in `Knowledge Graph/Inbox/`
-unprocessed. They are not lost — flip the toggle on and the
+unprocessed. They are not lost - flip the toggle on and the
 startup catch-up scan picks them all up in dedup-ledger order.
 
 ### Obsidian Mobile must be installed, signed in, and have opened
@@ -296,7 +296,7 @@ Same as the dictation Shortcut.
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Saved a file but it never appeared in `Entries/` on desktop | (a) Obsidian Sync on phone is paused or unreachable; (b) Mockingbird Knowledge Graph toggle on desktop is OFF; (c) file landed in `<vault>/inbox/` instead of `<vault>/Knowledge Graph/Inbox/`; (d) file is >5 MB | Check Obsidian Mobile → Settings → Sync (look for green check); check Settings → Knowledge Graph on desktop; verify the file is actually under `Knowledge Graph/Inbox/` via Obsidian Mobile file tree; check the file size on disk |
-| File showed up in the standard Dictations page, not in `Entries/` | Saved to the wrong folder — went into `<vault>/inbox/` (standard dictation courier) instead of `<vault>/Knowledge Graph/Inbox/` (KG courier) | Trigger the Shortcut again, re-navigate the Save File picker carefully: the path is **On My iPhone → Obsidian → mockingbird-vault → Knowledge Graph → Inbox**, not just "inbox" |
+| File showed up in the standard Dictations page, not in `Entries/` | Saved to the wrong folder - went into `<vault>/inbox/` (standard dictation courier) instead of `<vault>/Knowledge Graph/Inbox/` (KG courier) | Trigger the Shortcut again, re-navigate the Save File picker carefully: the path is **On My iPhone → Obsidian → mockingbird-vault → Knowledge Graph → Inbox**, not just "inbox" |
 | File appears in `Knowledge Graph/Inbox/_failed/` instead of being filed | Audio decode failed, transcription pipeline errored, or content failed validation. The courier quarantines the file to `_failed/` so it doesn't loop-retry forever | Open the file in `_failed/`; check Mockingbird's desktop log (Settings → About → Open log folder) for the specific error. Common causes: zero-byte recording (mic permission revoked), garbage-encoded m4a, recording shorter than the minimum-audio threshold. Move the file back to `Knowledge Graph/Inbox/` to retry after fixing the root cause |
 | Shortcut crashes when launched | iOS Shortcut runtime bug | Force-close the Shortcuts app and reopen. If it keeps happening, delete and rebuild the Shortcut (only takes a minute) |
 | Record Audio doesn't capture any sound | First-run mic permission denied | Settings → Privacy & Security → Microphone → Shortcuts → enable. Trigger the Shortcut again |
@@ -365,7 +365,7 @@ deltas called out:
 - **iOS Shortcut docs charter:** ADR 0053 §D10. This doc satisfies
   Wave 1E.8.
 - **Personal Knowledge Engine framing:** ADR 0054 §H (Ingest contract
-  — what the chat-LLM does with the raw entries this Shortcut
+  - what the chat-LLM does with the raw entries this Shortcut
   produces). Lands in Phase 2.
 - **Sync-layer findings (Open App necessity):**
   [`docs/spikes/iter3-sync-layer-findings.md`](../spikes/iter3-sync-layer-findings.md)

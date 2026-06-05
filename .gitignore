@@ -1,4 +1,4 @@
-# Beads / Dolt files (added by bd init)
+# Internal task tracking artifacts.
 .dolt/
 *.db
 .beads-credential-key
@@ -51,19 +51,18 @@ __pycache__/
 # (small JSONL evidence backing the findings docs that reference them)
 !docs/spikes/**/*.log
 
-# User-local reference docs (kept on disk but not in source control)
-Code-Puppy-Capabilities-Insight.docx
+# Internal capability notes (maintainer-only reference docs)
+internal-capabilities-notes.docx
 
 scratch/
 
 # ---------------------------------------------------------------------------
-# v1 Public Launch Readiness (LR.1) -- internal maintainer artifacts.
+# Maintainer-only artifacts.
 #
 # These files live on the maintainer's local disk and drive day-to-day
-# development, but they reference internal methodology (Code Puppy hooks,
-# beads, judges, phase choreography) that is intentionally hidden from
-# the public repo. See ADR 0055 and docs/audits/v1-public-launch-security.md
-# Check 8 for the exposure map.
+# development. They reference internal tooling and process notes that
+# are intentionally hidden from the public repo to keep the published
+# surface focused on the shipping product.
 # ---------------------------------------------------------------------------
 
 # Internal maintainer docs (hidden from public repo)
@@ -90,14 +89,17 @@ docs/spikes/
 docs/cleanup/
 docs/design/
 
-# Internal R&D harness (KG Phase 0/0.5 sandbox; corpus + harness + iter logs)
+# Internal R&D scratch (corpus + harness + iter logs)
 experimental/
 
-# Internal visual-regression baselines (Phase 5 phase-locked PNG snapshots)
+# Internal visual-regression baselines
 playwright-results/
 
-# Methodology tooling (Code Puppy + beads): hidden by design
+# Internal development tooling
 .code_puppy/
 .beads/
 .beads-credential-key
+
+# Internal command tooling
+.agents/
 

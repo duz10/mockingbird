@@ -43,6 +43,20 @@ If you want to use the Anthropic Claude API instead of Ollama, paste your API ke
 
 ---
 
+## Setting up mobile sync (optional)
+
+With mobile sync configured, you can capture notes from your iPhone via an iOS Shortcut and have them automatically picked up by Mockingbird on your PC. The mechanism is a folder synced between your phone and your desktop; Mockingbird watches the folder and routes new files into either the knowledge graph or the dictation pipeline depending on which inbox the file lands in.
+
+1. Pick a sync provider that mirrors a folder between your iPhone and your PC. iCloud Drive, OneDrive, Dropbox, and Google Drive all work. Use whichever you already have set up.
+2. Inside your Obsidian vault (or wherever you point Mockingbird's vault path), make sure the `Inbox/` and `Knowledge Graph/Inbox/` subfolders exist. Mockingbird creates these on first vault bootstrap; if you started before that landed, create them by hand.
+3. In Mockingbird, open Settings -> Vault and confirm the vault path points at that synced folder. The vault watcher activates automatically.
+4. On your iPhone, install the iOS Shortcut recipe from [`docs/mobile/`](./docs/mobile/). There is one recipe for general capture (routes to dictation) and one for knowledge graph capture (routes to KG).
+5. Test it: fire the Shortcut on your phone, wait for your sync provider to mirror the file to your PC, and watch Mockingbird pick it up.
+
+If nothing happens, check that the file actually arrived on the PC (sync providers have their own latency) and that Mockingbird's vault watcher path matches the folder your provider is syncing to.
+
+---
+
 ## Tier 3: From source
 
 For developers, forkers, and anyone who wants to build Mockingbird themselves.

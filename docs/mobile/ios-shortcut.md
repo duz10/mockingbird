@@ -1,4 +1,4 @@
-# Quick Voice Capture from your iPhone — iOS Shortcut setup
+# Quick Voice Capture from your iPhone - iOS Shortcut setup
 
 > **For the Knowledge Graph variant** (a sibling Shortcut that files
 > captures into your Personal Knowledge Engine instead of treating
@@ -34,7 +34,7 @@ The flow is:
 
 Mockingbird's processing stays 100% local. The only network hop is
 Obsidian Sync moving the audio file from your phone to your desktop
-through Obsidian's servers — encrypted end-to-end if you've set an
+through Obsidian's servers - encrypted end-to-end if you've set an
 encryption password on the vault (recommended; see the POC config in
 ADR 0046).
 
@@ -49,10 +49,10 @@ Before building the Shortcut, confirm all three of these:
   appears in the Obsidian Mobile vault list and is opened at least
   once (initial sync needs to complete).
 - **The `inbox/` folder exists in the vault.** Open Obsidian Mobile,
-  open `mockingbird-vault`, expand the file tree on the left — you
+  open `mockingbird-vault`, expand the file tree on the left - you
   should see at least `history/`, `inbox/`, and a `Welcome.md` file.
   If `inbox/` is missing, the desktop side hasn't initialized the
-  vault layout yet — open Mockingbird on the desktop, go to
+  vault layout yet - open Mockingbird on the desktop, go to
   Settings → Mobile (or Advanced → Mobile Sync preview while Iter 3
   is in flight), and toggle mobile sync on so the vault zones get
   created.
@@ -67,10 +67,10 @@ Before building the Shortcut, confirm all three of these:
 The Shortcut is intentionally tiny: **three built-in actions, nothing
 more**. No iOS Scripting JS, no custom URL handlers, no third-party
 apps. The spec is locked at this shape per ADR 0046 §8 + the
-ADR 0046 Iter 3 Wave 0 spike findings — see the "Why this design"
+ADR 0046 Iter 3 Wave 0 spike findings - see the "Why this design"
 section at the bottom of this doc for the reasoning.
 
-> **Important — three actions, not two.** Earlier drafts of this doc
+> **Important - three actions, not two.** Earlier drafts of this doc
 > described a two-action Shortcut. The ADR 0046 Iter 3 Wave 0 spike
 > (May 2026) found that without a third **Open App** action, files
 > saved by the Shortcut sit in Obsidian Mobile's iOS sandbox for
@@ -87,7 +87,7 @@ section at the bottom of this doc for the reasoning.
 4. Configure the Record Audio action:
    - **Audio Quality:** Low (32 kbps AAC mono). This is the single
      biggest knob for "how many minutes of recording fit under the
-     5 MB Obsidian Sync cap" — Low gets you ~20 min per recording,
+     5 MB Obsidian Sync cap" - Low gets you ~20 min per recording,
      Normal gets you ~5 min, High gets you ~2.5 min.
    - **Start Recording:** **On Tap**. You'll see a recording UI when
      you trigger the Shortcut; tap the red button to start, tap stop
@@ -99,12 +99,12 @@ section at the bottom of this doc for the reasoning.
 6. Configure the Save File action:
    - **Service:** Files.
    - **Ask Where to Save:** **ON**. (This is the explicit
-     confirmation step — see "Why this design" below.)
+     confirmation step - see "Why this design" below.)
    - **Destination Path:** leave blank. The iOS Files picker will
      pop up at run time; you'll navigate to the vault's `inbox/`
      folder and tap Save. iOS remembers the last destination, so
      after the first use it's a single confirmation tap.
-   - **Overwrite If File Exists:** OFF (default — the
+   - **Overwrite If File Exists:** OFF (default - the
      auto-generated filename includes a timestamp so collisions
      don't happen).
 7. Tap **Add Action** a third time. Search for **Open App**. Tap it
@@ -114,7 +114,7 @@ section at the bottom of this doc for the reasoning.
    **This third action is critical.** Without it, the Shortcut leaves
    Obsidian Mobile in the background, and Obsidian Mobile doesn't
    notice the saved file in its sandbox until its next iOS
-   BGAppRefresh window — typically **5-15 minutes**, sometimes longer.
+   BGAppRefresh window - typically **5-15 minutes**, sometimes longer.
    Foregrounding Obsidian via this action forces an immediate sandbox
    rescan and Sync push, reducing end-to-end latency from
    "done speaking" to "transcript on desktop" to about **30-60
@@ -124,7 +124,7 @@ section at the bottom of this doc for the reasoning.
    [`docs/spikes/iter3-sync-layer-findings.md`](../spikes/iter3-sync-layer-findings.md)
    § Finding 5.
 8. Tap the Shortcut name at the very top (it defaults to "New
-   Shortcut") and rename to something memorable — suggestion:
+   Shortcut") and rename to something memorable - suggestion:
    **Quick voice capture** or **Capture for Mockingbird**.
 9. Tap **Done** in the top right.
 
@@ -134,7 +134,7 @@ The Shortcut is now installed and ready to bind to a trigger.
 
 ## Pick a trigger
 
-Three options. **Pick one** — they all work the same way, just
+Three options. **Pick one** - they all work the same way, just
 different ergonomics.
 
 ### Option A: Back-tap (recommended)
@@ -188,10 +188,10 @@ variant in v1.
    **On My iPhone → Obsidian → mockingbird-vault → inbox**.
    Tap **Save** (or **Open** depending on iOS version) at the top
    right.
-4. iOS remembers the destination — **second and subsequent uses are
+4. iOS remembers the destination - **second and subsequent uses are
    single-tap confirmations**, no navigation needed.
 5. **Obsidian Mobile opens automatically** (the third Shortcut
-   action). You'll see Obsidian's vault view briefly — you can leave
+   action). You'll see Obsidian's vault view briefly - you can leave
    it open or swipe back to whatever you were doing; the key thing
    is that Obsidian was foregrounded long enough for it to notice
    the new file and push it to Sync.
@@ -201,11 +201,11 @@ variant in v1.
 
 ---
 
-## Known limitations (read these — they save real headaches)
+## Known limitations (read these - they save real headaches)
 
 ### The 5 MB Obsidian Sync Standard cap
 
-Obsidian Sync Standard silently skips files larger than 5 MB —
+Obsidian Sync Standard silently skips files larger than 5 MB -
 they appear to save on the phone but **never sync**, and Obsidian
 Sync gives no notification that they were dropped.
 
@@ -246,7 +246,7 @@ transport).
 
 If you really need zero-tap capture, the workaround is to bind a
 **second** Shortcut to a different trigger that does e.g. "Save to
-Notes" instead of "Save File" — but that file won't reach
+Notes" instead of "Save File" - but that file won't reach
 Mockingbird. Better to live with the one tap and keep the vault
 clean.
 
@@ -256,7 +256,7 @@ Even with the "Open App" action, the Shortcut needs an Obsidian Mobile
 instance that knows about the `mockingbird-vault` and is signed in to
 Obsidian Sync. If Obsidian Mobile has never opened the vault (e.g.
 fresh install on a new phone), foregrounding it via the Shortcut just
-drops you on the vault-picker screen — the file save still landed,
+drops you on the vault-picker screen - the file save still landed,
 but Sync isn't going to push it until the vault is actually opened.
 Open the vault manually once after install, then the Shortcut works
 as described from then on.
@@ -316,7 +316,7 @@ landed where it did. (Full reasoning is in ADR 0046 §8 and §9.)
   Standard tier caps individual files at 5 MB. Low gives you ~20 min
   of recording per file; Normal gives you ~5 min; High gives you
   ~2.5 min. For voice memo / dictation use, Low is more than enough
-  quality — Whisper transcribes Low-quality AAC essentially as well
+  quality - Whisper transcribes Low-quality AAC essentially as well
   as High.
 - **No `.json` sidecar.** An earlier ADR §9 design had the Shortcut
   write a tiny sidecar JSON next to the audio so the desktop could
@@ -333,7 +333,7 @@ landed where it did. (Full reasoning is in ADR 0046 §8 and §9.)
   for "show me the file URL after save".** The latter would add
   user-visible setup surface (one more place to misconfigure) for
   marginal benefit. The Open App action, by contrast, is a hard
-  requirement — not a polish step. The ADR 0046 Iter 3 Wave 0 spike
+  requirement - not a polish step. The ADR 0046 Iter 3 Wave 0 spike
   empirically observed a ~5 minute lag without it (Round 4b); with
   it, latency is ~30-60 s. Findings doc:
   [`docs/spikes/iter3-sync-layer-findings.md`](../spikes/iter3-sync-layer-findings.md).

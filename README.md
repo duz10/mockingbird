@@ -20,6 +20,10 @@ Mockingbird is three capabilities in one Windows app.
 
 Everything stays on your machine unless you explicitly opt in to a cloud surface (Claude API for cleanup, or Unsplash for ambient backgrounds). The app has no analytics, no crash reporting, no "phone home" of any kind.
 
+### Mobile capture
+
+Capture quick text or voice notes from your iPhone and have them land in Mockingbird on your PC automatically. The flow uses any sync provider that mirrors a folder between your phone and your desktop (iCloud Drive, OneDrive, Dropbox, Google Drive, etc.). You drop a note in the synced inbox folder from an iOS Shortcut, the sync provider mirrors it to your PC, and Mockingbird's vault watcher routes it into the knowledge graph (or, for audio, transcribes it through the dictation pipeline). See [`docs/mobile/`](./docs/mobile/) for the iOS Shortcut recipes for both routes.
+
 ## Quick install
 
 The fastest path:

@@ -24,13 +24,13 @@ Older Windows 10 builds (pre-19041) lack the WebView2 APIs and modern audio capt
 
 ## Optional but recommended
 
-### NVIDIA GPU for fast Whisper
+### GPU acceleration
 
-- **NVIDIA GPU** with CUDA Compute Capability 6.1 or higher (GTX 1060 era and newer).
-- **CUDA Toolkit 12.x** installed. Mockingbird targets CUDA 12.8 in CI but other 12.x patch versions work in practice.
-- The CPU fallback works fine for short utterances. It gets slow on multi-minute meeting transcripts.
+Mockingbird ships with CUDA support for NVIDIA GPUs baked into the MSI. If you have an NVIDIA GPU with a current driver (it came with your GPU and auto-updates via Windows Update or GeForce Experience), Mockingbird detects the GPU at launch and uses it automatically for fast transcription. You do NOT need to install the CUDA Toolkit separately. The runtime libraries Mockingbird needs are bundled next to the executable.
 
-If you do not have a GPU, the app still works. You will just notice longer latency on dictation and slower processing of meeting recordings.
+On systems without an NVIDIA GPU (AMD, Intel integrated, or no GPU at all), Mockingbird falls back to CPU transcription automatically. CPU mode is slower than GPU mode, but it works on any 64-bit Windows machine that meets the rest of the prerequisites.
+
+If you are building from source and want to compile WITH CUDA support, see [`INSTALL.md`](./INSTALL.md) Tier 3. CUDA Toolkit 12.8 is required at build time only; runtime requirements are unchanged.
 
 ### Ollama for local LLM cleanup
 
@@ -39,6 +39,8 @@ If you do not have a GPU, the app still works. You will just notice longer laten
 - The smaller `qwen2.5:3b` is documented as a degraded "tags only" mode for the knowledge graph features. It is not recommended for general cleanup.
 
 Without Ollama (or a Claude API key, see below), dictation still produces a raw Whisper transcript. You just lose the punctuation and filler-word cleanup pass.
+
+The current cleanup provider speaks Ollama's native API. Support for generic OpenAI-compatible local LLM servers (LM Studio, llama.cpp server, Jan, vLLM, Ollama's own OpenAI-compat endpoint, etc.) is planned for a future release.
 
 ### Anthropic Claude API for cloud cleanup
 
@@ -54,6 +56,13 @@ This is mutually exclusive with Ollama at the per-mode level: each cleanup mode 
 - Optional: [Obsidian Sync](https://obsidian.md/sync) or any folder-level sync (Dropbox, OneDrive, iCloud, Syncthing) if you want the vault available on multiple devices.
 
 Mockingbird does not synchronize SQLite across machines. Cross-device knowledge sharing happens through the vault's Markdown files.
+
+### Mobile sync for iPhone capture
+
+- A sync provider that mirrors a folder between your iPhone and your PC. iCloud Drive, OneDrive, Dropbox, and Google Drive all work. You probably already have one set up.
+- An iOS Shortcut configured to drop captures into that synced folder. See [`docs/mobile/`](./docs/mobile/) for the recipes (one for general dictation capture, one for knowledge graph capture).
+
+Mockingbird's vault watcher picks up files as soon as your sync provider mirrors them to disk. Latency end to end depends on your provider; iCloud Drive is typically a few seconds for small files.
 
 ### Unsplash API key for ambient backgrounds
 
