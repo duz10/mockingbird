@@ -67,7 +67,7 @@ fn silent_fixture_parses_at_target_format() {
     let path = fixtures_dir().join("silent.wav");
     assert!(
         path.exists(),
-        "fixture missing — run `cargo run --bin generate_fixtures`"
+        "fixture missing — run `cargo run --example generate_fixtures`"
     );
     let reader = hound::WavReader::open(&path).expect("open silent.wav");
     let spec = reader.spec();

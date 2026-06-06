@@ -8,10 +8,32 @@ license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true
 description    = "Local-first voice dictation for Windows. Privacy-respecting, self-improving."
+# mb-d1ii — `autobins = false` + relocate dev sources OUT of `src/bin/`.
+#
+# Tauri's MSI bundler does TWO things that conspire to leak dev
+# binaries into the user installer:
+#   1. It enumerates bin targets from `cargo metadata` and bundles every
+#      non-main one (so `[[bin]]` + `required-features` does NOT help).
+#   2. It ALSO scans `src/bin/` as a filesystem directory directly
+#      (see `tauri-cli/src/interface/rust.rs::get_binaries`) and adds
+#      every file/subdir found to the bundle binaries list, regardless
+#      of Cargo.toml.
+# The fix: keep `autobins = false` (cuts off #1), AND keep `src/bin/`
+# empty / nonexistent (cuts off #2). Dev/test/eval/probe one-shots now
+# live under `src/dev_bins/` and are declared as `[[example]]` targets
+# below. Tauri ignores both `src/dev_bins/` and examples.
+# The main `mockingbird` binary is declared explicitly below.
+autobins       = false
 
 [lib]
 name       = "mockingbird_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+# Explicit main binary (required because `autobins = false` above
+# also disables auto-discovery of `src/main.rs`).
+[[bin]]
+name = "mockingbird"
+path = "src/main.rs"
 
 [build-dependencies]
 tauri-build = { workspace = true }
@@ -136,18 +158,96 @@ path = "examples/verify_wave49.rs"
 name = "smoke_iter1_ingest"
 path = "examples/smoke_iter1_ingest.rs"
 
-# Phase 1A Wave 3 / mb-2mc9 / mb-qdgn — bit-identical KG pipeline
-# parity gate. Consumes the Wave 0.5.4 seed-42 fixture under
-# docs/knowledge-graph/parity/ and asserts the graduated
-# src-tauri/src/kg/ module reproduces it via a fixture-scripted
-# OllamaDispatcher. Bin (not test / not example) for the LESSONS P2
-# reason — `cargo test --release` is blocked on this box, and the
-# probe needs to actually launch end-to-end. Auto-discovered by
-# Cargo at src/bin/kg_parity.rs, but declared here for visibility
-# alongside the other workspace one-shots.
-[[bin]]
+# Dev/test/eval/probe targets under `src/dev_bins/` (mb-d1ii).
+#
+# These are KG parity probes, fixture generators, eval harnesses, and
+# diagnostic one-shots. They are NOT shipped with the user MSI.
+#
+# Why `[[example]]` instead of `[[bin]]`, AND why the sources live under
+# `src/dev_bins/` instead of the conventional `src/bin/`:
+#   - `cargo build --release` builds bins by default but skips
+#     examples — so the production build only produces `mockingbird.exe`.
+#   - Tauri's MSI bundler enumerates `cargo metadata`'s bin targets to
+#     decide what to ship; it does NOT honour `required-features`.
+#   - Tauri's bundler ALSO scans `src/bin/` as a raw filesystem dir and
+#     adds every entry to the bundle binaries list, IGNORING Cargo.toml
+#     (see `tauri-cli` 2.6.2 `interface/rust.rs::get_binaries`). So just
+#     reclassifying the targets in Cargo.toml is not enough — the source
+#     files have to LIVE somewhere else on disk too.
+#   - `src/dev_bins/` is invisible to both Cargo's auto-discovery (it
+#     only scans `src/bin/`) and Tauri's hardcoded `src/bin/` scan, so
+#     the dev sources never enter either harvest pool.
+#   - `cargo run --release --example <name>` Just Works for devs /
+#     CI parity runs; the explicit `path = "src/dev_bins/..."` below
+#     points Cargo at the relocated source.
+#
+# Pre-fix attempt history:
+#   1. Explicit `[[bin]]` + `required-features = ["dev-tools"]`. Cargo
+#      respected the gate, Tauri did not — the alphabetically first bin
+#      target (`cleaner_punctuation_eval`) still ended up in the WXS.
+#   2. Switching `[[bin]]` -> `[[example]]` while leaving sources under
+#      `src/bin/`. Cargo metadata showed only `mockingbird` as a bin,
+#      but the WXS STILL referenced `cleaner_punctuation_eval.exe`
+#      because Tauri's directory scan picked up the .rs source files
+#      directly.
+#   3. (Current) Relocate sources to `src/dev_bins/`. Tauri's directory
+#      scan finds nothing; only `mockingbird` reaches the bundler.
+#
+# `kg_parity` originally had a stand-alone entry per Phase 1A Wave 3
+# (mb-2mc9 / mb-qdgn) for visibility next to the other workspace
+# one-shots; that entry is now folded into this group.
+
+[[example]]
 name = "kg_parity"
-path = "src/bin/kg_parity.rs"
+path = "src/dev_bins/kg_parity.rs"
+
+[[example]]
+name = "kg_graph_off_invariant"
+path = "src/dev_bins/kg_graph_off_invariant.rs"
+
+[[example]]
+name = "kg_source_gate_invariant"
+path = "src/dev_bins/kg_source_gate_invariant.rs"
+
+[[example]]
+name = "kg_subtree_bootstrap_idempotent"
+path = "src/dev_bins/kg_subtree_bootstrap_idempotent.rs"
+
+[[example]]
+name = "kg_serializer_golden_roundtrip"
+path = "src/dev_bins/kg_serializer_golden_roundtrip.rs"
+
+[[example]]
+name = "kg_reverse_watcher_loop_prevention"
+path = "src/dev_bins/kg_reverse_watcher_loop_prevention.rs"
+
+[[example]]
+name = "kg_file_wins_on_conflict"
+path = "src/dev_bins/kg_file_wins_on_conflict.rs"
+
+[[example]]
+name = "kg_latency_bench"
+path = "src/dev_bins/kg_latency_bench.rs"
+
+[[example]]
+name = "generate_fixtures"
+path = "src/dev_bins/generate_fixtures.rs"
+
+[[example]]
+name = "stt_test"
+path = "src/dev_bins/stt_test.rs"
+
+[[example]]
+name = "learn"
+path = "src/dev_bins/learn.rs"
+
+[[example]]
+name = "cleaner_punctuation_eval"
+path = "src/dev_bins/cleaner_punctuation_eval.rs"
+
+[[example]]
+name = "mode_eval"
+path = "src/dev_bins/mode_eval/main.rs"
 
 # Feature flags.
 #

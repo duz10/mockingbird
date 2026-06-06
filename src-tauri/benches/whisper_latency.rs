@@ -42,7 +42,7 @@ fn whisper_model_present() -> bool {
 fn bench_transcribe_sine(c: &mut Criterion) {
     let path = fixtures_dir().join("sine_440.wav");
     if !path.exists() {
-        eprintln!("SKIP: sine_440.wav missing; run `cargo run --bin generate_fixtures`");
+        eprintln!("SKIP: sine_440.wav missing; run `cargo run --example generate_fixtures`");
         return;
     }
     if !whisper_model_present() {

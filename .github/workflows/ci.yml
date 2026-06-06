@@ -82,6 +82,11 @@ jobs:
       - name: Cargo fmt check
         run: cargo fmt --all -- --check
 
+      # `--all-targets` covers bins, examples, tests, benches. Dev/test/
+      # eval/probe one-shots live under `src-tauri/src/dev_bins/` and are
+      # declared as `[[example]]` targets in `src-tauri/Cargo.toml` (mb-d1ii)
+      # so they get linted here but never reach the Tauri MSI bundler
+      # (which scans `src/bin/` directly, bypassing Cargo metadata).
       - name: Cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 

@@ -51,7 +51,7 @@ use mockingbird_lib::meetings::llm_pass::{
 // Fixture schema.
 // --------------------------------------------------------------------
 
-const FIXTURES_JSON: &str = include_str!("../../../eval/cleaner_punctuation_fixtures.json");
+const FIXTURES_JSON: &str = include_str!("../../eval/cleaner_punctuation_fixtures.json");
 
 #[derive(Debug, Deserialize)]
 struct FixtureFile {
