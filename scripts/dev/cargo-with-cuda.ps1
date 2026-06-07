@@ -118,7 +118,7 @@ $cargoVerb = $null
 foreach ($a in $args) {
     if ($a -notlike '-*') { $cargoVerb = $a; break }
 }
-$featureCapableVerbs = @('build', 'check', 'clippy', 'test', 'run', 'bench', 'doc', 'rustc', 'rustdoc', 'tree', 'install')
+$featureCapableVerbs = @('build', 'check', 'clippy', 'test', 'run', 'bench', 'doc', 'rustc', 'rustdoc', 'tree', 'install', 'tauri')
 $userPassedFeatures  = ($args -contains '--features') -or ($args | Where-Object { $_ -like '--features=*' }).Count -gt 0
 $noCudaOverride      = $env:MOCKINGBIRD_NO_CUDA -eq '1'
 
