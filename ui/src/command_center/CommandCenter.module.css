@@ -55,7 +55,53 @@
   flex-direction: column;
   gap: 2px;
   padding-bottom: 8px;
+  /* Right padding clears the absolute-positioned close button so the
+   * welcome copy never gets crowded by it on narrow widths. */
+  padding-right: 28px;
   border-bottom: 1px solid color-mix(in oklab, var(--on-surf) 6%, transparent);
+}
+
+.closeButton {
+  /* Top-right close affordance for the welcome variant. Calls the
+   * same dismiss path as Esc + outside-click. */
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  appearance: none;
+  background: transparent;
+  color: color-mix(in oklab, var(--on-surf) 70%, transparent);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  padding: 0;
+  transition: background 80ms ease-out, border-color 80ms ease-out, color 80ms ease-out;
+}
+
+.closeButton:hover {
+  background: color-mix(in oklab, var(--on-surf) 8%, transparent);
+  border-color: color-mix(in oklab, var(--on-surf) 14%, transparent);
+  color: var(--on-surf);
+}
+
+.closeButton:active {
+  transform: translateY(1px);
+}
+
+.closeButton:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--on-surf) 35%, transparent);
+  outline-offset: 2px;
+}
+
+.closeButton svg {
+  width: 14px;
+  height: 14px;
 }
 
 .welcomeTitle {

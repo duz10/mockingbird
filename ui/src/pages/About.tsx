@@ -45,7 +45,7 @@ export function AboutPage() {
           <p className={styles.muted}>{t("about.license")}.</p>
           <p>
             <a
-              href="https://github.com/dustinboyd/mockingbird"
+              href="https://github.com/duz10/mockingbird"
               target="_blank"
               rel="noreferrer"
             >

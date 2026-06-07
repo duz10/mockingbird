@@ -181,13 +181,33 @@ export function CommandCenter(): JSX.Element | null {
     <div className={styles.root} aria-modal data-state={snap.state}>
       <div className={styles.card} ref={cardRef} role="dialog">
         {snap.firstRun && snap.state === "modePicker" && (
-          <header className={styles.welcomeBand}>
-            <h2 className={styles.welcomeTitle}>Welcome to Mockingbird</h2>
-            <p className={styles.welcomeBody}>
-              Press <kbd>Right&nbsp;Ctrl</kbd> + <kbd>Space</kbd> any time to
-              pop this card back up.
-            </p>
-          </header>
+          <>
+            <header className={styles.welcomeBand}>
+              <h2 className={styles.welcomeTitle}>Welcome to Mockingbird</h2>
+              <p className={styles.welcomeBody}>
+                Press <kbd>Right&nbsp;Ctrl</kbd> + <kbd>Space</kbd> any time to
+                pop this card back up.
+              </p>
+            </header>
+            <button
+              type="button"
+              className={styles.closeButton}
+              aria-label="Close welcome card"
+              onClick={() => void dismissCommandCenter()}
+            >
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path d="M4 4 L12 12 M12 4 L4 12" />
+              </svg>
+            </button>
+          </>
         )}
 
         {(snap.state === "modePicker" || snap.state === "launching") && (
