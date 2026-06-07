@@ -97,7 +97,11 @@ jobs:
 
       - name: Install CUDA Toolkit 12.8
         if: matrix.variant == 'cuda'
-        uses: Jimver/cuda-toolkit@v0.2.19
+        # v0.2.35: first release whose Node runtime is 24 (matches GHA's
+        # forced upgrade off Node 20) AND has 12.8.0 in its windows-links
+        # allowlist. v0.2.19 errored with `Version not available: 12.8.0`.
+        # mb-tk9s.
+        uses: Jimver/cuda-toolkit@v0.2.35
         with:
           cuda: "12.8.0"
           # Only need the bits required to compile whisper-rs-sys/cuda
