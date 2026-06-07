@@ -17,7 +17,7 @@
 //! ```text
 //! powershell -File scripts\cargo-with-cuda.ps1 run --release \
 //!     --example smoke_iter1_ingest -- \
-//!     "C:\Users\dboyd\Downloads\New Recording 38.m4a"
+//!     "C:\Users\<you>\Downloads\New Recording 38.m4a"
 //! ```
 //!
 //! The wrapper script gives us MSVC + CUDA env; this binary additionally

@@ -1,6 +1,7 @@
 """Quick DB-state checker for post-migration verification."""
-import sqlite3, sys
-conn = sqlite3.connect(r'C:\Users\dboyd\AppData\Roaming\com.dustin.mockingbird\mockingbird.db')
+import os, sqlite3, sys
+db_path = os.path.join(os.environ['USERPROFILE'], 'AppData', 'Roaming', 'com.dustin.mockingbird', 'mockingbird.db')
+conn = sqlite3.connect(db_path)
 cur = conn.cursor()
 print('schema_version:', cur.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0], flush=True)
 print('prompts table:', flush=True)

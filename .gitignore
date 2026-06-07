@@ -15,6 +15,13 @@ models/
 !.code_puppy/**/*.key.pub  # (defensive: never expected, but doesn't shadow)
 *.pfx
 *.pem
+# Defensive: additional credential file extensions (no current files match;
+# future-proofing in case keystore/cert artifacts ever land in-tree)
+*.p12
+*.jks
+*.keystore
+*.crt
+*.cer
 
 # Env / secrets
 .env
@@ -36,8 +43,10 @@ src-tauri/cuda-runtime/
 # IDE / OS noise
 .vscode/
 .idea/
+.cursor/
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # Test / coverage
 coverage/

@@ -166,7 +166,7 @@ pub enum SettingKey {
     MobileSyncEnabled,
     /// Absolute path to the Obsidian vault root the user wants
     /// Mockingbird to write into (e.g.
-    /// `C:\Users\dboyd\mockingbird-vault`). Validated by
+    /// `C:\Users\<you>\mockingbird-vault`). Validated by
     /// `vault::layout::VaultLayout::validate` before being honored.
     /// `null` until the user picks one. Default `null`.
     VaultPath,
