@@ -14,8 +14,12 @@
   <meta property="og:description" content="Local-first voice dictation, meeting capture, and knowledge graph capture for Windows. Fully on-device. Privacy-respecting. Zero telemetry.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://duz10.github.io/mockingbird/">
-  <meta property="og:image" content="https://duz10.github.io/mockingbird/favicon.svg">
-  <meta name="twitter:card" content="summary">
+  <meta property="og:image" content="https://duz10.github.io/mockingbird/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Mockingbird brand mark on a terracotta background">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://duz10.github.io/mockingbird/og-image.png">
 </head>
 <body>
   <main>
@@ -95,6 +99,43 @@
         </article>
 
       </div>
+    </section>
+
+    <section class="screenshots" aria-labelledby="screenshots-h">
+      <h2 id="screenshots-h">See it in action</h2>
+
+      <figure>
+        <img src="screenshots/dictations.png"
+             alt="Dictations view: a chronological list of recent voice captures, each showing the cleaned transcript, source app, duration, and tags."
+             loading="lazy" decoding="async"
+             width="2123" height="1218">
+        <figcaption>
+          <strong>Dictations.</strong> Press a hotkey, speak, and the transcript pastes
+          into whatever app has focus. Local Whisper, optional cleanup, your custom dictionary.
+        </figcaption>
+      </figure>
+
+      <figure>
+        <img src="screenshots/meetings.png"
+             alt="Meetings view: a captured call with separate microphone and system-audio channels merged into a single transcript with speaker labels and timestamps."
+             loading="lazy" decoding="async"
+             width="2121" height="1219">
+        <figcaption>
+          <strong>Meetings.</strong> Microphone and system audio captured on separate
+          channels, transcribed locally, then merged with speaker attribution.
+        </figcaption>
+      </figure>
+
+      <figure>
+        <img src="screenshots/insights.png"
+             alt="Insights view: charts of capture frequency over time, top extracted entities, and dictation trends, all computed locally."
+             loading="lazy" decoding="async"
+             width="2138" height="1218">
+        <figcaption>
+          <strong>Insights.</strong> See your capture patterns, top entities, and dictation
+          trends - every calculation runs on-device.
+        </figcaption>
+      </figure>
     </section>
 
     <section class="privacy" aria-labelledby="privacy-h">
