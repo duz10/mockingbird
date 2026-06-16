@@ -1,13 +1,17 @@
-/* Dictionary — table with an inline add-row form on top.
- * Kept as a real <table> for screen-reader friendliness; the visual
- * design uses CSS Grid for column control rather than fighting
- * `display: table`. */
+/* Dictionary — grouped-by-canonical card layout (mb-9x33). The DB
+ * stays flat (one row per term/canonical pair) but the UI rolls the
+ * rows up into cards so a Huly + 3 misspellings reads as one logical
+ * entry. */
 
 .shell {
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
 }
+
+/* ════════════════════════════════════════════════════════════════
+ * Toolbar / search
+ * ════════════════════════════════════════════════════════════════ */
 
 .toolbar {
   display: flex;
@@ -47,80 +51,10 @@
   pointer-events: none;
 }
 
-.tableWrap {
-  background: var(--surf-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-3);
-  overflow: hidden;
-}
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  font: var(--type-sm);
-  color: var(--on-surf);
-}
-
-.table th,
-.table td {
-  text-align: left;
-  padding: var(--s-2) var(--s-3);
-  border-bottom: 1px solid var(--border);
-}
-.table th {
-  font: var(--type-xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--on-surf-muted);
-  background: var(--surf-3);
-}
-.table tr:last-child td { border-bottom: none; }
-.table tr:hover td { background: oklch(from var(--mode-normal) l c h / 0.06); }
-
-.cellMono {
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.cellCount {
-  font-variant-numeric: tabular-nums;
-  color: var(--on-surf-muted);
-}
-
-.cellActions {
-  display: flex;
-  gap: var(--s-1);
-  justify-content: flex-end;
-}
-
-.inlineInput {
-  width: 100%;
-  padding: var(--s-1) var(--s-2);
-  background: var(--surf-1);
-  color: var(--on-surf);
-  border: 1px solid var(--border);
-  border-radius: var(--r-1);
-  font: var(--type-sm);
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-.inlineInput:focus {
-  outline: 2px solid var(--mode-normal);
-  outline-offset: 0;
-  border-color: var(--mode-normal);
-}
-
-.addRow td {
-  background: oklch(from var(--mode-normal) l c h / 0.08);
-}
-
 /* ════════════════════════════════════════════════════════════════
- * Standalone "Add term" panel — sits above the table so it stays
- * reachable when the dictionary is empty (mb-t75k). Same three
- * fields the inline add-row used to expose, just promoted out of
- * the table body and labeled so the affordance reads as a real form
- * rather than a sneaky table header.
+ * Add-term panel — same look as before. Now hosts the shared
+ * <DictionaryEntryForm> instead of three inline inputs, so the form
+ * widget controls its own layout.
  * ════════════════════════════════════════════════════════════════ */
 
 .addPanel {
@@ -141,79 +75,141 @@
   letter-spacing: 0.01em;
 }
 
-.addPanelRow {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr auto;
-  gap: var(--s-3);
-  align-items: end;
-}
-
-@media (max-width: 720px) {
-  .addPanelRow {
-    grid-template-columns: 1fr;
-  }
-}
-
-.addField {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-1);
-  min-width: 0;
-}
-
-.addLabel {
-  font: var(--type-xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--on-surf-muted);
-}
-
 .addAction {
   display: flex;
   justify-content: flex-end;
 }
 
-.addHint {
+/* ════════════════════════════════════════════════════════════════
+ * Group cards
+ * ════════════════════════════════════════════════════════════════ */
+
+.groupGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: var(--s-3);
+}
+
+.groupCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  background: var(--surf-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+  transition: border-color 120ms ease-out;
+}
+.groupCard:hover {
+  border-color: oklch(from var(--mode-normal) l c h / 0.5);
+}
+
+.groupHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+
+.groupTitleWrap {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.groupCanonical {
   margin: 0;
+  font: var(--type-md);
+  font-weight: 600;
+  color: var(--on-surf);
+  overflow-wrap: anywhere;
+}
+
+.properNounTag {
+  font: var(--type-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--on-surf-muted);
+  padding: 1px 6px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-pill);
+}
+
+.groupActions {
+  display: flex;
+  gap: var(--s-1);
+  flex-shrink: 0;
+}
+
+.variantsRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+
+.variantsLabel {
+  font: var(--type-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--on-surf-muted);
+  flex-shrink: 0;
+}
+
+.variantsList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+}
+
+.variantPill {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 2px 8px;
+  background: var(--surf-3);
+  color: var(--on-surf);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+}
+
+.groupFooter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+  align-items: center;
   font: var(--type-xs);
   color: var(--on-surf-muted);
-  max-width: 72ch;
+  font-variant-numeric: tabular-nums;
 }
+
+.appContext {
+  font-family: var(--font-mono);
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * Source badges. "user" is the warm primary tone, "learned" / "import"
+ * stay on the existing palette, and "mixed" gets a neutral chrome so
+ * it visually communicates ambiguity rather than another category.
+ * ════════════════════════════════════════════════════════════════ */
 
 .sourceBadge {
   font: var(--type-xs);
   text-transform: capitalize;
   padding: 1px 8px;
   border-radius: var(--r-pill);
+  flex-shrink: 0;
 }
 .sourceUser    { background: oklch(from var(--mode-normal) l c h / 0.2); color: var(--mode-normal); }
 .sourceLearned { background: oklch(from var(--mode-fragment) l c h / 0.2); color: var(--mode-fragment); }
 .sourceImport  { background: oklch(from var(--mode-verbose) l c h / 0.2); color: var(--mode-verbose); }
-
-.confidenceBar {
-  display: inline-block;
-  width: 60px;
-  height: 6px;
-  background: var(--surf-3);
-  border-radius: var(--r-pill);
-  overflow: hidden;
-  vertical-align: middle;
-  margin-left: var(--s-2);
-}
-.confidenceFill {
-  height: 100%;
-  background: var(--status-ok);
-  border-radius: var(--r-pill);
-}
+.sourceMixed   { background: var(--surf-3); color: var(--on-surf-muted); }
 
 /* ════════════════════════════════════════════════════════════════
- * Photo-background mode: .shell is a bare flex container (toolbar +
- * tableWrap stacked). The .tableWrap inside has --surf-2 fill, but
- * the toolbar (search box) floats orphaned over the photo, and the
- * loading state (rows === null) shows just the search box with no
- * surrounding material. Wrap the whole page-shell in glass so it
- * reads as one grouped panel regardless of load state.
+ * Photo-background mode: wrap the whole shell in glass so it reads as
+ * one grouped panel regardless of load state.
  * ════════════════════════════════════════════════════════════════ */
 
 :root[data-photo-bg] .shell {

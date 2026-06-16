@@ -1087,11 +1087,74 @@ export const FIXTURES: {
     },
   ],
   searchHits: [],
+  // The fixture now demonstrates the grouped UI shape: one canonical
+  // ("Huly") with three misspelling variants, one canonical
+  // ("kubectl") with two variants, and two proper-noun rows
+  // (canonical = null) so designers see both branches on /dictionary.
   dictionary: [
+    // Huly group — three misspellings the cleanup pass rewrites.
     {
       id: 1,
+      term: "Hooli",
+      canonical: "Huly",
+      source: "user",
+      confidence: 1.0,
+      appContext: null,
+      useCount: 5,
+      lastUsedAt: new Date(Date.now() - 7200_000).toISOString(),
+      createdAt: "2026-05-01T00:00:00Z",
+    },
+    {
+      id: 2,
+      term: "Hooly",
+      canonical: "Huly",
+      source: "user",
+      confidence: 1.0,
+      appContext: null,
+      useCount: 4,
+      lastUsedAt: new Date(Date.now() - 86400_000).toISOString(),
+      createdAt: "2026-05-02T00:00:00Z",
+    },
+    {
+      id: 3,
+      term: "Huley",
+      canonical: "Huly",
+      source: "learned",
+      confidence: 0.7,
+      appContext: null,
+      useCount: 3,
+      lastUsedAt: new Date(Date.now() - 86400_000 * 2).toISOString(),
+      createdAt: "2026-05-03T00:00:00Z",
+    },
+    // kubectl group — two misspellings, scoped to the terminal.
+    {
+      id: 4,
+      term: "cube cuttle",
+      canonical: "kubectl",
+      source: "learned",
+      confidence: 0.7,
+      appContext: "terminal",
+      useCount: 11,
+      lastUsedAt: new Date(Date.now() - 86400_000).toISOString(),
+      createdAt: "2026-03-12T00:00:00Z",
+    },
+    {
+      id: 5,
+      term: "cube cattle",
+      canonical: "kubectl",
+      source: "learned",
+      confidence: 0.6,
+      appContext: "terminal",
+      useCount: 7,
+      lastUsedAt: new Date(Date.now() - 86400_000 * 4).toISOString(),
+      createdAt: "2026-03-14T00:00:00Z",
+    },
+    // Proper-noun rows — the LLM is just being told these words
+    // exist; no misspelling correction needed.
+    {
+      id: 6,
       term: "Mockingbird",
-      canonical: "Mockingbird",
+      canonical: null,
       source: "user",
       confidence: 1.0,
       appContext: null,
@@ -1100,20 +1163,9 @@ export const FIXTURES: {
       createdAt: "2026-01-01T00:00:00Z",
     },
     {
-      id: 2,
-      term: "kubectl",
-      canonical: "kubectl",
-      source: "learned",
-      confidence: 0.7,
-      appContext: "terminal",
-      useCount: 18,
-      lastUsedAt: new Date(Date.now() - 86400_000).toISOString(),
-      createdAt: "2026-03-12T00:00:00Z",
-    },
-    {
-      id: 3,
+      id: 7,
       term: "OKLCH",
-      canonical: "OKLCH",
+      canonical: null,
       source: "user",
       confidence: 1.0,
       appContext: null,

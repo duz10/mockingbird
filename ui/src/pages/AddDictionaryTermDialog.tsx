@@ -1,11 +1,15 @@
-// Modal for adding a dictionary term while viewing a dictation.
+// Modal for adding a dictionary entry while viewing a dictation.
 // Triggered from DictationsDetailPane "Add term to dictionary"
-// action (mb-t75k). Pre-fills `appContext` from the dictation's
-// foregroundApp so the entry auto-scopes to whichever app the user
-// was dictating into; user can clear that field for a global scope.
+// action. Pre-fills `appContext` from the dictation's foregroundApp
+// so the entry auto-scopes to whichever app the user was dictating
+// into; the user can clear that field for a global scope.
 //
-// Wraps the design-system Dialog primitive (native <dialog>, ESC +
-// focus management for free) so we don't grow a bespoke modal shell.
+// Built on the design-system Dialog primitive (native <dialog>, ESC +
+// focus management for free) and the shared <DictionaryEntryForm> so
+// it stays visually + structurally aligned with the inline panel on
+// the Dictionary page (mb-9x33). Submit fires N parallel
+// `upsert_dictionary_entry` calls — one per variant, or one
+// proper-noun row when no variants were entered.
 
 import { useEffect, useState } from "react";
 
@@ -15,7 +19,11 @@ import { PlusIcon } from "../design/Icon";
 import { t } from "../i18n";
 import { api } from "../lib/tauri";
 
-import styles from "./AddDictionaryTermDialog.module.css";
+import {
+  DictionaryEntryForm,
+  EMPTY_FORM,
+  type DictionaryFormState,
+} from "./DictionaryEntryForm";
 
 interface Props {
   open: boolean;
@@ -33,36 +41,51 @@ export function AddDictionaryTermDialog({
   initialAppContext,
   onAdded,
 }: Props) {
-  const [term, setTerm] = useState("");
-  const [canonical, setCanonical] = useState("");
-  const [appContext, setAppContext] = useState(initialAppContext ?? "");
+  const [form, setForm] = useState<DictionaryFormState>(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
 
-  // Reset form state every time the dialog opens so a previous
-  // half-typed entry doesn't ghost back in. The initialAppContext
-  // is re-applied here for the same reason — the dictation might
-  // have changed between opens.
+  // Reset every time the dialog opens so a previous half-typed entry
+  // doesn't ghost back in. The initialAppContext is re-applied here
+  // for the same reason — the dictation might have changed between
+  // opens.
   useEffect(() => {
     if (open) {
-      setTerm("");
-      setCanonical("");
-      setAppContext(initialAppContext ?? "");
+      setForm({
+        canonical: "",
+        variants: [],
+        appContext: initialAppContext ?? "",
+      });
       setBusy(false);
     }
   }, [open, initialAppContext]);
 
   async function handleSubmit() {
-    const trimmed = term.trim();
-    if (!trimmed || busy) return;
+    const canonical = form.canonical.trim();
+    if (!canonical || busy) return;
     setBusy(true);
     try {
-      await api.upsert_dictionary_entry({
-        term: trimmed,
-        canonical: canonical.trim() || null,
-        source: "user",
-        confidence: 1.0,
-        appContext: appContext.trim() || null,
-      });
+      const appContext = form.appContext.trim() || null;
+      if (form.variants.length === 0) {
+        await api.upsert_dictionary_entry({
+          term: canonical,
+          canonical: null,
+          source: "user",
+          confidence: 1.0,
+          appContext,
+        });
+      } else {
+        await Promise.all(
+          form.variants.map((variant) =>
+            api.upsert_dictionary_entry({
+              term: variant,
+              canonical,
+              source: "user",
+              confidence: 1.0,
+              appContext,
+            }),
+          ),
+        );
+      }
       onAdded?.();
       onClose();
     } finally {
@@ -82,7 +105,7 @@ export function AddDictionaryTermDialog({
           <Button
             variant="primary"
             onClick={() => void handleSubmit()}
-            disabled={busy || term.trim().length === 0}
+            disabled={busy || form.canonical.trim().length === 0}
           >
             <PlusIcon size={12} />
             {t("dictionary.add")}
@@ -90,46 +113,11 @@ export function AddDictionaryTermDialog({
         </>
       }
     >
-      <form
-        className={styles.form}
-        onSubmit={(e) => {
-          e.preventDefault();
-          void handleSubmit();
-        }}
-      >
-        <label className={styles.field}>
-          <span className={styles.label}>{t("dictionary.column.term")}</span>
-          <input
-            className={styles.input}
-            value={term}
-            onChange={(e) => setTerm(e.target.value)}
-            placeholder={t("dictionary.add.placeholder.term")}
-            autoFocus
-            aria-label={t("dictionary.column.term")}
-          />
-        </label>
-        <label className={styles.field}>
-          <span className={styles.label}>{t("dictionary.column.canonical")}</span>
-          <input
-            className={styles.input}
-            value={canonical}
-            onChange={(e) => setCanonical(e.target.value)}
-            placeholder={t("dictionary.add.placeholder.canonical")}
-            aria-label={t("dictionary.column.canonical")}
-          />
-        </label>
-        <label className={styles.field}>
-          <span className={styles.label}>{t("dictionary.column.appContext")}</span>
-          <input
-            className={styles.input}
-            value={appContext}
-            onChange={(e) => setAppContext(e.target.value)}
-            placeholder={t("dictionary.add.placeholder.appContext")}
-            aria-label={t("dictionary.column.appContext")}
-          />
-        </label>
-        <p className={styles.hint}>{t("dictionary.add.hint")}</p>
-      </form>
+      <DictionaryEntryForm
+        value={form}
+        onChange={setForm}
+        autoFocusCanonical
+      />
     </Dialog>
   );
 }

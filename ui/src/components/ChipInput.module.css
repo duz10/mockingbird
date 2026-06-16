@@ -1,0 +1,40 @@
+/* ChipInput — a row of design-system Chips followed by a borderless
+ * text field. The whole box looks like a single text input so it
+ * slots into forms next to other inputs without visual noise. */
+
+.box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 36px;
+  padding: var(--s-2);
+  background: var(--surf-1);
+  color: var(--on-surf);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  cursor: text;
+}
+
+.box:focus-within {
+  outline: 2px solid var(--mode-normal);
+  outline-offset: 0;
+  border-color: var(--mode-normal);
+}
+
+.input {
+  flex: 1 1 120px;
+  min-width: 120px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: var(--type-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.input::placeholder {
+  color: var(--on-surf-faint);
+}
