@@ -8,6 +8,40 @@ follows [Semantic Versioning](https://semver.org/).
 
 _Nothing yet._
 
+## [0.2.0-beta.2] - 2026-06-16
+
+Second beta iteration on the v0.2.0 line. Dictionary UI improvements
+plus a CI infrastructure fix. No data migrations, no schema changes;
+upgrade is a straight installer-over-installer replacement.
+
+### Fixed
+
+- **Dictionary: "Add term" UI is now reachable when the dictionary is
+  empty.** Previously the empty-state card replaced the add form
+  entirely, so first-time users had no path to create their first
+  entry without seeding it from somewhere else.
+
+### Added
+
+- **Dictionary: add a term directly from any dictation.** A new
+  "Add term to dictionary" action surfaces on every dictation; the
+  modal pre-fills app context from the source dictation so the new
+  entry's scope is set without manual hunting.
+- **Dictionary: entries now group by canonical term, with misspelling
+  variants shown as chips.** Editing a group lets you add, remove, or
+  rename variants in one place instead of managing each spelling as a
+  standalone row.
+
+### Infrastructure
+
+- **CI: pinned the Windows runner to `windows-2022`.** GitHub rolled
+  `windows-latest` forward to ship Visual Studio 18 (2026), which
+  collided with the cached `target/` from earlier Visual Studio 17
+  (2022) builds and broke the `whisper-rs-sys` CMake step. Pinning the
+  runner matches the dev box's VS 2022 toolchain and folds
+  `matrix.os` into the cargo cache key so a future runner image bump
+  auto-invalidates rather than poisoning the cache.
+
 ## [0.2.0-beta.1] - 2026-06-08
 
 First public beta release. Local-first voice dictation, meeting capture,
