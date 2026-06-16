@@ -39,7 +39,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest]
+        # Pinned to windows-2022 (VS 17) so the toolchain matches the dev
+        # box wrapper (scripts\dev\cargo-with-cuda.ps1 imports vcvars64
+        # from VS 2022). windows-latest rolled forward to VS 18 (2026)
+        # and poisoned a stale cargo cache built against VS 17 in run
+        # 27649041528 (whisper-rs-sys CMake generator mismatch). mb-wgla.
+        os: [windows-2022]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -60,6 +65,12 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          # Inject the runner image label so a future intentional bump
+          # (windows-2022 -> windows-2025) auto-invalidates the cache.
+          # Swatinem's default key uses runner.os = "Windows" which does
+          # NOT distinguish runner image versions. mb-wgla.
+          key: ${{ matrix.os }}
 
       # `--ignore-scripts` is mandatory per repo hook policy
       # (block-unsafe-npm). Mini Shai-Hulud guard.

@@ -52,11 +52,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          # Pinned to windows-2022 (VS 17) per mb-wgla. windows-latest
+          # rolled to VS 18 (2026) and broke whisper-rs-sys CMake builds
+          # via cache poisoning. Matches the dev box wrapper which
+          # imports vcvars64 from VS 2022.
+          - os: windows-2022
             target: x86_64-pc-windows-msvc
             variant: cpu
             tauri_args: --target x86_64-pc-windows-msvc
-          - os: windows-latest
+          - os: windows-2022
             target: x86_64-pc-windows-msvc
             variant: cuda
             tauri_args: --target x86_64-pc-windows-msvc --config src-tauri/tauri.cuda.conf.json --features mockingbird/cuda
@@ -92,8 +96,10 @@ jobs:
           # whisper-rs-sys with the cuda feature which produces a
           # different artifact set than the cpu variant; sharing the
           # cache across variants would force a full rebuild on every
-          # run and cause stale-artifact confusion.
-          key: ${{ matrix.variant }}
+          # run and cause stale-artifact confusion. matrix.os is folded
+          # in so a future runner image bump auto-invalidates the cache
+          # (mb-wgla).
+          key: ${{ matrix.variant }}-${{ matrix.os }}
 
       - name: Install CUDA Toolkit 12.8
         if: matrix.variant == 'cuda'
