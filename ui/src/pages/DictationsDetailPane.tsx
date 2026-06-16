@@ -15,7 +15,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Button, Card, Pill } from "../components/primitives";
-import { CheckIcon, CopyIcon, PlusIcon, TrashIcon } from "../design/Icon";
+import { BookIcon, CheckIcon, CopyIcon, PlusIcon, TrashIcon } from "../design/Icon";
 import { t } from "../i18n";
 import {
   formatRelative,
@@ -24,6 +24,7 @@ import {
 } from "../lib/format";
 import type { SessionDetail } from "../lib/types";
 
+import { AddDictionaryTermDialog } from "./AddDictionaryTermDialog";
 import { DictationsLlmPassCard } from "./DictationsLlmPassCard";
 import styles from "./Dictations.module.css";
 
@@ -51,6 +52,7 @@ export function DictationsDetailPane({
   // reads as the confirmation. The toast still fires for
   // screen-reader users.
   const [copied, setCopied] = useState(false);
+  const [addTermOpen, setAddTermOpen] = useState(false);
   const copyTimer = useRef<number | null>(null);
   function fireCopy() {
     onCopy();
@@ -85,6 +87,10 @@ export function DictationsDetailPane({
           <Button onClick={onMarkExample}>
             <PlusIcon size={14} />
             {t("dictations.action.markExample")}
+          </Button>
+          <Button onClick={() => setAddTermOpen(true)}>
+            <BookIcon size={14} />
+            {t("dictations.action.addTerm")}
           </Button>
           <Button variant="danger" onClick={onDelete}>
             <TrashIcon size={14} />
@@ -152,6 +158,12 @@ export function DictationsDetailPane({
       </Card>
 
       <DictationsLlmPassCard sessionId={detail.session.id} />
+
+      <AddDictionaryTermDialog
+        open={addTermOpen}
+        onClose={() => setAddTermOpen(false)}
+        initialAppContext={s.foregroundApp}
+      />
     </>
   );
 }

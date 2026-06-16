@@ -115,6 +115,72 @@
   background: oklch(from var(--mode-normal) l c h / 0.08);
 }
 
+/* ════════════════════════════════════════════════════════════════
+ * Standalone "Add term" panel — sits above the table so it stays
+ * reachable when the dictionary is empty (mb-t75k). Same three
+ * fields the inline add-row used to expose, just promoted out of
+ * the table body and labeled so the affordance reads as a real form
+ * rather than a sneaky table header.
+ * ════════════════════════════════════════════════════════════════ */
+
+.addPanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  background: var(--surf-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+}
+
+.addPanelTitle {
+  margin: 0;
+  font: var(--type-sm);
+  font-weight: 600;
+  color: var(--on-surf);
+  letter-spacing: 0.01em;
+}
+
+.addPanelRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: var(--s-3);
+  align-items: end;
+}
+
+@media (max-width: 720px) {
+  .addPanelRow {
+    grid-template-columns: 1fr;
+  }
+}
+
+.addField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  min-width: 0;
+}
+
+.addLabel {
+  font: var(--type-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--on-surf-muted);
+}
+
+.addAction {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.addHint {
+  margin: 0;
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  max-width: 72ch;
+}
+
 .sourceBadge {
   font: var(--type-xs);
   text-transform: capitalize;

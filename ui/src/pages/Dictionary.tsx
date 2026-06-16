@@ -1,6 +1,8 @@
-// Dictionary CRUD. Add-row inline at the top, list below with edit
-// in place (term + canonical only — source/confidence are managed by
-// the learning loop) and delete via trash icon.
+// Dictionary CRUD. Add-term form lives in its own panel above the
+// list so it stays reachable even when the dictionary is empty
+// (the prior layout buried the add-row inside the table body, which
+// EmptyState replaced when rows.length === 0 -- the empty-state copy
+// "Add one above" was a polite lie, see mb-t75k).
 //
 // No client-side virtualization yet. Real-world dictionaries cap out
 // in the low hundreds; we'll graduate to react-window when someone
@@ -25,9 +27,6 @@ export function DictionaryPage() {
   const [rows, setRows] = useState<DictionaryEntry[] | null>(null);
   const [query, setQuery] = useState("");
   const [editId, setEditId] = useState<number | null>(null);
-  const [draft, setDraft] = useState<{ term: string; canonical: string; appContext: string }>(
-    { term: "", canonical: "", appContext: "" },
-  );
 
   const refresh = useCallback(async () => {
     const r = await api.list_dictionary();
@@ -50,20 +49,6 @@ export function DictionaryPage() {
     );
   }, [rows, query]);
 
-  const handleAdd = useCallback(async () => {
-    const term = draft.term.trim();
-    if (!term) return;
-    await api.upsert_dictionary_entry({
-      term,
-      canonical: draft.canonical.trim() || null,
-      source: "user",
-      confidence: 1.0,
-      appContext: draft.appContext.trim() || null,
-    });
-    setDraft({ term: "", canonical: "", appContext: "" });
-    await refresh();
-  }, [draft, refresh]);
-
   const handleSaveEdit = useCallback(
     async (row: DictionaryEntry, patch: Partial<DictionaryEntry>) => {
       // The TS helper accepts an optional `id`. When present, the
@@ -84,7 +69,7 @@ export function DictionaryPage() {
 
   const handleDelete = useCallback(
     async (id: number) => {
-      if (!window.confirm(t("dictionary.column.term") + " — " + t("common.confirm") + "?"))
+      if (!window.confirm(t("dictionary.column.term") + " - " + t("common.confirm") + "?"))
         return;
       await api.delete_dictionary_entry(id);
       await refresh();
@@ -100,6 +85,8 @@ export function DictionaryPage() {
       />
 
       <div className={styles.shell}>
+        <AddTermPanel onAdded={refresh} />
+
         <div className={styles.toolbar}>
           <label className={styles.searchBox}>
             <span className={styles.searchIcon}>
@@ -136,69 +123,6 @@ export function DictionaryPage() {
                 </tr>
               </thead>
               <tbody>
-                <tr className={styles.addRow}>
-                  <td>
-                    <input
-                      className={styles.inlineInput}
-                      value={draft.term}
-                      onChange={(e) =>
-                        setDraft({ ...draft, term: e.target.value })
-                      }
-                      placeholder="new term"
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") void handleAdd();
-                      }}
-                      aria-label="New term"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      className={styles.inlineInput}
-                      value={draft.canonical}
-                      onChange={(e) =>
-                        setDraft({ ...draft, canonical: e.target.value })
-                      }
-                      placeholder="canonical form (optional)"
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") void handleAdd();
-                      }}
-                      aria-label="Canonical form"
-                    />
-                  </td>
-                  <td>
-                    <span className={`${styles.sourceBadge} ${styles.sourceUser}`}>
-                      user
-                    </span>
-                  </td>
-                  <td>
-                    <input
-                      className={styles.inlineInput}
-                      value={draft.appContext}
-                      onChange={(e) =>
-                        setDraft({ ...draft, appContext: e.target.value })
-                      }
-                      placeholder="app context (optional)"
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") void handleAdd();
-                      }}
-                      aria-label="App context"
-                    />
-                  </td>
-                  <td colSpan={2} />
-                  <td>
-                    <div className={styles.cellActions}>
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        onClick={handleAdd}
-                        ariaLabel={t("dictionary.add")}
-                      >
-                        <PlusIcon size={12} />
-                        {t("dictionary.add")}
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
                 {(filtered ?? []).map((row) => (
                   <DictRow
                     key={row.id}
@@ -216,6 +140,88 @@ export function DictionaryPage() {
         )}
       </div>
     </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* AddTermPanel — standalone "add a term" affordance. Lives above the */
+/* table so it stays reachable when the dictionary is empty. Same     */
+/* three fields as the old inline add-row, just promoted to its own   */
+/* panel with a hint line that documents the misspelling-correction   */
+/* use case (Hooli -> Huly).                                          */
+/* ------------------------------------------------------------------ */
+
+function AddTermPanel({ onAdded }: { onAdded: () => Promise<void> | void }) {
+  const [draft, setDraft] = useState({ term: "", canonical: "", appContext: "" });
+
+  const submit = useCallback(async () => {
+    const term = draft.term.trim();
+    if (!term) return;
+    await api.upsert_dictionary_entry({
+      term,
+      canonical: draft.canonical.trim() || null,
+      source: "user",
+      confidence: 1.0,
+      appContext: draft.appContext.trim() || null,
+    });
+    setDraft({ term: "", canonical: "", appContext: "" });
+    await onAdded();
+  }, [draft, onAdded]);
+
+  const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") void submit();
+  };
+
+  return (
+    <section className={styles.addPanel} aria-label={t("dictionary.add.heading")}>
+      <h3 className={styles.addPanelTitle}>{t("dictionary.add.heading")}</h3>
+      <div className={styles.addPanelRow}>
+        <label className={styles.addField}>
+          <span className={styles.addLabel}>{t("dictionary.column.term")}</span>
+          <input
+            className={styles.inlineInput}
+            value={draft.term}
+            onChange={(e) => setDraft({ ...draft, term: e.target.value })}
+            placeholder={t("dictionary.add.placeholder.term")}
+            onKeyDown={onKey}
+            aria-label={t("dictionary.column.term")}
+          />
+        </label>
+        <label className={styles.addField}>
+          <span className={styles.addLabel}>{t("dictionary.column.canonical")}</span>
+          <input
+            className={styles.inlineInput}
+            value={draft.canonical}
+            onChange={(e) => setDraft({ ...draft, canonical: e.target.value })}
+            placeholder={t("dictionary.add.placeholder.canonical")}
+            onKeyDown={onKey}
+            aria-label={t("dictionary.column.canonical")}
+          />
+        </label>
+        <label className={styles.addField}>
+          <span className={styles.addLabel}>{t("dictionary.column.appContext")}</span>
+          <input
+            className={styles.inlineInput}
+            value={draft.appContext}
+            onChange={(e) => setDraft({ ...draft, appContext: e.target.value })}
+            placeholder={t("dictionary.add.placeholder.appContext")}
+            onKeyDown={onKey}
+            aria-label={t("dictionary.column.appContext")}
+          />
+        </label>
+        <div className={styles.addAction}>
+          <Button
+            variant="primary"
+            onClick={() => void submit()}
+            ariaLabel={t("dictionary.add")}
+          >
+            <PlusIcon size={12} />
+            {t("dictionary.add")}
+          </Button>
+        </div>
+      </div>
+      <p className={styles.addHint}>{t("dictionary.add.hint")}</p>
+    </section>
   );
 }
 
@@ -275,7 +281,7 @@ function DictRow({
             aria-label="Canonical"
           />
         ) : (
-          row.canonical ?? "—"
+          row.canonical ?? "-"
         )}
       </td>
       <td>
@@ -303,12 +309,12 @@ function DictRow({
             aria-label="App context"
           />
         ) : (
-          row.appContext ?? "—"
+          row.appContext ?? "-"
         )}
       </td>
       <td className={styles.cellCount}>{formatCount(row.useCount)}</td>
       <td className={styles.cellCount}>
-        {row.lastUsedAt ? formatRelative(row.lastUsedAt) : "—"}
+        {row.lastUsedAt ? formatRelative(row.lastUsedAt) : "-"}
       </td>
       <td>
         <div className={styles.cellActions}>

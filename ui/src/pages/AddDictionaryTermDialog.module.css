@@ -1,0 +1,51 @@
+/* AddDictionaryTermDialog — body styling for the form inside the
+ * design-system Dialog primitive. The Dialog provides the shell
+ * (glass-thick surface, backdrop, ESC handling); this module just
+ * styles the three labeled inputs + hint line inside the content
+ * slot. Mirrors the standalone "Add term" panel on the Dictionary
+ * page so the two affordances feel like the same control. */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, var(--s-3));
+  text-align: left;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, var(--s-1));
+}
+
+.label {
+  font-family: "DM Sans", sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--md-sys-on-surface-variant, var(--on-surf-muted));
+}
+
+.input {
+  width: 100%;
+  padding: var(--s-2) var(--s-3);
+  background: var(--surf-1);
+  color: var(--on-surf);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  font: var(--type-sm);
+  font-family: var(--font-mono);
+}
+
+.input:focus {
+  outline: 2px solid var(--mode-normal);
+  outline-offset: 0;
+  border-color: var(--mode-normal);
+}
+
+.hint {
+  margin: 0;
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+}
