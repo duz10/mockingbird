@@ -70,6 +70,10 @@ internal-capabilities-notes.docx
 
 scratch/
 
+# local build/release scratch logs (useful local references; not committed)
+_cuda_build_logs/
+_release_logs/
+
 # ---------------------------------------------------------------------------
 # Maintainer-only artifacts.
 #
