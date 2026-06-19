@@ -14,6 +14,11 @@ pub mod resampler;
 pub mod vad;
 pub mod vad_trim;
 
+// macOS port Phase 2 (mb-mac-v1.3.2): ORT load-dynamic dylib discovery smoke.
+// macOS-only; the module file is internally `#![cfg(target_os = "macos")]`.
+#[cfg(target_os = "macos")]
+pub mod judges_macos_v1;
+
 pub use vad_trim::{vad_trim as trim_speech, TrimConfig};
 
 #[cfg(not(target_os = "windows"))]

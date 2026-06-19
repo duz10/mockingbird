@@ -243,6 +243,20 @@ path = "src/dev_bins/generate_fixtures.rs"
 name = "stt_test"
 path = "src/dev_bins/stt_test.rs"
 
+# macOS port Phase 2 (mb-mac-v1.3.3) — Metal-backend transcript judge
+# (`mac-p2-metal-transcript`). Runs on macOS only; a no-op stub on other
+# targets. Drives `stt::judges_macos_v1::metal_transcript_probe`.
+[[example]]
+name = "mac_whisper_metal_smoke"
+path = "src/dev_bins/mac_whisper_metal_smoke.rs"
+
+# macOS port Phase 2 (mb-mac-v1.3.2) — ORT load-dynamic dylib discovery
+# smoke (`mac-p2-ort-dylib`). macOS only; no-op stub elsewhere. Drives
+# `audio::judges_macos_v1::ort_vad_session_smoke`.
+[[example]]
+name = "mac_ort_vad_smoke"
+path = "src/dev_bins/mac_ort_vad_smoke.rs"
+
 [[example]]
 name = "learn"
 path = "src/dev_bins/learn.rs"
@@ -284,6 +298,28 @@ audible-beeps    = []
 # is a no-op and we run on CPU; with it on, GPU init is attempted and
 # falls back to CPU if the driver is missing or OOM (ADR 0011).
 cuda             = ["whisper-rs/cuda"]
+
+# Opt-in Metal acceleration for the whisper_rs STT crate (macOS /
+# Apple Silicon).
+#
+# Mirror of `cuda` above, for the macOS port (mb-mac-v1.3.1). Kept OUT
+# of `default` for the same reason `cuda` is: the metal feature pulls
+# in Apple's Metal framework + a Metal-backed ggml build that does NOT
+# compile on Windows/Linux, so making it default would break the
+# cross-platform `cargo build`. Local macOS dev turns this on via the
+# `scripts/dev/cargo-mac.sh` wrapper, which auto-injects
+# `--features mockingbird/metal` for build-y cargo verbs (the Mac
+# analogue of cargo-with-cuda.ps1). Runtime behaviour: with this
+# feature off, `WhisperContextParameters::use_gpu(true)` is a no-op and
+# we run on CPU; with it on, ggml initialises the Metal backend and
+# Whisper runs on the GPU, falling back to CPU if Metal init fails.
+#
+# The `raw-api` feature is pulled in alongside so the macOS Metal judge
+# probe (`stt::judges_macos_v1`) can install a ggml/whisper log callback
+# via the re-exported `whisper_rs_sys` and CONFIRM the Metal backend
+# actually engaged (vs a silent CPU fallback). raw-api only re-exports
+# the -sys bindings; it does not change runtime behaviour.
+metal            = ["whisper-rs/metal", "whisper-rs/raw-api"]
 
 # Notes:
 # - Phase 2 Wave 4 added `whisper-rs` (currently CPU-only; see bd mb-ltq).

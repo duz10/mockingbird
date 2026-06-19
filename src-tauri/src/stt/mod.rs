@@ -10,6 +10,14 @@ pub mod initial_prompt;
 pub mod prompt_builder;
 pub mod whisper;
 
+// macOS port Phase 2 (mb-mac-v1.3.3): Metal-backend transcript judge probe.
+// Gated on `macos` AND `metal` because the backend-confirmation log
+// capture uses `whisper_rs::whisper_rs_sys`, which is only re-exported
+// under `whisper-rs/raw-api` (pulled in by our `metal` feature). A plain
+// (no-metal) build must NOT try to compile it.
+#[cfg(all(target_os = "macos", feature = "metal"))]
+pub mod judges_macos_v1;
+
 use std::path::PathBuf;
 
 #[cfg(not(target_os = "windows"))]
