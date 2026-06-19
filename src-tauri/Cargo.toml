@@ -124,6 +124,13 @@ tempfile  = { workspace = true }
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true }
 
+# macOS-only deps. Target-gated so Windows/Linux builds never see them.
+[target.'cfg(target_os = "macos")'.dependencies]
+# ADR-0056 / mb-mac-v1.4.1 — Keychain-backed SecretStore. Apple's
+# canonical Rust Security.framework binding (MIT OR Apache-2.0); exposes
+# the generic-password primitives the `KeychainSecretStore` round-trips.
+security-framework = "3"
+
 [dev-dependencies]
 rstest    = { workspace = true }
 proptest  = { workspace = true }
@@ -256,6 +263,13 @@ path = "src/dev_bins/mac_whisper_metal_smoke.rs"
 [[example]]
 name = "mac_ort_vad_smoke"
 path = "src/dev_bins/mac_ort_vad_smoke.rs"
+
+# macOS port Phase 3a (mb-mac-v1.4.1) — Keychain roundtrip judge
+# (`mac-p3a-keychain-roundtrip`). macOS only; exits 2 elsewhere. Drives
+# `secrets::judges_macos_v1::keychain_roundtrip_probe`.
+[[example]]
+name = "mac_keychain_smoke"
+path = "src/dev_bins/mac_keychain_smoke.rs"
 
 [[example]]
 name = "learn"
