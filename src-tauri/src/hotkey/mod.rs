@@ -28,10 +28,13 @@ pub mod windows;
 #[cfg(target_os = "macos")]
 pub mod macos;
 
+#[cfg(target_os = "macos")]
+pub mod judges_macos_v1;
+
 #[cfg(target_os = "linux")]
 pub mod linux;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 use crate::error::AppError;
 use crate::error::AppResult;
 
@@ -96,10 +99,18 @@ pub fn make_default_listener() -> AppResult<Box<dyn HotkeyListener>> {
     {
         Ok(Box::new(windows::WinKeyboardHook::new()?))
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        // macOS port Phase 3 (mb-mac-v1.4.4): CGEventTap-backed
+        // listener (ADR 0057). Construction holds no OS resources;
+        // the tap + Input Monitoring permission are exercised at
+        // `install()`.
+        Ok(Box::new(macos::MacKeyboardHook::new()?))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         Err(AppError::Hotkey(
-            "hotkey listener not implemented for this platform (Phase 9 macOS/Linux)".into(),
+            "hotkey listener not implemented for this platform (Phase 9 Linux)".into(),
         ))
     }
 }

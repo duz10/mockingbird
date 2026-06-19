@@ -131,6 +131,16 @@ windows = { workspace = true }
 # the generic-password primitives the `KeychainSecretStore` round-trips.
 security-framework = "3"
 
+# ADR-0057 / mb-mac-v1.4.4 — global dictation hotkey via CGEventTap.
+# Servo's CoreGraphics / CoreFoundation bindings (MIT OR Apache-2.0).
+# `core-graphics` provides `CGEventTap` + the CFMachPort→runloop-source
+# plumbing; `core-foundation` provides the `CFRunLoop` the tap thread
+# pumps (and the thread-safe `CFRunLoopStop` teardown). Low-level by
+# design — parity with the Windows `WH_KEYBOARD_LL` hook (ADR 0015),
+# which the hotkey state machine needs for key-up visibility.
+core-graphics = "0.24"
+core-foundation = "0.10"
+
 [dev-dependencies]
 rstest    = { workspace = true }
 proptest  = { workspace = true }
@@ -270,6 +280,15 @@ path = "src/dev_bins/mac_ort_vad_smoke.rs"
 [[example]]
 name = "mac_keychain_smoke"
 path = "src/dev_bins/mac_keychain_smoke.rs"
+
+# macOS port Phase 3 (mb-mac-v1.4.4) — global-hotkey roundtrip judge
+# (`mac-p3d-hotkey-roundtrip`). macOS only; exits 2 elsewhere. Drives
+# `hotkey::judges_macos_v1::hotkey_roundtrip_probe` — the deterministic
+# translation→state-machine boundary (the OS event-tap capture itself
+# is verified in the permission-gated `mac-p3-dictation-e2e`).
+[[example]]
+name = "mac_hotkey_smoke"
+path = "src/dev_bins/mac_hotkey_smoke.rs"
 
 [[example]]
 name = "learn"
