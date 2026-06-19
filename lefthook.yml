@@ -33,10 +33,34 @@ pre-commit:
     py-syntax:
       glob: "scripts/dev/hooks/*.py"
       run: python -m py_compile {staged_files}
+    # macOS-port wiggum hooks (added Phase 0 Leaf 0.4).
+    # These run on every commit; each self-gates on git state (branch,
+    # staged paths, target file). Validated via
+    # `python scripts/dev/hooks/_test_macport_hooks.py`.
+    block-windows-rs-edit-on-macport:
+      run: python3 scripts/dev/hooks/block-windows-rs-edit-on-macport.py
+      skip:
+        - merge
+        - rebase
+    block-stt-swap:
+      run: python3 scripts/dev/hooks/block-stt-swap.py
+      skip:
+        - merge
+        - rebase
+    verify-cargo-build-jobs:
+      run: python3 scripts/dev/hooks/verify-cargo-build-jobs.py
+      skip:
+        - merge
+        - rebase
 
 pre-push:
   parallel: false
   commands:
+    # macOS-port wiggum hook (Phase 0 Leaf 0.4). Reads git's pre-push
+    # stdin contract; refuses pushes targeting refs/heads/main from this
+    # Mac. Validated via `_test_macport_hooks.py`.
+    block-push-to-main:
+      run: python3 scripts/dev/hooks/block-push-to-main.py
     rust-test:
       glob: "*.rs"
       run: cargo test --quiet
