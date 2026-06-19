@@ -554,6 +554,14 @@ mod tests {
     #[test]
     fn clean_modes_produce_different_output() {
         let db = fresh_db();
+        // Isolate from the Wave 2.2 short-utterance skip (which would
+        // bypass the LLM for this 5-word input, making every mode
+        // return identical preprocessor output) and the Wave 1.2
+        // shrink-fallback guard (which would reject `fragment`'s
+        // deliberately shorter output). Both guards have dedicated
+        // tests. (mb-mac-v1.9)
+        disable_skip(&db);
+        disable_shrink_guard(&db);
         let mut cleaner = LlmCleaner::new(
             Box::new(StubCleanupProvider),
             db,
@@ -561,20 +569,31 @@ mod tests {
             0.3,
             256,
         );
-        // We need prompts seeded for the alt modes; seed migrations
-        // already seed normal/verbose/fragment.
+        // Seed migrations seed normal/verbose/fragment. We do NOT
+        // assert normal != verbose: once the preprocessor has
+        // capitalised + punctuated this short input, the `normal`
+        // (capitalise + period) and `verbose` (identity) stub
+        // transforms coincide -- a stub artifact, not a routing
+        // failure. `fragment` (first-half, lowercased) stays
+        // distinct from both, which is what proves mode routing.
+        // (mb-mac-v1.9: previously asserted normal != verbose.)
         let raw = "the quick brown fox jumps";
         let n = cleaner.clean(raw, "normal").unwrap();
         let v = cleaner.clean(raw, "verbose").unwrap();
         let f = cleaner.clean(raw, "fragment").unwrap();
-        assert_ne!(n, v);
-        assert_ne!(v, f);
         assert_ne!(n, f);
+        assert_ne!(v, f);
     }
 
     #[test]
     fn clean_missing_prompt_falls_back_to_raw() {
         let db = fresh_db();
+        // Disable the Wave 2.2 short-utterance skip: the 1-word input
+        // below would otherwise short-circuit to preprocessor output
+        // BEFORE the prompt lookup runs, so the missing-prompt ->
+        // fallback path under test would never be exercised.
+        // (mb-mac-v1.9)
+        disable_skip(&db);
         let mut cleaner = LlmCleaner::new(
             Box::new(StubCleanupProvider),
             db,
@@ -808,6 +827,11 @@ mod tests {
         let provider = ConfigurableStubCleanupProvider {
             text_to_return: "LLM RAN ON LISTY INPUT".into(),
         };
+        // The 5-word fingerprint is intentionally shorter than the
+        // 10-word input; disable the Wave 1.2 shrink-fallback guard
+        // so it survives -- this test is about the listy override of
+        // the skip, not the shrink guard. (mb-mac-v1.9)
+        disable_shrink_guard(&db);
         let mut cleaner = LlmCleaner::new(
             Box::new(provider),
             db,
@@ -872,6 +896,27 @@ mod tests {
         let conn = db.lock().unwrap();
         Settings::new(&conn)
             .set(SettingKey::DictationCleanupLevel, &level)
+            .unwrap();
+    }
+
+    /// Disable the Wave 1.2 shrink-fallback guard so a test can assert
+    /// the provider's (possibly short) output passes through verbatim.
+    /// The guard itself is covered by the `shrink_fallback_*` tests.
+    /// (mb-mac-v1.9)
+    fn disable_shrink_guard(db: &Arc<Mutex<Connection>>) {
+        let conn = db.lock().unwrap();
+        Settings::new(&conn)
+            .set(SettingKey::LlmShrinkFallbackThreshold, &0.0f32)
+            .unwrap();
+    }
+
+    /// Disable the Wave 2.2 short-utterance LLM-skip so a test that
+    /// uses a short input still routes through the provider. The skip
+    /// itself is covered by the `llm_skip_*` tests. (mb-mac-v1.9)
+    fn disable_skip(db: &Arc<Mutex<Connection>>) {
+        let conn = db.lock().unwrap();
+        Settings::new(&conn)
+            .set(SettingKey::LlmSkipWordThreshold, &0u32)
             .unwrap();
     }
 
@@ -945,6 +990,11 @@ mod tests {
         let provider = ConfigurableStubCleanupProvider {
             text_to_return: "Medium output.".into(),
         };
+        // The short "Medium output." fingerprint would trip the
+        // Wave 1.2 shrink-fallback guard against the long input; this
+        // test is about the additive-prompt branch, not the guard.
+        // (mb-mac-v1.9)
+        disable_shrink_guard(&db);
         let mut cleaner = LlmCleaner::new(
             Box::new(provider),
             db,
@@ -982,6 +1032,10 @@ mod tests {
         let provider = ConfigurableStubCleanupProvider {
             text_to_return: "High output.".into(),
         };
+        // The short "High output." fingerprint would trip the Wave 1.2
+        // shrink-fallback guard against the long input; this test is
+        // about the level=High provenance, not the guard. (mb-mac-v1.9)
+        disable_shrink_guard(&db);
         let mut cleaner = LlmCleaner::new(
             Box::new(provider),
             db,

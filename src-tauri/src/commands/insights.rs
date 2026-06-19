@@ -662,12 +662,18 @@ mod tests {
         let insert = |edit_free: Option<i64>, completed: &str| {
             db.conn
                 .execute(
+                    // `audio_duration_ms` is NOT NULL with no default;
+                    // the aggregator ignores it but the INSERT must
+                    // still supply it. (mb-mac-v1.9: column became
+                    // NOT NULL after this fixture was written; the
+                    // partial INSERT only failed once Mac ran the
+                    // suite for real.)
                     "INSERT INTO sessions ( \
                         uuid, mode_id, hotkey_pressed, started_at, recording_ended_at, \
-                        status, edit_free_within_5min, processing_completed_at \
+                        status, audio_duration_ms, edit_free_within_5min, processing_completed_at \
                      ) VALUES ( \
                         hex(randomblob(8)), 1, 'PTT', datetime('now'), datetime('now'), \
-                        'complete', ?1, ?2 \
+                        'complete', 0, ?1, ?2 \
                      )",
                     rusqlite::params![edit_free, completed],
                 )
@@ -685,10 +691,10 @@ mod tests {
             .execute(
                 "INSERT INTO sessions ( \
                     uuid, mode_id, hotkey_pressed, started_at, recording_ended_at, \
-                    status, edit_free_within_5min, processing_completed_at \
+                    status, audio_duration_ms, edit_free_within_5min, processing_completed_at \
                  ) VALUES ( \
                     hex(randomblob(8)), 1, 'PTT', datetime('now', '-60 days'), \
-                    datetime('now', '-60 days'), 'complete', 1, \
+                    datetime('now', '-60 days'), 'complete', 0, 1, \
                     datetime('now', '-60 days') \
                  )",
                 [],

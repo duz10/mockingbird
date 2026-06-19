@@ -385,7 +385,13 @@ mod tests {
     fn chord_config_default_matches_adr_0019() {
         let c = ChordConfig::default();
         assert_eq!(c.modifier_vk, 0xA3); // VK_RCONTROL
-        assert_eq!(c.main_vk, 0x4D); // 'M'
+                                         // mb-fc1 hotfix repointed the default main key from VK_M
+                                         // (0x4D) to VK_OEM_PERIOD (0xBE, the `.>` key) after the
+                                         // VK_M default collided with Microsoft 365 Copilot on
+                                         // Windows 11. (mb-mac-v1.9: assertion was stale at 0x4D --
+                                         // the `ChordConfig::default()` value is the same 0xBE on
+                                         // every platform; this is not Windows-divergent.)
+        assert_eq!(c.main_vk, 0xBE); // VK_OEM_PERIOD (`.>`)
     }
 
     #[test]

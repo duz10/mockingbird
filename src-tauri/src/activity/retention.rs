@@ -102,7 +102,17 @@ pub fn compute_cutoff_ms(now_ms: i64, ttl_days: i64) -> Option<i64> {
     if ttl_days <= 0 {
         None
     } else {
-        Some(now_ms.saturating_sub(ttl_days.saturating_mul(MS_PER_DAY)))
+        // Clamp the cutoff at the epoch: a negative cutoff is
+        // meaningless (timestamps are >= 0) and a stupid-large TTL
+        // would otherwise underflow toward i64::MIN. `.max(0)`
+        // mirrors `save_user_policy`'s guard. (mb-mac-v1.9: real
+        // bug -- `cutoff_saturates_on_overflow` expected Some(0)
+        // but got ~i64::MIN; surfaced on Mac's first real test run.)
+        Some(
+            now_ms
+                .saturating_sub(ttl_days.saturating_mul(MS_PER_DAY))
+                .max(0),
+        )
     }
 }
 

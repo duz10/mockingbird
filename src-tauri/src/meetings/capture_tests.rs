@@ -457,9 +457,18 @@ fn current_levels_reflects_per_channel_dbfs_after_drain() {
     use crate::meetings::levels::{DBFS_FLOOR, DBFS_NO_DATA};
 
     let dir = tempfile::tempdir().unwrap();
-    // Mic: full-scale i16 → ~0 dBFS. Sys: silence → DBFS_FLOOR after
+    // Mic: HALF-scale i16 → ~-6 dBFS. Sys: silence → DBFS_FLOOR after
     // the first non-empty drain.
-    let mic_feed = stub_feed(vec![vec![i16::MAX; 16_000]]);
+    //
+    // mb-mac-v1.9: this used to feed FULL-scale `i16::MAX`, which
+    // `compute_dbfs` maps to exactly 0.0 dBFS -- the SAME value as the
+    // `DBFS_NO_DATA` sentinel (0.0). That made the `assert_ne!(mic_db,
+    // DBFS_NO_DATA)` sanity check below unsatisfiable (a real full-
+    // scale reading is indistinguishable from "no data"). A half-scale
+    // feed gives a clearly-negative reading that is distinct from both
+    // the sentinel and DBFS_FLOOR. The underlying sentinel-collision
+    // smell is tracked in mb-x1d.
+    let mic_feed = stub_feed(vec![vec![i16::MAX / 2; 16_000]]);
     let sys_feed = stub_feed(vec![vec![0i16; 16_000]]);
     let mut twin = TwinStreamCapture::start_with(
         "levels-test".into(),
@@ -471,7 +480,7 @@ fn current_levels_reflects_per_channel_dbfs_after_drain() {
     .unwrap();
 
     // Initial snapshot may race the first drain on a fast box but is
-    // always one of {(NO_DATA, NO_DATA), (~0, FLOOR)} — either is
+    // always one of {(NO_DATA, NO_DATA), (~-6, FLOOR)} — either is
     // valid for the contract.
     let _ = twin.current_levels();
 
@@ -483,9 +492,10 @@ fn current_levels_reflects_per_channel_dbfs_after_drain() {
     drop(trailing);
 
     let (mic_db, sys_db) = twin.current_levels();
+    // Half-scale peak → 20*log10(16383/32767) ≈ -6.02 dBFS.
     assert!(
-        (mic_db - 0.0).abs() < 0.5,
-        "mic should read ~0 dBFS post-drain, got {mic_db}"
+        mic_db > -7.0 && mic_db < -5.0,
+        "half-scale mic should read ~-6 dBFS post-drain, got {mic_db}"
     );
     assert_eq!(
         sys_db, DBFS_FLOOR,

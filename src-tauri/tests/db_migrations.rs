@@ -15,7 +15,7 @@ fn fresh_db() -> Database {
 }
 
 #[test]
-fn schema_version_is_16_after_apply() {
+fn schema_version_is_current_after_apply() {
     // Bump history: 3 → 4 (migration 004 injection_status; Phase 3
     // Wave 4) → 5 (AI command modes) → 6/7/8 (prompt iterations) → 9
     // (max_tokens bump) → 10 (ADR 0024 Wave C prompt v2) → 11 (Phase MC
@@ -27,8 +27,14 @@ fn schema_version_is_16_after_apply() {
     // activity_blocks.raw_events_purged_at; ADR 0042 + 0043) → 16
     // (post-phase-10 hotfix: add the missing
     // `activity_blocks.primary_title` column referenced by every
-    // code path in `activity/`; mb-scla). Bump this assert when the
-    // next migration lands.
+    // code path in `activity/`; mb-scla). → 17/18/19 (ADR 0046/0047
+    // session columns + temp bumps) → 20/21/22 (ADR 0047 prompt +
+    // mode + Q5 checkpoint) → 23 (edit-free-send column) → 24 (ADR
+    // 0050 KG persistence) → 25 (ADR 0052 capture_kind/category) → 26
+    // (ADR 0053 vault two-phase-commit columns). Bump this assert
+    // when the next migration lands. (mb-mac-v1.9: assertion + fn name
+    // were stale at 16 -- this integration test had never executed,
+    // Windows gates `--no-run`.)
     let db = fresh_db();
     let v: String = db
         .conn
@@ -38,7 +44,7 @@ fn schema_version_is_16_after_apply() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(v, "16");
+    assert_eq!(v, "26");
 }
 
 #[test]
@@ -86,7 +92,7 @@ fn all_expected_tables_exist() {
 }
 
 #[test]
-fn trigger_count_is_21() {
+fn trigger_count_matches_migration_set() {
     // 2 dictation FTS5 triggers (transcripts_fts_insert/delete; mig 001)
     // + 4 tables * 3 audit triggers = 12 (mig 002)
     // + 2 meeting FTS5 triggers (meeting_transcripts_fts_insert/delete; mig 011)
@@ -94,7 +100,10 @@ fn trigger_count_is_21() {
     //   (activity_events_no_update / activity_events_no_delete; mig 012)
     // + 3 activity_blocks FTS5 triggers
     //   (activity_blocks_ai / activity_blocks_au / activity_blocks_ad; mig 013)
-    // = 21 total. Migration 015 (Phase 10 Wave 5) adds 0 triggers.
+    // = 21 total through migration 015. Migration 024 (ADR 0050 KG
+    // persistence) adds 2 immutability triggers → 23 total. (mb-mac-
+    // v1.9: assert + fn name were stale at 21; this integration test
+    // had never run -- Windows gates `--no-run`.)
     //
     // Bump this count whenever a migration adds or removes a trigger.
     // The plus side of asserting an exact number: it catches an
@@ -109,7 +118,7 @@ fn trigger_count_is_21() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(n, 21);
+    assert_eq!(n, 23);
 }
 
 #[test]
@@ -119,12 +128,17 @@ fn seeded_modes_and_prompts_present() {
         .conn
         .query_row("SELECT COUNT(*) FROM prompts", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(prompts, 3);
+    // 15 prompt rows after all seed migrations (003 seeds 3; 005/006/
+    // 007/008/010/020 append further versions). (mb-mac-v1.9: was 3.)
+    assert_eq!(prompts, 15);
     let modes: i64 = db
         .conn
         .query_row("SELECT COUNT(*) FROM modes", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(modes, 3);
+    // 8 modes: the 3 tone modes (casual/normal/formal) + the AI
+    // command modes (migration 005: rewrite/expand/summarize/…).
+    // (mb-mac-v1.9: was 3.)
+    assert_eq!(modes, 8);
 
     // Seed inserts MUST fire audit triggers (migration 002 ran before 003).
     let history_prompts: i64 = db
@@ -135,7 +149,7 @@ fn seeded_modes_and_prompts_present() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(history_prompts, 3, "audit triggers should fire on seed");
+    assert_eq!(history_prompts, 15, "audit triggers should fire on seed");
     let history_modes: i64 = db
         .conn
         .query_row(
@@ -144,7 +158,7 @@ fn seeded_modes_and_prompts_present() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(history_modes, 3);
+    assert_eq!(history_modes, 8);
 }
 
 #[test]
@@ -218,7 +232,8 @@ fn fts5_round_trip_finds_inserted_transcript() {
 #[test]
 fn apply_all_is_idempotent() {
     let db = fresh_db();
-    // Second call must be a no-op (assertion: doesn't panic, schema_version still 11).
+    // Second call must be a no-op (assertion: doesn't panic, schema_version
+    // still at the current latest). (mb-mac-v1.9: was stale at 11.)
     mockingbird_lib::db::apply_migrations(&db.conn).expect("second apply_migrations should be Ok");
     let v: String = db
         .conn
@@ -228,7 +243,7 @@ fn apply_all_is_idempotent() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(v, "11");
+    assert_eq!(v, "26");
 }
 
 /// Migration 011 ships the FTS5 mirror for meeting transcripts.

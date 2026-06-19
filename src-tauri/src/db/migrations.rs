@@ -733,7 +733,14 @@ mod tests {
             "migration 025 must reset kg_graph_enabled to false"
         );
 
-        // schema_version bumps to 25.
+        // After the full apply_all run schema_version is at the
+        // current latest (26). This test exercises migration 025's
+        // side effects (above); the version assertion just confirms
+        // the DB is fully migrated. Bump alongside
+        // `apply_all_brings_fresh_db_to_latest_version` when a new
+        // migration lands. (mb-mac-v1.9: was a stale `"25"` that only
+        // held when 025 was the latest; surfaced on the first real
+        // Mac `cargo test` run since Windows gates with `--no-run`.)
         let v: String = conn
             .query_row(
                 "SELECT value FROM schema_meta WHERE key='schema_version'",
@@ -741,7 +748,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v, "25");
+        assert_eq!(v, "26");
 
         // The drift session row (id=42) is intentionally PRESERVED.
         // Sessions are user-meaningful raw data (Principle 1); only
@@ -805,7 +812,13 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
         apply_all(&conn).unwrap();
 
-        // schema_version is at 22 after the full apply_all run.
+        // After the full apply_all run schema_version is at the
+        // current latest (26). This test exercises migration 022's
+        // invariant (modes.model_id untouched, below); the version
+        // assertion just confirms the DB is fully migrated. Bump
+        // alongside `apply_all_brings_fresh_db_to_latest_version`
+        // when a new migration lands. (mb-mac-v1.9: was a stale
+        // `"22"` that only held when 022 was the latest.)
         let v: String = conn
             .query_row(
                 "SELECT value FROM schema_meta WHERE key='schema_version'",
@@ -813,7 +826,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v, "22");
+        assert_eq!(v, "26");
 
         // Migration 022 must not have moved any modes.model_id. The
         // three tone modes should still all be on qwen2.5:7b-instruct-
