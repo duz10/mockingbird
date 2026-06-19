@@ -57,13 +57,27 @@ if [[ -z "${ORT_DYLIB_PATH:-}" ]]; then
 fi
 
 # --- 4. Auto-inject `--features mockingbird/metal` for build-y verbs ---------
+#
+# Placement matters. For plain cargo verbs (build/check/test/...) the
+# feature flag goes right after the verb. For `cargo tauri dev|build`,
+# cargo-tauri rejects flags placed BEFORE its subcommand, so the flag
+# must land AFTER the tauri subcommand:
+#     cargo tauri dev --features mockingbird/metal     (correct)
+#     cargo tauri --features mockingbird/metal dev     (WRONG -- rejected:
+#                                                       "unexpected argument")
 feature_capable=" build check clippy test run bench doc rustc rustdoc tree tauri "
+tauri_feature_subcommands=" dev build "
+
+# Find the cargo verb (first non-flag token) and its 0-based index.
 cargo_verb=""
+verb_index=-1
+idx=0
 for a in "$@"; do
     case "$a" in
         -*) ;;            # skip leading flags
-        *) cargo_verb="$a"; break ;;
+        *) cargo_verb="$a"; verb_index="${idx}"; break ;;
     esac
+    idx=$((idx + 1))
 done
 
 user_passed_features=0
@@ -73,30 +87,64 @@ for a in "$@"; do
     esac
 done
 
-inject_metal=0
+# Decide the token index AFTER which we splice the feature flag.
+#   plain verb -> right after the verb.
+#   tauri verb -> right after the tauri subcommand (dev|build only; other
+#                 tauri subcommands don't take --features, so skip them).
+insert_after_index=-1
 if [[ -n "${cargo_verb}" ]] \
     && [[ "${feature_capable}" == *" ${cargo_verb} "* ]] \
     && [[ "${user_passed_features}" -eq 0 ]] \
     && [[ "${MOCKINGBIRD_NO_METAL:-0}" != "1" ]]; then
-    inject_metal=1
+    if [[ "${cargo_verb}" == "tauri" ]]; then
+        # Locate the tauri subcommand: first non-flag token after the verb.
+        sub=""
+        sub_index=-1
+        idx=0
+        for a in "$@"; do
+            if [[ "${idx}" -gt "${verb_index}" ]]; then
+                case "$a" in
+                    -*) ;;
+                    *) sub="$a"; sub_index="${idx}"; break ;;
+                esac
+            fi
+            idx=$((idx + 1))
+        done
+        if [[ -n "${sub}" ]] \
+            && [[ "${tauri_feature_subcommands}" == *" ${sub} "* ]]; then
+            insert_after_index="${sub_index}"
+        fi
+    else
+        insert_after_index="${verb_index}"
+    fi
 fi
 
-# Build the effective arg list, inserting the feature flag right after
-# the verb so it lands inside cargo's flag set (before any `--`
-# passthrough boundary for test/clippy).
+# Build the effective arg list, splicing the feature flag after the chosen
+# token (verb, or tauri subcommand). For plain build-y verbs this lands
+# inside cargo's flag set, before any `--` passthrough boundary.
 args=()
-if [[ "${inject_metal}" -eq 1 ]]; then
-    inserted=0
+if [[ "${insert_after_index}" -ge 0 ]]; then
+    idx=0
     for a in "$@"; do
         args+=("$a")
-        if [[ "${inserted}" -eq 0 && "$a" == "${cargo_verb}" ]]; then
+        if [[ "${idx}" -eq "${insert_after_index}" ]]; then
             args+=("--features" "mockingbird/metal")
-            inserted=1
         fi
+        idx=$((idx + 1))
     done
 else
     args=("$@")
 fi
 
 # --- 5. Invoke cargo --------------------------------------------------------
+# MOCKINGBIRD_DRY_RUN=1 echoes the constructed command instead of running
+# it -- handy for verifying feature-flag placement without launching a
+# long-running verb like `tauri dev`.
+if [[ "${MOCKINGBIRD_DRY_RUN:-0}" == "1" ]]; then
+    printf 'cargo'
+    printf ' %q' "${args[@]}"
+    printf '\n'
+    exit 0
+fi
+
 exec cargo "${args[@]}"

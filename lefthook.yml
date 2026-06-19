@@ -24,9 +24,14 @@ pre-commit:
         - merge
         - rebase
     ts-lint:
+      # ts-lint repointed from `npm run lint` to `tsc --noEmit` until
+      # ESLint v9 migration (mb-yxh) lands -- npm run lint fails on the
+      # broken flat-config, not on real violations. tsc type-checks the
+      # whole project (can't scope to staged files) and is macOS+Windows
+      # safe. Revert to `npm run lint` once mb-yxh seals.
       glob: "{*.ts,*.tsx}"
       root: ui/
-      run: npm run lint -- --no-warn-ignored {staged_files}
+      run: npx tsc --noEmit
       skip:
         - merge
         - rebase
