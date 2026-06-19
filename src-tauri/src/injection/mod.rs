@@ -42,7 +42,13 @@ pub mod macos;
 #[cfg(target_os = "linux")]
 pub mod linux;
 
-#[cfg(not(target_os = "windows"))]
+// macOS judges (`mac-p3b-paste-clipboard-saverestore`,
+// `mac-p3c-secure-input-aborts`). File is `#![cfg(target_os = "macos")]`
+// internally, so this compiles to nothing off-macOS — mirrors the
+// `secrets::judges_macos_v1` pattern.
+pub mod judges_macos_v1;
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 use crate::error::AppError;
 use crate::error::AppResult;
 
@@ -123,10 +129,14 @@ pub fn make_default_injector() -> AppResult<Box<dyn Injector>> {
     {
         Ok(Box::new(windows::SendInputInjector::new()?))
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        Ok(Box::new(macos::MacInjector::new()?))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         Err(AppError::Injection(
-            "injector not implemented for this platform (Phase 9 macOS/Linux)".into(),
+            "injector not implemented for this platform".into(),
         ))
     }
 }

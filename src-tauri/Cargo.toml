@@ -141,6 +141,24 @@ security-framework = "3"
 core-graphics = "0.24"
 core-foundation = "0.10"
 
+# ADR-0058 / mb-mac-v1.4.2 — Cmd+V paste injection clipboard layer.
+# Cross-platform clipboard crate (Apache-2.0 OR MIT). Supplies the
+# text save/restore around the synthesized Cmd+V keypost — the macOS
+# analogue of the Win32 save/restore dance in `injection/paste.rs`
+# (ADR 0018). `default-features = false` drops the `image-data`
+# feature (and the heavy `image` dep tree); dictation only round-trips
+# text. The Cmd+V keystroke itself is synthesized via `core-graphics`.
+arboard = { version = "3", default-features = false }
+
+# ADR-0059 / mb-mac-v1.4.3 — Accessibility AX secure-input detection.
+# Raw Apple Accessibility (AX) FFI (MIT OR Apache-2.0). Reads the
+# system-wide focused UI element's role to detect
+# `AXSecureTextField` (password fields) — the macOS twin of the
+# Windows per-element `ES_PASSWORD` check in `secure_guard.rs`. The
+# coarse system-wide `IsSecureEventInputEnabled()` belt-and-suspenders
+# signal is linked from the Carbon framework directly (no crate).
+accessibility-sys = "0.1"
+
 [dev-dependencies]
 rstest    = { workspace = true }
 proptest  = { workspace = true }
@@ -289,6 +307,24 @@ path = "src/dev_bins/mac_keychain_smoke.rs"
 [[example]]
 name = "mac_hotkey_smoke"
 path = "src/dev_bins/mac_hotkey_smoke.rs"
+
+# macOS port Phase 3 (mb-mac-v1.4.2) — paste clipboard save/restore
+# judge (`mac-p3b-paste-clipboard-saverestore`). macOS only; exits 2
+# elsewhere. Drives `injection::judges_macos_v1::paste_clipboard_saverestore_probe`
+# — the deterministic save/restore assertion (the Cmd+V keypost itself
+# needs Accessibility and is verified in `mac-p3-dictation-e2e`).
+[[example]]
+name = "mac_paste_smoke"
+path = "src/dev_bins/mac_paste_smoke.rs"
+
+# macOS port Phase 3 (mb-mac-v1.4.3) — secure-input abort judge
+# (`mac-p3c-secure-input-aborts`). macOS only; exits 2 elsewhere.
+# Drives `injection::judges_macos_v1::secure_input_aborts_probe` — the
+# AX query sits behind a mockable seam so the abort decision is
+# deterministic without a real Accessibility grant.
+[[example]]
+name = "mac_secure_input_smoke"
+path = "src/dev_bins/mac_secure_input_smoke.rs"
 
 [[example]]
 name = "learn"

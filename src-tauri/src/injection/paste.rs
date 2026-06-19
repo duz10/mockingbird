@@ -337,14 +337,102 @@ where
     Ok(outcome)
 }
 
-#[cfg(not(target_os = "windows"))]
+/// macOS clipboard save/restore (ADR 0058, mb-mac-v1.4.2).
+///
+/// The macOS analogue of the Win32 four-step dance: snapshot the
+/// current pasteboard text, write `payload`, run `paste_fn` (typically
+/// the synthesized Cmd+V keypost in `injection/macos.rs`), then restore
+/// the snapshot. Implemented over the portable `arboard` crate — the
+/// pasteboard is the OS's, but arboard is the only `set_text` caller so
+/// the "clipboard writes live in paste.rs" discipline (PLAN §12 #17)
+/// holds on macOS too.
+///
+/// ## Parity gaps vs. Windows (documented in ADR 0058)
+///
+/// 1. **Text-only.** Only `CF_UNICODETEXT`-equivalent text is saved /
+///    restored; images and custom pasteboard flavors are lost around a
+///    dictation. This mirrors the Windows path's deliberate skip of
+///    non-`HGLOBAL` formats — a paper cut, never a crash.
+/// 2. **No change-count divergence skip.** Unlike the Win32 path
+///    (which consults `GetClipboardSequenceNumber` to avoid clobbering
+///    a concurrent writer), v1 restores unconditionally. `arboard`
+///    does not surface `NSPasteboard.changeCount`; a future leaf could
+///    drop to raw `NSPasteboard` for full parity. The single-user
+///    dictation workload makes the race vanishingly rare.
+#[cfg(target_os = "macos")]
+pub fn with_saved_clipboard<F>(payload: &str, paste_fn: F) -> AppResult<PasteOutcome>
+where
+    F: FnOnce() -> AppResult<()>,
+{
+    mac::with_saved_clipboard(payload, paste_fn)
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn with_saved_clipboard<F>(_payload: &str, _paste_fn: F) -> AppResult<PasteOutcome>
 where
     F: FnOnce() -> AppResult<()>,
 {
     Err(AppError::Injection(
-        "clipboard save/restore is Windows-only (Phase 9 platform parity)".into(),
+        "clipboard save/restore is not implemented on this platform".into(),
     ))
+}
+
+// --------------------------------------------------------------------
+// macOS implementation (the only place the macOS pasteboard is written)
+// --------------------------------------------------------------------
+
+#[cfg(target_os = "macos")]
+mod mac {
+    use super::*;
+    use arboard::Clipboard;
+
+    /// See [`super::with_saved_clipboard`] (macOS arm) for the contract
+    /// and the documented parity gaps.
+    pub fn with_saved_clipboard<F>(payload: &str, paste_fn: F) -> AppResult<PasteOutcome>
+    where
+        F: FnOnce() -> AppResult<()>,
+    {
+        let mut clipboard = Clipboard::new()
+            .map_err(|e| AppError::Injection(format!("open macOS pasteboard: {e}")))?;
+
+        // 1. Snapshot. `Err`/empty → treat as "no text to restore".
+        let saved = clipboard.get_text().ok();
+
+        // 2. Write the payload.
+        clipboard
+            .set_text(payload.to_owned())
+            .map_err(|e| AppError::Injection(format!("set macOS pasteboard text: {e}")))?;
+
+        // 3. Paste (caller's Cmd+V keypost). Errors still need restore.
+        let paste_result = paste_fn();
+
+        // Give the focused app time to read the pasteboard before we
+        // overwrite it again — same rationale as [`PASTE_CONSUME_GRACE`].
+        std::thread::sleep(PASTE_CONSUME_GRACE);
+
+        // 4. Restore the snapshot (best-effort; see parity gap #2).
+        let outcome = match saved {
+            Some(prev) => match clipboard.set_text(prev) {
+                Ok(()) => PasteOutcome::Ok,
+                Err(e) => {
+                    tracing::warn!("macOS clipboard restore failed (best-effort): {e}");
+                    PasteOutcome::OkClipboardNotRestored
+                }
+            },
+            None => {
+                // Nothing meaningful preceded our write — clear our
+                // payload so the dictation text doesn't linger.
+                if let Err(e) = clipboard.clear() {
+                    tracing::warn!("macOS clipboard clear failed (best-effort): {e}");
+                }
+                PasteOutcome::Ok
+            }
+        };
+
+        // Propagate any paste error after the restore has run.
+        paste_result?;
+        Ok(outcome)
+    }
 }
 
 // --------------------------------------------------------------------
