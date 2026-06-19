@@ -2530,6 +2530,7 @@ dependencies = [
  "criterion",
  "crossbeam-channel",
  "hound",
+ "libc",
  "mockall",
  "notify-debouncer-full",
  "objc2",

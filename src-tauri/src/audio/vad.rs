@@ -11,15 +11,18 @@
 //! Outputs the speech probability + updated state. Probabilities ≥ 0.5
 //! are flagged as speech.
 
-// macOS port: live impl is `#[cfg(target_os = "windows")]`; these imports are
-// orphaned on non-Windows until the cross-platform backend lands (Phase 3/4).
-#![cfg_attr(not(target_os = "windows"), allow(unused_imports))]
+// macOS port (.4.7a): the Silero impl is un-gated to `any(windows, macos)` —
+// the ort/Silero ONNX path is cross-platform (proven by `mac_ort_vad_smoke`).
+// Imports are orphaned only on Linux/other until that backend lands.
+#![cfg_attr(
+    not(any(target_os = "windows", target_os = "macos")),
+    allow(unused_imports)
+)]
 
 use std::path::{Path, PathBuf};
 
-#[cfg(not(target_os = "windows"))]
-use crate::error::AppError;
-#[cfg(target_os = "windows")]
+// AppError is used on every platform: SileroVad's impl on win+mac, and the
+// not-implemented Linux arm of `make_default_vad`.
 use crate::error::AppError;
 use crate::error::AppResult;
 
@@ -43,25 +46,25 @@ pub trait VoiceActivityDetector: Send {
 
 /// Construct the platform-default VAD impl.
 pub fn make_default_vad() -> AppResult<Box<dyn VoiceActivityDetector>> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         Ok(Box::new(SileroVad::new()?))
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         Err(AppError::Audio(
-            "VAD not implemented for this platform (Phase 9)".into(),
+            "VAD not implemented for this platform (Phase 9 Linux)".into(),
         ))
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub const SILERO_FRAME_SAMPLES: usize = 512;
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 const SILERO_STATE_LEN: usize = 2 * 128; // (h+c stacked, batch=1, hidden=128)
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 const SILERO_SR: i64 = 16_000;
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 const SPEECH_THRESHOLD: f32 = 0.5;
 /// Silero v5 at 16 kHz requires 64 samples of context (last 64 of
 /// the previous frame) prepended to each new 512-sample frame.
@@ -71,12 +74,12 @@ const SPEECH_THRESHOLD: f32 = 0.5;
 /// official Python reference (`silero-vad/src/silero_vad/utils_vad.py`)
 /// makes this implicit — only readable by tracing the `_context`
 /// buffer through `__call__`. Wave 4.8 finding.
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 const SILERO_CONTEXT_SAMPLES: usize = 64;
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 const SILERO_INPUT_SAMPLES: usize = SILERO_CONTEXT_SAMPLES + SILERO_FRAME_SAMPLES;
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub struct SileroVad {
     session: ort::session::Session,
     /// LSTM hidden+cell stacked flat as [2 * 1 * 128].
@@ -87,7 +90,7 @@ pub struct SileroVad {
     context: Vec<f32>,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 impl SileroVad {
     pub fn new() -> AppResult<Self> {
         let model_path = locate_model().ok_or_else(|| {
@@ -117,7 +120,7 @@ impl SileroVad {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 fn locate_model() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("SILERO_VAD_PATH") {
         let pb = PathBuf::from(p);
@@ -134,7 +137,7 @@ fn locate_model() -> Option<PathBuf> {
     None
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 impl VoiceActivityDetector for SileroVad {
     fn process_frame(&mut self, frame: &[i16]) -> AppResult<VadFrame> {
         if frame.len() != SILERO_FRAME_SAMPLES {
@@ -233,7 +236,7 @@ impl VoiceActivityDetector for SileroVad {
     }
 }
 
-#[cfg(all(test, target_os = "windows"))]
+#[cfg(all(test, any(target_os = "windows", target_os = "macos")))]
 mod tests {
     use super::*;
 

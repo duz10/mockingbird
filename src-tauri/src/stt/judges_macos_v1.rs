@@ -122,8 +122,32 @@ fn classify_backend(log: &str) -> (Backend, Option<String>) {
     (Backend::Cpu, None)
 }
 
+/// Begin a fresh backend-log capture: install the ggml/whisper log
+/// trampoline (idempotent) and clear the buffer. Call this BEFORE
+/// constructing a `WhisperContext` (or the production `WhisperStt`) so
+/// the backend-init lines land in the capture buffer.
+///
+/// Exposed so the `.4.7a` dictation un-gate judge can confirm the
+/// Metal backend through the PRODUCTION `WhisperStt` wrapper, reusing
+/// this module's trampoline + classifier instead of duplicating them.
+pub fn begin_backend_capture() {
+    install_capture();
+    if let Ok(mut buf) = LOG_CAPTURE.lock() {
+        buf.clear();
+    }
+}
+
+/// Classify whatever has been captured since the last
+/// [`begin_backend_capture`]. Returns the backend, the evidence line
+/// (if any), and the full captured log (for diagnostics).
+pub fn classify_captured_backend() -> (Backend, Option<String>, String) {
+    let log = LOG_CAPTURE.lock().map(|b| b.clone()).unwrap_or_default();
+    let (backend, evidence) = classify_backend(&log);
+    (backend, evidence, log)
+}
+
 /// Read a 16 kHz mono 16-bit WAV into i16 samples.
-fn read_wav_16k_mono_i16(path: &Path) -> Result<Vec<i16>, String> {
+pub fn read_wav_16k_mono_i16(path: &Path) -> Result<Vec<i16>, String> {
     let mut reader =
         hound::WavReader::open(path).map_err(|e| format!("open wav {}: {e}", path.display()))?;
     let spec = reader.spec();

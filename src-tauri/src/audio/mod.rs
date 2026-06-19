@@ -21,7 +21,10 @@ pub mod judges_macos_v1;
 
 pub use vad_trim::{vad_trim as trim_speech, TrimConfig};
 
-#[cfg(not(target_os = "windows"))]
+// macOS port (.4.7a): capture is un-gated to `any(windows, macos)` — cpal's
+// CoreAudio backend handles mic input. AppError is only referenced by the
+// not-yet-implemented Linux/other arm of `make_default_capture` below.
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 use crate::error::AppError;
 use crate::error::AppResult;
 
@@ -54,14 +57,14 @@ pub trait AudioCapture {
 
 /// Construct the platform-default capture impl.
 pub fn make_default_capture() -> AppResult<Box<dyn AudioCapture>> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         Ok(Box::new(capture::CpalCapture::new()?))
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         Err(AppError::Audio(
-            "audio capture not implemented for this platform (Phase 9 macOS/Linux)".into(),
+            "audio capture not implemented for this platform (Phase 9 Linux)".into(),
         ))
     }
 }

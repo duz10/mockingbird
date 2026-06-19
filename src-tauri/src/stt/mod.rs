@@ -20,9 +20,8 @@ pub mod judges_macos_v1;
 
 use std::path::PathBuf;
 
-#[cfg(not(target_os = "windows"))]
-use crate::error::AppError;
-#[cfg(target_os = "windows")]
+// AppError is used unconditionally: `models_dir()` constructs it on every
+// platform, and `make_default_stt`'s Linux arm does too.
 use crate::error::AppError;
 use crate::error::AppResult;
 
@@ -120,14 +119,14 @@ pub trait SpeechToText: Send {
 
 /// Construct the platform-default STT impl.
 pub fn make_default_stt() -> AppResult<Box<dyn SpeechToText>> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         Ok(Box::new(whisper::WhisperStt::new()?))
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         Err(AppError::Stt(
-            "STT not implemented for this platform (Phase 9 macOS/Linux)".into(),
+            "STT not implemented for this platform (Phase 9 Linux)".into(),
         ))
     }
 }

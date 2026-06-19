@@ -16,16 +16,21 @@ fn fixtures_dir() -> PathBuf {
 }
 
 #[test]
-fn factory_returns_a_capture_on_windows() {
-    #[cfg(target_os = "windows")]
+fn factory_constructs_on_supported_platforms() {
+    // .4.7a (ADR 0062) un-gated microphone capture to macOS via cpal's
+    // CoreAudio backend, so the factory now constructs on Windows AND
+    // macOS. Construction does not open a device, so no mic grant is
+    // needed here. Loopback (system audio) stays Windows-only.
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
-        let _ = make_default_capture().expect("Windows factory should construct");
+        let _ = make_default_capture().expect("Windows/macOS factory should construct");
     }
-    #[cfg(not(target_os = "windows"))]
+    // Linux / other remain Phase 9 stubs that return Err.
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         assert!(
             make_default_capture().is_err(),
-            "non-Windows factory must return Err per Phase 9 stub policy"
+            "unsupported-platform factory must return Err per Phase 9 stub policy"
         );
     }
 }

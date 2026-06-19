@@ -452,9 +452,17 @@ fn run_dictation_thread(
 /// Ensure `ORT_DYLIB_PATH` is set so `ort` can `dlopen` the runtime.
 ///
 /// Discovery order (mirrors `models_dir`):
-///   1. Existing `ORT_DYLIB_PATH` (caller wins).
-///   2. `<models_dir>\onnxruntime.dll`.
-///   3. `%USERPROFILE%\mockingbird_models\onnxruntime.dll`.
+///   1. Existing `ORT_DYLIB_PATH` (caller wins — on macOS this is what
+///      `scripts/dev/cargo-mac.sh` exports in dev).
+///   2. `<models_dir>/<platform dylib>` — `onnxruntime.dll` on Windows,
+///      `libonnxruntime.dylib` on macOS, `libonnxruntime.so` elsewhere.
+///      `models_dir` resolves `MODEL_PATH` first (also set by
+///      cargo-mac.sh), so the dev `models/` dir is found here too.
+///   3. `%USERPROFILE%\mockingbird_models\onnxruntime.dll` (Windows dev).
+///
+/// macOS note: for the packaged `.app`, discovery from the bundle
+/// Resources dir is a later item (ADR 0062) — the dev `ORT_DYLIB_PATH`
+/// env + the repo `models/` dir cover .4.7a.
 ///
 /// On miss we don't error — VAD construction will fail later with a
 /// clearer message. Setting the env early just saves a setup step.
@@ -462,8 +470,17 @@ fn ensure_ort_dylib_set() {
     if std::env::var("ORT_DYLIB_PATH").is_ok() {
         return;
     }
+
+    // Platform filename for the onnxruntime shared library.
+    #[cfg(target_os = "windows")]
+    const ORT_DYLIB_NAME: &str = "onnxruntime.dll";
+    #[cfg(target_os = "macos")]
+    const ORT_DYLIB_NAME: &str = "libonnxruntime.dylib";
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    const ORT_DYLIB_NAME: &str = "libonnxruntime.so";
+
     if let Ok(dir) = crate::stt::models_dir() {
-        let candidate = dir.join("onnxruntime.dll");
+        let candidate = dir.join(ORT_DYLIB_NAME);
         if candidate.is_file() {
             tracing::info!(path = %candidate.display(), "setting ORT_DYLIB_PATH");
             // SAFETY: process-startup env mutation; no other thread

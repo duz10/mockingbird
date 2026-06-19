@@ -16,29 +16,35 @@
 //!     does not auto-restart on change (clean restart support is a
 //!     Phase 5 concern).
 
-// macOS port: the live `CpalCapture` is `#[cfg(target_os = "windows")]`; the std
-// sync/thread + error imports below feed it and are orphaned on non-Windows until
-// the cross-platform capture backend lands (Phase 3/4). The `SampleProducer` alias
-// + ringbuf imports stay un-gated (consumed by the cross-platform resampler).
-#![cfg_attr(not(target_os = "windows"), allow(unused_imports))]
+// macOS port (.4.7a): the live `CpalCapture` (microphone input) is un-gated to
+// `any(windows, macos)` — cpal's CoreAudio backend handles mic capture. The std
+// sync/thread + error imports below feed it and are orphaned only on Linux/other
+// until that backend lands. The `SampleProducer` alias + ringbuf `Split`/`HeapRb`
+// stay fully un-gated (consumed by the cross-platform resampler). The WASAPI
+// loopback (system-audio) `DeviceSource` stays Windows-only — macOS system audio
+// uses ScreenCaptureKit (mb-mac-v1.5.3, Phase 4 meeting capture), not here.
+#![cfg_attr(
+    not(any(target_os = "windows", target_os = "macos")),
+    allow(unused_imports)
+)]
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use cpal::{Device, Host, SampleFormat, Stream, StreamConfig};
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use ringbuf::traits::Consumer;
 // `Split` + `HeapRb` back the `SampleProducer` alias below, which the
-// cross-platform resampler DSP depends on — so they are NOT windows-only.
+// cross-platform resampler DSP depends on — so they are NOT platform-gated.
 use ringbuf::traits::Split;
 use ringbuf::HeapRb;
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use crate::error::AppError;
 use crate::error::AppResult;
 
@@ -73,7 +79,7 @@ pub const DEVICE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 // cpal `CpalCapture` that *owns* the consumer end is Windows-gated
 // (until the macOS capture backend lands in a later phase).
 pub(super) type SampleProducer = <HeapRb<i16> as Split>::Prod;
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 type SampleConsumer = <HeapRb<i16> as Split>::Cons;
 
 /// Which endpoint a [`CpalCapture`] grabs at `start()`.
@@ -83,18 +89,24 @@ type SampleConsumer = <HeapRb<i16> as Split>::Cons;
 /// relies on cpal 0.15's WASAPI backend transparently setting
 /// `AUDCLNT_STREAMFLAGS_LOOPBACK` when `build_input_stream` is
 /// invoked on a device with `data_flow() == eRender`.
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DeviceSource {
     Input,
+    // WASAPI loopback (system-audio) capture. macOS system audio is
+    // captured via ScreenCaptureKit (mb-mac-v1.5.3, Phase 4 meeting
+    // capture), NOT cpal — so this variant is Windows-only. Dictation
+    // (.4.7a) is microphone-only on every platform.
+    #[cfg(target_os = "windows")]
     Loopback,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 impl DeviceSource {
     fn resolve(self, host: &Host) -> Option<Device> {
         match self {
             DeviceSource::Input => host.default_input_device(),
+            #[cfg(target_os = "windows")]
             DeviceSource::Loopback => host.default_output_device(),
         }
     }
@@ -102,12 +114,13 @@ impl DeviceSource {
     fn label(self) -> &'static str {
         match self {
             DeviceSource::Input => "input",
+            #[cfg(target_os = "windows")]
             DeviceSource::Loopback => "loopback",
         }
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub struct CpalCapture {
     host: Host,
     /// Which endpoint to grab on `start()`. Set at construction; never
@@ -135,7 +148,7 @@ pub struct CpalCapture {
     device_changed: Arc<AtomicBool>,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 impl CpalCapture {
     pub fn new() -> AppResult<Self> {
         Self::with_source(DeviceSource::Input)
@@ -149,6 +162,7 @@ impl CpalCapture {
     /// on a device whose `data_flow() == eRender`. No explicit flag
     /// plumbing is required at the cpal API level. See ADR 0031 for
     /// the cpal source-line evidence.
+    #[cfg(target_os = "windows")]
     pub fn new_loopback() -> AppResult<Self> {
         Self::with_source(DeviceSource::Loopback)
     }
@@ -212,6 +226,7 @@ impl CpalCapture {
             DeviceSource::Input => device
                 .default_input_config()
                 .map_err(|e| AppError::Audio(format!("default_input_config: {e}")))?,
+            #[cfg(target_os = "windows")]
             DeviceSource::Loopback => device
                 .default_output_config()
                 .map_err(|e| AppError::Audio(format!("default_output_config: {e}")))?,
@@ -325,7 +340,7 @@ impl CpalCapture {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 impl super::AudioCapture for CpalCapture {
     fn start(&mut self) -> AppResult<()> {
         if self.stream.is_some() {
@@ -400,7 +415,7 @@ impl super::AudioCapture for CpalCapture {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 impl Drop for CpalCapture {
     fn drop(&mut self) {
         // Ensure the watcher thread exits even if stop() wasn't called.
@@ -411,7 +426,7 @@ impl Drop for CpalCapture {
     }
 }
 
-#[cfg(all(test, target_os = "windows"))]
+#[cfg(all(test, any(target_os = "windows", target_os = "macos")))]
 mod tests {
     use super::*;
     use crate::audio::AudioCapture;

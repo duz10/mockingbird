@@ -58,6 +58,12 @@ pub mod llm_prompts;
 pub mod paste_payload;
 pub mod runtime;
 
+// macOS port Phase 3 (.4.7a) — dictation-backend un-gate judge probe.
+// macOS + metal only (it confirms the Metal backend through the
+// production WhisperStt); compiles to nothing elsewhere.
+#[cfg(all(target_os = "macos", feature = "metal"))]
+pub mod judges_macos_v1;
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;

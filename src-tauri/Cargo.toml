@@ -192,6 +192,16 @@ proptest  = { workspace = true }
 mockall   = { workspace = true }
 criterion = { workspace = true }
 
+# mb-mac-v1.4.7a — dev-only `_exit(2)` for the macOS dictation-backend
+# judge shim. Once onnxruntime (the VAD `ort` session) has been loaded in
+# a process, its global thread-pool teardown aborts during the libc
+# `exit()` atexit/static-destructor chain ("mutex lock failed"), turning a
+# PASS into SIGABRT (exit 134). `_exit` skips that buggy teardown so the
+# judge reports its true 0/1 status. dev-dep only: never linked into the
+# shipped `mockingbird` binary (examples DO get dev-dependencies). libc is
+# already in the graph transitively (cpal/coreaudio-sys) — no new vendor.
+libc      = "0.2"
+
 # mb-1z0m Round 4 fix gate — enables `tauri::test::mock_builder` /
 # `mock_context` / `noop_assets` for the `state_extractor_sees_*`
 # regression test in `src-tauri/src/lib.rs`. Dev-dep + workspace
@@ -318,6 +328,16 @@ path = "src/dev_bins/mac_whisper_metal_smoke.rs"
 [[example]]
 name = "mac_ort_vad_smoke"
 path = "src/dev_bins/mac_ort_vad_smoke.rs"
+
+# macOS port Phase 3 (mb-mac-v1.4.7a) — dictation-backend un-gate judge
+# (`mac-p3-dictation-backends-ungated`). macOS + metal only; a no-op stub
+# (exit 2) elsewhere. Drives
+# `dictation::judges_macos_v1::ungate_backends_probe`: asserts the three
+# `make_default_*` factories return Ok and the production WhisperStt
+# transcribes jfk.wav via a confirmed Metal backend.
+[[example]]
+name = "mac_dictation_backends_smoke"
+path = "src/dev_bins/mac_dictation_backends_smoke.rs"
 
 # macOS port Phase 3a (mb-mac-v1.4.1) — Keychain roundtrip judge
 # (`mac-p3a-keychain-roundtrip`). macOS only; exits 2 elsewhere. Drives
