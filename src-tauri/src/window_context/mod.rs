@@ -11,7 +11,9 @@
 //!
 //! Cross-platform via the [`WindowContext`] trait; Windows impl uses
 //! `GetForegroundWindow` + `GetWindowTextW` + `GetModuleBaseNameW`.
-//! macOS / Linux are `todo!()` stubs (PLAN §12 #15).
+//! macOS uses `NSWorkspace.frontmostApplication` (permission-free app
+//! identity; window title needs Accessibility and is deferred — ADR
+//! 0060). Linux is a `todo!()` stub (PLAN §12 #15).
 
 #[cfg(target_os = "windows")]
 pub mod windows;
@@ -19,10 +21,15 @@ pub mod windows;
 #[cfg(target_os = "macos")]
 pub mod macos;
 
+// mb-mac-v1.4.5 — macOS frontmost-app judge (mac-p3e-frontmost-app-readable),
+// mirroring the `injection::judges_macos_v1` in-tree pattern.
+#[cfg(target_os = "macos")]
+pub mod judges_macos_v1;
+
 #[cfg(target_os = "linux")]
 pub mod linux;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 use crate::error::AppError;
 use crate::error::AppResult;
 
@@ -68,10 +75,15 @@ pub fn make_default_context() -> AppResult<Box<dyn WindowContext>> {
     {
         Ok(Box::new(windows::WinWindowContext::new()))
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        Ok(Box::new(macos::MacWindowContext::new()))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         Err(AppError::Other(
-            "window context not implemented for this platform (Phase 9 macOS/Linux)".into(),
+            "window context not implemented for this platform (Linux deferred — PLAN §12 #15)"
+                .into(),
         ))
     }
 }

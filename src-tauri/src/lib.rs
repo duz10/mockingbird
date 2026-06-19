@@ -44,6 +44,9 @@ pub mod logging;
 pub mod meetings;
 // Phase 10 Wave 1A — shared bottom-center overlay conventions.
 pub mod overlay_conventions;
+// mb-mac-v1.4.6 (ADR 0061) — macOS first-launch permissions onboarding.
+// Pure logic compiles everywhere; the FFI status reads are macOS-gated.
+pub mod permissions;
 pub mod recording_window;
 pub mod secrets;
 pub mod settings;

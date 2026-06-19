@@ -755,3 +755,35 @@ export type VaultPathCheck =
       parentVault: string;
       suggestedSibling: string | null;
     };
+
+/* ------------------------------------------------------------------ */
+/* macOS permissions onboarding (mb-mac-v1.4.6 / ADR 0061)            */
+/* ------------------------------------------------------------------ */
+
+/** The four macOS privacy permissions Mockingbird surfaces. Wire-format
+ *  mirror of the Rust `permissions::Permission` enum (serde camelCase). */
+export type PermissionKey =
+  | "microphone"
+  | "inputMonitoring"
+  | "accessibility"
+  | "screenRecording";
+
+/** Grant state of a single permission. Mirror of the Rust
+ *  `permissions::PermissionState` (serde camelCase). `unsupported` is the
+ *  non-macOS answer; `notDetermined` covers both "never asked" and the
+ *  boolean-API "not granted" case (see ADR 0061). */
+export type PermissionState =
+  | "granted"
+  | "denied"
+  | "notDetermined"
+  | "restricted"
+  | "unsupported";
+
+/** All four grant states in one payload — what `mac_permission_statuses`
+ *  returns. Mirror of the Rust `permissions::PermissionStatuses`. */
+export interface PermissionStatuses {
+  microphone: PermissionState;
+  inputMonitoring: PermissionState;
+  accessibility: PermissionState;
+  screenRecording: PermissionState;
+}

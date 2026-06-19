@@ -41,6 +41,7 @@ import { SettingsDictationTab } from "./SettingsDictationTab";
 import { SettingsKgTab } from "./SettingsKgTab";
 import { SettingsMeetingTab } from "./SettingsMeetingTab";
 import { SettingsMobileSyncTab } from "./SettingsMobileSyncTab";
+import { SettingsPermissionsTab } from "./SettingsPermissionsTab";
 import styles from "./Settings.module.css";
 
 // ADR 0047 Wave 2C / mb-h0nn: the old `"history"` tab id is now
@@ -54,6 +55,7 @@ type Tab =
   | "meeting"
   | "mobileSync"
   | "kg"
+  | "permissions"
   | "advanced";
 
 export function SettingsPage() {
@@ -62,6 +64,13 @@ export function SettingsPage() {
   const applyTheme = useAppStore((s) => s.applyTheme);
 
   const [tab, setTab] = useState<Tab>("general");
+
+  // mb-mac-v1.4.6 — the macOS permissions tab only exists on macOS.
+  // Detected once via `host_os()`; cheaper + more robust than UA sniffing.
+  const [isMac, setIsMac] = useState(false);
+  useEffect(() => {
+    void api.host_os().then((os) => setIsMac(os === "macos"));
+  }, []);
 
   // Lazy boot: if the store wasn't populated for some reason, fetch.
   useEffect(() => {
@@ -106,6 +115,14 @@ export function SettingsPage() {
           <TabBtn id="meeting" active={tab} setActive={setTab} label={t("settings.tab.meeting")} />
           <TabBtn id="mobileSync" active={tab} setActive={setTab} label={t("settings.tab.mobileSync")} />
           <TabBtn id="kg" active={tab} setActive={setTab} label={t("settings.tab.kg")} />
+          {isMac ? (
+            <TabBtn
+              id="permissions"
+              active={tab}
+              setActive={setTab}
+              label={t("settings.tab.permissions")}
+            />
+          ) : null}
           <TabBtn id="advanced" active={tab} setActive={setTab} label={t("settings.tab.advanced")} />
         </nav>
 
@@ -126,6 +143,7 @@ export function SettingsPage() {
           {tab === "kg" && (
             <SettingsKgTab onOpenMobileSync={() => setTab("mobileSync")} />
           )}
+          {tab === "permissions" && isMac && <SettingsPermissionsTab />}
           {tab === "advanced" && <AdvancedPanel settings={settings} patch={patch} />}
         </div>
       </div>

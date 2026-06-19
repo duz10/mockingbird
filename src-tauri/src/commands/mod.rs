@@ -25,6 +25,8 @@ pub mod learning;
 pub mod legacy;
 pub mod meetings;
 pub mod modes;
+// mb-mac-v1.4.6 (ADR 0061) — macOS permissions onboarding IPC.
+pub mod permissions;
 pub mod sessions;
 pub mod settings;
 pub mod system;
@@ -127,6 +129,10 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         system::open_path,
         system::app_paths,
         system::list_installed_models,
+        system::host_os,
+        // macOS permissions onboarding (mb-mac-v1.4.6 / ADR 0061).
+        permissions::mac_permission_statuses,
+        permissions::mac_open_settings_pane,
         // mb-1z0m (Round 3) — JS→Rust IPC-outcome mirror.
         system::report_ipc_status,
         // mb-1z0m (Round 4) — React mount beacon (no state, no args).

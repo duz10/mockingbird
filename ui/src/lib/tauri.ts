@@ -34,6 +34,8 @@ import type {
   LlmPassResult,
   MeetingSettingsSnapshot,
   ModeRow,
+  PermissionKey,
+  PermissionStatuses,
   QueueStatus,
   Vocabularies,
   SessionDetail,
@@ -373,6 +375,23 @@ export const api = {
   list_installed_models: () =>
     invoke<string[]>("list_installed_models"),
 
+  /** Host OS string (`std::env::consts::OS`): `"macos"`, `"windows"`,
+   *  `"linux"`, … The Settings page gates the macOS permissions tab on
+   *  `=== "macos"`. mb-mac-v1.4.6. */
+  host_os: () => invoke<string>("host_os"),
+
+  /** macOS permissions onboarding (mb-mac-v1.4.6 / ADR 0061). Returns
+   *  the current grant state of all four privacy permissions. On
+   *  non-macOS every field is `"unsupported"`. The panel polls this on
+   *  mount and on window-focus regain. */
+  mac_permission_statuses: () =>
+    invoke<PermissionStatuses>("mac_permission_statuses"),
+
+  /** Deep-link System Settings to a permission's pane. `permission` is
+   *  one of the `PermissionKey` strings. mb-mac-v1.4.6. */
+  mac_open_settings_pane: (permission: PermissionKey) =>
+    invoke<void>("mac_open_settings_pane", { permission }),
+
   /**
    * mb-1z0m (Round 3) -- fire-and-forget IPC-outcome mirror so JS-side
    * `console.warn` failures also land in `mockingbird.log`. Takes no
@@ -679,6 +698,20 @@ function fixtureFor<T>(command: string, args?: object): T {
         "qwen2.5:3b-instruct-q4_K_M",
         "gemma2:2b-instruct-q4_K_M",
       ]) as T;
+    case "host_os":
+      // Preview/tests run in a browser — pretend macOS so the
+      // permissions tab is exercisable in `npm run preview`.
+      return fixture(command, "macos") as T;
+    case "mac_permission_statuses":
+      return fixture(command, {
+        microphone: "granted",
+        inputMonitoring: "notDetermined",
+        accessibility: "denied",
+        screenRecording: "notDetermined",
+      } as PermissionStatuses) as T;
+    case "mac_open_settings_pane":
+      // Deep-link open is a real OS side-effect; nothing to fixture.
+      return fixture(command, null) as T;
     case "report_ipc_status":
       // mb-1z0m (Round 3) -- fire-and-forget; nothing to fixture.
       return fixture(command, null) as T;

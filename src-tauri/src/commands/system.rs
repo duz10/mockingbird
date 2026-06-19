@@ -122,6 +122,16 @@ pub fn react_mounted() {
     tracing::info!(target: "ipc::react", "react_mounted: shell useEffect fired");
 }
 
+/// Report the host OS so the UI can show platform-specific affordances
+/// (e.g. the macOS permissions onboarding panel — mb-mac-v1.4.6). Returns
+/// `std::env::consts::OS` verbatim: `"macos"`, `"windows"`, `"linux"`, …
+/// The UI compares against `"macos"` to decide whether to render the
+/// permissions tab; cheaper and more robust than sniffing the user agent.
+#[tauri::command]
+pub fn host_os() -> String {
+    std::env::consts::OS.to_string()
+}
+
 /// List the local Ollama tags via `GET /api/tags`. Used by the Modes
 /// editor's per-mode model dropdown — UI populates the `<select>`
 /// options with whatever the user actually has installed, so we

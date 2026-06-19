@@ -159,6 +159,33 @@ arboard = { version = "3", default-features = false }
 # signal is linked from the Carbon framework directly (no crate).
 accessibility-sys = "0.1"
 
+# ADR-0060 / mb-mac-v1.4.5 — NSWorkspace frontmost-app reader.
+# madsmtm's `objc2` family (MIT) — the modern, maintained, memory-safe
+# Objective-C bindings, preferred over the older `cocoa`/`objc` crates
+# (unmaintained, manual retain/release). ALREADY in the tree transitively
+# via Tauri (objc2 0.6 / objc2-*-kit 0.3), so this adds no new vendor:
+# we just opt into the `NSWorkspace` + `NSRunningApplication` class
+# features. `NSWorkspace.frontmostApplication` yields bundle id + name +
+# pid with NO Accessibility grant (the cheap path the plan calls for).
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSURL"] }
+objc2-app-kit = { version = "0.3", features = [
+    "NSWorkspace",
+    "NSRunningApplication",
+] }
+
+# ADR-0061 / mb-mac-v1.4.6 — first-launch permissions onboarding.
+# The four status-query APIs are reached via direct framework linking
+# (the same raw-FFI discipline Wave B2 used for Carbon / accessibility):
+#   - Microphone:       AVCaptureDevice.authorizationStatusForMediaType
+#                       (AVFoundation framework, AVMediaTypeAudio static)
+#   - Input Monitoring: IOHIDCheckAccess (IOKit framework)
+#   - Accessibility:    AXIsProcessTrusted (via accessibility-sys, above)
+#   - Screen Recording: CGPreflightScreenCaptureAccess (CoreGraphics)
+# None of these prompt; they are silent preflight reads. No extra crate
+# is needed — `objc2`/`objc2-foundation` (above) supply the NSString +
+# msg_send plumbing the AVFoundation call uses.
+
 [dev-dependencies]
 rstest    = { workspace = true }
 proptest  = { workspace = true }
@@ -325,6 +352,15 @@ path = "src/dev_bins/mac_paste_smoke.rs"
 [[example]]
 name = "mac_secure_input_smoke"
 path = "src/dev_bins/mac_secure_input_smoke.rs"
+
+# macOS port Phase 3 Wave C (mb-mac-v1.4.5) — frontmost-app reader judge
+# (`mac-p3e-frontmost-app-readable`). macOS only; exits 2 elsewhere.
+# Drives `window_context::judges_macos_v1::frontmost_app_readable_probe`
+# — the permission-free `NSWorkspace.frontmostApplication` read (bundle
+# id + localized name); the AX-gated window title is deferred (ADR 0060).
+[[example]]
+name = "mac_frontmost_smoke"
+path = "src/dev_bins/mac_frontmost_smoke.rs"
 
 [[example]]
 name = "learn"
