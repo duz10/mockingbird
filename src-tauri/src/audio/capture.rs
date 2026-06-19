@@ -16,6 +16,12 @@
 //!     does not auto-restart on change (clean restart support is a
 //!     Phase 5 concern).
 
+// macOS port: the live `CpalCapture` is `#[cfg(target_os = "windows")]`; the std
+// sync/thread + error imports below feed it and are orphaned on non-Windows until
+// the cross-platform capture backend lands (Phase 3/4). The `SampleProducer` alias
+// + ringbuf imports stay un-gated (consumed by the cross-platform resampler).
+#![cfg_attr(not(target_os = "windows"), allow(unused_imports))]
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -26,8 +32,10 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 #[cfg(target_os = "windows")]
 use cpal::{Device, Host, SampleFormat, Stream, StreamConfig};
 #[cfg(target_os = "windows")]
-use ringbuf::traits::{Consumer, Split};
-#[cfg(target_os = "windows")]
+use ringbuf::traits::Consumer;
+// `Split` + `HeapRb` back the `SampleProducer` alias below, which the
+// cross-platform resampler DSP depends on — so they are NOT windows-only.
+use ringbuf::traits::Split;
 use ringbuf::HeapRb;
 
 #[cfg(target_os = "windows")]
@@ -60,7 +68,10 @@ pub const RING_CAPACITY: usize = 4_800_000;
 /// Device-watcher poll interval.
 pub const DEVICE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
-#[cfg(target_os = "windows")]
+// Cross-platform: the resampler (`resampler.rs`) writes converted
+// samples into this ringbuf producer on every target. Only the live
+// cpal `CpalCapture` that *owns* the consumer end is Windows-gated
+// (until the macOS capture backend lands in a later phase).
 pub(super) type SampleProducer = <HeapRb<i16> as Split>::Prod;
 #[cfg(target_os = "windows")]
 type SampleConsumer = <HeapRb<i16> as Split>::Cons;

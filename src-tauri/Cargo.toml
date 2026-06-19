@@ -65,9 +65,6 @@ chrono             = { workspace = true }
 uuid               = { workspace = true }
 thiserror          = { workspace = true }
 
-[target.'cfg(windows)'.dependencies]
-windows = { workspace = true }
-
 # Phase 3 — per-app injection-strategy override table (ADR 0016).
 phf     = { workspace = true }
 
@@ -117,6 +114,15 @@ notify-debouncer-full = { workspace = true }
 # SQLite for migration round-trips. Still available to `[dev-deps]`-
 # scoped tests because `[dependencies]` is a superset.
 tempfile  = { workspace = true }
+
+# mb-mac-v1.2.3 (macOS port) — ONLY genuinely Windows-specific dep here.
+# The crates above were inadvertently scoped under this cfg(windows)
+# target during the Windows-only era; they are cross-platform and have
+# been relocated into [dependencies] so the macOS build links them.
+# This is a no-op for Windows (that target sees [dependencies] +
+# this block as one set). `windows` stays here by design.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
 
 [dev-dependencies]
 rstest    = { workspace = true }

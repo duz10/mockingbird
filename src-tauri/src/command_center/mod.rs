@@ -33,6 +33,9 @@
 //! logic belongs in the subsystem you're trying to drive.
 
 #![allow(missing_docs)]
+// macOS port: live impl is `#[cfg(target_os = "windows")]`; `chord` is consumed
+// only on Windows until the cross-platform backend lands (Phase 3/4).
+#![cfg_attr(not(target_os = "windows"), allow(unused_variables))]
 
 pub mod drive;
 pub mod hotkey;

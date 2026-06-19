@@ -32,6 +32,9 @@
 //! handling via the state machine.
 
 #![allow(missing_docs)]
+// macOS port: live impl is `#[cfg(target_os = "windows")]`; these are orphaned
+// on non-Windows until the cross-platform backend lands (Phase 3/4).
+#![cfg_attr(not(target_os = "windows"), allow(unused_imports, unused_mut))]
 
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Sender;
@@ -85,6 +88,10 @@ pub struct CcActivation {
 
 /// Owner of the chord-hook thread. `install()` plants the hook and
 /// returns this struct; `stop()` / `Drop` tears it down.
+// `Debug` is required by the `not(windows)` unit test that asserts
+// `install()` returns a Hotkey error off-Windows (`.unwrap_err()`).
+// All fields are `Debug`; no-op for the Windows build.
+#[derive(Debug)]
 pub struct CommandCenterHotkeyInstaller {
     chord: CcChordConfig,
     stop_signal: Arc<AtomicBool>,

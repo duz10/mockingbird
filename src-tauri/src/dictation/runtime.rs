@@ -31,6 +31,16 @@
 //! it INSIDE the spawned thread sidesteps that — !Send things only
 //! need to live on one thread.
 
+// macOS port: the dictation runtime wiring is `#[cfg(target_os = "windows")]`;
+// these imports + helpers (ensure_ort_dylib_set / make_default_cleaner /
+// spawn_ollama_warmup) are orphaned on non-Windows until the cross-platform
+// runtime lands (Phase 3/4). `needless_return` only fires on non-Windows because
+// the trailing USERPROFILE fallback in ensure_ort_dylib_set is Windows-gated.
+#![cfg_attr(
+    not(target_os = "windows"),
+    allow(unused_imports, dead_code, clippy::needless_return)
+)]
+
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;

@@ -20,6 +20,10 @@
 //! user's task list. Avoids "did I just register a task on the dev
 //! box every time the test runs?"
 
+// macOS port: live impl is `#[cfg(target_os = "windows")]`; these imports are
+// orphaned on non-Windows until the cross-platform backend lands (Phase 3/4).
+#![cfg_attr(not(target_os = "windows"), allow(unused_imports))]
+
 use crate::error::{AppError, AppResult};
 
 /// Stable name we use for the scheduled task. Single tasks per user.

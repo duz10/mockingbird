@@ -11,6 +11,10 @@
 //! Outputs the speech probability + updated state. Probabilities ≥ 0.5
 //! are flagged as speech.
 
+// macOS port: live impl is `#[cfg(target_os = "windows")]`; these imports are
+// orphaned on non-Windows until the cross-platform backend lands (Phase 3/4).
+#![cfg_attr(not(target_os = "windows"), allow(unused_imports))]
+
 use std::path::{Path, PathBuf};
 
 #[cfg(not(target_os = "windows"))]

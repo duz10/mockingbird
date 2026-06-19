@@ -33,6 +33,13 @@
 //! default. The activation state machine + the runtime wiring exercise
 //! the path end-to-end in Wave 4.
 
+// macOS port: live impl is `#[cfg(target_os = "windows")]`; these imports/fields
+// are orphaned on non-Windows until the cross-platform backend lands (Phase 3/4).
+#![cfg_attr(
+    not(target_os = "windows"),
+    allow(unused_imports, dead_code, unused_mut)
+)]
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
@@ -69,6 +76,10 @@ impl Default for ChordConfig {
 /// Owner of the meetings hook thread. `install()` plants the second
 /// `WH_KEYBOARD_LL` hook on a dedicated thread; `stop()` posts WM_QUIT
 /// and joins.
+// `Debug` is required by the `not(windows)` unit test that asserts
+// `install()` returns a Phase-9 error off-Windows (`.unwrap_err()`).
+// All fields are `Debug`; no-op for the Windows build.
+#[derive(Debug)]
 pub struct MeetingHotkeyInstaller {
     chord: ChordConfig,
     thread: Option<JoinHandle<()>>,

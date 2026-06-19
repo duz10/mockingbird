@@ -54,6 +54,10 @@ pub mod tray;
 pub mod vault;
 pub mod window_context;
 
+// macOS port: HashMap is consumed only by the Windows-gated DictationRuntime
+// spawn block below; gate the import to match (crate-root, so no module-wide
+// allow). Wired cross-platform in Phase 3/4.
+#[cfg(target_os = "windows")]
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -62,7 +66,11 @@ use tauri::Manager;
 
 use activity::ActivityCaptureRuntime;
 use commands::AppState;
-use dictation::runtime::{default_normal_config, DictationRuntime};
+use dictation::runtime::default_normal_config;
+// macOS port: DictationRuntime is only spawned in the Windows-gated block in
+// `run()`; gate the import to match. Cross-platform spawn lands in Phase 3/4.
+#[cfg(target_os = "windows")]
+use dictation::runtime::DictationRuntime;
 #[cfg(target_os = "windows")]
 use meetings::runtime::{MeetingCaptureRuntime, MeetingRuntimeConfig};
 
@@ -666,18 +674,45 @@ where
 /// this constant matches the JSON config at compile-time.
 const APP_IDENTIFIER: &str = "com.dustin.mockingbird";
 
-/// Resolve `%APPDATA%/<APP_IDENTIFIER>` on Windows, mirroring what
-/// Tauri 2's `PathResolver::app_data_dir()` produces for the
-/// configured identifier. Called from [`run`] BEFORE the Tauri
-/// Builder is constructed so we can `Builder::manage(AppState)`
-/// before the .setup() closure runs (Path A fix for mb-1z0m).
+/// Resolve `<platform app-data root>/<APP_IDENTIFIER>`, mirroring what
+/// Tauri 2's `PathResolver::app_data_dir()` produces for the configured
+/// identifier on each OS. Called from [`run`] BEFORE the Tauri Builder
+/// is constructed so we can `Builder::manage(AppState)` before the
+/// .setup() closure runs (Path A fix for mb-1z0m).
+///
+/// Per-OS roots (must stay in lock-step with Tauri's own resolver, or
+/// the pre-Builder bootstrap lands the DB in the wrong place again):
+/// - Windows: `%APPDATA%` (= `dirs::data_dir()`, Roaming).
+/// - macOS:   `$HOME/Library/Application Support` (mb-mac-v1.2.4).
+/// - other unix (CI dev only): `$HOME/.local/share` (XDG default).
 ///
 /// Returns an error rather than panicking so the caller can decide
 /// how to surface the failure (run() expects it; tests can probe).
 fn resolve_app_data_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let appdata = std::env::var("APPDATA")
-        .map_err(|_| "APPDATA env var not set; cannot resolve app data dir")?;
-    Ok(PathBuf::from(appdata).join(APP_IDENTIFIER))
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var("APPDATA")
+            .map_err(|_| "APPDATA env var not set; cannot resolve app data dir")?;
+        Ok(PathBuf::from(appdata).join(APP_IDENTIFIER))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME")
+            .map_err(|_| "HOME env var not set; cannot resolve app data dir")?;
+        Ok(PathBuf::from(home)
+            .join("Library")
+            .join("Application Support")
+            .join(APP_IDENTIFIER))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let home = std::env::var("HOME")
+            .map_err(|_| "HOME env var not set; cannot resolve app data dir")?;
+        Ok(PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join(APP_IDENTIFIER))
+    }
 }
 
 #[cfg(test)]

@@ -22,6 +22,10 @@
 //! [`crate::window_context::WindowContext::foreground`] and never
 //! reach this code path at all.
 
+// macOS port: these helpers are consumed only by the Windows secure-input path;
+// dead on non-Windows until the cross-platform backend lands (Phase 3/4).
+#![cfg_attr(not(target_os = "windows"), allow(dead_code))]
+
 use crate::window_context::ForegroundWindow;
 
 #[cfg(target_os = "windows")]

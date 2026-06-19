@@ -9,6 +9,11 @@
 //! in `Cargo.toml` once CUDA 12.x is installed side-by-side, and the
 //! GPU path activates automatically. See bd issue `mb-ltq`.
 
+// macOS port: `WhisperStt` + its consts are `#[cfg(target_os = "windows")]`;
+// these imports/consts are orphaned on non-Windows until the cross-platform STT
+// backend lands (Phase 3/4).
+#![cfg_attr(not(target_os = "windows"), allow(unused_imports, dead_code))]
+
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
