@@ -122,3 +122,7 @@ playwright-results/
 # Internal command tooling
 .agents/
 
+# Mac-port maintainer carry files (local-only, never committed to the public repo)
+AGENTS-MAC*.md
+macos-port-kickoff.md
+
