@@ -57,10 +57,11 @@ pub mod tray;
 pub mod vault;
 pub mod window_context;
 
-// macOS port: HashMap is consumed only by the Windows-gated DictationRuntime
-// spawn block below; gate the import to match (crate-root, so no module-wide
-// allow). Wired cross-platform in Phase 3/4.
-#[cfg(target_os = "windows")]
+// macOS port (mb-mac-v1.4.7d): HashMap is consumed by the DictationRuntime
+// spawn block below, now widened to any(windows, macos). The crate-root
+// import gate is widened to match so the no-features cross-platform check
+// (which is neither windows nor macos) stays unused-import-clean.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -70,9 +71,11 @@ use tauri::Manager;
 use activity::ActivityCaptureRuntime;
 use commands::AppState;
 use dictation::runtime::default_normal_config;
-// macOS port: DictationRuntime is only spawned in the Windows-gated block in
-// `run()`; gate the import to match. Cross-platform spawn lands in Phase 3/4.
-#[cfg(target_os = "windows")]
+// macOS port (mb-mac-v1.4.7d): DictationRuntime is now spawned in the
+// any(windows, macos) block in `run()` (cross-platform spawn landed in
+// .4.7c). Gate the import to match so the no-features cross-platform check
+// stays unused-import-clean.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use dictation::runtime::DictationRuntime;
 #[cfg(target_os = "windows")]
 use meetings::runtime::{MeetingCaptureRuntime, MeetingRuntimeConfig};
@@ -270,7 +273,16 @@ pub fn run() {
 
             // Spawn the full dictation pipeline. Drop-on-AppState-drop
             // tears down the hook + threads cleanly.
-            #[cfg(target_os = "windows")]
+            //
+            // macOS port (mb-mac-v1.4.7d): widened windows -> any(windows,
+            // macos). The cross-platform spawn landed in .4.7c (unified
+            // DictationRuntime::spawn + Box<dyn HotkeyListener>); this is
+            // the boot-path wiring that actually fires it on macOS. The
+            // dictation spawn + headless-ingest sender + ingest-progress
+            // bus + mobile-inbox courier are all cross-platform-safe and
+            // enabled here; the KG-inbox courier is the lone exception and
+            // stays Windows-gated below (see its comment).
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
             {
                 match DictationRuntime::spawn(
                     shared_conn.clone(),
@@ -353,20 +365,48 @@ pub fn run() {
                         // the KG can be used with desktop-only
                         // drag-and-drop too). Same off-by-default
                         // ergonomics.
-                        let kg_inbox_runtime = Arc::new(
-                            crate::vault::kg_inbox_runtime::KgInboxRuntime::new_with_progress(
-                                headless_ingest_tx,
-                                Arc::clone(&shared_conn),
-                                progress_bus_dyn,
-                            ),
-                        );
-                        if let Err(e) = kg_inbox_runtime.refresh_config(&shared_conn) {
-                            tracing::error!(
-                                error = ?e,
-                                "kg-inbox runtime: initial refresh_config failed; KG-Inbox disabled this session"
+                        //
+                        // macOS port (mb-mac-v1.4.7d): KG-inbox stays
+                        // Windows-only on macOS for now. The KG
+                        // *filing worker* + *reverse-watcher* that
+                        // actually drain the queue and file entities
+                        // into the graph are still Windows-gated
+                        // (separate block further below), so enabling
+                        // only the courier here would half-wire KG:
+                        // files would be couriered/ingested but never
+                        // filed. KG is post-MVP priority. Keep the
+                        // whole KG subsystem Windows-only on macOS
+                        // until it's wired + validated as a unit.
+                        // TODO(mac): mb-0cg -- wire the full KG
+                        // subsystem on macOS (filing worker +
+                        // reverse-watcher + kg-inbox courier).
+                        #[cfg(target_os = "windows")]
+                        {
+                            let kg_inbox_runtime = Arc::new(
+                                crate::vault::kg_inbox_runtime::KgInboxRuntime::new_with_progress(
+                                    headless_ingest_tx,
+                                    Arc::clone(&shared_conn),
+                                    progress_bus_dyn,
+                                ),
                             );
+                            if let Err(e) = kg_inbox_runtime.refresh_config(&shared_conn) {
+                                tracing::error!(
+                                    error = ?e,
+                                    "kg-inbox runtime: initial refresh_config failed; KG-Inbox disabled this session"
+                                );
+                            }
+                            app.manage(Arc::clone(&kg_inbox_runtime));
                         }
-                        app.manage(Arc::clone(&kg_inbox_runtime));
+                        // macOS: headless_ingest_tx + progress_bus_dyn
+                        // were already consumed by the inbox courier
+                        // above (by clone), so no unused-binding churn
+                        // here. The KG courier's by-move consumption is
+                        // Windows-only per the gate above.
+                        #[cfg(not(target_os = "windows"))]
+                        {
+                            let _ = headless_ingest_tx;
+                            let _ = progress_bus_dyn;
+                        }
                     }
                     Err(e) => {
                         // Non-fatal: the Tauri shell + IPC still work.
@@ -377,11 +417,13 @@ pub fn run() {
                     }
                 }
             }
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(not(any(target_os = "windows", target_os = "macos")))]
             {
                 let _ = orchestrator_config;
                 let _ = &shared_conn;
-                tracing::warn!("dictation runtime is Windows-only; skipping");
+                tracing::warn!(
+                    "dictation runtime is unsupported on this platform; skipping"
+                );
             }
 
             // Phase MC Wave 4 — Meeting capture runtime. Non-fatal
