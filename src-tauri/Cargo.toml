@@ -398,6 +398,14 @@ path = "src/dev_bins/learn.rs"
 name = "cleaner_punctuation_eval"
 path = "src/dev_bins/cleaner_punctuation_eval.rs"
 
+# macOS port Phase 5 (mb-mac-v1.6.1) — live-Ollama dictation cleanup
+# proof. Mirrors `make_default_cleaner`: migrated DB → normal mode →
+# real OllamaProvider + LlmCleaner → clean(). Cross-platform (no cfg
+# gate); needs `ollama serve` + the configured model pulled.
+[[example]]
+name = "mac_cleanup_ollama_probe"
+path = "src/dev_bins/mac_cleanup_ollama_probe.rs"
+
 [[example]]
 name = "mode_eval"
 path = "src/dev_bins/mode_eval/main.rs"
