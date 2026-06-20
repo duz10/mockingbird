@@ -122,3 +122,58 @@ powershell -File scripts\dev\cargo-with-cuda.ps1 tauri build
 ```
 
 The MSI lands under `target\release\bundle\msi\`. It is unsigned. If you want a signed build, configure your own code-signing certificate in `src-tauri\tauri.conf.json`.
+
+---
+
+## macOS (developer preview, Apple Silicon)
+
+macOS support is in active development (the macOS port). Dictation runs
+end-to-end today; build from source with the Mac wrapper:
+
+```bash
+git clone https://github.com/duz10/mockingbird.git
+cd mockingbird
+brew install jq            # used by the model fetch script
+scripts/download-onnxruntime.sh
+scripts/download-models.sh  # Whisper GGUF + Silero VAD into ./models
+scripts/dev/cargo-mac.sh tauri dev     # or: cargo-mac.sh tauri build
+```
+
+Whisper runs on the **Metal** GPU backend (the wrapper auto-injects
+`--features mockingbird/metal`).
+
+### Granting permissions (Privacy & Security / TCC)
+
+Mockingbird needs three macOS permissions to dictate:
+
+- **Microphone** — to record your voice.
+- **Input Monitoring** — to see the Right Option hotkey globally.
+- **Accessibility** — to paste the transcript into the focused app.
+
+**Which app you grant depends on how you launched Mockingbird — and this
+trips people up.** macOS attributes the Input Monitoring and Accessibility
+requests to the *responsible process*, which is **not always Mockingbird**:
+
+| How you launched it | What appears in the permission list | What to grant |
+|---|---|---|
+| **Built `.app`** (`cargo tauri build`, then open `target/release/bundle/macos/Mockingbird.app`) | **`Mockingbird`** | Grant **Mockingbird**. Stable identity — the grant sticks across runs. This is the real end-user path. |
+| **Dev build** (`cargo tauri dev` / `scripts/dev/cargo-mac.sh tauri dev`) | the **terminal that launched it** (e.g. **iTerm** or **Terminal**) — *not* "Mockingbird" | Grant the **terminal**. The unbundled dev binary inherits the terminal's TCC identity, so macOS lists the terminal, not Mockingbird. |
+
+For the dev build, if the terminal isn't listed, click **`+`** in the
+Privacy pane and add it (e.g. `/Applications/iTerm.app`), or add the dev
+binary directly via `Cmd+Shift+G` →
+`<repo>/target/debug/mockingbird`.
+
+**TCC grants only take effect at process start.** After toggling a
+permission you must **fully quit and relaunch** Mockingbird (for the dev
+build, `Ctrl+C` the dev server and re-run it from the same terminal).
+Microphone is unaffected by this quirk — its prompt attributes correctly.
+
+> Note: the in-app first-launch permissions panel's "jump to the right
+> pane, then come back" copy is accurate for the **built `.app`** (where
+> the entry is *Mockingbird*). For a **dev build** the entry you actually
+> toggle is your **terminal** — keep that in mind while developing.
+
+For a representative sign-off (what a real user sees), validate against
+the **built `.app`**, not the dev binary — its TCC identity is stable and
+the permission entries read "Mockingbird".

@@ -49,6 +49,25 @@ sha256_of() {
     fi
 }
 
+install_name_for() {
+    # Map a manifest *download* filename to the *on-disk* filename the
+    # runtime loader expects. macOS-only concern; identity for everything
+    # the loader already names canonically (e.g. silero_vad.onnx).
+    #
+    # Why: the Rust whisper loader (src-tauri/src/stt/whisper.rs,
+    # MODEL_FILENAME) and the Windows launcher (run-mockingbird.ps1) both
+    # expect the project-canonical 'whisper-large-v3-turbo-q5_0.bin'. The
+    # SHARED manifest + Hugging Face URL use the upstream 'ggml-*' name.
+    # Rather than mutate the shared manifest or the loader, this Mac-only
+    # script downloads under the manifest name (so the SHA-256 still
+    # validates against the fetched bytes) and then installs the verified
+    # file under the loader-canonical name. Pure rename: bytes (and thus
+    # the hash) are unchanged. See bead mb-oow.
+    case "$1" in
+        ggml-large-v3-turbo-q5_0.bin) echo "whisper-large-v3-turbo-q5_0.bin" ;;
+        *) echo "$1" ;;
+    esac
+}
 count="$(jq '.models | length' "${MANIFEST}")"
 failed=()
 total_bytes=0
@@ -59,7 +78,12 @@ for i in $(seq 0 $((count - 1))); do
     url="$(jq -r ".models[$i].url" "${MANIFEST}")"
     expected="$(jq -r ".models[$i].sha256" "${MANIFEST}" | tr '[:upper:]' '[:lower:]')"
     size_bytes="$(jq -r ".models[$i].size_bytes" "${MANIFEST}")"
+    # dest      = where we DOWNLOAD (manifest filename; what the SHA pins).
+    # dest_final = where the loader READS (canonical install name). Equal
+    #             for most models; differs only via install_name_for().
+    install_name="$(install_name_for "${filename}")"
     dest="${TARGET_DIR}/${filename}"
+    dest_final="${TARGET_DIR}/${install_name}"
 
     size_mb="$(echo "${size_bytes}" | awk '{printf "%.1f", $1/1048576}')"
     echo ""
@@ -71,16 +95,18 @@ for i in $(seq 0 $((count - 1))); do
         echo "  note: SHA-256 not yet pinned in manifest."
     fi
 
-    # Idempotency: skip if present + matching.
-    if [[ -f "${dest}" ]]; then
-        actual="$(sha256_of "${dest}")"
+    # Idempotency: skip if the INSTALLED file is present + matching. A pure
+    # rename preserves bytes, so the manifest SHA-256 validates against the
+    # installed (canonical-named) file just as it would the downloaded one.
+    if [[ -f "${dest_final}" ]]; then
+        actual="$(sha256_of "${dest_final}")"
         if [[ "${unpinned}" -eq 0 && "${actual}" == "${expected}" ]]; then
             echo "  ok: already present with matching SHA-256."
-            total_bytes=$((total_bytes + $(stat -f%z "${dest}")))
+            total_bytes=$((total_bytes + $(stat -f%z "${dest_final}")))
             continue
         elif [[ "${unpinned}" -eq 1 ]]; then
             echo "  present (unpinned); observed SHA-256: ${actual}"
-            total_bytes=$((total_bytes + $(stat -f%z "${dest}")))
+            total_bytes=$((total_bytes + $(stat -f%z "${dest_final}")))
             continue
         else
             echo "  hash mismatch on disk; re-downloading."
@@ -105,7 +131,14 @@ for i in $(seq 0 $((count - 1))); do
         failed+=("${name}")
         continue
     fi
-    total_bytes=$((total_bytes + $(stat -f%z "${dest}")))
+
+    # Install verified bytes under the loader-canonical name (see
+    # install_name_for). No-op when the names already match.
+    if [[ "${install_name}" != "${filename}" ]]; then
+        mv -f "${dest}" "${dest_final}"
+        echo "  installed as ${install_name} (loader-canonical name)."
+    fi
+    total_bytes=$((total_bytes + $(stat -f%z "${dest_final}")))
 done
 
 echo ""

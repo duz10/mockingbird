@@ -8,17 +8,31 @@
 #
 # Bypass an individual run (rarely): LEFTHOOK=0 git commit ...
 
+# Why the rust hooks carry an `env: PATH` prepend
+# ------------------------------------------------
+# lefthook spawns hook commands in a minimal shell that does NOT have
+# rustup's ~/.cargo/bin on PATH, so bare `cargo` exits 127 (command not
+# found) on macOS unless you manually `export PATH` first (recurring
+# friction; kennel drawers 59/73). lefthook expands `$HOME`/`$PATH` in
+# env values (Go os.Expand), so prepending the rustup bin dir fixes it.
+# Cross-platform-safe: on Windows cargo lives elsewhere and is already on
+# PATH, so a (possibly empty) `$HOME/.cargo/bin` prefix is an inert,
+# nonexistent leading entry — cargo still resolves from the real PATH.
 pre-commit:
   parallel: true
   commands:
     rust-fmt:
       glob: "*.rs"
+      env:
+        PATH: "$HOME/.cargo/bin:$PATH"
       run: cargo fmt --check -- {staged_files}
       skip:
         - merge
         - rebase
     rust-clippy:
       glob: "*.rs"
+      env:
+        PATH: "$HOME/.cargo/bin:$PATH"
       run: cargo clippy --all-targets -- -D warnings
       skip:
         - merge
@@ -68,6 +82,8 @@ pre-push:
       run: python3 scripts/dev/hooks/block-push-to-main.py
     rust-test:
       glob: "*.rs"
+      env:
+        PATH: "$HOME/.cargo/bin:$PATH"
       run: cargo test --quiet
       skip:
         - rebase
