@@ -37,9 +37,13 @@
 // runtime lands (Phase 3/4). `needless_return` only fires on non-Windows because
 // the trailing USERPROFILE fallback in ensure_ort_dylib_set is Windows-gated.
 #![cfg_attr(
-    not(target_os = "windows"),
-    allow(unused_imports, dead_code, clippy::needless_return)
+    not(any(target_os = "windows", target_os = "macos")),
+    allow(unused_imports, dead_code)
 )]
+// `ensure_ort_dylib_set`'s mid-function `return` is in tail position on
+// every non-Windows target (the trailing `%USERPROFILE%` fallback is
+// Windows-gated), so clippy flags it as needless there.
+#![cfg_attr(not(target_os = "windows"), allow(clippy::needless_return))]
 
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
@@ -50,31 +54,43 @@ use std::thread::JoinHandle;
 use rusqlite::Connection;
 
 use super::ingest_channel::{self, HeadlessIngestRequest, HeadlessIngestSender};
+use super::runtime_cleaner::make_default_cleaner;
 use super::{DictationOrchestrator, OrchestratorConfig};
-use crate::cleanup::{Cleaner, LlmCleaner, OllamaProvider, PassthroughCleaner};
+use crate::audio::vad::VoiceActivityDetector;
+use crate::audio::AudioCapture;
 use crate::error::{AppError, AppResult};
 use crate::hotkey::driver::StateDriver;
 use crate::hotkey::pause::PauseHandle;
 use crate::hotkey::state::StateAction;
 use crate::hotkey::HotkeyEvent;
+use crate::injection::secure_guard::SecureInputGuard;
 use crate::injection::strategy::InjectionStrategy;
+use crate::injection::Injector;
 use crate::recording_window::RecordingWindow;
+use crate::stt::SpeechToText;
+use crate::window_context::WindowContext;
 
-#[cfg(target_os = "windows")]
-use crate::hotkey::windows::WinKeyboardHook;
-#[cfg(target_os = "windows")]
+// ADR 0063 — preserve the `dictation::runtime::*` public paths for the
+// helpers relocated to `runtime_provenance` (learning + KG ingest +
+// lib.rs depend on them).
+pub use super::runtime_provenance::{bootstrap_provenance_rows, default_normal_config};
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use crate::hotkey::HotkeyListener;
-#[cfg(target_os = "windows")]
-use crate::injection::secure_guard::WinSecureInputGuard;
 
 /// Owned, cleanup-on-drop handle to the running dictation pipeline.
 ///
-/// Drop order (matters):
-///   1. Drop `hook` first — it sends `WM_QUIT` to the hotkey thread,
-///      which closes the hotkey channel.
+/// Drop order (matters; ADR 0063):
+///   1. The `_hook` field drops (declaration order), invoking the
+///      platform listener's teardown — `WM_QUIT` post on Windows,
+///      `CFRunLoopStop` + tap-thread join on macOS — which drops the
+///      listener's `Sender<HotkeyEvent>` clone.
 ///   2. State-driver thread sees `Disconnected`, exits, closes the
 ///      action channel.
-///   3. Dictation thread sees `Disconnected` and exits cleanly.
+///   3. The dictation thread is detached (its `JoinHandle` is dropped,
+///      not joined): the orchestrator holds a `hotkey_tx` clone for
+///      `PipelineComplete`, so the full channel cascade to it completes
+///      at process exit. The runtime's Drop returns promptly either way.
 ///   4. JoinHandles drop without panic.
 pub struct DictationRuntime {
     /// Public so the tray + Tauri commands can flip the paused flag.
@@ -112,9 +128,13 @@ pub struct DictationRuntime {
     /// managed-state entry by cloning this field at boot).
     headless_ingest_tx: HeadlessIngestSender,
 
-    /// Hook handle — Drop posts WM_QUIT to the hotkey thread.
-    #[cfg(target_os = "windows")]
-    _hook: WinKeyboardHook,
+    /// Platform hotkey listener handle. Dropping it tears down the OS
+    /// hook/tap via the listener's own `Drop` (`WM_QUIT` on Windows,
+    /// `CFRunLoopStop` + join on macOS — ADR 0063), so the runtime needs
+    /// no cfg-branched teardown of its own. Field order matters — see
+    /// the struct doc.
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    _hook: Box<dyn HotkeyListener>,
 
     /// Dictation thread join handle — held purely so the thread
     /// isn't detached. Drop happens when the runtime drops.
@@ -122,26 +142,98 @@ pub struct DictationRuntime {
     _dictation_join: Option<JoinHandle<()>>,
 }
 
+/// Backend dependencies the dictation orchestrator consumes, built
+/// INSIDE the dictation thread (several are `!Send` — `CpalCapture`'s
+/// cpal `Stream` is thread-bound, so it must never cross a thread
+/// boundary). Produced by an [`OrchestratorDepsFn`] (ADR 0063).
+///
+/// The `cleaner` is intentionally NOT here — it is built from `&db` /
+/// `&config` by [`make_default_cleaner`] (cheap + passthrough-capable
+/// when Ollama is absent), so the spawn/teardown judge uses the real
+/// one rather than doubling it.
+pub struct OrchestratorDeps {
+    /// 16 kHz mono mic capture (`CpalCapture` in production).
+    pub audio: Box<dyn AudioCapture>,
+    /// Voice-activity detector (`SileroVad` in production).
+    pub vad: Box<dyn VoiceActivityDetector>,
+    /// Speech-to-text engine (`WhisperStt` in production).
+    pub stt: Box<dyn SpeechToText>,
+    /// Text injector (`SendInputInjector` / `MacInjector`).
+    pub injector: Box<dyn Injector>,
+    /// Foreground-window reader (`make_default_context`).
+    pub window_ctx: Box<dyn WindowContext>,
+    /// Secure-input guard (`make_default_guard`).
+    pub secure_guard: Box<dyn SecureInputGuard>,
+}
+
+/// Builds [`OrchestratorDeps`] on the dictation thread. `FnOnce +
+/// Send` (the closure is moved into the thread); its RETURN value need
+/// not be `Send` because it is produced and consumed entirely on that
+/// one thread — which is exactly why the `!Send` `CpalCapture` is OK.
+pub type OrchestratorDepsFn = Box<dyn FnOnce() -> AppResult<OrchestratorDeps> + Send>;
+
+/// The production dep builder — every backend via its `make_default_*`
+/// factory. Passed by [`DictationRuntime::spawn`]; the judge passes a
+/// doubling builder to [`DictationRuntime::spawn_with_deps`] instead.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+fn default_orchestrator_deps() -> AppResult<OrchestratorDeps> {
+    Ok(OrchestratorDeps {
+        audio: crate::audio::make_default_capture()?,
+        vad: crate::audio::vad::make_default_vad()?,
+        stt: crate::stt::make_default_stt()?,
+        injector: crate::injection::make_default_injector()?,
+        window_ctx: crate::window_context::make_default_context()?,
+        secure_guard: crate::injection::secure_guard::make_default_guard(),
+    })
+}
+
 impl DictationRuntime {
-    /// Construct & start the runtime.
+    /// Construct & start the runtime with the production backends.
     ///
     /// On error nothing is left running — partial init (e.g. hook
     /// installed but threads not spawned) is rolled back via Drop on
     /// the locals built so far.
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     pub fn spawn(
         db: Arc<Mutex<Connection>>,
         config: OrchestratorConfig,
         user_overrides: HashMap<String, InjectionStrategy>,
         vault: Arc<crate::vault::export_job::VaultRuntime>,
     ) -> AppResult<Self> {
+        Self::spawn_with_deps(
+            db,
+            config,
+            user_overrides,
+            vault,
+            Box::new(default_orchestrator_deps),
+        )
+    }
+
+    /// Construct & start the runtime with a custom backend-dep builder
+    /// (ADR 0063). The public [`Self::spawn`] passes
+    /// [`default_orchestrator_deps`]; the macOS spawn/teardown judge
+    /// injects DOUBLED device backends (audio/vad/stt) while keeping the
+    /// REAL listener + thread wiring + Drop teardown under test.
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    pub fn spawn_with_deps(
+        db: Arc<Mutex<Connection>>,
+        config: OrchestratorConfig,
+        user_overrides: HashMap<String, InjectionStrategy>,
+        vault: Arc<crate::vault::export_job::VaultRuntime>,
+        deps_fn: OrchestratorDepsFn,
+    ) -> AppResult<Self> {
         ensure_ort_dylib_set();
 
         // 1. Hotkey channel: hook → driver.
         let (hotkey_tx, hotkey_rx) = mpsc::channel::<HotkeyEvent>();
 
-        // 2. Install the low-level keyboard hook.
-        let mut hook = WinKeyboardHook::new()?;
+        // 2. Build + install the platform hotkey listener via the trait
+        //    seam (ADR 0063): Windows `WinKeyboardHook` (WM_QUIT
+        //    teardown) or macOS `MacKeyboardHook` (CGEventTap on a
+        //    dedicated CFRunLoop thread; CFRunLoopStop teardown). Both
+        //    encapsulate their own Drop, so the runtime stays
+        //    platform-agnostic.
+        let mut hook = crate::hotkey::make_default_listener()?;
         hook.install(hotkey_tx.clone())?;
 
         // 3. Pause handle reuses the hotkey channel: tray's
@@ -199,6 +291,7 @@ impl DictationRuntime {
                     programmatic_clone,
                     kg_note_clone,
                     vault,
+                    deps_fn,
                 ) {
                     tracing::error!(error = ?e, "dictation thread bailed out");
                 }
@@ -218,26 +311,18 @@ impl DictationRuntime {
         })
     }
 
-    /// Non-Windows stub — returns an error so callers fail loudly
-    /// rather than silently doing nothing.
-    #[cfg(not(target_os = "windows"))]
+    /// Unsupported-platform stub — returns an error so callers fail
+    /// loudly rather than silently doing nothing. (Windows + macOS now
+    /// share the real spawn above; this is the Phase 9 Linux gap.)
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     pub fn spawn(
         _db: Arc<Mutex<Connection>>,
         _config: OrchestratorConfig,
         _user_overrides: HashMap<String, InjectionStrategy>,
         _vault: Arc<crate::vault::export_job::VaultRuntime>,
     ) -> AppResult<Self> {
-        // The `next_start_is_programmatic` /
-        // `next_start_is_kg_note` + headless-channel fields are
-        // unused on non-Windows (`Self` is never actually
-        // constructed on those platforms), but referring to the
-        // types here keeps the imports live without cfg-gated use
-        // statements.
-        let _: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-        let _: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-        let (_tx, _rx) = ingest_channel::channel();
         Err(AppError::Other(
-            "dictation runtime is Windows-only (Phase 9 platform parity)".into(),
+            "dictation runtime not implemented for this platform (Phase 9 Linux)".into(),
         ))
     }
 
@@ -365,7 +450,7 @@ impl DictationRuntime {
 /// `DictationRuntime::start` for the full rationale.
 const PROGRAMMATIC_VK: u32 = 0x07;
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 #[allow(clippy::too_many_arguments)]
 fn run_dictation_thread(
     actions: std::sync::mpsc::Receiver<StateAction>,
@@ -378,15 +463,22 @@ fn run_dictation_thread(
     next_start_is_programmatic: Arc<AtomicBool>,
     next_start_is_kg_note: Arc<AtomicBool>,
     vault: Arc<crate::vault::export_job::VaultRuntime>,
+    deps_fn: OrchestratorDepsFn,
 ) -> AppResult<()> {
-    // Build !Send deps here on this thread. None cross thread boundaries.
-    let audio = crate::audio::make_default_capture()?;
-    let vad = crate::audio::vad::make_default_vad()?;
-    let stt = crate::stt::make_default_stt()?;
+    // Build the backend deps here on this thread (several are !Send;
+    // none cross thread boundaries — ADR 0063). The default builder
+    // uses the `make_default_*` factories; the judge injects doubles.
+    let OrchestratorDeps {
+        audio,
+        vad,
+        stt,
+        injector,
+        window_ctx,
+        secure_guard,
+    } = deps_fn()?;
+    // The cleaner is built from db/config (passthrough when Ollama is
+    // absent), not part of the injected dep bundle.
     let cleaner = make_default_cleaner(&db, &config);
-    let injector = crate::injection::make_default_injector()?;
-    let window_ctx = crate::window_context::make_default_context()?;
-    let secure_guard = Box::new(WinSecureInputGuard::new());
 
     let orchestrator = DictationOrchestrator::new(
         audio,
@@ -498,239 +590,5 @@ fn ensure_ort_dylib_set() {
             tracing::info!(path = %candidate.display(), "setting ORT_DYLIB_PATH");
             std::env::set_var("ORT_DYLIB_PATH", candidate);
         }
-    }
-}
-
-/// Build the cleaner the dictation thread will use.
-///
-/// Strategy: try to construct an [`LlmCleaner`] wired to a local
-/// Ollama via the mode's configured model. If Ollama is unreachable
-/// (no service running, wrong port, network blocked), log a `WARN`
-/// and fall back to [`PassthroughCleaner`] — the user still gets
-/// their raw transcript injected, with the cleanup phase a no-op.
-///
-/// Phase 7 will replace this with a settings-driven dispatcher that
-/// picks Ollama vs Claude per-mode. For Phase 4 we hard-default to
-/// the Normal mode's `ollama` provider — that's the PLAN §8 default.
-fn make_default_cleaner(
-    db: &Arc<Mutex<Connection>>,
-    config: &OrchestratorConfig,
-) -> Box<dyn Cleaner> {
-    let lookup = {
-        let conn = match db.lock() {
-            Ok(g) => g,
-            Err(_) => {
-                tracing::warn!("cleaner: db mutex poisoned at boot; using passthrough");
-                return Box::new(PassthroughCleaner::new());
-            }
-        };
-        conn.query_row(
-            "SELECT model_id, temperature, max_tokens FROM modes WHERE slug = ?1",
-            [&config.mode_slug],
-            |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, f64>(1)?,
-                    r.get::<_, i64>(2)?,
-                ))
-            },
-        )
-    };
-    let (model_id, temperature, max_tokens) = match lookup {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                error = ?e,
-                mode = %config.mode_slug,
-                "cleaner: mode lookup failed; using passthrough"
-            );
-            return Box::new(PassthroughCleaner::new());
-        }
-    };
-
-    let provider = OllamaProvider::new();
-    match provider.health_check() {
-        Ok(_) => {
-            tracing::info!(
-                model = %model_id,
-                temperature,
-                max_tokens,
-                "cleaner: Ollama reachable; using LlmCleaner"
-            );
-            // **Warm-up shot.** Ollama loads the model into VRAM on
-            // the first /api/chat request — a cold qwen2.5:3b can
-            // take 30-60s, which is right at our 30s REQUEST_TIMEOUT.
-            // First real dictation reliably times out. Pay the cost
-            // here in the background: fire one minimal /api/chat
-            // while the user is still reading the splash / opening
-            // their target app. Errors are ignored — worst case the
-            // first real dictation still times out, which is no
-            // worse than today's behavior. (LESSONS 2026-05-17
-            // phase5-smoketest, third pass.)
-            spawn_ollama_warmup(model_id.clone(), temperature as f32);
-            Box::new(LlmCleaner::new(
-                Box::new(provider),
-                Arc::clone(db),
-                model_id,
-                temperature as f32,
-                max_tokens as u32,
-            ))
-        }
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "cleaner: Ollama health check failed; falling back to passthrough \
-                 (start Ollama + pull the model to enable LLM cleanup)"
-            );
-            Box::new(PassthroughCleaner::new())
-        }
-    }
-}
-
-/// Fire-and-forget thread that sends one minimal `/api/chat` request
-/// to Ollama to pay the cold model-load cost before the user's first
-/// dictation. Errors are logged at debug-level and never surface to
-/// the caller — a failed warm-up is no worse than not warming up.
-///
-/// Uses a fresh [`OllamaProvider`] (cheap; just a ureq::Agent + a
-/// base-URL string) so we don't have to thread a clone of the
-/// cleaner's provider through. The model_id + temperature match the
-/// configured mode so the warm-up populates the SAME VRAM slot the
-/// first real request will hit.
-fn spawn_ollama_warmup(model_id: String, temperature: f32) {
-    std::thread::Builder::new()
-        .name("ollama-warmup".into())
-        .spawn(move || {
-            use crate::cleanup::provider::{CleanupProvider, CleanupRequest};
-            let provider = OllamaProvider::new();
-            // Minimal prompt: enough tokens to force a real forward
-            // pass (= VRAM load) but tiny enough to return quickly
-            // on a warm model. `num_predict: 1` caps generation at
-            // a single token; we throw the result away.
-            let req = CleanupRequest {
-                prompt: "Respond with the single word: ok",
-                raw_transcript: "hi",
-                model_id: &model_id,
-                temperature,
-                max_tokens: 1,
-                mode_slug: "warmup",
-            };
-            let start = std::time::Instant::now();
-            match provider.cleanup(req) {
-                Ok(_) => tracing::info!(
-                    model = %model_id,
-                    warmup_ms = start.elapsed().as_millis() as u64,
-                    "ollama warmup complete; first real dictation will hit a hot model"
-                ),
-                Err(e) => tracing::debug!(
-                    error = %e,
-                    model = %model_id,
-                    "ollama warmup failed (non-fatal); first real cleanup may cold-load"
-                ),
-            }
-        })
-        .ok(); // If we can't even spawn a thread, the app has bigger problems.
-}
-
-/// Bootstrap default provenance rows (dictionary_snapshot + example_set)
-/// if the DB doesn't have any yet.
-///
-/// The orchestrator's `NewSession` requires non-null FKs for both.
-/// Phase 1's seed migration only populates `prompts` + `modes`; this
-/// fills the gap on first launch.
-///
-/// Returns `(dictionary_snapshot_id, example_set_id)`.
-pub fn bootstrap_provenance_rows(conn: &Connection) -> AppResult<(i64, i64)> {
-    let dict_id: i64 = match conn
-        .query_row(
-            "SELECT id FROM dictionary_snapshots ORDER BY id ASC LIMIT 1",
-            [],
-            |r| r.get(0),
-        )
-        .ok()
-    {
-        Some(id) => id,
-        None => {
-            conn.execute(
-                "INSERT INTO dictionary_snapshots (term_ids) VALUES ('[]')",
-                [],
-            )?;
-            conn.last_insert_rowid()
-        }
-    };
-    let example_id: i64 = match conn
-        .query_row(
-            "SELECT id FROM example_sets ORDER BY id ASC LIMIT 1",
-            [],
-            |r| r.get(0),
-        )
-        .ok()
-    {
-        Some(id) => id,
-        None => {
-            conn.execute(
-                "INSERT INTO example_sets (mode_slug, example_ids) VALUES ('normal', '[]')",
-                [],
-            )?;
-            conn.last_insert_rowid()
-        }
-    };
-    Ok((dict_id, example_id))
-}
-
-/// Build the default Wave 4.5 [`OrchestratorConfig`] for Normal mode.
-///
-/// Phase 5 will swap this for settings-driven config that respects
-/// the user's active mode.
-pub fn default_normal_config(conn: &Connection) -> AppResult<OrchestratorConfig> {
-    let (dict_id, example_id) = bootstrap_provenance_rows(conn)?;
-
-    // Modes table: id=1 normal, id=2 verbose, id=3 fragment.
-    let prompt_id: i64 = conn
-        .query_row("SELECT prompt_id FROM modes WHERE slug='normal'", [], |r| {
-            r.get(0)
-        })
-        .map_err(|e| AppError::Other(format!("lookup normal-mode prompt_id: {e}")))?;
-
-    Ok(OrchestratorConfig {
-        mode_id: 1,
-        mode_slug: "normal".into(),
-        prompt_id,
-        dictionary_snapshot_id: dict_id,
-        example_set_id: example_id,
-        hotkey_label: "RightAlt".into(),
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::db::Database;
-
-    #[test]
-    fn bootstrap_creates_rows_on_empty_db() {
-        let db = Database::open_in_memory().unwrap();
-        let (dict, ex) = bootstrap_provenance_rows(&db.conn).unwrap();
-        assert!(dict > 0);
-        assert!(ex > 0);
-    }
-
-    #[test]
-    fn bootstrap_is_idempotent() {
-        let db = Database::open_in_memory().unwrap();
-        let (d1, e1) = bootstrap_provenance_rows(&db.conn).unwrap();
-        let (d2, e2) = bootstrap_provenance_rows(&db.conn).unwrap();
-        assert_eq!(d1, d2);
-        assert_eq!(e1, e2);
-    }
-
-    #[test]
-    fn default_normal_config_resolves_prompt_id() {
-        let db = Database::open_in_memory().unwrap();
-        let cfg = default_normal_config(&db.conn).unwrap();
-        assert_eq!(cfg.mode_id, 1);
-        assert_eq!(cfg.mode_slug, "normal");
-        assert!(cfg.prompt_id > 0);
-        assert_eq!(cfg.hotkey_label, "RightAlt");
     }
 }

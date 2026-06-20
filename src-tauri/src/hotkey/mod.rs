@@ -75,7 +75,12 @@ pub enum HotkeyEvent {
 /// 0015 codifies the rule: read the keystroke, build a [`HotkeyEvent`],
 /// `try_send` on the channel, return immediately. Anything else
 /// risks the Windows low-level-hook timeout and a silent unhook.
-pub trait HotkeyListener: Send {
+///
+/// `Send + Sync`: the listener is stored as a `Box<dyn HotkeyListener>`
+/// field of `DictationRuntime`, which Tauri holds as `Send + Sync`
+/// managed state (ADR 0063). All implementors are trivially `Sync`
+/// (they hold only a key code + a `JoinHandle` + a run-loop pointer).
+pub trait HotkeyListener: Send + Sync {
     /// Install the OS-level hook and begin emitting events on the
     /// provided sender. Idempotent: calling on an already-installed
     /// listener is a no-op.

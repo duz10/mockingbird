@@ -57,6 +57,10 @@ pub mod ingest_progress;
 pub mod llm_prompts;
 pub mod paste_payload;
 pub mod runtime;
+// ADR 0063 — runtime helpers split out to keep `runtime.rs` under the
+// 600-line cap (cleaner-factory + DB-provenance concerns).
+pub mod runtime_cleaner;
+pub mod runtime_provenance;
 
 // macOS port Phase 3 (.4.7a) — dictation-backend un-gate judge probe.
 // macOS + metal only (it confirms the Metal backend through the

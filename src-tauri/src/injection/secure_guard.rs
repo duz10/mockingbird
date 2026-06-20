@@ -81,6 +81,37 @@ impl SecureInputGuard for NeverSecureGuard {
     }
 }
 
+/// Construct the platform-default secure-input guard (ADR 0063 `.4.7b`).
+///
+/// Mirrors the other `make_default_*` factories
+/// ([`crate::injection::make_default_injector`] /
+/// [`crate::window_context::make_default_context`]) so the dictation
+/// runtime stops hard-constructing `WinSecureInputGuard` directly.
+///
+/// Infallible by design — guard construction is free on both real
+/// platforms — so this returns a plain `Box`, not `AppResult` (YAGNI:
+/// the call-site never used `?`).
+///
+/// | Platform | Guard |
+/// |----------|-------|
+/// | Windows  | [`WinSecureInputGuard`] |
+/// | macOS    | [`MacSecureInputGuard`] |
+/// | other    | [`NeverSecureGuard`] (permissive null — the dictation runtime never spawns there) |
+pub fn make_default_guard() -> Box<dyn SecureInputGuard> {
+    #[cfg(target_os = "windows")]
+    {
+        Box::new(WinSecureInputGuard::new())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Box::new(MacSecureInputGuard::new())
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        Box::new(NeverSecureGuard)
+    }
+}
+
 /// Production Windows guard.
 ///
 /// Composes the two signals listed at the module head. Construction

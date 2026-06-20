@@ -339,6 +339,14 @@ path = "src/dev_bins/mac_ort_vad_smoke.rs"
 name = "mac_dictation_backends_smoke"
 path = "src/dev_bins/mac_dictation_backends_smoke.rs"
 
+# macOS port Phase 3 `.4.7c` (mb-mac-v1.4.7c) — DictationRuntime spawn +
+# teardown judge (`mac-p3-dictation-runtime-spawn`, ADR 0063). Real
+# listener + thread wiring + Drop teardown; doubled device backends.
+# macOS only; exits 2 elsewhere.
+[[example]]
+name = "mac_dictation_runtime_smoke"
+path = "src/dev_bins/mac_dictation_runtime_smoke.rs"
+
 # macOS port Phase 3a (mb-mac-v1.4.1) — Keychain roundtrip judge
 # (`mac-p3a-keychain-roundtrip`). macOS only; exits 2 elsewhere. Drives
 # `secrets::judges_macos_v1::keychain_roundtrip_probe`.
