@@ -406,6 +406,14 @@ path = "src/dev_bins/cleaner_punctuation_eval.rs"
 name = "mac_cleanup_ollama_probe"
 path = "src/dev_bins/mac_cleanup_ollama_probe.rs"
 
+# macOS port Phase 5 (mb-mac-v1.6.3) — RAM-aware model-selection judge
+# (ADR 0064). Mocked-budget asserts run cross-platform; the real
+# `sysctl hw.memsize` sub-check is macOS-only and needs `ollama serve`
+# with qwen2.5:3b pulled to prove the 7B→3B downgrade on the 8 GB canary.
+[[example]]
+name = "mac_ram_aware_select_probe"
+path = "src/dev_bins/mac_ram_aware_select_probe.rs"
+
 [[example]]
 name = "mode_eval"
 path = "src/dev_bins/mode_eval/main.rs"

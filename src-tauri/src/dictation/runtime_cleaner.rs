@@ -67,6 +67,15 @@ pub(super) fn make_default_cleaner(
     let provider = OllamaProvider::new();
     match provider.health_check() {
         Ok(_) => {
+            // RAM-aware effective-model substitution (ADR 0064). On
+            // non-macOS this line is cfg'd out entirely, so `model_id`
+            // stays the mode's parity default and the Windows cleanup
+            // code path is unchanged. On macOS it swaps in a model that
+            // fits unified memory (e.g. 7B → 3B on an 8 GB box).
+            #[cfg(target_os = "macos")]
+            let model_id =
+                crate::cleanup::model_select::resolve_effective_model(&provider, model_id);
+
             tracing::info!(
                 model = %model_id,
                 temperature,

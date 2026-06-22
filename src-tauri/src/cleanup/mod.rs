@@ -17,6 +17,9 @@
 pub mod claude;
 pub mod few_shot;
 pub mod llm_cleaner;
+// ADR 0064 — RAM-aware effective-model selection (macOS unified-memory
+// tier + shared, Windows-byte-identical selector).
+pub mod model_select;
 pub mod ollama;
 pub mod preprocessor;
 pub mod prompt_builder;
