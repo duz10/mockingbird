@@ -47,7 +47,9 @@ use mockingbird_lib::cleanup::{
 };
 use mockingbird_lib::db::{dictionary, prompts, Database};
 
-use report::{render_report, score_preservation, ModeAggregate, PreservationScore};
+use report::{
+    render_report, score_grounding, score_preservation, ModeAggregate, PreservationScore,
+};
 
 // --------------------------------------------------------------------
 // Fixture schema — mirrors `src-tauri/eval/baseline.json`.
@@ -76,6 +78,15 @@ pub struct Fixture {
     /// default for fixtures where literal preservation is the bar.
     #[serde(default)]
     pub must_preserve_alts: Vec<Vec<String>>,
+    /// Forbidden substrings — the GROUNDING check (ADR 0065). If ANY of
+    /// these appears in the cleaned output, the fixture FAILS grounding.
+    /// This catches ADDED / hallucinated content (e.g. a baked-in
+    /// few-shot example sentence the weak 3B copied verbatim), which the
+    /// preservation score — substring presence of `must_preserve` — is
+    /// structurally blind to. Optional + defaulted, so existing fixtures
+    /// without the field are unaffected.
+    #[serde(default)]
+    pub must_not_contain: Vec<String>,
     #[serde(default)]
     pub mode_hints: BTreeMap<String, String>,
 }
@@ -248,6 +259,20 @@ struct Args {
     label: String,
     modes: Vec<String>,
     only: Option<Vec<String>>,
+    /// Override the model_id for every selected mode (ADR 0065). Lets us
+    /// point the harness at the 3B on an 8 GB Mac where the modes table
+    /// still carries the 7B parity model.
+    model: Option<String>,
+    /// Override the prompt body for every selected mode with the latest
+    /// version of an arbitrary prompt slug (ADR 0065). Lets us evaluate
+    /// `normal_small` (a parallel slug, not a mode) against a real model.
+    prompt_slug: Option<String>,
+    /// Override the sampling temperature for every selected mode (ADR
+    /// 0065). Raising it stress-tests few-shot leak-resistance — example
+    /// bleed is a high-temperature failure mode, so a prompt that stays
+    /// clean at elevated temp is robustly hardened (the same way
+    /// casual_v2 was validated).
+    temperature: Option<f32>,
 }
 
 fn parse_args() -> Args {
@@ -258,10 +283,31 @@ fn parse_args() -> Args {
         "formal".to_string(),
     ];
     let mut only: Option<Vec<String>> = None;
+    let mut model: Option<String> = None;
+    let mut prompt_slug: Option<String> = None;
+    let mut temperature: Option<f32> = None;
 
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
+            "--model" => {
+                if let Some(v) = it.next() {
+                    model = Some(v);
+                }
+            }
+            "--prompt-slug" => {
+                if let Some(v) = it.next() {
+                    prompt_slug = Some(v);
+                }
+            }
+            "--temperature" => {
+                if let Some(v) = it.next() {
+                    match v.parse::<f32>() {
+                        Ok(t) => temperature = Some(t),
+                        Err(_) => eprintln!("warn: --temperature `{v}` is not a float; ignoring"),
+                    }
+                }
+            }
             "--label" => {
                 if let Some(v) = it.next() {
                     label = v;
@@ -279,15 +325,26 @@ fn parse_args() -> Args {
             }
             "-h" | "--help" => {
                 eprintln!(
-                    "Usage: mode_eval [--label NAME] [--modes csv] [--only fixture_id_csv]\n\
-                     Defaults: --label baseline --modes casual,normal,formal"
+                    "Usage: mode_eval [--label NAME] [--modes csv] [--only fixture_id_csv] \
+                     [--model model_id] [--prompt-slug slug] [--temperature f32]\n\
+                     Defaults: --label baseline --modes casual,normal,formal\n\
+                     --model overrides every selected mode's model_id.\n\
+                     --prompt-slug overrides every selected mode's prompt body \
+                     with the latest version of that slug (e.g. normal_small)."
                 );
                 std::process::exit(0);
             }
             other => eprintln!("warn: ignoring unknown arg `{other}`"),
         }
     }
-    Args { label, modes, only }
+    Args {
+        label,
+        modes,
+        only,
+        model,
+        prompt_slug,
+        temperature,
+    }
 }
 
 fn main() {
@@ -331,10 +388,40 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
 
     let modes: Vec<ModeRow> = {
         let conn = db_arc.lock().map_err(|_| "db mutex poisoned")?;
-        args.modes
+        let mut loaded = args
+            .modes
             .iter()
             .map(|s| load_mode(&conn, s))
-            .collect::<Result<Vec<_>, _>>()?
+            .collect::<Result<Vec<_>, _>>()?;
+        // ADR 0065 overrides. Apply the prompt-slug swap first (so the
+        // report's prompt_version reflects the override), then the model
+        // swap. Both are all-modes broadcasts — in practice the override
+        // runs are single-mode (`--modes normal`).
+        if let Some(ps) = &args.prompt_slug {
+            let p = prompts::get_latest_for_mode(&conn, ps)?
+                .ok_or_else(|| format!("no prompt rows for --prompt-slug {ps}"))?;
+            eprintln!(
+                "mode_eval: --prompt-slug {ps} (v{}) overriding prompt body for all modes",
+                p.version
+            );
+            for m in &mut loaded {
+                m.prompt_body = p.body.clone();
+                m.prompt_version = p.version;
+            }
+        }
+        if let Some(model) = &args.model {
+            eprintln!("mode_eval: --model {model} overriding model_id for all modes");
+            for m in &mut loaded {
+                m.model_id = model.clone();
+            }
+        }
+        if let Some(temp) = args.temperature {
+            eprintln!("mode_eval: --temperature {temp} overriding temperature for all modes");
+            for m in &mut loaded {
+                m.temperature = temp;
+            }
+        }
+        loaded
     };
 
     let provider = OllamaProvider::new();
@@ -371,10 +458,19 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             let result = run_one(&provider, &db_arc, &preprocessor, m, &fx.raw);
             let score =
                 score_preservation(&result.output, &fx.must_preserve, &fx.must_preserve_alts);
+            let grounding = score_grounding(&result.output, &fx.must_not_contain);
+            if grounding.violated() {
+                eprintln!(
+                    "    ⚠️  GROUNDING VIOLATION ({} x {}): forbidden substring(s) present: {}",
+                    fx.id,
+                    m.slug,
+                    grounding.violations.join(", ")
+                );
+            }
             aggregates
                 .entry(m.slug.clone())
                 .or_default()
-                .record(score, &result);
+                .record(score, &grounding, &result);
             runs.insert((fx.id.clone(), m.slug.clone()), (score, result));
         }
     }
@@ -398,7 +494,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     for m in &modes {
         let agg = aggregates.get(&m.slug).cloned().unwrap_or_default();
         println!(
-            "  {}: N={} errors={} preserve={:.1}% (full {} / partial {} / zero {}), avg LLM={}ms, max LLM={}ms",
+            "  {}: N={} errors={} preserve={:.1}% (full {} / partial {} / zero {}), grounding-fail={}, avg LLM={}ms, max LLM={}ms",
             m.slug,
             agg.fixtures_run,
             agg.fixtures_errored,
@@ -406,6 +502,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             agg.preservation_full,
             agg.preservation_partial,
             agg.preservation_zero,
+            agg.grounding_failed,
             agg.avg_llm_ms(),
             agg.max_llm_ms,
         );

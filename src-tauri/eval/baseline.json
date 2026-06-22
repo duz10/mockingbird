@@ -1,6 +1,9 @@
 {
   "_doc": [
-    "Mode-eval baseline fixtures. 18 categories, 52 total cases.",
+    "Mode-eval baseline fixtures. 19 categories, 53 total cases.",
+    "Case 53 (grounding_regression) added 2026-06-23 (ADR 0065): the user's",
+    "actual 8GB-Mac grocery dictation, with a `must_not_contain` grounding",
+    "check guarding against the leaked normal@v5 few-shot example.",
     "Original 13 categories x 3 lengths = 39 cases (ADR 0024 Wave A/B/C).",
     "Extension: 5 new categories added 2026-05-18 covering content types the",
     "original corpus under-represented: directions (turn-by-turn navigation),",
@@ -570,6 +573,16 @@
         ["llm is unavailable", "LLM is unavailable", "the LLM is unavailable"]
       ],
       "mode_hints": {"casual": "prose with the tradeoff as a closing sentence", "normal": "decision sentence + bulleted reasons + a 'Tradeoff:' closing line", "formal": "## Decision + ## Rationale (numbered) + ## Tradeoffs"}
+    },
+    {
+      "id": "53_grocery_leak_guard",
+      "category": "grounding_regression",
+      "length": "medium",
+      "raw": "testing in-app dictation i want to um buy some groceries um i need i need these three things bananas eggs shampoo",
+      "intent": "ADR 0065 grounding regression: the user's actual 8GB-Mac grocery dictation. The weak 3B leaked normal@v5's 'the meeting is at 3 PM tomorrow and we should bring the slides' few-shot example into this output. must_preserve guards the real groceries; must_not_contain guards against the leaked example. normal@v5 on the 3B FAILS grounding (proves the check works); normal_small on the 3B must PASS both.",
+      "must_preserve": ["bananas", "eggs", "shampoo"],
+      "must_not_contain": ["3 PM tomorrow", "bring the slides", "keyboard supplies", "naughty", "example input number three"],
+      "mode_hints": {"casual": "inline: bananas, eggs, and shampoo", "normal": "lead-in + bulleted list of the three groceries; NO leaked example sentence", "formal": "lead-in + numbered list"}
     }
   ]
 }

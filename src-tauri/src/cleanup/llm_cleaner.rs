@@ -100,6 +100,125 @@ fn maybe_promote_to_q5(model_id: &str, prefer_q5: bool) -> String {
     }
 }
 
+/// ASCII-case-insensitive substring search returning the byte offset of
+/// the first match. Unlike `haystack.to_lowercase().find(..)` this
+/// preserves byte offsets into the ORIGINAL `haystack` (lowercasing can
+/// change byte lengths for some Unicode), so the offset is always safe
+/// to slice/`replace_range`. The needle is matched ASCII-case-folded;
+/// non-ASCII bytes must match exactly. Sufficient for our sentinels,
+/// which are pure ASCII.
+fn find_ascii_ci(haystack: &str, needle: &str) -> Option<usize> {
+    let (hb, nb) = (haystack.as_bytes(), needle.as_bytes());
+    if nb.is_empty() || nb.len() > hb.len() {
+        return None;
+    }
+    (0..=hb.len() - nb.len()).find(|&i| hb[i..i + nb.len()].eq_ignore_ascii_case(nb))
+}
+
+/// Punctuation-insensitive, case-insensitive containment test: does
+/// `haystack` contain `needle` ignoring ASCII punctuation + case +
+/// whitespace runs? Used to decide whether a sentinel was actually
+/// DICTATED (and is therefore content, not a leak): raw STT is lower-
+/// case and lacks the terminal punctuation / colon that the baked-in
+/// example carries, so a strict match would wrongly flag legitimately
+/// dictated content as a leak.
+fn loosely_contains(haystack: &str, needle: &str) -> bool {
+    fn norm(s: &str) -> String {
+        s.chars()
+            .map(|c| {
+                if c.is_ascii_punctuation() {
+                    ' '
+                } else {
+                    c.to_ascii_lowercase()
+                }
+            })
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+    norm(haystack).contains(&norm(needle))
+}
+
+/// Collapse runs of blank lines left behind after excising a leaked
+/// example, and trim leading/trailing whitespace. Intra-line spacing is
+/// left untouched (we never want to mangle a code block on the rare
+/// guard path).
+fn collapse_blank_lines(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev_blank = false;
+    for line in s.lines() {
+        let trimmed_end = line.trim_end();
+        if trimmed_end.is_empty() {
+            if !out.is_empty() && !prev_blank {
+                out.push('\n');
+            }
+            prev_blank = true;
+        } else {
+            out.push_str(trimmed_end);
+            out.push('\n');
+            prev_blank = false;
+        }
+    }
+    out.trim().to_string()
+}
+
+/// Small-model example-leak guard (ADR 0065). Strip any baked-in
+/// example `sentinel` that leaked into `cleaned` but was NOT present in
+/// `raw_input` (case-insensitive). Returns the (possibly shortened)
+/// text and a bool that is `true` iff at least one sentinel was
+/// removed.
+///
+/// Only ever removes text the model could not have legitimately
+/// produced from its input — a sentinel that also appears in the input
+/// is real user content and is left alone. This is the symmetric twin
+/// of the shrink-fallback guard (which catches DROPPED content). The
+/// caller scopes it to the small-model override path so the 7B /
+/// Windows path runs none of this logic.
+fn strip_leaked_examples(cleaned: &str, raw_input: &str, sentinels: &[&str]) -> (String, bool) {
+    let mut out = cleaned.to_string();
+    let mut stripped = false;
+    for s in sentinels {
+        // If the speaker actually dictated the sentinel, it is content,
+        // not a leak — leave it. Punctuation-insensitive because raw
+        // STT lacks the example's colon / terminal period.
+        if loosely_contains(raw_input, s) {
+            continue;
+        }
+        while let Some(pos) = find_ascii_ci(&out, s) {
+            out.replace_range(pos..pos + s.len(), "");
+            stripped = true;
+        }
+    }
+    if stripped {
+        out = collapse_blank_lines(&out);
+    }
+    (out, stripped)
+}
+
+/// Distinctive example sentences baked into the `normal_small` prompt
+/// (ADR 0065). On weak (≈3B) local models the few-shot examples can
+/// leak verbatim into the output (in-context example bleed). These
+/// strings are the canaries: if one appears in the cleaned output but
+/// was NOT in the raw input, it is a leaked example, not user content.
+///
+/// They are compile-time constants kept in lockstep with the example
+/// block of `src-tauri/src/cleanup/prompts/normal_small.md`. Edit the
+/// prompt's examples → update these (the unit tests assert the guard
+/// behaviour, not the exact text, so they won't catch drift on their
+/// own — keep them paired).
+const NORMAL_SMALL_EXAMPLE_SENTINELS: &[&str] = &[
+    "Example input number three is a run-on sentence.",
+    "It shows two independent clauses that should be split apart.",
+    "Here's my list of keyboard supplies:",
+];
+
+/// Provenance suffix stamped onto `model_used` when the small-model
+/// example-leak guard stripped (or fell back over) a leaked example
+/// sentence. Symmetric twin of [`SHRINK_FALLBACK_SUFFIX`]: that guard
+/// catches DROPPED content, this one catches ADDED content. ADR 0065.
+const EXAMPLE_LEAK_GUARD_SUFFIX: &str = "-example-leak-guard";
+
 /// Cleaner backed by a real LLM provider.
 pub struct LlmCleaner {
     provider: Box<dyn CleanupProvider>,
@@ -112,6 +231,15 @@ pub struct LlmCleaner {
     /// see [`super::preprocessor`] module docs + ADR 0022 for the
     /// pipeline rationale.
     preprocessor: Preprocessor,
+    /// Optional prompt-slug override (ADR 0065). When `Some(slug)`, the
+    /// High-level cleanup path resolves its prompt from `slug` instead
+    /// of the tone `mode_slug` (e.g. `normal_small` instead of
+    /// `normal`). Set ONLY at the macOS RAM-aware downsize seam in
+    /// `dictation/runtime_cleaner.rs`; `None` everywhere else, so the
+    /// 7B / Windows path is byte-identical and `normal@v5` is never
+    /// re-evaluated. Also gates the example-leak guard below — that
+    /// new logic runs ONLY when this is `Some`.
+    prompt_mode_override: Option<String>,
 }
 
 impl LlmCleaner {
@@ -136,7 +264,20 @@ impl LlmCleaner {
             max_tokens,
             last_model_used: Mutex::new(provider_name.to_string()),
             preprocessor: Preprocessor::new(),
+            prompt_mode_override: None,
         }
+    }
+
+    /// Builder-style setter for the prompt-slug override (ADR 0065).
+    ///
+    /// Consumes + returns `self` so the call site reads as one
+    /// expression: `LlmCleaner::new(..).with_prompt_mode_override(o)`.
+    /// Passing `None` is an explicit no-op that leaves the default
+    /// tone-mode behaviour intact — that is exactly what the non-macOS
+    /// build does, keeping the Windows path byte-identical.
+    pub fn with_prompt_mode_override(mut self, override_slug: Option<String>) -> Self {
+        self.prompt_mode_override = override_slug;
+        self
     }
 
     /// Read the configured shrink-fallback threshold. Defaults to the
@@ -299,10 +440,19 @@ impl LlmCleaner {
             .db
             .lock()
             .map_err(|_| AppError::Cleanup("db mutex poisoned during cleanup".into()))?;
+        // ADR 0065 — small-model prompt override. Precedence:
+        //   Medium level   -> additive prompt (level dial wins; it is
+        //                      orthogonal to tone and already ignores
+        //                      mode_slug).
+        //   override set    -> the override slug (e.g. `normal_small`),
+        //                      set ONLY at the macOS downsize seam.
+        //   otherwise       -> the tone mode_slug, exactly as before.
+        // On the 7B / Windows path the override is always `None`, so
+        // this collapses to the pre-ADR-0065 `mode_slug` behaviour.
         let prompt_slug = if matches!(level, DictationCleanupLevel::Medium) {
             ADDITIVE_PROMPT_MODE_SLUG
         } else {
-            mode_slug
+            self.prompt_mode_override.as_deref().unwrap_or(mode_slug)
         };
         let prompt = prompts::get_latest_for_mode(&conn, prompt_slug)?
             .ok_or_else(|| AppError::Cleanup(format!("no prompt for mode {prompt_slug:?}")))?;
@@ -359,7 +509,51 @@ impl LlmCleaner {
             max_tokens: self.max_tokens,
             mode_slug,
         };
-        let result = self.provider.cleanup(req)?;
+        let mut result = self.provider.cleanup(req)?;
+
+        // ADR 0065 — small-model example-leak guard. Symmetric twin of
+        // the shrink-fallback below: that guard catches DROPPED content,
+        // this one catches ADDED content (a baked-in few-shot example
+        // sentence the weak 3B copied verbatim into its output). Scoped
+        // to the small-model override path via `prompt_mode_override`,
+        // so the 7B / Windows path runs ZERO new logic and stays
+        // byte-identical.
+        let mut example_leak_stripped = false;
+        if self.prompt_mode_override.is_some() {
+            let (guarded, stripped) =
+                strip_leaked_examples(&result.text, raw, NORMAL_SMALL_EXAMPLE_SENTINELS);
+            if stripped {
+                example_leak_stripped = true;
+                if guarded.trim().is_empty() {
+                    // The output was ENTIRELY a leaked example — there is
+                    // nothing real to inject. Fall back to the
+                    // deterministic preprocessor output (never inject an
+                    // empty cleanup).
+                    tracing::warn!(
+                        mode = mode_slug,
+                        prompt_slug,
+                        model = %result.model_used,
+                        "example-leak guard: cleaned output was entirely a leaked \
+                         example; falling back to preprocessor output"
+                    );
+                    let stamped = format!(
+                        "{}+{}{EXAMPLE_LEAK_GUARD_SUFFIX}",
+                        result.model_used, PREPROCESSOR_VERSION
+                    );
+                    if let Ok(mut slot) = self.last_model_used.lock() {
+                        *slot = stamped;
+                    }
+                    return Ok(pre_text);
+                }
+                tracing::warn!(
+                    mode = mode_slug,
+                    prompt_slug,
+                    model = %result.model_used,
+                    "example-leak guard: stripped a leaked few-shot example from output"
+                );
+                result.text = guarded;
+            }
+        }
 
         // ADR 0047 §Wave 1.2 — length-ratio sanity check. If the LLM
         // returned a transcript materially shorter than what the
@@ -420,7 +614,7 @@ impl LlmCleaner {
         // model_used column). At level=Medium also stamp the additive
         // infix so the dial choice is recoverable from `model_used`
         // alone. At Q5 opt-in, append the q5-opt-in suffix likewise.
-        let stamped_model = if matches!(level, DictationCleanupLevel::Medium) {
+        let mut stamped_model = if matches!(level, DictationCleanupLevel::Medium) {
             format!(
                 "{}{ADDITIVE_INFIX}+{}{q5_suffix}",
                 result.model_used, PREPROCESSOR_VERSION
@@ -428,6 +622,12 @@ impl LlmCleaner {
         } else {
             format!("{}+{}{q5_suffix}", result.model_used, PREPROCESSOR_VERSION)
         };
+        // ADR 0065 — record when the example-leak guard stripped (but
+        // did not fully suppress) a leaked example, so provenance is
+        // recoverable from `model_used` alone.
+        if example_leak_stripped {
+            stamped_model.push_str(EXAMPLE_LEAK_GUARD_SUFFIX);
+        }
         if let Ok(mut slot) = self.last_model_used.lock() {
             *slot = stamped_model.clone();
         }
@@ -502,6 +702,77 @@ mod tests {
     fn fresh_db() -> Arc<Mutex<Connection>> {
         let db = Database::open_in_memory().unwrap();
         Arc::new(Mutex::new(db.conn))
+    }
+
+    // ── ADR 0065 small-model example-leak guard ──────────────────────
+
+    #[test]
+    fn find_ascii_ci_matches_case_insensitively_with_real_offsets() {
+        assert_eq!(find_ascii_ci("hello WORLD", "world"), Some(6));
+        assert_eq!(find_ascii_ci("hello world", "WORLD"), Some(6));
+        assert_eq!(find_ascii_ci("nope", "world"), None);
+        assert_eq!(find_ascii_ci("", "x"), None);
+        assert_eq!(find_ascii_ci("abc", ""), None);
+    }
+
+    #[test]
+    fn guard_strips_leaked_example_not_in_input() {
+        // The classic leak: 3B prepends a baked-in example sentence to
+        // the real (grocery) cleanup.
+        let leaked = "Example input number three is a run-on sentence.\n\n\
+                      Bananas, eggs, and shampoo.";
+        let raw = "i need bananas eggs shampoo";
+        let (out, stripped) = strip_leaked_examples(leaked, raw, NORMAL_SMALL_EXAMPLE_SENTINELS);
+        assert!(stripped, "the leaked sentinel should have been detected");
+        assert!(
+            !out.contains("Example input number three"),
+            "sentinel must be removed; got: {out}"
+        );
+        assert!(
+            out.contains("Bananas, eggs, and shampoo."),
+            "real content must survive; got: {out}"
+        );
+    }
+
+    #[test]
+    fn guard_keeps_sentinel_that_was_actually_dictated() {
+        // If the speaker really dictated the keyboard-supplies line, it
+        // is content, not a leak — do not strip it.
+        let cleaned = "Here's my list of keyboard supplies:\n\n- air duster";
+        let raw = "here's my list of keyboard supplies first is air duster";
+        let (out, stripped) = strip_leaked_examples(cleaned, raw, NORMAL_SMALL_EXAMPLE_SENTINELS);
+        assert!(!stripped, "dictated content must not be treated as a leak");
+        assert_eq!(out, cleaned);
+    }
+
+    #[test]
+    fn guard_noop_when_no_sentinel_present() {
+        let cleaned = "Bananas, eggs, and shampoo.";
+        let (out, stripped) = strip_leaked_examples(
+            cleaned,
+            "bananas eggs shampoo",
+            NORMAL_SMALL_EXAMPLE_SENTINELS,
+        );
+        assert!(!stripped);
+        assert_eq!(out, cleaned);
+    }
+
+    #[test]
+    fn guard_reports_fully_leaked_output_as_empty_after_strip() {
+        // Output that is ONLY a leaked example collapses to empty, which
+        // the caller uses to trigger the preprocessor fallback.
+        let leaked = "Example input number three is a run-on sentence. \
+                      It shows two independent clauses that should be split apart.";
+        let (out, stripped) = strip_leaked_examples(
+            leaked,
+            "totally different input",
+            NORMAL_SMALL_EXAMPLE_SENTINELS,
+        );
+        assert!(stripped);
+        assert!(
+            out.trim().is_empty(),
+            "expected empty after strip; got: {out:?}"
+        );
     }
 
     /// Test-only cleanup provider that returns a caller-supplied

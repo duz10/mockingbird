@@ -66,6 +66,44 @@ pub fn score_preservation(
     }
 }
 
+// --------------------------------------------------------------------
+// Grounding scoring (ADR 0065) — the symmetric twin of preservation.
+//
+// Preservation catches DROPPED content (a must_preserve term absent).
+// Grounding catches ADDED content (a forbidden substring present) — the
+// class of bug that lets a 3B leak a baked-in few-shot example sentence
+// into a grocery-list dictation and still score 100% preservation. The
+// old harness was structurally blind to this.
+// --------------------------------------------------------------------
+
+/// Result of the grounding check for one fixture/output. Lists every
+/// forbidden substring that was found in the output (empty = clean).
+#[derive(Debug, Clone, Default)]
+pub struct GroundingScore {
+    pub violations: Vec<String>,
+}
+
+impl GroundingScore {
+    /// True iff at least one forbidden substring was present.
+    pub fn violated(&self) -> bool {
+        !self.violations.is_empty()
+    }
+}
+
+/// Score `output` against `must_not_contain` forbidden substrings.
+/// Case-insensitive, markdown/punct-normalised (same `normalise` used
+/// by preservation) so `"3 PM tomorrow"` matches `"...at 3 pm tomorrow,
+/// and..."`. A fixture with no `must_not_contain` terms always passes.
+pub fn score_grounding(output: &str, must_not_contain: &[String]) -> GroundingScore {
+    let normalised = normalise(output);
+    let violations = must_not_contain
+        .iter()
+        .filter(|term| normalised.contains(&normalise(term)))
+        .cloned()
+        .collect();
+    GroundingScore { violations }
+}
+
 /// Lowercase, strip markdown/punct, collapse whitespace. So
 /// `"Audio Streaming"` matches `"**audio**   streaming."`.
 ///
@@ -93,6 +131,9 @@ pub struct ModeAggregate {
     pub preservation_full: usize,
     pub preservation_partial: usize,
     pub preservation_zero: usize,
+    /// Number of fixtures whose output violated the grounding check
+    /// (contained a forbidden substring). ADR 0065.
+    pub grounding_failed: usize,
     pub sum_preservation_pct: f32,
     pub sum_total_ms: u64,
     pub sum_llm_ms: u64,
@@ -100,10 +141,18 @@ pub struct ModeAggregate {
 }
 
 impl ModeAggregate {
-    pub fn record(&mut self, score: PreservationScore, result: &RunResult) {
+    pub fn record(
+        &mut self,
+        score: PreservationScore,
+        grounding: &GroundingScore,
+        result: &RunResult,
+    ) {
         self.fixtures_run += 1;
         if result.error.is_some() {
             self.fixtures_errored += 1;
+        }
+        if grounding.violated() {
+            self.grounding_failed += 1;
         }
         let pct = score.pct();
         self.sum_preservation_pct += pct;
@@ -200,6 +249,14 @@ fn write_methodology(out: &mut String, fixtures: &[Fixture]) {
     .ok();
     writeln!(
         out,
+        "- **Grounding** (ADR 0065) is automated: the output must NOT contain any \
+         `must_not_contain` substring. Catches ADDED / hallucinated content \
+         (e.g. a leaked few-shot example) that preservation is blind to. A 🚨 \
+         badge on a fixture below means a grounding violation."
+    )
+    .ok();
+    writeln!(
+        out,
         "- A mode hits **badass** when ≥100% preservation, ≥90% format-fit ≥1, ≥70% format-fit =2 \
          (per ADR 0024). Numbers below give the human reviewer a quick read.\n"
     )
@@ -233,15 +290,15 @@ fn write_summary(
     writeln!(out, "## Summary\n").ok();
     writeln!(
         out,
-        "| Mode | N | Errors | Preserve avg | Full ✅ | Partial ⚠️ | Zero ❌ | avg LLM ms | avg total ms | max LLM ms |"
+        "| Mode | N | Errors | Preserve avg | Full ✅ | Partial ⚠️ | Zero ❌ | Grounding-fail 🚨 | avg LLM ms | avg total ms | max LLM ms |"
     )
     .ok();
-    writeln!(out, "|---|---|---|---|---|---|---|---|---|---|").ok();
+    writeln!(out, "|---|---|---|---|---|---|---|---|---|---|---|").ok();
     for m in modes {
         let agg = aggregates.get(&m.slug).cloned().unwrap_or_default();
         writeln!(
             out,
-            "| `{}` | {} | {} | {:.1}% | {} | {} | {} | {} | {} | {} |",
+            "| `{}` | {} | {} | {:.1}% | {} | {} | {} | {} | {} | {} | {} |",
             m.slug,
             agg.fixtures_run,
             agg.fixtures_errored,
@@ -249,6 +306,7 @@ fn write_summary(
             agg.preservation_full,
             agg.preservation_partial,
             agg.preservation_zero,
+            agg.grounding_failed,
             agg.avg_llm_ms(),
             agg.avg_total_ms(),
             agg.max_llm_ms,
@@ -279,6 +337,19 @@ fn write_per_fixture(
                 .join(", ")
         )
         .ok();
+        if !fx.must_not_contain.is_empty() {
+            writeln!(
+                out,
+                "- **Must NOT contain (grounding, {}):** {}",
+                fx.must_not_contain.len(),
+                fx.must_not_contain
+                    .iter()
+                    .map(|t| format!("`{t}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .ok();
+        }
         writeln!(out, "- **Raw STT:**\n  ```\n  {}\n  ```", fx.raw).ok();
         // Preprocessor output is identical across modes — show once.
         if let Some((_, r)) = runs.iter().find(|((fid, _), _)| fid == &fx.id) {
@@ -313,8 +384,15 @@ fn write_one_mode_block(
     score: &PreservationScore,
     r: &RunResult,
 ) {
+    // Grounding is computed here from the fixture's forbidden list +
+    // this run's output (cheaper than threading it through the runs map).
+    let grounding = score_grounding(&r.output, &fx.must_not_contain);
     let badge = if r.error.is_some() {
         "🛑"
+    } else if grounding.violated() {
+        // A grounding violation is a hard failure regardless of how
+        // well preservation scored — the whole point of ADR 0065.
+        "🚨"
     } else if score.pct() >= 99.9 {
         "✅"
     } else if score.pct() > 0.0 {
@@ -324,18 +402,32 @@ fn write_one_mode_block(
     };
     writeln!(
         out,
-        "#### `{}` {} — preservation {}/{} ({:.0}%), LLM {}ms, total {}ms",
+        "#### `{}` {} — preservation {}/{} ({:.0}%), grounding {}, LLM {}ms, total {}ms",
         m.slug,
         badge,
         score.matched,
         score.total,
         score.pct(),
+        if grounding.violated() { "FAIL" } else { "pass" },
         r.llm_ms,
         r.total_ms
     )
     .ok();
     if let Some(err) = &r.error {
         writeln!(out, "\n> 🛑 **error:** {err}\n").ok();
+    }
+    if grounding.violated() {
+        writeln!(
+            out,
+            "\n> 🚨 **grounding violation:** output contains forbidden substring(s): {}\n",
+            grounding
+                .violations
+                .iter()
+                .map(|v| format!("`{v}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .ok();
     }
     if let Some(hint) = fx.mode_hints.get(&m.slug) {
         writeln!(out, "\n> _hint: {hint}_\n").ok();
@@ -465,6 +557,41 @@ mod tests {
         assert_eq!(s.matched, 0);
         assert_eq!(s.total, 0);
         assert!((s.pct() - 100.0).abs() < 0.01);
+    }
+
+    // ── grounding (ADR 0065) ──────────────────────────────────────────
+
+    #[test]
+    fn grounding_passes_when_no_forbidden_substring_present() {
+        let g = score_grounding("Bananas, eggs, and shampoo.", &svec(&["3 PM tomorrow"]));
+        assert!(!g.violated());
+        assert!(g.violations.is_empty());
+    }
+
+    #[test]
+    fn grounding_fails_on_leaked_example_sentence() {
+        // The exact regression: a grocery cleanup that leaked the v5
+        // meeting example. Preservation would still be 100%; grounding
+        // catches it.
+        let leaked = "The meeting is at 3 PM tomorrow, and we should bring the slides. \
+                      Bananas, eggs, and shampoo.";
+        let g = score_grounding(leaked, &svec(&["3 PM tomorrow", "bring the slides"]));
+        assert!(g.violated());
+        assert_eq!(g.violations.len(), 2);
+    }
+
+    #[test]
+    fn grounding_is_case_and_punct_insensitive() {
+        // normalise() folds case + strips punctuation, so a leaked
+        // "3 pm tomorrow" (lowercased by the model) still trips.
+        let g = score_grounding("meeting at 3 pm tomorrow!", &svec(&["3 PM tomorrow"]));
+        assert!(g.violated());
+    }
+
+    #[test]
+    fn grounding_empty_forbidden_list_always_passes() {
+        let g = score_grounding("anything at all", &[]);
+        assert!(!g.violated());
     }
 
     fn svec(xs: &[&str]) -> Vec<String> {

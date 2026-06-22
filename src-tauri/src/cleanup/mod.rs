@@ -77,6 +77,18 @@ pub enum DictationCleanupLevel {
 /// future provenance-grepping code all reference the same string.
 pub const ADDITIVE_PROMPT_MODE_SLUG: &str = "normal_additive";
 
+/// Mode slug for the tier-gated small-model Normal prompt (ADR 0065).
+///
+/// A hardened variant of `normal@v5` seeded by migration 027 under a
+/// parallel slug (same pattern as [`ADDITIVE_PROMPT_MODE_SLUG`]).
+/// Selected ONLY at the macOS RAM-aware downsize seam in
+/// `dictation/runtime_cleaner.rs::make_default_cleaner` — when the
+/// effective model was downsized off the parity model AND the active
+/// mode is `normal` — via [`LlmCleaner::with_prompt_mode_override`].
+/// On non-macOS the override is never set, so `normal` keeps resolving
+/// to `normal@v5` and the 7B / Windows cleanup path is byte-identical.
+pub const SMALL_MODEL_PROMPT_MODE_SLUG: &str = "normal_small";
+
 /// Cleanup trait. `clean(raw, mode_slug)` returns the polished text
 /// that will be injected.
 pub trait Cleaner: Send {

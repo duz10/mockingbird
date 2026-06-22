@@ -134,6 +134,12 @@ const MIGRATION_025: &str = include_str!("migrations/025_kg_phase_1d_source_gate
 // successfully landed in the vault.
 const MIGRATION_026: &str = include_str!("migrations/026_kg_vault_linkage.sql");
 
+// ADR 0065: tier-gated small-model Normal prompt. Append-only INSERT
+// of mode_slug='normal_small' v1 into `prompts`. Selected only at the
+// macOS RAM-aware downsize seam via LlmCleaner::prompt_mode_override;
+// the 7B / Windows path never sees it (keeps normal@v5 byte-identical).
+const MIGRATION_027: &str = include_str!("migrations/027_prompt_normal_small.sql");
+
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
 ///
@@ -338,6 +344,15 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         let prepared = substitute_prompt_bodies(MIGRATION_026);
         conn.execute_batch(&prepared)?;
     }
+    if current < 27 {
+        // ADR 0065: ship the `normal_small` prompt body (hardened
+        // small-model Normal variant) under mode_slug='normal_small',
+        // version=1. Append-only INSERT (ADR 0008 compliant).
+        // Substitution required for the __PROMPT_NORMAL_SMALL_BODY__
+        // token.
+        let prepared = substitute_prompt_bodies(MIGRATION_027);
+        conn.execute_batch(&prepared)?;
+    }
     Ok(())
 }
 
@@ -396,7 +411,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "26");
+        assert_eq!(v, "27");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -415,7 +430,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "26");
+        assert_eq!(v, "27");
     }
 
     /// Migration 024 (mb-geds / ADR 0050 KG Phase 1B Chunk 2) ships
@@ -734,7 +749,7 @@ mod tests {
         );
 
         // After the full apply_all run schema_version is at the
-        // current latest (26). This test exercises migration 025's
+        // current latest (27). This test exercises migration 025's
         // side effects (above); the version assertion just confirms
         // the DB is fully migrated. Bump alongside
         // `apply_all_brings_fresh_db_to_latest_version` when a new
@@ -748,7 +763,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v, "26");
+        assert_eq!(v, "27");
 
         // The drift session row (id=42) is intentionally PRESERVED.
         // Sessions are user-meaningful raw data (Principle 1); only
@@ -813,7 +828,7 @@ mod tests {
         apply_all(&conn).unwrap();
 
         // After the full apply_all run schema_version is at the
-        // current latest (26). This test exercises migration 022's
+        // current latest (27). This test exercises migration 022's
         // invariant (modes.model_id untouched, below); the version
         // assertion just confirms the DB is fully migrated. Bump
         // alongside `apply_all_brings_fresh_db_to_latest_version`
@@ -826,7 +841,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v, "26");
+        assert_eq!(v, "27");
 
         // Migration 022 must not have moved any modes.model_id. The
         // three tone modes should still all be on qwen2.5:7b-instruct-
@@ -941,6 +956,58 @@ mod tests {
         assert_eq!(
             normal_latest_version, 5,
             "migration 020 must not bump `normal`'s latest version chain"
+        );
+    }
+
+    /// Migration 027 (ADR 0065) ships the hardened small-model Normal
+    /// prompt under the parallel slug `normal_small`. It must NOT touch
+    /// the `normal` tone-prompt version chain (normal@v5 stays the
+    /// canonical, byte-identical 7B/Windows prompt).
+    #[test]
+    fn migration_027_ships_normal_small_prompt_without_disturbing_normal() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+
+        let body: String = conn
+            .query_row(
+                "SELECT body FROM prompts WHERE mode_slug='normal_small' AND version=1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("normal_small v1 prompt row should exist after migration 027");
+        assert!(
+            !body.is_empty(),
+            "normal_small v1 prompt body should not be empty"
+        );
+        // The hardening is load-bearing: the leak-prone declarative
+        // example from v5 must be ABSENT, and the casual_v2 recipe
+        // (distinctive labels + never-echo rule) must be present.
+        assert!(
+            !body.contains("3 PM tomorrow") && !body.contains("bring the slides"),
+            "normal_small must NOT carry v5's leak-prone declarative example"
+        );
+        assert!(
+            body.contains("Speech:") && body.contains("Cleaned:"),
+            "normal_small must use casual_v2's distinctive non-markdown labels"
+        );
+        assert!(
+            body.to_lowercase().contains("never echo"),
+            "normal_small must carry the never-echo-scaffolding rule"
+        );
+
+        // normal@v5 stays the canonical Normal tone prompt — the
+        // parallel slug must not bump the `normal` version chain.
+        let normal_latest_version: i64 = conn
+            .query_row(
+                "SELECT MAX(version) FROM prompts WHERE mode_slug='normal'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            normal_latest_version, 5,
+            "migration 027 must not bump `normal`'s latest version chain"
         );
     }
 

@@ -67,14 +67,36 @@ pub(super) fn make_default_cleaner(
     let provider = OllamaProvider::new();
     match provider.health_check() {
         Ok(_) => {
-            // RAM-aware effective-model substitution (ADR 0064). On
-            // non-macOS this line is cfg'd out entirely, so `model_id`
-            // stays the mode's parity default and the Windows cleanup
-            // code path is unchanged. On macOS it swaps in a model that
-            // fits unified memory (e.g. 7B → 3B on an 8 GB box).
+            // RAM-aware effective-model substitution (ADR 0064) + the
+            // ADR 0065 prompt override that rides on it. On non-macOS
+            // BOTH the model swap and the override are cfg'd out: `model_id`
+            // stays the mode's parity default, `prompt_override` is `None`,
+            // and the Windows cleanup path is byte-identical (normal@v5 is
+            // never re-evaluated).
+            #[cfg(not(target_os = "macos"))]
+            let prompt_override: Option<String> = None;
+            // On macOS the selector swaps in a model that fits unified
+            // memory (e.g. 7B → 3B on an 8 GB box). When it actually
+            // downsizes AND the active mode is Normal, also swap Normal's
+            // prompt for the hardened `normal_small` variant — the weak 3B
+            // leaks normal@v5's few-shot examples otherwise (ADR 0065).
             #[cfg(target_os = "macos")]
-            let model_id =
-                crate::cleanup::model_select::resolve_effective_model(&provider, model_id);
+            let (model_id, prompt_override) = {
+                let parity_model = model_id.clone();
+                let effective =
+                    crate::cleanup::model_select::resolve_effective_model(&provider, model_id);
+                let prompt_override = if effective != parity_model && config.mode_slug == "normal" {
+                    tracing::info!(
+                        parity_model = %parity_model,
+                        effective_model = %effective,
+                        "ADR 0065: Normal downsized off parity → using hardened `normal_small` prompt"
+                    );
+                    Some(crate::cleanup::SMALL_MODEL_PROMPT_MODE_SLUG.to_string())
+                } else {
+                    None
+                };
+                (effective, prompt_override)
+            };
 
             tracing::info!(
                 model = %model_id,
@@ -93,13 +115,16 @@ pub(super) fn make_default_cleaner(
             // worse than today's behavior. (LESSONS 2026-05-17
             // phase5-smoketest, third pass.)
             spawn_ollama_warmup(model_id.clone(), temperature as f32);
-            Box::new(LlmCleaner::new(
-                Box::new(provider),
-                Arc::clone(db),
-                model_id,
-                temperature as f32,
-                max_tokens as u32,
-            ))
+            Box::new(
+                LlmCleaner::new(
+                    Box::new(provider),
+                    Arc::clone(db),
+                    model_id,
+                    temperature as f32,
+                    max_tokens as u32,
+                )
+                .with_prompt_mode_override(prompt_override),
+            )
         }
         Err(e) => {
             tracing::warn!(
