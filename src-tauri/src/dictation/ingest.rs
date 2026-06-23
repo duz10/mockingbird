@@ -286,6 +286,10 @@ struct IngestPersistParams<'a> {
     /// exactly so FK invariants hold.
     dictionary_snapshot_id: i64,
     example_set_id: i64,
+    /// ADR 0065 v2 — the prompt (slug + version) the cleaner actually
+    /// resolved, from `Cleaner::prompt_label()`. `None` when no LLM
+    /// prompt ran; stamped into `sessions.effective_prompt_label`.
+    effective_prompt_label: Option<String>,
 }
 
 /// All inputs for the STT-failure persistence branch. Bundled to
@@ -438,6 +442,7 @@ pub fn headless_ingest(
             resolved_prompt_id: resolved.prompt_id,
             dictionary_snapshot_id: deps.config.dictionary_snapshot_id,
             example_set_id: deps.config.example_set_id,
+            effective_prompt_label: deps.cleaner.prompt_label(),
         },
     )
 }
@@ -513,6 +518,13 @@ fn persist_ingest(
     }
     if let Err(e) = transcripts::insert_cleaned(&conn, id, p.cleaned_text, p.cleanup_model) {
         tracing::warn!(error = ?e, session_id = id, "persist cleaned transcript failed");
+    }
+    // ADR 0065 v2 — stamp the prompt that ACTUALLY ran (truthful
+    // provenance for the dictation Metadata).
+    if let Some(label) = &p.effective_prompt_label {
+        if let Err(e) = sessions::set_effective_prompt_label(&conn, id, label) {
+            tracing::warn!(error = ?e, session_id = id, "persist effective_prompt_label failed");
+        }
     }
     // NO final stage -- nothing was injected. This is the
     // load-bearing distinction from the PTT path.

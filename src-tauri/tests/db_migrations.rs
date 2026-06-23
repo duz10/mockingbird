@@ -44,7 +44,7 @@ fn schema_version_is_current_after_apply() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(v, "27");
+    assert_eq!(v, "28");
 }
 
 #[test]
@@ -128,10 +128,11 @@ fn seeded_modes_and_prompts_present() {
         .conn
         .query_row("SELECT COUNT(*) FROM prompts", [], |r| r.get(0))
         .unwrap();
-    // 16 prompt rows after all seed migrations (003 seeds 3; 005/006/
-    // 007/008/010/020 append further versions; 027 appends normal_small).
-    // (mb-mac-v1.9: was 3; ADR 0065: 15 -> 16.)
-    assert_eq!(prompts, 16);
+    // 17 prompt rows after all seed migrations (003 seeds 3; 005/006/
+    // 007/008/010/020 append further versions; 027 appends normal_small
+    // v1; 028 appends normal_small v2).
+    // (mb-mac-v1.9: was 3; ADR 0065: 15 -> 16; ADR 0065 v2: 16 -> 17.)
+    assert_eq!(prompts, 17);
     let modes: i64 = db
         .conn
         .query_row("SELECT COUNT(*) FROM modes", [], |r| r.get(0))
@@ -150,7 +151,7 @@ fn seeded_modes_and_prompts_present() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(history_prompts, 16, "audit triggers should fire on seed");
+    assert_eq!(history_prompts, 17, "audit triggers should fire on seed");
     let history_modes: i64 = db
         .conn
         .query_row(
@@ -244,7 +245,7 @@ fn apply_all_is_idempotent() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(v, "27");
+    assert_eq!(v, "28");
 }
 
 /// Migration 011 ships the FTS5 mirror for meeting transcripts.

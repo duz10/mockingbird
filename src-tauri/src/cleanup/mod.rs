@@ -108,6 +108,22 @@ pub trait Cleaner: Send {
     fn model_name(&self) -> &str {
         "passthrough"
     }
+
+    /// The prompt (slug + version) this cleaner actually resolved for
+    /// the most recent [`Self::clean`] call, e.g. `"normal_small v2"`.
+    ///
+    /// Persisted into `sessions.effective_prompt_label` so the dictation
+    /// Metadata reports the prompt that REALLY ran rather than inferring
+    /// it from the mode's canonical `prompt_id` (which is wrong on the
+    /// macOS RAM-aware downsize path, where the override runs
+    /// `normal_small` while `prompt_id` still points at normal@v5).
+    ///
+    /// Default `None` — the passthrough cleaner resolves no prompt, and
+    /// any cleaner that doesn't opt in simply leaves the column NULL
+    /// (the Metadata then falls back to the canonical version).
+    fn prompt_label(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Default cleaner — returns the input verbatim.

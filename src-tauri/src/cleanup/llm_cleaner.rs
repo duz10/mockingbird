@@ -196,6 +196,110 @@ fn strip_leaked_examples(cleaned: &str, raw_input: &str, sentinels: &[&str]) -> 
     (out, stripped)
 }
 
+/// Leading meta-preambles a weak (≈3B) model prepends despite the
+/// prompt's "output only the cleaned text" rule (ADR 0065 v2 — the
+/// `Here's your cleaned transcript:` failure on Dustin's 8 GB Mac).
+/// Stored WITHOUT apostrophes / punctuation because
+/// [`normalise_preamble`] strips those before comparison, so both the
+/// ASCII `Here's` and the curly `Here\u{2019}s` an LLM tends to emit
+/// both match.
+const NORMAL_SMALL_PREAMBLE_PHRASES: &[&str] = &[
+    "heres your cleaned transcript",
+    "here is your cleaned transcript",
+    "heres the cleaned transcript",
+    "here is the cleaned transcript",
+    "heres your cleaned text",
+    "here is your cleaned text",
+    "heres the cleaned text",
+    "here is the cleaned text",
+    "heres your cleaned version",
+    "here is your cleaned version",
+    "heres the cleaned version",
+    "here is the cleaned version",
+    "heres the cleaned dictation",
+    "here is the cleaned dictation",
+    "heres the cleaned up text",
+    "here is the cleaned up text",
+];
+
+/// Leading conversational interjections (followed by a comma) a weak
+/// model opens with (`Sure, ...`, `Okay, ...`). Normalised, no punct.
+const NORMAL_SMALL_PREAMBLE_INTERJECTIONS: &[&str] = &[
+    "sure",
+    "okay",
+    "ok",
+    "certainly",
+    "of course",
+    "got it",
+    "alright",
+];
+
+/// Provenance suffix stamped onto `model_used` when the small-model
+/// preamble guard stripped (or fell back over) a leading meta-preamble.
+/// Twin of [`EXAMPLE_LEAK_GUARD_SUFFIX`]. ADR 0065 v2.
+const PREAMBLE_GUARD_SUFFIX: &str = "-preamble-guard";
+
+/// Lowercase + drop apostrophes/quotes/periods + collapse whitespace,
+/// so a candidate preamble segment compares cleanly against the
+/// punctuation-free phrase tables above.
+fn normalise_preamble(s: &str) -> String {
+    s.chars()
+        .filter(|c| !matches!(*c, '\'' | '\u{2019}' | '`' | '.' | '"'))
+        .map(|c| c.to_ascii_lowercase())
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Strip a single leading meta-preamble from the START of `cleaned`
+/// (ADR 0065 v2). Two conservative cases:
+///   A. a colon-terminated cleaned-transcript lead-in
+///      (`Here's your cleaned transcript:`), and
+///   B. a `Sure,` / `Okay,`-style interjection (which may itself be
+///      followed by a case-A lead-in).
+/// Only the very first short segment is considered and only KNOWN
+/// phrases match, so genuine list lead-ins (`I need these three
+/// things:`, `Here's my list of keyboard supplies:`) and mid-content
+/// colons are never touched. Returns the (possibly shortened) text and
+/// whether anything was stripped. The caller scopes it to the
+/// small-model override path so the 7B / Windows path runs none of it.
+fn strip_meta_preamble(cleaned: &str) -> (String, bool) {
+    let leading_ws = cleaned.len() - cleaned.trim_start().len();
+    let body = &cleaned[leading_ws..];
+
+    // Case A — colon-terminated meta lead-in on the first line.
+    if let Some(colon_rel) = body.find(':') {
+        let segment = &body[..colon_rel];
+        if !segment.contains('\n') && segment.len() <= 80 {
+            let norm = normalise_preamble(segment);
+            if NORMAL_SMALL_PREAMBLE_PHRASES.iter().any(|p| norm == *p) {
+                return (body[colon_rel + 1..].trim_start().to_string(), true);
+            }
+        }
+    }
+
+    // Case B — leading interjection + comma ("Sure, ...", "Okay, ...").
+    if let Some(comma_rel) = body.find(',') {
+        let segment = &body[..comma_rel];
+        if !segment.contains('\n') && segment.len() <= 24 {
+            let norm = normalise_preamble(segment);
+            if NORMAL_SMALL_PREAMBLE_INTERJECTIONS
+                .iter()
+                .any(|p| norm == *p)
+            {
+                // An interjection can be followed by a case-A lead-in
+                // ("Sure, here's your cleaned transcript:"); recurse to
+                // peel that too.
+                let (inner, _) = strip_meta_preamble(body[comma_rel + 1..].trim_start());
+                return (inner, true);
+            }
+        }
+    }
+
+    (cleaned.to_string(), false)
+}
+
 /// Distinctive example sentences baked into the `normal_small` prompt
 /// (ADR 0065). On weak (≈3B) local models the few-shot examples can
 /// leak verbatim into the output (in-context example bleed). These
@@ -227,6 +331,16 @@ pub struct LlmCleaner {
     temperature: f32,
     max_tokens: u32,
     last_model_used: Mutex<String>,
+    /// The prompt (slug + version) the LAST `clean()` call actually
+    /// resolved, e.g. `"normal_small v2"`. `None` until the first LLM
+    /// cleanup, and reset to `None` on any path that resolves no LLM
+    /// prompt (level=None/Light, skip-short-utterance). Surfaced via
+    /// [`Cleaner::prompt_label`] so the persistence layer can record
+    /// the prompt that was REALLY used in `sessions.effective_prompt_label`
+    /// — fixing the pre-028 Metadata bug where the UI always showed the
+    /// mode's canonical prompt version (normal@v5) even when the macOS
+    /// downsize override ran `normal_small` (kennel drawer 91).
+    last_prompt_label: Mutex<Option<String>>,
     /// Deterministic pre-pass that runs BEFORE the LLM call. Stateless;
     /// see [`super::preprocessor`] module docs + ADR 0022 for the
     /// pipeline rationale.
@@ -263,6 +377,7 @@ impl LlmCleaner {
             temperature,
             max_tokens,
             last_model_used: Mutex::new(provider_name.to_string()),
+            last_prompt_label: Mutex::new(None),
             preprocessor: Preprocessor::new(),
             prompt_mode_override: None,
         }
@@ -360,6 +475,15 @@ impl LlmCleaner {
     /// so `clean()` can swallow errors + log them while keeping the
     /// happy path readable.
     fn run_cleanup(&mut self, raw: &str, mode_slug: &str) -> AppResult<String> {
+        // Reset the per-call prompt provenance. Paths that resolve no
+        // LLM prompt (None / Light / skip-short-utterance) leave it
+        // `None`, so the Metadata falls back to the mode's canonical
+        // version rather than reporting a stale label from a previous
+        // dictation on this long-lived cleaner instance.
+        if let Ok(mut slot) = self.last_prompt_label.lock() {
+            *slot = None;
+        }
+
         // -1. Cleanup-level dial (ADR 0047 §Wave 2.1). Branches:
         //     - None   -> raw STT passthrough (skip preprocessor + LLM)
         //     - Light  -> preprocessor only (skip LLM regardless)
@@ -457,6 +581,25 @@ impl LlmCleaner {
         let prompt = prompts::get_latest_for_mode(&conn, prompt_slug)?
             .ok_or_else(|| AppError::Cleanup(format!("no prompt for mode {prompt_slug:?}")))?;
 
+        // Truthful prompt provenance (ADR 0065 v2). Record EXACTLY which
+        // prompt won resolution — slug + version — so (a) every dictation
+        // logs the prompt that ran and (b) the persistence layer can
+        // stamp `sessions.effective_prompt_label` instead of the UI
+        // inferring it from the mode's canonical `prompt_id` (which lies
+        // on the macOS downsize path: it points at normal@v5 while the
+        // override actually runs normal_small). `override` is the slug
+        // the macOS seam injected, or `none` on the 7B / Windows path.
+        tracing::info!(
+            slug = prompt_slug,
+            version = prompt.version,
+            model = %self.model_id,
+            override = self.prompt_mode_override.as_deref().unwrap_or("none"),
+            "cleanup prompt resolved"
+        );
+        if let Ok(mut slot) = self.last_prompt_label.lock() {
+            *slot = Some(format!("{prompt_slug} v{}", prompt.version));
+        }
+
         // 3. Dictionary + examples. Dictionary: all (already small).
         //    Examples: top-N per mode, app context unknown at this
         //    layer (Phase 4 stub — Phase 6 will plumb the foreground
@@ -518,6 +661,47 @@ impl LlmCleaner {
         // to the small-model override path via `prompt_mode_override`,
         // so the 7B / Windows path runs ZERO new logic and stays
         // byte-identical.
+        // ADR 0065 v2 — small-model preamble guard. Weak models prepend
+        // a chatty "Here's your cleaned transcript:" despite the prompt's
+        // output-only rule. Strip it BEFORE the shrink-fallback check
+        // below so (a) the user never sees the preamble and (b) the
+        // word-count guard sees the REAL content length — a preamble
+        // inflates the count and can mask dropped sentences (exactly how
+        // session 12's dropped opening slipped past the 0.65 guard).
+        // Scoped to the override path; the 7B / Windows path runs none
+        // of this.
+        let mut preamble_stripped = false;
+        if self.prompt_mode_override.is_some() {
+            let (guarded, stripped) = strip_meta_preamble(&result.text);
+            if stripped {
+                preamble_stripped = true;
+                if guarded.trim().is_empty() {
+                    tracing::warn!(
+                        mode = mode_slug,
+                        prompt_slug,
+                        model = %result.model_used,
+                        "preamble guard: cleaned output was entirely a meta-preamble; \
+                         falling back to preprocessor output"
+                    );
+                    let stamped = format!(
+                        "{}+{}{PREAMBLE_GUARD_SUFFIX}",
+                        result.model_used, PREPROCESSOR_VERSION
+                    );
+                    if let Ok(mut slot) = self.last_model_used.lock() {
+                        *slot = stamped;
+                    }
+                    return Ok(pre_text);
+                }
+                tracing::warn!(
+                    mode = mode_slug,
+                    prompt_slug,
+                    model = %result.model_used,
+                    "preamble guard: stripped a leading meta-preamble from output"
+                );
+                result.text = guarded;
+            }
+        }
+
         let mut example_leak_stripped = false;
         if self.prompt_mode_override.is_some() {
             let (guarded, stripped) =
@@ -628,6 +812,10 @@ impl LlmCleaner {
         if example_leak_stripped {
             stamped_model.push_str(EXAMPLE_LEAK_GUARD_SUFFIX);
         }
+        // ADR 0065 v2 — likewise record a stripped meta-preamble.
+        if preamble_stripped {
+            stamped_model.push_str(PREAMBLE_GUARD_SUFFIX);
+        }
         if let Ok(mut slot) = self.last_model_used.lock() {
             *slot = stamped_model.clone();
         }
@@ -689,6 +877,10 @@ impl Cleaner for LlmCleaner {
         let leaked: &'static str = Box::leak(guard.clone().into_boxed_str());
         leaked
     }
+
+    fn prompt_label(&self) -> Option<String> {
+        self.last_prompt_label.lock().ok().and_then(|g| g.clone())
+    }
 }
 
 #[cfg(test)]
@@ -702,6 +894,55 @@ mod tests {
     fn fresh_db() -> Arc<Mutex<Connection>> {
         let db = Database::open_in_memory().unwrap();
         Arc::new(Mutex::new(db.conn))
+    }
+
+    // ── ADR 0065 v2 small-model preamble guard ───────────────────────
+
+    #[test]
+    fn preamble_guard_strips_colon_terminated_meta_lead_in() {
+        // The exact session-12 failure (with the curly apostrophe an
+        // LLM actually emits).
+        let (out, stripped) =
+            strip_meta_preamble("Here\u{2019}s your cleaned transcript:\n\nI need these things.");
+        assert!(stripped);
+        assert_eq!(out, "I need these things.");
+    }
+
+    #[test]
+    fn preamble_guard_strips_ascii_apostrophe_variant() {
+        let (out, stripped) = strip_meta_preamble("Here's your cleaned transcript: bananas");
+        assert!(stripped);
+        assert_eq!(out, "bananas");
+    }
+
+    #[test]
+    fn preamble_guard_strips_interjection_then_meta() {
+        let (out, stripped) = strip_meta_preamble("Sure, here is the cleaned text:\nbuy groceries");
+        assert!(stripped);
+        assert_eq!(out, "buy groceries");
+    }
+
+    #[test]
+    fn preamble_guard_leaves_genuine_list_lead_ins_untouched() {
+        // A real Normal-mode lead-in ends in a colon too — it must NOT
+        // be mistaken for a meta-preamble.
+        let lead_in = "I need these three things:\n- bananas\n- eggs";
+        let (out, stripped) = strip_meta_preamble(lead_in);
+        assert!(!stripped);
+        assert_eq!(out, lead_in);
+
+        let keyboard = "Here's my list of keyboard supplies:\n- air duster";
+        let (out2, stripped2) = strip_meta_preamble(keyboard);
+        assert!(!stripped2);
+        assert_eq!(out2, keyboard);
+    }
+
+    #[test]
+    fn preamble_guard_leaves_clean_content_untouched() {
+        let clean = "I want to buy some groceries. I need bananas, eggs, and shampoo.";
+        let (out, stripped) = strip_meta_preamble(clean);
+        assert!(!stripped);
+        assert_eq!(out, clean);
     }
 
     // ── ADR 0065 small-model example-leak guard ──────────────────────

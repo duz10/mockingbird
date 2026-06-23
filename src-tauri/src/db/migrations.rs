@@ -140,6 +140,14 @@ const MIGRATION_026: &str = include_str!("migrations/026_kg_vault_linkage.sql");
 // the 7B / Windows path never sees it (keeps normal@v5 byte-identical).
 const MIGRATION_027: &str = include_str!("migrations/027_prompt_normal_small.sql");
 
+// ADR 0065 v2: harden the small-model Normal prompt (content fidelity +
+// no-preamble) and add `sessions.effective_prompt_label` so the
+// dictation Metadata can report the prompt that ACTUALLY ran (not the
+// mode's canonical version). Append-only INSERT of normal_small v2 +
+// additive ADD COLUMN. The 7B / Windows path never resolves
+// normal_small, so it stays byte-identical (normal@v5 untouched).
+const MIGRATION_028: &str = include_str!("migrations/028_normal_small_v2_and_prompt_label.sql");
+
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
 ///
@@ -353,6 +361,14 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         let prepared = substitute_prompt_bodies(MIGRATION_027);
         conn.execute_batch(&prepared)?;
     }
+    if current < 28 {
+        // ADR 0065 v2: normal_small v2 (content-fidelity + no-preamble
+        // hardening) + `sessions.effective_prompt_label` for truthful
+        // prompt provenance in the dictation Metadata. Substitution
+        // required for the __PROMPT_NORMAL_SMALL_V2_BODY__ token.
+        let prepared = substitute_prompt_bodies(MIGRATION_028);
+        conn.execute_batch(&prepared)?;
+    }
     Ok(())
 }
 
@@ -411,7 +427,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "27");
+        assert_eq!(v, "28");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -430,7 +446,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "27");
+        assert_eq!(v, "28");
     }
 
     /// Migration 024 (mb-geds / ADR 0050 KG Phase 1B Chunk 2) ships
@@ -763,7 +779,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v, "27");
+        assert_eq!(v, "28");
 
         // The drift session row (id=42) is intentionally PRESERVED.
         // Sessions are user-meaningful raw data (Principle 1); only
@@ -828,7 +844,7 @@ mod tests {
         apply_all(&conn).unwrap();
 
         // After the full apply_all run schema_version is at the
-        // current latest (27). This test exercises migration 022's
+        // current latest (28). This test exercises migration 022's
         // invariant (modes.model_id untouched, below); the version
         // assertion just confirms the DB is fully migrated. Bump
         // alongside `apply_all_brings_fresh_db_to_latest_version`
@@ -841,7 +857,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v, "27");
+        assert_eq!(v, "28");
 
         // Migration 022 must not have moved any modes.model_id. The
         // three tone modes should still all be on qwen2.5:7b-instruct-
@@ -1008,6 +1024,96 @@ mod tests {
         assert_eq!(
             normal_latest_version, 5,
             "migration 027 must not bump `normal`'s latest version chain"
+        );
+    }
+
+    /// Migration 028 (ADR 0065 v2) ships normal_small v2 (content
+    /// fidelity + no-preamble hardening) and adds the
+    /// `sessions.effective_prompt_label` provenance column. v1 stays
+    /// addressable; v2 becomes the latest; `normal` is untouched.
+    #[test]
+    fn migration_028_ships_normal_small_v2_and_prompt_label_column() {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        apply_all(&conn).unwrap();
+
+        // normal_small now has a v2, and it is the latest.
+        let small_latest: i64 = conn
+            .query_row(
+                "SELECT MAX(version) FROM prompts WHERE mode_slug='normal_small'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(small_latest, 2, "normal_small latest must be v2 after 028");
+
+        // v1 stays addressable for historical session rows (append-only).
+        let v1_present: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM prompts WHERE mode_slug='normal_small' AND version=1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(v1_present, 1, "normal_small v1 must remain addressable");
+
+        // v2 body carries the new load-bearing rules.
+        let body: String = conn
+            .query_row(
+                "SELECT body FROM prompts WHERE mode_slug='normal_small' AND version=2",
+                [],
+                |r| r.get(0),
+            )
+            .expect("normal_small v2 prompt row should exist after migration 028");
+        let lc = body.to_lowercase();
+        assert!(
+            lc.contains("content fidelity") || lc.contains("preserve everything"),
+            "normal_small v2 must make content fidelity the top rule"
+        );
+        assert!(
+            lc.contains("here's your cleaned transcript") || lc.contains("output only the cleaned"),
+            "normal_small v2 must carry the explicit no-preamble rule"
+        );
+        // Guardrail canary sentinels must still be present so the
+        // output example-leak guard keeps working against v2.
+        assert!(
+            body.contains("example input number three"),
+            "normal_small v2 must keep the run-on sentinel the guardrail watches for"
+        );
+
+        // The new provenance column exists and is nullable with no
+        // default (NULL = no LLM prompt resolved / historical row).
+        let mut stmt = conn.prepare("PRAGMA table_info(sessions)").unwrap();
+        let col = stmt
+            .query_map([], |row| {
+                let name: String = row.get(1)?;
+                let ty: String = row.get(2)?;
+                let notnull: i64 = row.get(3)?;
+                let dflt: Option<String> = row.get(4)?;
+                Ok((name, ty, notnull, dflt))
+            })
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .find(|(n, _, _, _)| n == "effective_prompt_label")
+            .expect("effective_prompt_label column should exist after migration 028");
+        assert_eq!(col.1, "TEXT");
+        assert_eq!(col.2, 0, "effective_prompt_label must be nullable");
+        assert!(
+            col.3.is_none(),
+            "effective_prompt_label must have no default"
+        );
+
+        // `normal` tone chain stays at v5 — byte-identical guarantee.
+        let normal_latest: i64 = conn
+            .query_row(
+                "SELECT MAX(version) FROM prompts WHERE mode_slug='normal'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            normal_latest, 5,
+            "migration 028 must not bump `normal`'s latest version chain"
         );
     }
 

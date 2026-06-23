@@ -1228,6 +1228,14 @@ impl DictationOrchestrator {
         if let Err(e) = transcripts::insert_cleaned(&conn, id, p.cleaned_text, p.cleanup_model) {
             tracing::warn!(error = ?e, session_id = id, "persist cleaned transcript failed");
         }
+        // ADR 0065 v2 — stamp the prompt that ACTUALLY ran (e.g.
+        // `normal_small v2` on a downsized Mac) so the Metadata stops
+        // inferring it from the mode's canonical prompt_id (normal@v5).
+        if let Some(label) = self.cleaner.prompt_label() {
+            if let Err(e) = sessions::set_effective_prompt_label(&conn, id, &label) {
+                tracing::warn!(error = ?e, session_id = id, "persist effective_prompt_label failed");
+            }
+        }
         if let Some(injected) = p.injected_text {
             if let Err(e) = transcripts::insert_final(&conn, id, injected, Some(p.cleanup_model)) {
                 tracing::warn!(error = ?e, session_id = id, "persist final transcript failed");

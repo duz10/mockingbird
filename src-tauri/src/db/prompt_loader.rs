@@ -25,6 +25,8 @@ const PROMPT_NORMAL_V5: &str = include_str!("../cleanup/prompts/normal_v5.md");
 const PROMPT_NORMAL_V6_ADDITIVE: &str = include_str!("../cleanup/prompts/normal_v6_additive.md");
 // ADR 0065 — tier-gated small-model Normal variant (macOS downsize seam).
 const PROMPT_NORMAL_SMALL: &str = include_str!("../cleanup/prompts/normal_small.md");
+// ADR 0065 v2 — content-fidelity + no-preamble hardening (migration 028).
+const PROMPT_NORMAL_SMALL_V2: &str = include_str!("../cleanup/prompts/normal_small_v2.md");
 const PROMPT_VERBOSE: &str = include_str!("../cleanup/prompts/verbose.md");
 const PROMPT_FRAGMENT: &str = include_str!("../cleanup/prompts/fragment.md");
 const PROMPT_REWRITE: &str = include_str!("../cleanup/prompts/rewrite.md");
@@ -55,6 +57,10 @@ pub fn substitute_prompt_bodies(sql: &str) -> String {
         .replace(
             "__PROMPT_NORMAL_SMALL_BODY__",
             &sql_escape(PROMPT_NORMAL_SMALL),
+        )
+        .replace(
+            "__PROMPT_NORMAL_SMALL_V2_BODY__",
+            &sql_escape(PROMPT_NORMAL_SMALL_V2),
         )
         .replace("__PROMPT_CASUAL_V1_BODY__", &sql_escape(PROMPT_CASUAL_V1))
         .replace("__PROMPT_CASUAL_V2_BODY__", &sql_escape(PROMPT_CASUAL_V2))

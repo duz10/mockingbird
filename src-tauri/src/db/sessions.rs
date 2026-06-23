@@ -424,6 +424,25 @@ pub fn update_processing_complete(
     Ok(())
 }
 
+/// ADR 0065 v2 -- record the prompt (slug + version) the cleaner
+/// ACTUALLY resolved for this session, e.g. `"normal_small v2"`.
+///
+/// Stamped right after the cleaned transcript is persisted, from
+/// [`crate::cleanup::Cleaner::prompt_label`]. The dictation Metadata
+/// reads this in preference to the mode's canonical `prompt_id` version
+/// so "Prompt: vN" reports the prompt that genuinely ran -- which on
+/// the macOS RAM-aware downsize path is `normal_small`, not the
+/// normal@v5 that `prompt_id` still points at. NULL on rows where no
+/// LLM prompt was resolved (level=None/Light, skip-short-utterance);
+/// the Metadata falls back to the canonical version there.
+pub fn set_effective_prompt_label(conn: &Connection, id: i64, label: &str) -> AppResult<()> {
+    conn.execute(
+        "UPDATE sessions SET effective_prompt_label = ?1 WHERE id = ?2",
+        params![label, id],
+    )?;
+    Ok(())
+}
+
 /// mb-v2fa / ADR 0047 §Wave 2.5 -- set `edit_free_within_5min = 1`
 /// on a session that just got injected successfully. The orchestrator
 /// calls this right after `update_processing_complete` when

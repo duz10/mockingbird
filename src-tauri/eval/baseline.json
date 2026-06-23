@@ -579,9 +579,9 @@
       "category": "grounding_regression",
       "length": "medium",
       "raw": "testing in-app dictation i want to um buy some groceries um i need i need these three things bananas eggs shampoo",
-      "intent": "ADR 0065 grounding regression: the user's actual 8GB-Mac grocery dictation. The weak 3B leaked normal@v5's 'the meeting is at 3 PM tomorrow and we should bring the slides' few-shot example into this output. must_preserve guards the real groceries; must_not_contain guards against the leaked example. normal@v5 on the 3B FAILS grounding (proves the check works); normal_small on the 3B must PASS both.",
-      "must_preserve": ["bananas", "eggs", "shampoo"],
-      "must_not_contain": ["3 PM tomorrow", "bring the slides", "keyboard supplies", "naughty", "example input number three"],
+      "intent": "ADR 0065 v2 grounding+fidelity regression: the user's actual 8GB-Mac grocery dictation. Two real failures on the 3B: (a) it added a 'Here's your cleaned transcript:' preamble, and (b) it DROPPED the opening 'testing in-app dictation … buy some groceries' sentences, summarizing to just the list. must_preserve now covers the FULL spoken content (not just the groceries) so any dropped sentence FAILS; must_not_contain guards against both the old leaked example AND the new meta-preambles. normal_small@v2 on the 3B must PASS both. (Preamble phrases are apostrophe-free because the harness normaliser strips straight ' but not the curly ’ an LLM emits.)",
+      "must_preserve": ["testing in-app dictation", "buy some groceries", "these three things", "bananas", "eggs", "shampoo"],
+      "must_not_contain": ["3 PM tomorrow", "bring the slides", "keyboard supplies", "naughty", "example input number three", "cleaned transcript", "here is the cleaned", "the cleaned text", "cleaned version", "here is your cleaned"],
       "mode_hints": {"casual": "inline: bananas, eggs, and shampoo", "normal": "lead-in + bulleted list of the three groceries; NO leaked example sentence", "formal": "lead-in + numbered list"}
     }
   ]
