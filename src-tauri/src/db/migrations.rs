@@ -148,6 +148,15 @@ const MIGRATION_027: &str = include_str!("migrations/027_prompt_normal_small.sql
 // normal_small, so it stays byte-identical (normal@v5 untouched).
 const MIGRATION_028: &str = include_str!("migrations/028_normal_small_v2_and_prompt_label.sql");
 
+// ADR 0066: per-mode user model-override layer. Additive CREATE TABLE
+// `mode_model_overrides` (mode_slug PK + model_id + created_at). Holds an
+// optional user-pinned cleanup model per mode, kept separate from the
+// immutable `modes` table so "Auto" (no row) == today's behaviour on
+// every platform. Written only by the isMac-gated Modes control; read at
+// dictation time behind `#[cfg(target_os = "macos")]`, so Windows stays
+// byte-identical (table empty, no read).
+const MIGRATION_029: &str = include_str!("migrations/029_mode_model_overrides.sql");
+
 /// Apply every migration with a version strictly greater than the
 /// current `schema_version`. Idempotent — returns Ok early if up-to-date.
 ///
@@ -369,6 +378,14 @@ pub fn apply_all(conn: &Connection) -> AppResult<()> {
         let prepared = substitute_prompt_bodies(MIGRATION_028);
         conn.execute_batch(&prepared)?;
     }
+    if current < 29 {
+        // ADR 0066: per-mode user model-override side table. Additive
+        // CREATE TABLE only; no existing table touched, no triggers,
+        // no prompt bodies. Substituter pass for the leftover-token
+        // guard.
+        let prepared = substitute_prompt_bodies(MIGRATION_029);
+        conn.execute_batch(&prepared)?;
+    }
     Ok(())
 }
 
@@ -427,7 +444,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "28");
+        assert_eq!(v, "29");
     }
 
     /// Second `apply_all` call against a fully-migrated DB is a no-op.
@@ -446,7 +463,7 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read schema_version");
-        assert_eq!(v, "28");
+        assert_eq!(v, "29");
     }
 
     /// Migration 024 (mb-geds / ADR 0050 KG Phase 1B Chunk 2) ships
@@ -779,7 +796,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v, "28");
+        assert_eq!(v, "29");
 
         // The drift session row (id=42) is intentionally PRESERVED.
         // Sessions are user-meaningful raw data (Principle 1); only
@@ -857,7 +874,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v, "28");
+        assert_eq!(v, "29");
 
         // Migration 022 must not have moved any modes.model_id. The
         // three tone modes should still all be on qwen2.5:7b-instruct-

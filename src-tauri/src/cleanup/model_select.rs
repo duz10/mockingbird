@@ -99,6 +99,31 @@ pub fn select_model(
     best_installed_under_cap(installed, cap).unwrap_or_else(|| mode_default.to_string())
 }
 
+/// Resolve the effective cleanup model, honouring an optional user
+/// **pin** (per-mode model override, ADR 0066) ahead of the RAM-aware
+/// auto-selection.
+///
+/// * `override_model = Some(id)` — the user explicitly pinned a model in
+///   the Modes screen. Return it verbatim, with **no** RAM-aware
+///   substitution: an explicit choice beats the heuristic. (`installed`
+///   / `budget` are deliberately ignored — we never silently swap a
+///   pinned model, even if it looks too big for the box; the runtime
+///   passthrough net still protects against a model that won't load.)
+/// * `override_model = None` — "Auto": fall through to [`select_model`],
+///   which on a `None` budget (every non-macOS target) is the identity.
+///   **This is the unchanged, byte-identical default path.**
+pub fn select_effective_model(
+    budget: Option<MemoryBudget>,
+    mode_default: &str,
+    installed: &[String],
+    override_model: Option<&str>,
+) -> String {
+    match override_model {
+        Some(pinned) => pinned.to_string(),
+        None => select_model(budget, mode_default, installed),
+    }
+}
+
 /// Map a physical-memory budget to a parameter-count ceiling (billions).
 /// `>= 16 GiB` → no cap (parity allowed); otherwise the small-model tier.
 fn tier_cap_billions(physical_bytes: u64) -> f32 {
@@ -227,7 +252,18 @@ pub fn parse_memsize(stdout: &str) -> Option<u64> {
 pub fn resolve_effective_model(
     provider: &crate::cleanup::OllamaProvider,
     mode_default: String,
+    override_model: Option<String>,
 ) -> String {
+    // Auto path (`override_model == None`) is exactly the pre-ADR-0066
+    // behaviour. A pin short-circuits the RAM-aware heuristic.
+    if let Some(pinned) = override_model {
+        tracing::info!(
+            parity_model = %mode_default,
+            pinned_model = %pinned,
+            "per-mode model override (ADR 0066): using user-pinned model, no RAM-aware substitution"
+        );
+        return pinned;
+    }
     let installed = provider.list_models().unwrap_or_default();
     let budget = detect_memory_budget();
     let effective = select_model(budget, &mode_default, &installed);
@@ -362,6 +398,50 @@ mod tests {
         });
         assert_eq!(
             select_model(budget, "qwen2.5:7b-instruct-q4_K_M", &[]),
+            "qwen2.5:7b-instruct-q4_K_M"
+        );
+    }
+
+    // ── select_effective_model (ADR 0066 override layer) ──────────────
+
+    #[test]
+    fn override_pin_beats_ram_aware_substitution() {
+        // 8 GB box that would normally downgrade 7B → 3B, but the user
+        // pinned the 7B explicitly → honour the pin, no substitution.
+        let budget = Some(MemoryBudget {
+            physical_bytes: 8 * 1024 * 1024 * 1024,
+        });
+        let inst = installed(&["qwen2.5:7b-instruct-q4_K_M", "qwen2.5:3b-instruct-q4_K_M"]);
+        assert_eq!(
+            select_effective_model(
+                budget,
+                "qwen2.5:7b-instruct-q4_K_M",
+                &inst,
+                Some("qwen2.5:7b-instruct-q4_K_M"),
+            ),
+            "qwen2.5:7b-instruct-q4_K_M"
+        );
+    }
+
+    #[test]
+    fn no_override_is_ram_aware_auto() {
+        // "Auto" (None) on an 8 GB box behaves exactly like select_model.
+        let budget = Some(MemoryBudget {
+            physical_bytes: 8 * 1024 * 1024 * 1024,
+        });
+        let inst = installed(&["qwen2.5:7b-instruct-q4_K_M", "qwen2.5:3b-instruct-q4_K_M"]);
+        assert_eq!(
+            select_effective_model(budget, "qwen2.5:7b-instruct-q4_K_M", &inst, None),
+            select_model(budget, "qwen2.5:7b-instruct-q4_K_M", &inst),
+        );
+    }
+
+    #[test]
+    fn no_override_no_budget_is_windows_byte_identical() {
+        // The load-bearing guarantee: Auto + no budget = parity default.
+        let inst = installed(&["qwen2.5:3b-instruct-q4_K_M"]);
+        assert_eq!(
+            select_effective_model(None, "qwen2.5:7b-instruct-q4_K_M", &inst, None),
             "qwen2.5:7b-instruct-q4_K_M"
         );
     }

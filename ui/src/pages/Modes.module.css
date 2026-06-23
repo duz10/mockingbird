@@ -232,6 +232,59 @@
   border-color: var(--mode-normal);
 }
 
+/* ADR 0066 — macOS effective-model control + low-RAM warning. */
+.effectiveHint {
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+}
+.effectiveRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+.revertBtn {
+  background: transparent;
+  color: var(--mode-normal);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  padding: var(--s-1) var(--s-2);
+  font: var(--type-xs);
+  font-family: inherit;
+  cursor: pointer;
+}
+.revertBtn:hover {
+  border-color: var(--mode-normal);
+}
+.revertBtn:focus-visible {
+  outline: 2px solid var(--mode-normal);
+  outline-offset: 1px;
+}
+.ollamaNote {
+  font: var(--type-xs);
+  color: var(--status-warn, var(--on-surf-muted));
+}
+.ramWarning {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--status-warn, var(--mode-normal));
+  background: var(--surf-1);
+  border-radius: var(--r-2);
+  padding: var(--s-3);
+  margin-bottom: var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.ramWarningTitle {
+  font: var(--type-sm);
+  color: var(--on-surf);
+}
+.ramWarningBody {
+  font: var(--type-xs);
+  color: var(--on-surf-muted);
+  margin: 0;
+}
+
 .saveRow {
   display: flex;
   justify-content: flex-end;

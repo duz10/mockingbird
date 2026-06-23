@@ -24,6 +24,8 @@ pub mod kg;
 pub mod learning;
 pub mod legacy;
 pub mod meetings;
+// ADR 0066 — per-mode user model-override layer (macOS effective-model picker).
+pub mod model_override;
 pub mod modes;
 // mb-mac-v1.4.6 (ADR 0061) — macOS permissions onboarding IPC.
 pub mod permissions;
@@ -95,6 +97,10 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         modes::update_mode,
         active_mode::get_active_mode,
         active_mode::set_active_mode,
+        // ADR 0066 — per-mode effective-model picker + override layer (macOS).
+        model_override::get_effective_model,
+        model_override::set_mode_model_override,
+        model_override::clear_mode_model_override,
         // Settings (UI panel)
         settings::get_settings,
         settings::update_setting,

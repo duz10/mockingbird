@@ -33,6 +33,7 @@ import type {
   LlmPassPromptArg,
   LlmPassResult,
   MeetingSettingsSnapshot,
+  EffectiveModel,
   ModeRow,
   PermissionKey,
   PermissionStatuses,
@@ -178,6 +179,22 @@ export const api = {
     invoke<void>("update_mode", { slug, patch }),
   get_active_mode: () => invoke<ActiveMode>("get_active_mode"),
   set_active_mode: (slug: string) => invoke<void>("set_active_mode", { slug }),
+
+  /**
+   * ADR 0066 — the effective cleanup model for a mode (what will
+   * ACTUALLY run, after the macOS RAM-aware substitution / user pin),
+   * for the macOS Modes "Model" control. Cross-platform safe: on
+   * non-macOS `budgetGb` is null and `effective === configured`.
+   */
+  get_effective_model: (slug: string) =>
+    invoke<EffectiveModel>("get_effective_model", { slug }),
+  /** ADR 0066 — pin a specific cleanup model for a mode (bypasses the
+   *  RAM-aware substitution). */
+  set_mode_model_override: (slug: string, modelId: string) =>
+    invoke<void>("set_mode_model_override", { slug, modelId }),
+  /** ADR 0066 — clear a mode's pin → revert to Auto (RAM-aware). */
+  clear_mode_model_override: (slug: string) =>
+    invoke<void>("clear_mode_model_override", { slug }),
 
   // Settings
   get_settings: () => invoke<SettingsSnapshot>("get_settings"),
@@ -702,6 +719,20 @@ function fixtureFor<T>(command: string, args?: object): T {
       // Preview/tests run in a browser — pretend macOS so the
       // permissions tab is exercisable in `npm run preview`.
       return fixture(command, "macos") as T;
+    case "get_effective_model":
+      // ADR 0066 — mirror the 8 GB-Mac canary: configured 7B, but the
+      // RAM-aware layer downsizes to the 3B; no user pin ("Auto").
+      return fixture(command, {
+        configured: "qwen2.5:7b-instruct-q4_K_M",
+        effective: "qwen2.5:3b-instruct-q4_K_M",
+        overrideModel: null,
+        budgetGb: 8,
+        ollamaReachable: true,
+      } as EffectiveModel) as T;
+    case "set_mode_model_override":
+    case "clear_mode_model_override":
+      // Write commands — nothing to fixture in browser preview.
+      return fixture(command, null) as T;
     case "mac_permission_statuses":
       return fixture(command, {
         microphone: "granted",

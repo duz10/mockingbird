@@ -83,8 +83,16 @@ pub(super) fn make_default_cleaner(
             #[cfg(target_os = "macos")]
             let (model_id, prompt_override) = {
                 let parity_model = model_id.clone();
-                let effective =
-                    crate::cleanup::model_select::resolve_effective_model(&provider, model_id);
+                // ADR 0066: a per-mode user pin (Modes screen) short-
+                // circuits the RAM-aware heuristic. `None` = "Auto" =
+                // the unchanged pre-0066 behaviour. Read behind the
+                // macOS cfg only, so Windows never touches this table.
+                let override_model = read_mode_model_override(db, &config.mode_slug);
+                let effective = crate::cleanup::model_select::resolve_effective_model(
+                    &provider,
+                    model_id,
+                    override_model,
+                );
                 let prompt_override = if effective != parity_model && config.mode_slug == "normal" {
                     tracing::info!(
                         parity_model = %parity_model,
@@ -180,4 +188,27 @@ fn spawn_ollama_warmup(model_id: String, temperature: f32) {
             }
         })
         .ok(); // If we can't even spawn a thread, the app has bigger problems.
+}
+
+/// Read the user's per-mode model pin (ADR 0066), if any.
+///
+/// `Some(model_id)` = the user explicitly pinned a model for this mode in
+/// the Modes screen → use it verbatim. `None` = "Auto" (no row) → the
+/// caller falls through to the RAM-aware auto-selection, i.e. the
+/// unchanged pre-0066 behaviour.
+///
+/// macOS-only: the table is written exclusively by the isMac-gated Modes
+/// control, and this read sits behind `#[cfg(target_os = "macos")]`, so
+/// the Windows cleanup path never queries it (byte-identical guarantee).
+/// Any failure (poisoned mutex, missing table on a partially-migrated DB,
+/// query error) collapses to `None` → Auto, the safe default.
+#[cfg(target_os = "macos")]
+fn read_mode_model_override(db: &Arc<Mutex<Connection>>, mode_slug: &str) -> Option<String> {
+    let conn = db.lock().ok()?;
+    conn.query_row(
+        "SELECT model_id FROM mode_model_overrides WHERE mode_slug = ?1",
+        [mode_slug],
+        |r| r.get::<_, String>(0),
+    )
+    .ok()
 }

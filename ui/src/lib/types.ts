@@ -168,6 +168,24 @@ export interface ModeRow {
 }
 
 /**
+ * The effective cleanup model for a mode (ADR 0066). Powers the macOS
+ * Modes "Model" control so it shows what will ACTUALLY run, not the
+ * (possibly RAM-substituted) configured parity default.
+ *
+ * `overrideModel === null` means "Auto (RAM-aware)" — `effective` is the
+ * heuristic pick; otherwise `effective === overrideModel` (a user pin).
+ * `budgetGb` is the detected unified-memory budget in whole GiB on macOS,
+ * `null` on every other platform (where Auto is a no-op).
+ */
+export interface EffectiveModel {
+  configured: string;
+  effective: string;
+  overrideModel: string | null;
+  budgetGb: number | null;
+  ollamaReachable: boolean;
+}
+
+/**
  * Currently-selected transcription mode. The orchestrator resolves
  * this fresh at the start of every dictation, so `set_active_mode`
  * takes effect on the NEXT Right-Alt hold without any restart.
