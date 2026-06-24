@@ -74,14 +74,14 @@ pub(super) fn make_default_cleaner(
             // and the Windows cleanup path is byte-identical (normal@v5 is
             // never re-evaluated).
             #[cfg(not(target_os = "macos"))]
-            let prompt_override: Option<String> = None;
+            let (prompt_override, small_model_fidelity): (Option<String>, bool) = (None, false);
             // On macOS the selector swaps in a model that fits unified
             // memory (e.g. 7B → 3B on an 8 GB box). When it actually
             // downsizes AND the active mode is Normal, also swap Normal's
             // prompt for the hardened `normal_small` variant — the weak 3B
             // leaks normal@v5's few-shot examples otherwise (ADR 0065).
             #[cfg(target_os = "macos")]
-            let (model_id, prompt_override) = {
+            let (model_id, prompt_override, small_model_fidelity) = {
                 let parity_model = model_id.clone();
                 // ADR 0066: a per-mode user pin (Modes screen) short-
                 // circuits the RAM-aware heuristic. `None` = "Auto" =
@@ -103,7 +103,13 @@ pub(super) fn make_default_cleaner(
                 } else {
                     None
                 };
-                (effective, prompt_override)
+                // Phase 5 / mb-l97 — the content-coverage fidelity
+                // fallback applies whenever the effective model is a
+                // DOWNSIZE off parity (auto-select on a small Mac OR a
+                // user pin to a smaller model), for ANY mode — not just
+                // Normal's prompt swap above.
+                let small_model_fidelity = effective != parity_model;
+                (effective, prompt_override, small_model_fidelity)
             };
 
             tracing::info!(
@@ -131,7 +137,8 @@ pub(super) fn make_default_cleaner(
                     temperature as f32,
                     max_tokens as u32,
                 )
-                .with_prompt_mode_override(prompt_override),
+                .with_prompt_mode_override(prompt_override)
+                .with_small_model_fidelity(small_model_fidelity),
             )
         }
         Err(e) => {

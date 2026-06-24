@@ -414,6 +414,15 @@ path = "src/dev_bins/mac_cleanup_ollama_probe.rs"
 name = "mac_ram_aware_select_probe"
 path = "src/dev_bins/mac_ram_aware_select_probe.rs"
 
+# macOS port Phase 5 (mb-l97) — content-coverage fidelity fallback live
+# validation. Constructs the real LlmCleaner on the 8 GB downsize wiring
+# (3B + normal_small + small_model_fidelity) and proves the user's
+# problem transcript never drops a load-bearing sentence. Needs
+# `ollama serve` with qwen2.5:3b pulled.
+[[example]]
+name = "mac_fidelity_fallback_probe"
+path = "src/dev_bins/mac_fidelity_fallback_probe.rs"
+
 [[example]]
 name = "mode_eval"
 path = "src/dev_bins/mode_eval/main.rs"

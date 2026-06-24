@@ -323,6 +323,110 @@ const NORMAL_SMALL_EXAMPLE_SENTINELS: &[&str] = &[
 /// catches DROPPED content, this one catches ADDED content. ADR 0065.
 const EXAMPLE_LEAK_GUARD_SUFFIX: &str = "-example-leak-guard";
 
+/// Provenance suffix stamped onto `model_used` when the Phase 5
+/// content-coverage fidelity fallback fired (mb-l97): the small-model
+/// LLM output dropped a whole spoken sentence the deterministic
+/// preprocessor had preserved, so we returned the faithful preprocessor
+/// text instead. Sibling of [`SHRINK_FALLBACK_SUFFIX`] — a stricter,
+/// per-sentence guard that catches the one-sentence drops the loose
+/// length-ratio guard missed.
+const COVERAGE_FALLBACK_SUFFIX: &str = "-coverage-fallback";
+
+/// How many CONSECUTIVE salient (content) words must vanish from the LLM
+/// output — relative to their order in the preprocessor output — before
+/// we call it a dropped phrase/sentence and fall back. A run of 3 is the
+/// signal of a genuinely lost clause ("testing in-app dictation",
+/// "I want to buy some groceries" are each 3 salient words); isolated
+/// one- or two-word misses are treated as legitimate rephrase/dedup and
+/// never trip the guard. Deliberately a CONTIGUOUS-run test rather than a
+/// whole-text ratio: the preprocessor emits a single run-on block (it
+/// only adds terminal punctuation, it does NOT segment sentences), so a
+/// ratio over the whole transcript stays high even when one clause is
+/// dropped — exactly the blind spot that let session 12's opening slip
+/// past the loose shrink guard (live-validated 2026-06-23, mb-l97).
+const COVERAGE_MIN_DROPPED_RUN: usize = 3;
+
+/// Function words / fillers that carry no content signal. Excluded from
+/// the salient-word set so a legitimate rephrase ("I want to buy" → "I'd
+/// like to get") isn't punished for swapping connective tissue — only a
+/// genuine loss of nouns/verbs/proper-nouns can trip the guard. Kept
+/// deliberately small + lowercase; matched after [`coverage_normalise`].
+const COVERAGE_STOPWORDS: &[&str] = &[
+    "a", "an", "the", "i", "im", "ive", "id", "you", "we", "they", "it", "he", "she", "me", "my",
+    "your", "our", "their", "to", "of", "in", "on", "at", "by", "for", "and", "or", "but", "so",
+    "is", "am", "are", "was", "were", "be", "been", "being", "this", "that", "these", "those",
+    "some", "any", "do", "does", "did", "have", "has", "had", "will", "would", "can", "could",
+    "should", "just", "um", "uh", "like", "as", "with", "from", "into", "up", "out", "if", "then",
+    "there", "here", "now",
+];
+
+/// Lowercase, drop punctuation, convert hyphens to spaces. Mirrors the
+/// `mode_eval` harness's `normalise` so the runtime guard and the
+/// offline eval agree on what "the same word" means.
+fn coverage_normalise(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .map(|c| if c == '-' { ' ' } else { c })
+        .filter(|c| !"*_`#[]()<>\"'.,;:!?".contains(*c))
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Content-coverage fidelity check (Phase 5, mb-l97). The small-model
+/// path's last-resort guarantee that the LLM never silently drops a whole
+/// spoken clause.
+///
+/// Walks the DETERMINISTIC preprocessor output's salient words IN ORDER
+/// and asks: is there a run of >= [`COVERAGE_MIN_DROPPED_RUN`] CONSECUTIVE
+/// salient words that are entirely absent from the LLM output? A dropped
+/// clause leaves exactly that fingerprint (its content words vanish as a
+/// contiguous block); a legitimate rephrase that swaps connective tissue
+/// but keeps the nouns/verbs does not. Returns the dropped phrase (joined
+/// for logging) or `None` when no such run exists.
+///
+/// Conservative by construction:
+///   * Grounds on the PREPROCESSOR output (not raw STT), so the filler
+///     removal + stutter/self-correction dedup the preprocessor already
+///     did are never counted as "dropped content" — only the LLM stage is
+///     judged.
+///   * Only salient words count (function words / fillers excluded), so a
+///     rephrase that keeps the content words passes cleanly.
+///   * Requires a CONTIGUOUS run, not a whole-text ratio — the
+///     preprocessor emits one run-on block (no sentence segmentation), so
+///     a ratio stays high even when a single clause is dropped. This was
+///     live-validated against the 3B: the ratio/per-sentence approach
+///     missed a dropped "testing in-app dictation"; the contiguous-run
+///     test catches it (mb-l97).
+fn coverage_drop(preprocessor_text: &str, llm_text: &str) -> Option<String> {
+    let llm_norm = coverage_normalise(llm_text);
+    let llm_words: std::collections::HashSet<&str> = llm_norm.split_whitespace().collect();
+
+    let pre_norm = coverage_normalise(preprocessor_text);
+    // Ordered, NOT de-duplicated: positional adjacency is the signal.
+    let pre_seq: Vec<&str> = pre_norm
+        .split_whitespace()
+        .filter(|w| w.len() >= 2 && !COVERAGE_STOPWORDS.contains(w))
+        .collect();
+
+    let mut run: Vec<&str> = Vec::new();
+    for w in pre_seq {
+        if llm_words.contains(w) {
+            if run.len() >= COVERAGE_MIN_DROPPED_RUN {
+                return Some(run.join(" "));
+            }
+            run.clear();
+        } else {
+            run.push(w);
+        }
+    }
+    if run.len() >= COVERAGE_MIN_DROPPED_RUN {
+        return Some(run.join(" "));
+    }
+    None
+}
+
 /// Cleaner backed by a real LLM provider.
 pub struct LlmCleaner {
     provider: Box<dyn CleanupProvider>,
@@ -354,6 +458,18 @@ pub struct LlmCleaner {
     /// re-evaluated. Also gates the example-leak guard below — that
     /// new logic runs ONLY when this is `Some`.
     prompt_mode_override: Option<String>,
+    /// Whether the dictation thread is running a DOWNSIZED model on this
+    /// machine — the effective model differs from the mode's parity
+    /// default (RAM-aware auto-downsize on a small Mac, or a user pin to
+    /// a smaller model). Gates the Phase 5 content-coverage fidelity
+    /// fallback (mb-l97): on the small-model path we never let the LLM
+    /// silently drop a whole spoken sentence — we fall back to the
+    /// faithful preprocessor text instead. Set ONLY at the macOS
+    /// effective-model seam in `dictation/runtime_cleaner.rs`; `false`
+    /// everywhere else (every non-macOS target + the 7B parity path), so
+    /// the coverage logic never runs there and the Windows / 7B cleanup
+    /// path is byte-identical.
+    small_model_fidelity: bool,
 }
 
 impl LlmCleaner {
@@ -380,6 +496,7 @@ impl LlmCleaner {
             last_prompt_label: Mutex::new(None),
             preprocessor: Preprocessor::new(),
             prompt_mode_override: None,
+            small_model_fidelity: false,
         }
     }
 
@@ -392,6 +509,16 @@ impl LlmCleaner {
     /// build does, keeping the Windows path byte-identical.
     pub fn with_prompt_mode_override(mut self, override_slug: Option<String>) -> Self {
         self.prompt_mode_override = override_slug;
+        self
+    }
+
+    /// Builder-style setter for the small-model fidelity flag (Phase 5,
+    /// mb-l97). `true` enables the content-coverage fallback below;
+    /// `false` (the default) is a no-op that leaves the cleanup path
+    /// exactly as it was — that is what the non-macOS build and the 7B
+    /// parity path do, keeping Windows / parity byte-identical.
+    pub fn with_small_model_fidelity(mut self, enabled: bool) -> Self {
+        self.small_model_fidelity = enabled;
         self
     }
 
@@ -736,6 +863,39 @@ impl LlmCleaner {
                     "example-leak guard: stripped a leaked few-shot example from output"
                 );
                 result.text = guarded;
+            }
+        }
+
+        // Phase 5 / mb-l97 — content-coverage fidelity fallback.
+        // Scoped to the small-model path (effective model downsized off
+        // parity, set at the macOS seam). The loose length-ratio guard
+        // below is blind to a SINGLE dropped sentence when the rest of
+        // the output is long enough to keep the word-count ratio above
+        // threshold (exactly how session 12's opening sentence slipped
+        // past). This per-sentence check catches that: if any
+        // substantial preprocessor sentence is largely absent from the
+        // LLM output, fall back to the faithful preprocessor text — the
+        // user's #1 rule (never drop content) wins over polish. Runs ONLY
+        // when `small_model_fidelity` is set, so the 7B / Windows path
+        // executes none of this and stays byte-identical.
+        if self.small_model_fidelity {
+            if let Some(dropped) = coverage_drop(&pre_text, &result.text) {
+                tracing::warn!(
+                    mode = mode_slug,
+                    prompt_slug,
+                    model = %result.model_used,
+                    dropped_sentence = %dropped,
+                    "content-coverage fallback (mb-l97): small-model output dropped a \
+                     spoken sentence; returning faithful preprocessor output"
+                );
+                let stamped = format!(
+                    "{}+{}{COVERAGE_FALLBACK_SUFFIX}",
+                    result.model_used, PREPROCESSOR_VERSION
+                );
+                if let Ok(mut slot) = self.last_model_used.lock() {
+                    *slot = stamped;
+                }
+                return Ok(pre_text);
             }
         }
 
@@ -1774,6 +1934,121 @@ mod tests {
         assert!(
             !model.contains("q5-opt-in"),
             "q5-opt-in suffix must be absent when substitution didn't fire; got: {model}"
+        );
+    }
+
+    // -------- Phase 5 / mb-l97 — content-coverage fidelity fallback. -----
+
+    #[test]
+    fn coverage_normalise_strips_punct_and_hyphens() {
+        assert_eq!(coverage_normalise("In-app  Dictation."), "in app dictation");
+    }
+
+    #[test]
+    fn coverage_drop_flags_a_contiguous_dropped_clause() {
+        // The preprocessor emits ONE run-on block (it doesn't segment);
+        // the LLM dropped the opening clause entirely → its three salient
+        // words vanish as a contiguous run.
+        let pre =
+            "Testing in-app dictation I want to buy some groceries I need bananas eggs shampoo";
+        let llm = "I want to buy some groceries. I need bananas, eggs, shampoo.";
+        let dropped = coverage_drop(pre, llm).expect("should flag the dropped clause");
+        assert_eq!(dropped, "testing app dictation");
+    }
+
+    #[test]
+    fn coverage_drop_flags_dropped_middle_clause() {
+        let pre = "I want to buy some groceries I need bananas eggs shampoo";
+        // The grocery clause is gone; bananas/eggs/shampoo remain.
+        let llm = "I need bananas, eggs and shampoo.";
+        let dropped = coverage_drop(pre, llm).expect("should flag the dropped clause");
+        assert_eq!(dropped, "want buy groceries");
+    }
+
+    #[test]
+    fn coverage_drop_passes_when_content_preserved() {
+        let pre = "I want to buy some groceries I need bananas eggs shampoo";
+        // Reformatted as a list but every salient word survives.
+        let llm = "I want to buy some groceries. I need:\n- bananas\n- eggs\n- shampoo";
+        assert!(coverage_drop(pre, llm).is_none());
+    }
+
+    #[test]
+    fn coverage_drop_tolerates_scattered_one_and_two_word_misses() {
+        // A rephrase that drops a couple of NON-adjacent content words
+        // (here "really" and "big") must not trip — only a contiguous run
+        // of >= 3 missing salient words is a dropped clause.
+        let pre = "I really need to grab a big coffee before the long meeting";
+        let llm = "I need to grab coffee before the meeting";
+        assert!(coverage_drop(pre, llm).is_none());
+    }
+
+    #[test]
+    fn coverage_fallback_fires_on_small_model_path() {
+        let db = fresh_db();
+        // Isolate the coverage guard: the loose length-ratio guard would
+        // also catch a big drop, so turn it off to prove THIS guard
+        // fires; and the input is long enough that the short-utterance
+        // skip never engages.
+        disable_shrink_guard(&db);
+        // "period" cues give the preprocessor real sentence boundaries.
+        let raw = "i want to buy some groceries period i need bananas \
+                   eggs and shampoo period call the dentist tomorrow afternoon";
+        // The model drops the whole opening sentence.
+        let provider = ConfigurableStubCleanupProvider {
+            text_to_return: "I need bananas, eggs and shampoo. \
+                             Call the dentist tomorrow afternoon."
+                .into(),
+        };
+        let mut cleaner = LlmCleaner::new(
+            Box::new(provider),
+            db,
+            "qwen2.5:3b-instruct-q4_K_M".into(),
+            0.3,
+            256,
+        )
+        .with_small_model_fidelity(true);
+        let out = cleaner.clean(raw, "normal").unwrap();
+        assert!(
+            out.to_lowercase().contains("buy some groceries"),
+            "fallback must return the faithful preprocessor text; got: {out}"
+        );
+        let model = cleaner.model_name();
+        assert!(
+            model.contains("coverage-fallback"),
+            "model_name should record the coverage fallback; got: {model}"
+        );
+    }
+
+    #[test]
+    fn coverage_fallback_inert_off_small_model_path_byte_identical() {
+        // Same dropped-sentence output, but small_model_fidelity unset
+        // (the default — every non-macOS target + the 7B parity path).
+        // The guard must NOT run: the LLM output passes through verbatim.
+        let db = fresh_db();
+        disable_shrink_guard(&db);
+        let raw = "i want to buy some groceries period i need bananas \
+                   eggs and shampoo period call the dentist tomorrow afternoon";
+        let provider = ConfigurableStubCleanupProvider {
+            text_to_return: "I need bananas, eggs and shampoo. \
+                             Call the dentist tomorrow afternoon."
+                .into(),
+        };
+        let mut cleaner = LlmCleaner::new(
+            Box::new(provider),
+            db,
+            "qwen2.5:7b-instruct-q4_K_M".into(),
+            0.3,
+            256,
+        );
+        let out = cleaner.clean(raw, "normal").unwrap();
+        assert!(
+            !out.to_lowercase().contains("buy some groceries"),
+            "off the small-model path the LLM output must pass through; got: {out}"
+        );
+        assert!(
+            !cleaner.model_name().contains("coverage-fallback"),
+            "coverage fallback must not fire off the small-model path"
         );
     }
 }
