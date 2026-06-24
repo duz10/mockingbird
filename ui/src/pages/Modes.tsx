@@ -101,14 +101,16 @@ export function ModesPage() {
     void api.host_os().then((os) => setIsMac(os === "macos"));
   }, [modes.length, activeModeSlug, setModes, setActiveModeSlug]);
 
-  // macOS: fetch the effective model for every (non-deprecated)
-  // transcription mode once we know we're on a Mac and modes are loaded.
-  // Non-macOS skips this entirely — the legacy field needs no IPC.
+  // macOS: fetch the effective model for every (non-deprecated) mode —
+  // both transcription AND AI command modes (ADR 0066 Part A) — once we
+  // know we're on a Mac and modes are loaded. `get_effective_model` is
+  // generic by slug (the modes/override tables hold every mode), so the
+  // command modes get the same truthful Auto/RAM-aware picker. Non-macOS
+  // skips this entirely — the legacy field needs no IPC.
   useEffect(() => {
     if (!isMac || modes.length === 0) return;
     for (const m of modes) {
       if (DEPRECATED_SLUGS.has(m.slug)) continue;
-      if (!isTranscriptionSlug(m.slug)) continue;
       refreshEffective(m.slug);
     }
   }, [isMac, modes, refreshEffective]);
@@ -262,6 +264,9 @@ export function ModesPage() {
                   isActive={false}
                   justSaved={savedSlug === m.slug}
                   installedModels={installedModels}
+                  isMac={isMac}
+                  effective={effectiveModels[m.slug]}
+                  onOverrideChanged={() => refreshEffective(m.slug)}
                   onPatch={(patch) => void handlePatch(m.slug, patch)}
                   onSetActive={() => {
                     /* not applicable for command modes */
@@ -479,14 +484,15 @@ function ModeCard({
           </select>
         </div>
 
-        {isMac && isTranscription && effective ? (
+        {isMac && effective ? (
           /*
             macOS enhanced control (ADR 0066): a dropdown of installed
             models + "Auto (RAM-aware)" that shows the EFFECTIVE model
             (post-substitution) and supports a per-mode pin + revert. The
             modes-table model_id is NOT written on this path — the pin
             lives in the separate override table, keeping Auto = today's
-            behaviour. Non-macOS / command modes fall through to the
+            behaviour. Applies to BOTH transcription and AI command
+            modes on macOS (Part A). Non-macOS falls through to the
             legacy free-text field below (Windows byte-identical).
           */
           <MacModelControl
