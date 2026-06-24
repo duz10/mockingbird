@@ -186,6 +186,23 @@ export interface EffectiveModel {
 }
 
 /**
+ * The effective cleanup PROMPT for a mode (ADR 0067). Powers the macOS
+ * Modes prompt editor: shows the shipped default vs the user's custom
+ * override, with Save + Revert.
+ *
+ * `isOverridden` distinguishes a user-authored prompt (`effectiveBody`
+ * === the override) from the shipped default (`effectiveBody` ===
+ * `defaultBody`). `defaultBody` / `defaultVersion` are the immutable
+ * shipped prompt a Revert restores.
+ */
+export interface EffectivePrompt {
+  defaultBody: string;
+  defaultVersion: number;
+  effectiveBody: string;
+  isOverridden: boolean;
+}
+
+/**
  * Currently-selected transcription mode. The orchestrator resolves
  * this fresh at the start of every dictation, so `set_active_mode`
  * takes effect on the NEXT Right-Alt hold without any restart.

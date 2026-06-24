@@ -44,7 +44,7 @@ fn schema_version_is_current_after_apply() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(v, "29");
+    assert_eq!(v, "30");
 }
 
 #[test]
@@ -245,7 +245,7 @@ fn apply_all_is_idempotent() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(v, "29");
+    assert_eq!(v, "30");
 }
 
 /// Migration 011 ships the FTS5 mirror for meeting transcripts.

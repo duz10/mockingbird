@@ -29,6 +29,8 @@ pub mod model_override;
 pub mod modes;
 // mb-mac-v1.4.6 (ADR 0061) — macOS permissions onboarding IPC.
 pub mod permissions;
+// ADR 0067 — per-mode user PROMPT-override layer (macOS editable mode prompts).
+pub mod prompt_override;
 pub mod sessions;
 pub mod settings;
 pub mod system;
@@ -101,6 +103,10 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         model_override::get_effective_model,
         model_override::set_mode_model_override,
         model_override::clear_mode_model_override,
+        // ADR 0067 — per-mode editable LLM prompt + override layer (macOS).
+        prompt_override::get_effective_prompt,
+        prompt_override::set_mode_prompt_override,
+        prompt_override::clear_mode_prompt_override,
         // Settings (UI panel)
         settings::get_settings,
         settings::update_setting,

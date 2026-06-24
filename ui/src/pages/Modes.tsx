@@ -29,6 +29,7 @@ import { isTranscriptionSlug } from "../lib/types";
 import type { EffectiveModel, ModeRow } from "../lib/types";
 
 import { MacModelControl, MacRamWarning } from "./ModesMacModel";
+import { MacPromptEditor } from "./ModesMacPrompt";
 import styles from "./Modes.module.css";
 
 const SAVE_DEBOUNCE_MS = 400;
@@ -560,6 +561,14 @@ function ModeCard({
           />
         </div>
       </div>
+
+      {/*
+        macOS-only editable prompt (ADR 0067), dictation modes only. The
+        editor self-fetches its effective prompt; off-macOS it never
+        mounts → Windows byte-identical. Command modes are out of scope
+        for now (prompt editing is a dictation-tone power feature).
+      */}
+      {isMac && isTranscription ? <MacPromptEditor slug={mode.slug} /> : null}
 
       <div className={styles.saveRow}>
         {justSaved ? (

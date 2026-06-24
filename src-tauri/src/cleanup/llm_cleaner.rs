@@ -470,6 +470,15 @@ pub struct LlmCleaner {
     /// the coverage logic never runs there and the Windows / 7B cleanup
     /// path is byte-identical.
     small_model_fidelity: bool,
+    /// A user-authored cleanup prompt for this mode (ADR 0067). When
+    /// `Some(body)`, the High-level cleanup path uses this body VERBATIM
+    /// and SKIPS the small-model tier substitution — precedence is:
+    /// user prompt override > tier substitution (`normal_small`) > mode
+    /// default. Set ONLY at the macOS effective-model seam in
+    /// `dictation/runtime_cleaner.rs` (read from `mode_prompt_overrides`
+    /// behind `#[cfg(target_os = "macos")]`); `None` everywhere else, so
+    /// the 7B / Windows path is byte-identical.
+    user_prompt_override: Option<String>,
 }
 
 impl LlmCleaner {
@@ -497,6 +506,7 @@ impl LlmCleaner {
             preprocessor: Preprocessor::new(),
             prompt_mode_override: None,
             small_model_fidelity: false,
+            user_prompt_override: None,
         }
     }
 
@@ -519,6 +529,19 @@ impl LlmCleaner {
     /// parity path do, keeping Windows / parity byte-identical.
     pub fn with_small_model_fidelity(mut self, enabled: bool) -> Self {
         self.small_model_fidelity = enabled;
+        self
+    }
+
+    /// Builder-style setter for the user prompt override (ADR 0067).
+    ///
+    /// `Some(body)` makes the High-level cleanup path use `body` verbatim
+    /// and skip the small-model tier substitution (precedence: user
+    /// override > tier > default). `None` (the default — every non-macOS
+    /// target + any mode the user hasn't customised) is a no-op that
+    /// leaves prompt resolution exactly as before, keeping Windows
+    /// byte-identical.
+    pub fn with_user_prompt_override(mut self, body: Option<String>) -> Self {
+        self.user_prompt_override = body;
         self
     }
 
@@ -691,40 +714,60 @@ impl LlmCleaner {
             .db
             .lock()
             .map_err(|_| AppError::Cleanup("db mutex poisoned during cleanup".into()))?;
-        // ADR 0065 — small-model prompt override. Precedence:
-        //   Medium level   -> additive prompt (level dial wins; it is
-        //                      orthogonal to tone and already ignores
-        //                      mode_slug).
-        //   override set    -> the override slug (e.g. `normal_small`),
-        //                      set ONLY at the macOS downsize seam.
-        //   otherwise       -> the tone mode_slug, exactly as before.
-        // On the 7B / Windows path the override is always `None`, so
+        // Prompt-body + few-shot-slug resolution. Precedence (highest
+        // first):
+        //   Medium level        -> additive prompt (level dial wins; it
+        //                           is orthogonal to tone and ignores
+        //                           mode_slug). ADR 0047 §Wave 2.1.
+        //   user prompt override -> the user-authored body, VERBATIM,
+        //                           skipping the tier substitution. ADR
+        //                           0067; set only at the macOS seam.
+        //   tier override set    -> the override slug (e.g.
+        //                           `normal_small`), set ONLY at the macOS
+        //                           downsize seam. ADR 0065.
+        //   otherwise            -> the tone mode_slug, exactly as before.
+        // On the 7B / Windows path BOTH overrides are always `None`, so
         // this collapses to the pre-ADR-0065 `mode_slug` behaviour.
-        let prompt_slug = if matches!(level, DictationCleanupLevel::Medium) {
-            ADDITIVE_PROMPT_MODE_SLUG
-        } else {
-            self.prompt_mode_override.as_deref().unwrap_or(mode_slug)
-        };
-        let prompt = prompts::get_latest_for_mode(&conn, prompt_slug)?
-            .ok_or_else(|| AppError::Cleanup(format!("no prompt for mode {prompt_slug:?}")))?;
+        //
+        // `few_shot_slug` keys example selection; the user-override case
+        // reuses the tone mode's examples (a custom prompt is still a
+        // `normal`/`casual`/`formal` tone edit).
+        let (prompt_body, prompt_label, few_shot_slug): (String, String, &str) =
+            if matches!(level, DictationCleanupLevel::Medium) {
+                let prompt = prompts::get_latest_for_mode(&conn, ADDITIVE_PROMPT_MODE_SLUG)?
+                    .ok_or_else(|| {
+                        AppError::Cleanup(format!(
+                            "no prompt for mode {ADDITIVE_PROMPT_MODE_SLUG:?}"
+                        ))
+                    })?;
+                let label = format!("{ADDITIVE_PROMPT_MODE_SLUG} v{}", prompt.version);
+                (prompt.body, label, ADDITIVE_PROMPT_MODE_SLUG)
+            } else if let Some(body) = self.user_prompt_override.as_deref() {
+                // ADR 0067 — a user-authored prompt beats the tier
+                // substitution and the shipped default. Used verbatim.
+                (body.to_string(), format!("{mode_slug} custom"), mode_slug)
+            } else {
+                let slug = self.prompt_mode_override.as_deref().unwrap_or(mode_slug);
+                let prompt = prompts::get_latest_for_mode(&conn, slug)?
+                    .ok_or_else(|| AppError::Cleanup(format!("no prompt for mode {slug:?}")))?;
+                (prompt.body, format!("{slug} v{}", prompt.version), slug)
+            };
 
-        // Truthful prompt provenance (ADR 0065 v2). Record EXACTLY which
-        // prompt won resolution — slug + version — so (a) every dictation
-        // logs the prompt that ran and (b) the persistence layer can
-        // stamp `sessions.effective_prompt_label` instead of the UI
-        // inferring it from the mode's canonical `prompt_id` (which lies
-        // on the macOS downsize path: it points at normal@v5 while the
-        // override actually runs normal_small). `override` is the slug
-        // the macOS seam injected, or `none` on the 7B / Windows path.
+        // Truthful prompt provenance (ADR 0065 v2 + 0067). Record EXACTLY
+        // which prompt won resolution so (a) every dictation logs the
+        // prompt that ran and (b) the persistence layer can stamp
+        // `sessions.effective_prompt_label` instead of inferring it from
+        // the mode's canonical `prompt_id` (which lies on the macOS
+        // downsize / user-override paths).
         tracing::info!(
-            slug = prompt_slug,
-            version = prompt.version,
+            label = %prompt_label,
             model = %self.model_id,
-            override = self.prompt_mode_override.as_deref().unwrap_or("none"),
+            tier_override = self.prompt_mode_override.as_deref().unwrap_or("none"),
+            user_override = self.user_prompt_override.is_some(),
             "cleanup prompt resolved"
         );
         if let Ok(mut slot) = self.last_prompt_label.lock() {
-            *slot = Some(format!("{prompt_slug} v{}", prompt.version));
+            *slot = Some(prompt_label.clone());
         }
 
         // 3. Dictionary + examples. Dictionary: all (already small).
@@ -738,14 +781,14 @@ impl LlmCleaner {
         //    examples for `normal_additive`, the prompt's three
         //    baked-in examples carry the few-shot load.
         let dict = dictionary::list_all(&conn)?;
-        let candidates = few_shot::select_candidates(&conn, prompt_slug, None)?;
+        let candidates = few_shot::select_candidates(&conn, few_shot_slug, None)?;
         let examples = few_shot::fit_to_budget(candidates);
         drop(conn); // release lock before the HTTP call.
 
         // 4. Assemble. The LLM sees the pre-processed transcript, not
         //    the raw STT. The raw row in the DB is untouched (ADR 0010).
         let built = prompt_builder::build(prompt_builder::PromptInputs {
-            system_prompt: &prompt.body,
+            system_prompt: &prompt_body,
             dictionary: &dict,
             examples: &examples,
             foreground_app: None,
@@ -805,7 +848,7 @@ impl LlmCleaner {
                 if guarded.trim().is_empty() {
                     tracing::warn!(
                         mode = mode_slug,
-                        prompt_slug,
+                        prompt = %prompt_label,
                         model = %result.model_used,
                         "preamble guard: cleaned output was entirely a meta-preamble; \
                          falling back to preprocessor output"
@@ -821,7 +864,7 @@ impl LlmCleaner {
                 }
                 tracing::warn!(
                     mode = mode_slug,
-                    prompt_slug,
+                    prompt = %prompt_label,
                     model = %result.model_used,
                     "preamble guard: stripped a leading meta-preamble from output"
                 );
@@ -842,7 +885,7 @@ impl LlmCleaner {
                     // empty cleanup).
                     tracing::warn!(
                         mode = mode_slug,
-                        prompt_slug,
+                        prompt = %prompt_label,
                         model = %result.model_used,
                         "example-leak guard: cleaned output was entirely a leaked \
                          example; falling back to preprocessor output"
@@ -858,7 +901,7 @@ impl LlmCleaner {
                 }
                 tracing::warn!(
                     mode = mode_slug,
-                    prompt_slug,
+                    prompt = %prompt_label,
                     model = %result.model_used,
                     "example-leak guard: stripped a leaked few-shot example from output"
                 );
@@ -882,7 +925,7 @@ impl LlmCleaner {
             if let Some(dropped) = coverage_drop(&pre_text, &result.text) {
                 tracing::warn!(
                     mode = mode_slug,
-                    prompt_slug,
+                    prompt = %prompt_label,
                     model = %result.model_used,
                     dropped_sentence = %dropped,
                     "content-coverage fallback (mb-l97): small-model output dropped a \
@@ -2049,6 +2092,63 @@ mod tests {
         assert!(
             !cleaner.model_name().contains("coverage-fallback"),
             "coverage fallback must not fire off the small-model path"
+        );
+    }
+
+    // -------- ADR 0067 — user prompt override precedence. --------------
+
+    #[test]
+    fn user_prompt_override_wins_over_tier_substitution() {
+        // Both a tier substitution (normal_small) AND a user prompt
+        // override are set. Precedence: the user override wins → the
+        // resolved prompt label is the custom one, not the tier slug.
+        let db = fresh_db();
+        disable_skip(&db);
+        disable_shrink_guard(&db);
+        let mut cleaner = LlmCleaner::new(
+            Box::new(StubCleanupProvider),
+            db,
+            "qwen2.5:3b-instruct-q4_K_M".into(),
+            0.3,
+            256,
+        )
+        .with_prompt_mode_override(Some("normal_small".to_string()))
+        .with_user_prompt_override(Some("Use my house style; keep it terse.".to_string()));
+        let _ = cleaner
+            .clean("please clean this up a little bit thanks friend", "normal")
+            .unwrap();
+        assert_eq!(
+            cleaner.prompt_label().as_deref(),
+            Some("normal custom"),
+            "user prompt override must win over the normal_small tier substitution"
+        );
+    }
+
+    #[test]
+    fn no_user_prompt_override_keeps_tier_substitution_label() {
+        // Without a user override, the tier substitution still wins →
+        // label is the tier slug (the unchanged ADR 0065 behaviour).
+        let db = fresh_db();
+        disable_skip(&db);
+        disable_shrink_guard(&db);
+        let mut cleaner = LlmCleaner::new(
+            Box::new(StubCleanupProvider),
+            db,
+            "qwen2.5:3b-instruct-q4_K_M".into(),
+            0.3,
+            256,
+        )
+        .with_prompt_mode_override(Some("normal_small".to_string()));
+        let _ = cleaner
+            .clean("please clean this up a little bit thanks friend", "normal")
+            .unwrap();
+        assert!(
+            cleaner
+                .prompt_label()
+                .as_deref()
+                .is_some_and(|l| l.starts_with("normal_small v")),
+            "without a user override the tier slug must resolve; got: {:?}",
+            cleaner.prompt_label()
         );
     }
 }

@@ -75,6 +75,13 @@ pub(super) fn make_default_cleaner(
             // never re-evaluated).
             #[cfg(not(target_os = "macos"))]
             let (prompt_override, small_model_fidelity): (Option<String>, bool) = (None, false);
+            // ADR 0067 — user-authored per-mode prompt override. Read at
+            // the macOS seam only; `None` everywhere else, so the Windows
+            // prompt-resolution path is byte-identical.
+            #[cfg(not(target_os = "macos"))]
+            let user_prompt_override: Option<String> = None;
+            #[cfg(target_os = "macos")]
+            let user_prompt_override = read_mode_prompt_override(db, &config.mode_slug);
             // On macOS the selector swaps in a model that fits unified
             // memory (e.g. 7B → 3B on an 8 GB box). When it actually
             // downsizes AND the active mode is Normal, also swap Normal's
@@ -138,7 +145,8 @@ pub(super) fn make_default_cleaner(
                     max_tokens as u32,
                 )
                 .with_prompt_mode_override(prompt_override)
-                .with_small_model_fidelity(small_model_fidelity),
+                .with_small_model_fidelity(small_model_fidelity)
+                .with_user_prompt_override(user_prompt_override),
             )
         }
         Err(e) => {
@@ -214,6 +222,32 @@ fn read_mode_model_override(db: &Arc<Mutex<Connection>>, mode_slug: &str) -> Opt
     let conn = db.lock().ok()?;
     conn.query_row(
         "SELECT model_id FROM mode_model_overrides WHERE mode_slug = ?1",
+        [mode_slug],
+        |r| r.get::<_, String>(0),
+    )
+    .ok()
+}
+
+/// Read the user's per-mode PROMPT override (ADR 0067), if any.
+///
+/// `Some(body)` = the user authored a custom cleanup prompt for this mode
+/// in the Modes screen -> use it VERBATIM, skipping the small-model tier
+/// substitution (precedence: user override > tier substitution > mode
+/// default). `None` = no row -> the caller resolves the shipped default
+/// (then the tier substitution on a downsized model), i.e. the unchanged
+/// behaviour.
+///
+/// macOS-only: the table is written exclusively by the isMac-gated Modes
+/// prompt editor, and this read sits behind `#[cfg(target_os = "macos")]`,
+/// so the Windows cleanup path never queries it (byte-identical
+/// guarantee). Any failure (poisoned mutex, missing table on a
+/// partially-migrated DB, query error) collapses to `None` -> shipped
+/// default, the safe default.
+#[cfg(target_os = "macos")]
+fn read_mode_prompt_override(db: &Arc<Mutex<Connection>>, mode_slug: &str) -> Option<String> {
+    let conn = db.lock().ok()?;
+    conn.query_row(
+        "SELECT prompt_body FROM mode_prompt_overrides WHERE mode_slug = ?1",
         [mode_slug],
         |r| r.get::<_, String>(0),
     )

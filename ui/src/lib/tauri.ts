@@ -34,6 +34,7 @@ import type {
   LlmPassResult,
   MeetingSettingsSnapshot,
   EffectiveModel,
+  EffectivePrompt,
   ModeRow,
   PermissionKey,
   PermissionStatuses,
@@ -195,6 +196,16 @@ export const api = {
   /** ADR 0066 — clear a mode's pin → revert to Auto (RAM-aware). */
   clear_mode_model_override: (slug: string) =>
     invoke<void>("clear_mode_model_override", { slug }),
+  /** ADR 0067 — the effective cleanup prompt for a mode (shipped default
+   *  vs user override), for the macOS Modes prompt editor. */
+  get_effective_prompt: (slug: string) =>
+    invoke<EffectivePrompt>("get_effective_prompt", { slug }),
+  /** ADR 0067 — persist a user-authored prompt override for a mode. */
+  set_mode_prompt_override: (slug: string, body: string) =>
+    invoke<void>("set_mode_prompt_override", { slug, body }),
+  /** ADR 0067 — clear a mode's prompt override → revert to shipped. */
+  clear_mode_prompt_override: (slug: string) =>
+    invoke<void>("clear_mode_prompt_override", { slug }),
 
   // Settings
   get_settings: () => invoke<SettingsSnapshot>("get_settings"),
@@ -731,6 +742,19 @@ function fixtureFor<T>(command: string, args?: object): T {
       } as EffectiveModel) as T;
     case "set_mode_model_override":
     case "clear_mode_model_override":
+      // Write commands — nothing to fixture in browser preview.
+      return fixture(command, null) as T;
+    case "get_effective_prompt":
+      // ADR 0067 — a shipped default with no user override in preview.
+      return fixture(command, {
+        defaultBody: "You are a dictation cleanup assistant. Clean the transcript.",
+        defaultVersion: 5,
+        effectiveBody:
+          "You are a dictation cleanup assistant. Clean the transcript.",
+        isOverridden: false,
+      } as EffectivePrompt) as T;
+    case "set_mode_prompt_override":
+    case "clear_mode_prompt_override":
       // Write commands — nothing to fixture in browser preview.
       return fixture(command, null) as T;
     case "mac_permission_statuses":
