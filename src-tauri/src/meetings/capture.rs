@@ -149,17 +149,23 @@ pub fn probe_sources() -> AppResult<MeetingSourceProbe> {
     #[cfg(target_os = "macos")]
     {
         use cpal::traits::{DeviceTrait, HostTrait};
-        // macOS: mic (CoreAudio) is available in Phase 4a; system
-        // (loopback) capture requires ScreenCaptureKit and lands in
-        // Phase 4b, so it stays unavailable rather than lying.
+        // macOS: mic via CoreAudio (Phase 4a). System audio via
+        // ScreenCaptureKit (Phase 4b, ADR 0068) is gated on the Screen
+        // Recording TCC grant — SCK silently delivers zero-filled
+        // buffers when it's missing, so we report `system_available`
+        // from the live preflight (`CGPreflightScreenCaptureAccess`)
+        // rather than lying that the source is ready. The picker + the
+        // meeting-start preflight then reflect reality; a stale grant is
+        // caught at runtime by the SCK silent-buffer detector.
         let host = cpal::default_host();
         let mic_available = host
             .default_input_device()
             .and_then(|d| d.default_input_config().ok())
             .is_some();
+        let system_available = crate::meetings::sck_macos::screen_recording_granted();
         Ok(MeetingSourceProbe {
             mic_available,
-            system_available: false,
+            system_available,
         })
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
@@ -562,6 +568,12 @@ fn build_mic_capture() -> AppResult<Box<dyn AudioCapture>> {
 }
 
 fn build_sys_capture() -> AppResult<Box<dyn AudioCapture>> {
+    // Windows: WASAPI loopback of the default render endpoint (ADR 0031).
+    // macOS: ScreenCaptureKit system-audio stream (ADR 0068, Phase 4b) —
+    // the loopback-shaped `AudioCapture` mirroring the Windows arm, so
+    // `TwinStreamCapture` drives both platforms identically. Linux/other
+    // stays deferred. The Windows arm is byte-identical to before (the
+    // macOS arm is additive under its own `cfg`).
     #[cfg(target_os = "windows")]
     {
         Ok(
@@ -569,10 +581,15 @@ fn build_sys_capture() -> AppResult<Box<dyn AudioCapture>> {
                 as Box<dyn AudioCapture>,
         )
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        Ok(Box::new(crate::meetings::sck_macos::SckSysCapture::new()?) as Box<dyn AudioCapture>)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         Err(AppError::Audio(
-            "loopback capture not implemented for this platform (Phase 9 macOS/Linux)".into(),
+            "loopback capture not implemented for this platform (Linux/other is future work)"
+                .into(),
         ))
     }
 }

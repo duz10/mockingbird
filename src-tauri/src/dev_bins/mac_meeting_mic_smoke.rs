@@ -122,13 +122,17 @@ fn main() {
         eprintln!("FAIL: mic backend (make_default_capture) did not construct on macOS");
         ok = false;
     }
-    if report.probe_system_available {
-        eprintln!(
-            "FAIL: probe reports system_available = true on macOS; system/loopback \
-             capture is Phase 4b (ScreenCaptureKit) and must stay unavailable in 4a"
-        );
-        ok = false;
-    }
+    // NOTE (Phase 4b, ADR 0068): `system_available` is no longer a fixed
+    // `false` on macOS. Since ScreenCaptureKit system-audio landed, the
+    // probe reports the live Screen Recording grant
+    // (`CGPreflightScreenCaptureAccess`). So this is now informational —
+    // the 4a assertion that it must be `false` is obsolete. (This judge
+    // still proves the mic-only path; the system channel is `None` in the
+    // TwinStreamCapture it builds regardless of the grant.)
+    println!(
+        "note: probe_system_available now reflects the Screen Recording grant (Phase 4b); \
+         informational only"
+    );
     if report.chunk_wav_count == 0 {
         eprintln!("FAIL: no chunk WAV files were written by the chunker");
         ok = false;

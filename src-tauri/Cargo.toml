@@ -168,11 +168,48 @@ accessibility-sys = "0.1"
 # features. `NSWorkspace.frontmostApplication` yields bundle id + name +
 # pid with NO Accessibility grant (the cheap path the plan calls for).
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSString", "NSURL"] }
+objc2-foundation = { version = "0.3", features = [
+    "NSString",
+    "NSURL",
+    "NSArray",
+    "NSError",
+] }
 objc2-app-kit = { version = "0.3", features = [
     "NSWorkspace",
     "NSRunningApplication",
 ] }
+
+# ADR-0068 / mb-mac-v1.5.3 — Phase 4b ScreenCaptureKit system-audio
+# capture. The spike (kennel drawer 110) confirmed the
+# `objc2-screen-capture-kit` crate exposes the full audio-capture
+# surface (SCStreamConfiguration audio props, SCShareableContent /
+# SCContentFilter, SCStream lifecycle, the SCStreamOutput delegate +
+# `SCStreamOutputType::Audio`, and CMSampleBuffer PCM extraction via
+# objc2-core-media) — so NO Swift/ObjC sidecar and NO full Xcode are
+# needed (CLT-only; the framework is linked at load time by the crate,
+# same discipline as ADR 0060's NSWorkspace bindings). System audio
+# only: the mic stays on the 4a CoreAudio `CpalCapture` (two
+# independent streams, mirroring Windows cpal+WASAPI). All four crates
+# are macOS-target-gated, so Windows/Linux never see them.
+objc2-screen-capture-kit = { version = "0.3", features = [
+    "SCStream",
+    "SCShareableContent",
+    "SCError",
+    "objc2-core-media",
+    "dispatch2",
+    "block2",
+] }
+objc2-core-media = { version = "0.3", features = [
+    "CMSampleBuffer",
+    "CMBlockBuffer",
+    "CMFormatDescription",
+    "objc2-core-audio-types",
+    "objc2",
+] }
+objc2-core-audio-types = "0.3"
+objc2-core-foundation = "0.3"
+dispatch2 = "0.3"
+block2 = "0.6"
 
 # ADR-0061 / mb-mac-v1.4.6 — first-launch permissions onboarding.
 # The four status-query APIs are reached via direct framework linking
@@ -356,6 +393,18 @@ path = "src/dev_bins/mac_dictation_runtime_smoke.rs"
 [[example]]
 name = "mac_meeting_mic_smoke"
 path = "src/dev_bins/mac_meeting_mic_smoke.rs"
+
+# macOS port Phase 4b (mb-mac-v1.5.3, ADR 0068) — system-audio meeting
+# roundtrip judge (`mac-p4b-sys-meeting-roundtrip`). Drives a
+# system-only meeting through the real pipeline (doubled system source
+# → chunker WAV+CRC32 (Channel::Sys) → Whisper Metal → formatter →
+# persist → read-back) AND smokes the REAL SckSysCapture (construct +
+# start/stop, live audio deferred to the grant-gated user test). macOS
+# only; exits 2 elsewhere. Drives
+# `meetings::judges_macos_v1::sys_meeting_roundtrip_probe`.
+[[example]]
+name = "mac_meeting_sys_smoke"
+path = "src/dev_bins/mac_meeting_sys_smoke.rs"
 
 # macOS port Phase 3a (mb-mac-v1.4.1) — Keychain roundtrip judge
 # (`mac-p3a-keychain-roundtrip`). macOS only; exits 2 elsewhere. Drives

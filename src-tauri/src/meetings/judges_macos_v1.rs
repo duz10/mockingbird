@@ -290,3 +290,215 @@ pub fn mic_meeting_roundtrip_probe(
         persisted_formatted_mic_len: detail.formatted_mic.as_deref().unwrap_or("").len(),
     })
 }
+
+// =====================================================================
+// Phase 4b — system-audio meeting roundtrip (mac-p4b-sys-meeting-roundtrip)
+// =====================================================================
+
+/// Outcome of the Phase 4b system-audio meeting roundtrip probe.
+///
+/// ### Real vs doubled vs deferred-to-user (honest boundary)
+///
+///   REAL: the full `TwinStreamCapture` coordinator + chunker (real WAV
+///   write + CRC32) on the SYSTEM channel (`Channel::Sys`), the
+///   `LongFormStt` driver + its CRC verification, the production
+///   `make_default_stt` → `WhisperStt` on Metal, the deterministic
+///   formatter, `persist_meeting`, and the repo read-back — PLUS a REAL
+///   [`crate::meetings::sck_macos::SckSysCapture`] construction +
+///   start/stop lifecycle smoke.
+///
+///   DOUBLED: the physical system-audio device. Capturing real loopback
+///   audio needs a live Screen Recording grant + something actually
+///   playing, which is CI-hostile, so the roundtrip is driven by a
+///   [`WavMicCapture`] replaying `jfk.wav` **as the system channel** (a
+///   Wav-replay `AudioCapture` fed into the `sys_builder` slot). Channel
+///   attribution is by-stream (ADR 0068 §3), so this exercises the exact
+///   `Channel::Sys` routing a real SCK stream would.
+///
+///   DEFERRED-TO-USER: live SCK audio capture. `SckSysCapture::start()`
+///   is smoke-tested for construct-and-not-panic, but a real transcript
+///   from actual system audio is the grant-gated human test
+///   `mac-p4b-sys-meeting-e2e` (grant Screen Recording → play audio →
+///   start a System/Both meeting → confirm a `Channel::Sys` transcript).
+#[derive(Debug, Clone)]
+pub struct SysMeetingReport {
+    /// The REAL `SckSysCapture::new()` constructed `Ok` (no SCK/permission
+    /// touched at construction — lazy, like `CpalCapture`).
+    pub sck_capture_constructs_ok: bool,
+    /// `SckSysCapture::start()` then `stop()` completed without panicking.
+    /// `start()` returns `Err` when Screen Recording is ungranted (the
+    /// clean meeting-start failure) — that is a PASS for this smoke; we
+    /// only assert the lifecycle doesn't panic.
+    pub sck_start_stop_no_panic: bool,
+    /// `probe_sources().system_available` — now the live Screen Recording
+    /// grant on macOS (Phase 4b). Informational.
+    pub probe_system_available: bool,
+    /// Number of chunk WAV files the chunker wrote for the sys channel.
+    pub chunk_wav_count: usize,
+    /// Stitched sys-channel segment count from the real `LongFormStt`.
+    pub sys_segments: usize,
+    /// Whether at least one sys chunk reported `gpu_used = true` (Metal).
+    pub gpu_used: bool,
+    /// The deterministic formatter's sys prose (trimmed).
+    pub formatted_sys: String,
+    /// Rowid returned by `persist_meeting`.
+    pub persisted_rowid: i64,
+    /// The persisted status read back via the repo (want `complete`).
+    pub persisted_status: MeetingStatus,
+    /// The persisted source read back via the repo (want `system`).
+    pub persisted_source: MeetingSource,
+    /// Length of the formatted-sys prose read back from the DB.
+    pub persisted_formatted_sys_len: usize,
+}
+
+/// Drive a system-audio meeting end to end through the real pipeline,
+/// PLUS smoke the real `SckSysCapture` lifecycle. See [`SysMeetingReport`]
+/// for the real/doubled/deferred boundary.
+pub fn sys_meeting_roundtrip_probe(
+    model_path: &Path,
+    wav_path: &Path,
+) -> Result<SysMeetingReport, String> {
+    use crate::meetings::sck_macos::SckSysCapture;
+
+    // 1. Construction + lifecycle smoke of the REAL SckSysCapture. This is
+    //    the production system-audio backend `build_sys_capture` wraps.
+    //    Construction is permission-free; start() cleanly errors without a
+    //    Screen Recording grant (and may succeed on a granted dev box) —
+    //    either way it must not panic.
+    let mut sck = SckSysCapture::new().map_err(|e| format!("SckSysCapture::new: {e}"))?;
+    let sck_capture_constructs_ok = true;
+    // start() Result is intentionally ignored — a missing grant is the
+    // documented clean failure; we only care that it doesn't panic.
+    let _ = sck.start();
+    sck.stop()
+        .map_err(|e| format!("SckSysCapture::stop: {e}"))?;
+    let sck_start_stop_no_panic = true;
+
+    // 2. Source probe — system_available now reflects the live grant.
+    let probe = probe_sources().map_err(|e| format!("probe_sources: {e}"))?;
+
+    // 3. Pin the whisper model for the production STT locator.
+    if !model_path.is_file() {
+        return Err(format!(
+            "whisper model not found at {} (run scripts/download-models.sh)",
+            model_path.display()
+        ));
+    }
+    // SAFETY: probe runs single-threaded before any STT thread reads
+    // WHISPER_MODEL_PATH; this routes make_default_stt at the model.
+    unsafe {
+        std::env::set_var("WHISPER_MODEL_PATH", model_path);
+    }
+
+    let samples = crate::stt::judges_macos_v1::read_wav_16k_mono_i16(wav_path)?;
+
+    let chunk_dir = std::env::temp_dir().join(format!("mb-p4b-sys-{}", std::process::id()));
+    std::fs::create_dir_all(&chunk_dir)
+        .map_err(|e| format!("create chunk dir {chunk_dir:?}: {e}"))?;
+
+    let uuid = "p4b-sys-roundtrip".to_string();
+
+    // 4. System-only TwinStreamCapture: sys builder Some, mic builder None
+    //    — the `source.needs_system()` without `needs_mic()` path. The
+    //    doubled system source replays jfk.wav; by-stream attribution
+    //    routes every chunk to `Channel::Sys`.
+    let sys_builder: CaptureBuilder = {
+        let s = samples.clone();
+        Box::new(move || Ok(Box::new(WavMicCapture::new(s)) as Box<dyn AudioCapture>))
+    };
+    let mut capture = TwinStreamCapture::start_with(
+        uuid.clone(),
+        chunk_dir.clone(),
+        ChunkerConfig::default(),
+        None,
+        Some(sys_builder),
+    )
+    .map_err(|e| format!("TwinStreamCapture::start_with: {e}"))?;
+    let chunk_rx = capture
+        .take_chunk_rx()
+        .ok_or_else(|| "chunk_rx already taken".to_string())?;
+
+    // 5. Real long-form Whisper(Metal) driver on a worker thread.
+    let lf = thread::Builder::new()
+        .name("p4b-long-form".into())
+        .spawn(move || -> AppResult<LongFormOutput> {
+            let mut stt = crate::stt::make_default_stt()?;
+            let driver = LongFormStt::new(
+                stt.as_mut(),
+                chunk_rx,
+                |_p| { /* no overlay in the judge */ },
+                LongFormConfig::default(),
+            );
+            driver.run()
+        })
+        .map_err(|e| format!("spawn long-form: {e}"))?;
+
+    thread::sleep(Duration::from_millis(250));
+    capture.stop().map_err(|e| format!("capture.stop(): {e}"))?;
+
+    let output = lf
+        .join()
+        .map_err(|e| format!("long-form thread panicked: {e:?}"))?
+        .map_err(|e| format!("long-form driver: {e}"))?;
+
+    let chunk_wav_count = std::fs::read_dir(&chunk_dir)
+        .map_err(|e| format!("read chunk dir: {e}"))?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("wav"))
+        .count();
+
+    // 6. Deterministic format (canonical pass — no LLM) on the sys channel.
+    let formatted_sys = format(&output.sys_segments, &FILLERS, &FormatOpts::default())
+        .map_err(|e| format!("format: {e}"))?;
+
+    // 7. Persist as a SYSTEM-source meeting, then read back.
+    let database =
+        crate::db::Database::open_in_memory().map_err(|e| format!("open_in_memory: {e}"))?;
+    let req = MeetingPersistRequest {
+        uuid: uuid.clone(),
+        title: crate::meetings::title::derive_meeting_title(None, None, Some(&formatted_sys)),
+        started_at: "2026-07-01T00:00:00Z".to_string(),
+        ended_at: "2026-07-01T00:00:11Z".to_string(),
+        status: MeetingStatus::Complete,
+        error_message: None,
+        source: MeetingSource::System,
+        total_duration_ms: 11_000,
+        mic_duration_ms: None,
+        sys_duration_ms: Some(11_000),
+        hotkey_pressed: "cc".to_string(),
+        audio_blob_path: Some(chunk_dir.display().to_string()),
+        whisper_model_id: "whisper-large-v3-turbo-q5_0".to_string(),
+        formatter_version: "mc-v1".to_string(),
+        chunk_count_mic: None,
+        chunk_count_sys: Some(chunk_wav_count as u32),
+        stt_latency_ms: None,
+        formatter_latency_ms: None,
+        formatted_mic: None,
+        formatted_sys: Some(formatted_sys.clone()),
+        formatted_merged: None,
+        segments_mic: None,
+        segments_sys: Some(output.sys_segments.clone()),
+    };
+    let persisted_rowid =
+        persist_meeting(&database.conn, &req).map_err(|e| format!("persist_meeting: {e}"))?;
+
+    let detail = load_meeting_detail(&database.conn, &uuid)
+        .map_err(|e| format!("load_meeting_detail: {e}"))?
+        .ok_or_else(|| "persisted meeting not found on read-back".to_string())?;
+
+    let _ = std::fs::remove_dir_all(&chunk_dir);
+
+    Ok(SysMeetingReport {
+        sck_capture_constructs_ok,
+        sck_start_stop_no_panic,
+        probe_system_available: probe.system_available,
+        chunk_wav_count,
+        sys_segments: output.sys_segments.len(),
+        gpu_used: output.sys_gpu_used,
+        formatted_sys: formatted_sys.trim().to_string(),
+        persisted_rowid,
+        persisted_status: detail.status,
+        persisted_source: detail.source,
+        persisted_formatted_sys_len: detail.formatted_sys.as_deref().unwrap_or("").len(),
+    })
+}

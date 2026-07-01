@@ -79,6 +79,11 @@ pub mod vk_names;
 #[cfg(target_os = "windows")]
 pub mod loopback_windows;
 
+// Phase 4b (mb-mac-v1.5.3, ADR 0068) — ScreenCaptureKit system-audio
+// capture. macOS-only; the file is internally `#![cfg(target_os = "macos")]`.
+#[cfg(target_os = "macos")]
+pub mod sck_macos;
+
 // Phase 4a mic-only meeting roundtrip judge (mb-mac-v1.5.1). Gated
 // all(macos, metal) — compiles to nothing on every other config so
 // the default cross-platform build stays green.
