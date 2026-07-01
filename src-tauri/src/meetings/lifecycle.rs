@@ -575,17 +575,29 @@ pub(crate) fn now_iso() -> String {
 /// on the wire and in the DB.
 pub(crate) fn uuid_v4_simple() -> String {
     use std::hash::{Hash, Hasher};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+    // Process-local monotonic sequence mixed into the hash so two
+    // calls that land in the SAME clock tick still differ. On Apple
+    // Silicon release builds `SystemTime::now()` in a tight loop can
+    // return identical `as_nanos()` (the effective clock resolution
+    // is coarser than 1 ns), which without this counter produced
+    // duplicate ids (mb-mac-v1.5.1: the `uuid_v4_simple_unique_and_hex`
+    // flake surfaced deterministically on M3 / --release).
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     let mut h = std::collections::hash_map::DefaultHasher::new();
     nanos.hash(&mut h);
+    seq.hash(&mut h);
     std::thread::current().id().hash(&mut h);
     let lo = h.finish();
     let mut h2 = std::collections::hash_map::DefaultHasher::new();
     lo.hash(&mut h2);
+    seq.hash(&mut h2);
     nanos.wrapping_mul(0x9E37_79B9_7F4A_7C15).hash(&mut h2);
     let hi = h2.finish();
     format!("{hi:016x}{lo:016x}")

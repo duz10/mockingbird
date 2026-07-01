@@ -123,9 +123,11 @@ pub struct MeetingSourceProbe {
 /// and good enough to surface "no playback device" without making
 /// the OS think we're recording.
 ///
-/// On non-Windows, both flags are `false`. Cross-platform abstraction
-/// (Principle 5): the trait lives behind `#[cfg(target_os = ...)]`
-/// even in Windows-only v1.
+/// On macOS (Phase 4a) `mic_available` reflects the CoreAudio default
+/// input device while `system_available` stays `false` until
+/// ScreenCaptureKit loopback lands in Phase 4b. On other platforms
+/// both flags are `false`. Cross-platform abstraction (Principle 5):
+/// the probe lives behind `#[cfg(target_os = ...)]` branches.
 pub fn probe_sources() -> AppResult<MeetingSourceProbe> {
     #[cfg(target_os = "windows")]
     {
@@ -144,10 +146,26 @@ pub fn probe_sources() -> AppResult<MeetingSourceProbe> {
             system_available,
         })
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
-        // macOS/Linux loopback support is Phase 9 / future. Surface
-        // both as unavailable rather than lying.
+        use cpal::traits::{DeviceTrait, HostTrait};
+        // macOS: mic (CoreAudio) is available in Phase 4a; system
+        // (loopback) capture requires ScreenCaptureKit and lands in
+        // Phase 4b, so it stays unavailable rather than lying.
+        let host = cpal::default_host();
+        let mic_available = host
+            .default_input_device()
+            .and_then(|d| d.default_input_config().ok())
+            .is_some();
+        Ok(MeetingSourceProbe {
+            mic_available,
+            system_available: false,
+        })
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        // Linux loopback + mic support is future work. Surface both
+        // as unavailable rather than lying.
         Ok(MeetingSourceProbe {
             mic_available: false,
             system_available: false,

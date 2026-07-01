@@ -347,6 +347,16 @@ path = "src/dev_bins/mac_dictation_backends_smoke.rs"
 name = "mac_dictation_runtime_smoke"
 path = "src/dev_bins/mac_dictation_runtime_smoke.rs"
 
+# macOS port Phase 4a (mb-mac-v1.5.1) — mic-only meeting roundtrip judge
+# (`mac-p4a-mic-meeting-roundtrip`). Drives a mic-only meeting through
+# the real pipeline (test-double mic → chunker WAV+CRC32 → Whisper Metal
+# → formatter → persist → read-back) and asserts system-audio stays
+# unavailable (4b). macOS only; exits 2 elsewhere. Drives
+# `meetings::judges_macos_v1::mic_meeting_roundtrip_probe`.
+[[example]]
+name = "mac_meeting_mic_smoke"
+path = "src/dev_bins/mac_meeting_mic_smoke.rs"
+
 # macOS port Phase 3a (mb-mac-v1.4.1) — Keychain roundtrip judge
 # (`mac-p3a-keychain-roundtrip`). macOS only; exits 2 elsewhere. Drives
 # `secrets::judges_macos_v1::keychain_roundtrip_probe`.

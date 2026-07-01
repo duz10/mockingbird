@@ -77,7 +77,12 @@ use dictation::runtime::default_normal_config;
 // stays unused-import-clean.
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use dictation::runtime::DictationRuntime;
-#[cfg(target_os = "windows")]
+// Phase 4a (mb-mac-v1.5.1): the meeting-capture runtime spawns at boot
+// on macOS too (mic-only). The chord installer stays Windows-only via
+// `legacy_chord_enabled` (default false) inside `spawn`, so macOS runs
+// a pure Command-Center/UI-driven activation loop. Gate the import to
+// match the widened spawn block below.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use meetings::runtime::{MeetingCaptureRuntime, MeetingRuntimeConfig};
 
 /// Build and run the Tauri application.
@@ -432,7 +437,15 @@ pub fn run() {
             // the user just can't capture meetings. Both the runtime
             // (to keep it alive) AND its shared bag (for IPC) are
             // registered as managed state.
-            #[cfg(target_os = "windows")]
+            // Phase 4a (mb-mac-v1.5.1): widened windows -> any(windows,
+            // macos). The meeting runtime spawns at boot on macOS too;
+            // it runs a mic-only, Command-Center/UI-driven activation
+            // loop (no chord hook — `legacy_chord_enabled` defaults
+            // false, so the Windows-only MeetingHotkeyInstaller is
+            // never constructed). Windows construction is byte-
+            // identical (widened cfg only). System-audio capture stays
+            // Windows-only until macOS ScreenCaptureKit lands (4b).
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
             {
                 let chunk_base_dir = app_data.join("meetings");
                 if let Err(e) = std::fs::create_dir_all(&chunk_base_dir) {
@@ -663,6 +676,15 @@ pub fn run() {
             // capture failed to install — the user still sees the
             // mode picker, the Meeting tile just dispatches to a
             // missing runtime and gets a graceful failure toast.
+            // The Command Center's meeting-dispatch surface stays
+            // Windows-only in Phase 4a: on macOS a meeting starts from
+            // the Meetings page (or tray) via the cross-platform
+            // `meeting_start`/`meeting_stop` IPC commands, which read
+            // `MeetingRuntimeShared` directly from managed state and
+            // bypass the CC entirely. Wiring the CC Meeting tile on
+            // macOS (its dispatch_meeting_* + attach) is out of 4a
+            // scope. Keep this attach Windows-only so Windows behavior
+            // is byte-identical.
             #[cfg(target_os = "windows")]
             {
                 if let Some(mc_shared) = app.try_state::<crate::meetings::runtime::MeetingRuntimeShared>() {
