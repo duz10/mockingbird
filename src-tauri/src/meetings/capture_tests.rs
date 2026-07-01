@@ -55,6 +55,61 @@ fn channel_tag_strings_match_chunker() {
 }
 
 // ---------------------------------------------------------------------
+// Production mic-builder validation (Phase 4a fix)
+// ---------------------------------------------------------------------
+
+/// Phase 4a correctness gate: the *production* `build_mic_capture()`
+/// must return a real `CpalCapture`-backed `AudioCapture` on macOS,
+/// NOT the old `Err("... Phase 9 ...")` stub.
+///
+/// The 4a judge (`judges_macos_v1`) drove the pipeline with a
+/// `WavMicCapture` test double, so it never exercised the real
+/// builder — a live Meetings-page meeting on macOS would have errored
+/// at `TwinStreamCapture::start()`. This test closes that gap by
+/// asserting the real builder directly.
+///
+/// `CpalCapture::new()` constructs lazily (it builds a cpal host + an
+/// orphan ring; the actual CoreAudio input device is opened on
+/// `start()`), so `build_mic_capture()` returns `Ok(..)` regardless of
+/// whether a live mic is present in CI. An `Ok` therefore proves the
+/// macOS arm resolved to the `CpalCapture` path rather than the `Err`
+/// stub — the exact regression we're guarding.
+///
+/// When a live default input device IS present (dev boxes, not
+/// headless CI), we additionally smoke-test the full lifecycle
+/// (`start()` → one `drain()` → `stop()`) to prove the returned
+/// capture is functional CoreAudio, not just constructible.
+#[cfg(target_os = "macos")]
+#[test]
+fn build_mic_capture_returns_real_cpal_on_macos() {
+    let cap = build_mic_capture();
+    assert!(
+        cap.is_ok(),
+        "build_mic_capture() must return Ok (real CpalCapture) on macOS, \
+         not the Phase-9 Err stub; got {:?}",
+        cap.as_ref().err()
+    );
+    let mut cap = cap.unwrap();
+
+    // If a real default input device is available, prove the capture
+    // is functional CoreAudio end-to-end: open the stream, pull one
+    // drain, tear down. `drain()` returning any count (including 0 in
+    // silence) without error is the functional contract we need.
+    let live_mic = super::probe_sources()
+        .map(|p| p.mic_available)
+        .unwrap_or(false);
+    if live_mic {
+        cap.start()
+            .expect("CoreAudio mic start() should succeed on a box with a default input");
+        let mut buf = Vec::new();
+        let _ = cap
+            .drain(&mut buf)
+            .expect("drain() from a live CoreAudio mic should not error");
+        cap.stop().expect("CoreAudio mic stop() should succeed");
+    }
+}
+
+// ---------------------------------------------------------------------
 // Synthetic StubCapture for TwinStreamCapture integration tests
 // ---------------------------------------------------------------------
 

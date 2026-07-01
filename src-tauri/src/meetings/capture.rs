@@ -539,14 +539,24 @@ fn shutdown_capture(mut capture: Box<dyn AudioCapture>) -> AppResult<()> {
 // ---------------------------------------------------------------------
 
 fn build_mic_capture() -> AppResult<Box<dyn AudioCapture>> {
-    #[cfg(target_os = "windows")]
+    // Windows (WASAPI) and macOS (CoreAudio) both drive the microphone
+    // through the same cross-platform `CpalCapture` (un-gated to
+    // `any(windows, macos)` for dictation in .4.7a). It opens the OS
+    // default *input* device and resamples/downmixes to 16 kHz mono
+    // i16 — exactly the format the meeting chunker expects (ADR 0013).
+    // Phase 4a: the meeting mic path now shares this construction so a
+    // live Meetings-page meeting on macOS gets a real CoreAudio mic,
+    // not the Phase-9 `Err` stub. System (loopback) capture stays
+    // Windows-only until ScreenCaptureKit lands in Phase 4b
+    // (`build_sys_capture` below).
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         Ok(Box::new(crate::audio::capture::CpalCapture::new()?) as Box<dyn AudioCapture>)
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         Err(AppError::Audio(
-            "mic capture not implemented for this platform (Phase 9 macOS/Linux)".into(),
+            "mic capture not implemented for this platform (Linux/other is future work)".into(),
         ))
     }
 }
