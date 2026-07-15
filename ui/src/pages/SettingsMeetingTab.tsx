@@ -25,6 +25,7 @@ import {
   MEETING_MAX_DURATION_MAX_SEC,
   MEETING_MAX_DURATION_MIN_SEC,
 } from "../lib/meetings";
+import { useAppStore } from "../lib/store";
 import { api } from "../lib/tauri";
 import type { MeetingSettingsSnapshot } from "../lib/types";
 
@@ -80,6 +81,12 @@ const SPEAKER_LABEL_MAX_LENGTH = 30;
 const LEGACY_CHORD_SETTING = "legacy_meeting_chord_enabled";
 
 export function SettingsMeetingTab() {
+  // mb-7rl: the meeting activation chord is `#[cfg(windows)]` — on macOS
+  // meetings start/stop from the Meetings-page buttons, so the whole
+  // VK-name chord picker (modifier + main-key + pause + legacy-chord) is
+  // a Windows-only surface and must not show. `isMac` is `null` on
+  // Windows, so `!isMac` renders the card exactly as today there.
+  const isMac = useAppStore((s) => s.isMac);
   const [snap, setSnap] = useState<MeetingSettingsSnapshot | null>(null);
   const [savingError, setSavingError] = useState<string | null>(null);
   // Phase 10 Wave 1A deferral landed in Wave 1B: the typed-settings
@@ -169,6 +176,7 @@ export function SettingsMeetingTab() {
         </div>
       ) : null}
 
+      {!isMac ? (
       <Card title={t("settings.meeting.activation")}>
         <Row label={t("settings.meeting.modifier")}>
           <select
@@ -255,6 +263,7 @@ export function SettingsMeetingTab() {
           </div>
         </Row>
       </Card>
+      ) : null}
 
       <Card title={t("settings.meeting.transcript")}>
         <Row label={t("settings.meeting.defaultSource")}>

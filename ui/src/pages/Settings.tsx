@@ -155,7 +155,9 @@ export function SettingsPage() {
             <SettingsKgTab onOpenMobileSync={() => setTab("mobileSync")} />
           )}
           {tab === "permissions" && isMac && <SettingsPermissionsTab />}
-          {tab === "advanced" && <AdvancedPanel settings={settings} patch={patch} />}
+          {tab === "advanced" && (
+            <AdvancedPanel settings={settings} patch={patch} isMac={isMac} />
+          )}
         </div>
       </div>
     </>
@@ -294,16 +296,25 @@ function GeneralPanel({
           />
         }
       />
-      <Row
-        label={t("settings.general.autostart")}
-        control={
-          <Toggle
-            checked={settings.autostart}
-            onChange={(v) => void patch("ui.autostart", v, { autostart: v })}
-            ariaLabel={t("settings.general.autostart")}
-          />
-        }
-      />
+      {/* mb-i42: the autostart toggle only persists `ui.autostart` — no
+          code registers a macOS LaunchAgent/login-item (no Tauri
+          autostart plugin is wired), so on macOS it is a non-functional
+          setting and is hidden. Windows renders it exactly as today
+          (isMac === false). See the Wave-2a report: autostart is
+          currently a no-op on BOTH platforms; wiring it is a separate
+          cross-platform epic, deliberately NOT smuggled into this wave. */}
+      {!isMac ? (
+        <Row
+          label={t("settings.general.autostart")}
+          control={
+            <Toggle
+              checked={settings.autostart}
+              onChange={(v) => void patch("ui.autostart", v, { autostart: v })}
+              ariaLabel={t("settings.general.autostart")}
+            />
+          }
+        />
+      ) : null}
       <Row
         label={t("settings.general.reducedMotion")}
         help={t("settings.general.reducedMotion.help")}
@@ -629,7 +640,11 @@ function ModelsPanel({ settings, patch }: PanelProps) {
 /* Advanced panel — learning loop + folder shortcuts + data control     */
 /* ------------------------------------------------------------------ */
 
-function AdvancedPanel({ settings, patch }: PanelProps) {
+function AdvancedPanel({
+  settings,
+  patch,
+  isMac,
+}: PanelProps & { isMac: boolean }) {
   const [runs, setRuns] = useState<LearningRun[] | null>(null);
   const [paths, setPaths] = useState<{ dataDir: string; logsDir: string; modelsDir: string } | null>(
     null,
@@ -637,9 +652,14 @@ function AdvancedPanel({ settings, patch }: PanelProps) {
   const [running, setRunning] = useState(false);
 
   useEffect(() => {
-    void api.list_learning_runs(10).then(setRuns);
+    // mb-kw8: the nightly learning-loop scheduler is `#[cfg(windows)]`, so
+    // on macOS the loop can't run — skip fetching its run history and
+    // hide the whole card below. `app_paths` is cross-platform and stays.
+    if (!isMac) {
+      void api.list_learning_runs(10).then(setRuns);
+    }
     void api.app_paths().then(setPaths);
-  }, []);
+  }, [isMac]);
 
   const triggerRun = async () => {
     setRunning(true);
@@ -653,6 +673,11 @@ function AdvancedPanel({ settings, patch }: PanelProps) {
 
   return (
     <>
+      {/* mb-kw8: learning-loop controls are Windows-only (the nightly
+          scheduler is `#[cfg(windows)]`); hide them on macOS so a
+          non-functional Windows-remnant setting isn't shown. Windows
+          renders the card exactly as today (isMac === false). */}
+      {!isMac ? (
       <Card title={t("settings.advanced.learning")}>
         <p style={{ margin: 0, color: "var(--on-surf-muted)", font: "var(--type-sm)" }}>
           {t("settings.advanced.learning.help")}
@@ -712,6 +737,7 @@ function AdvancedPanel({ settings, patch }: PanelProps) {
           </>
         ) : null}
       </Card>
+      ) : null}
 
       <Card title="Folders">
         {paths
