@@ -94,11 +94,16 @@ pub struct SileroVad {
 impl SileroVad {
     pub fn new() -> AppResult<Self> {
         let model_path = locate_model().ok_or_else(|| {
-            AppError::Audio(
-                "silero_vad.onnx not found — set SILERO_VAD_PATH or run \
-                 `scripts/download-models.ps1`"
-                    .into(),
-            )
+            // Report the models dir we probed so a packaged-app miss is
+            // actionable, not a silent dead runtime (mb-3cr).
+            let dir_hint = crate::stt::models_dir()
+                .map(|d| d.join("silero_vad.onnx").display().to_string())
+                .unwrap_or_else(|e| format!("<no models dir: {e}>"));
+            tracing::error!(expected = %dir_hint, "silero_vad.onnx not found");
+            AppError::Audio(format!(
+                "silero_vad.onnx not found (set SILERO_VAD_PATH or bundle/place \
+                 it in the models dir). Expected at: {dir_hint}"
+            ))
         })?;
         Self::from_path(&model_path)
     }

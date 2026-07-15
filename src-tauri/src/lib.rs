@@ -755,7 +755,11 @@ const APP_IDENTIFIER: &str = "com.dustin.mockingbird";
 ///
 /// Returns an error rather than panicking so the caller can decide
 /// how to surface the failure (run() expects it; tests can probe).
-fn resolve_app_data_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
+///
+/// `pub(crate)` so the model-discovery resolver ([`crate::stt::models_dir`])
+/// can reuse the exact same app-data root for its `<app-data>/models/`
+/// candidate instead of re-deriving the per-OS path (mb-3cr).
+pub(crate) fn resolve_app_data_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
     #[cfg(target_os = "windows")]
     {
         let appdata = std::env::var("APPDATA")
