@@ -266,6 +266,7 @@
   "settings.permissions.state.notDetermined": "Not granted",
   "settings.permissions.state.restricted": "Restricted",
   "settings.permissions.state.unsupported": "Unsupported",
+  "settings.permissions.devHint": "Dev build (cargo tauri dev)? macOS attaches these grants to the terminal that launched the app, not to \"Mockingbird\" — grant your terminal and relaunch. The packaged .app grants \"Mockingbird\" directly.",
 
   "kg.settings.title": "Knowledge Graph",
   "kg.settings.explainer": "Knowledge Graph indexes your dictations so you can search and filter by entities, tags, and categories. Default off \u2014 no data is indexed until you turn it on.",

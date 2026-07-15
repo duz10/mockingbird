@@ -20,7 +20,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Button, Card, Pill, Spinner } from "../components/primitives";
 import { t } from "../i18n";
 import { api } from "../lib/tauri";
-import type { PermissionKey, PermissionState, PermissionStatuses } from "../lib/types";
+import type {
+  PermissionKey,
+  PermissionState,
+  PermissionStatuses,
+} from "../lib/types";
 
 import styles from "./Settings.module.css";
 
@@ -120,6 +124,21 @@ export function SettingsPermissionsTab() {
             />
           );
         })}
+
+        {/* mb-icp — dev-build TCC hint. In a `cargo tauri dev` build the
+            grant attaches to the launching TERMINAL, not "Mockingbird";
+            the built .app grants Mockingbird directly. Harmless for
+            .app users (it also explains their case). isMac-gated
+            already (this whole tab is macOS-only). */}
+        <p
+          style={{
+            color: "var(--on-surf-faint)",
+            margin: 0,
+            font: "var(--type-xs)",
+          }}
+        >
+          {t("settings.permissions.devHint")}
+        </p>
       </Card>
     </div>
   );
