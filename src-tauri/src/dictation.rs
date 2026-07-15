@@ -189,6 +189,17 @@ pub struct DictationOrchestrator {
     /// existing pipeline behavior changes.
     vault: Arc<crate::vault::export_job::VaultRuntime>,
 
+    /// mb-58i — whether to run the lazy Ollama self-heal at each
+    /// dictation boundary. Set TRUE only for the PRODUCTION cleaner
+    /// built by `runtime_cleaner::make_default_cleaner` (via
+    /// `with_cleaner_self_heal` in `run_dictation_thread`). Stays
+    /// `false` for test-injected cleaner doubles so the self-heal never
+    /// hijacks an injected `PassthroughCleaner` by rebuilding a real
+    /// Ollama-backed `LlmCleaner` off the live DB — which would make the
+    /// orchestrator tests non-deterministic on any box where Ollama
+    /// happens to be running.
+    cleaner_self_heal: bool,
+
     // Per-session transient state.
     state: SessionState,
 }
@@ -637,8 +648,20 @@ impl DictationOrchestrator {
             next_start_is_programmatic,
             next_start_is_kg_note,
             vault,
+            cleaner_self_heal: false,
             state: SessionState::default(),
         }
+    }
+
+    /// mb-58i — enable the lazy Ollama self-heal for this orchestrator.
+    /// Called ONLY by the production spawn path
+    /// (`runtime::run_dictation_thread`) whose cleaner comes from
+    /// `make_default_cleaner`; test doubles never opt in, so an injected
+    /// `PassthroughCleaner` is never silently rebuilt into a real
+    /// Ollama-backed cleaner.
+    pub fn with_cleaner_self_heal(mut self) -> Self {
+        self.cleaner_self_heal = true;
+        self
     }
 
     /// Emit the post-persist UI refetch signal via the
@@ -1029,13 +1052,19 @@ impl DictationOrchestrator {
         // down we're on the passthrough fallback; re-check now (cheap —
         // only pings when currently on passthrough) and swap in a real
         // LlmCleaner if Ollama has since come up. No-op / zero-cost once
-        // a live cleaner is in place.
-        if let Some(upgraded) = crate::dictation::runtime_cleaner::maybe_upgrade_from_passthrough(
-            self.cleaner.as_ref(),
-            &self.db,
-            &self.config,
-        ) {
-            self.cleaner = upgraded;
+        // a live cleaner is in place. Gated to the production cleaner
+        // (`cleaner_self_heal`) so it never rebuilds a test-injected
+        // passthrough double off the live DB/Ollama.
+        if self.cleaner_self_heal {
+            if let Some(upgraded) =
+                crate::dictation::runtime_cleaner::maybe_upgrade_from_passthrough(
+                    self.cleaner.as_ref(),
+                    &self.db,
+                    &self.config,
+                )
+            {
+                self.cleaner = upgraded;
+            }
         }
         let cleanup_start = Instant::now();
         tracing::info!(mode = %mode_slug, "dictation: cleanup begin");

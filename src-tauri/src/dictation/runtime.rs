@@ -496,7 +496,11 @@ fn run_dictation_thread(
         next_start_is_programmatic,
         next_start_is_kg_note,
         vault,
-    );
+    )
+    // mb-58i — production cleaner only: enable the lazy Ollama self-heal
+    // at dictation boundaries (the injected-double path in tests never
+    // opts in).
+    .with_cleaner_self_heal();
 
     // ADR 0046 §3.2 — bridge the std::sync::mpsc StateAction stream
     // into a crossbeam channel so the orchestrator's `run` loop can
