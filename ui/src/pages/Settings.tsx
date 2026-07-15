@@ -376,6 +376,11 @@ function GeneralPanel({
 /* ------------------------------------------------------------------ */
 
 function BackgroundCard() {
+  // macOS-port (mb-ihg): the Unsplash key is DPAPI on Windows but the
+  // macOS Keychain (ADR 0056) on Mac, so the storage-mechanism copy must
+  // be platform-accurate. `isMac` is `null` on Windows/pre-boot, so the
+  // `isMac ?` branch only fires on Mac -> Windows copy byte-identical.
+  const isMac = useAppStore((s) => s.isMac);
   const [prefs, setPrefsState] = useState<BackgroundPrefs>(() => getPrefs());
   // The committed API key, hydrated async from DPAPI. Empty string
   // when not yet loaded OR not configured; both states gate the
@@ -455,7 +460,7 @@ function BackgroundCard() {
           font: "var(--type-sm)",
         }}
       >
-        {t("settings.general.bg.help")}
+        {t(isMac ? "settings.general.bg.help.mac" : "settings.general.bg.help")}
       </p>
 
       <Row
@@ -582,6 +587,10 @@ function BackgroundCard() {
 /* ------------------------------------------------------------------ */
 
 function ModelsPanel({ settings, patch }: PanelProps) {
+  // macOS-port (mb-ihg): the Claude API key is DPAPI on Windows but the
+  // macOS Keychain (ADR 0056) on Mac. `isMac` is `null` on Windows/pre-boot,
+  // so Windows copy stays byte-identical.
+  const isMac = useAppStore((s) => s.isMac);
   return (
     <>
       <Card title={t("settings.models.ollama")}>
@@ -593,7 +602,11 @@ function ModelsPanel({ settings, patch }: PanelProps) {
         <Row
           label={
             settings.claudeKeyConfigured
-              ? t("settings.models.claude.configured")
+              ? t(
+                  isMac
+                    ? "settings.models.claude.configured.mac"
+                    : "settings.models.claude.configured",
+                )
               : t("settings.models.claude.unconfigured")
           }
           control={

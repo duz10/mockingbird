@@ -171,6 +171,7 @@
   "dictionary.add.placeholder.term": "e.g. Hooli",
   "dictionary.add.placeholder.canonical": "e.g. Huly (optional)",
   "dictionary.add.placeholder.appContext": "e.g. slack.exe (optional)",
+  "dictionary.add.placeholder.appContext.mac": "e.g. com.apple.Safari (optional)",
   "dictionary.addDialog.title": "Add term to dictionary",
   "dictionary.editDialog.title": "Edit dictionary entry",
   "dictionary.form.canonical": "Canonical term",
@@ -475,6 +476,7 @@
 
   "settings.general.bg.title": "Background photo",
   "settings.general.bg.help": "Display a slowly-panning photo from Unsplash behind the app. Rotates every 5 minutes. Your API key is encrypted via Windows DPAPI and stored only on this machine.",
+  "settings.general.bg.help.mac": "Display a slowly-panning photo from Unsplash behind the app. Rotates every 5 minutes. Your API key is stored in the macOS Keychain and only on this machine.",
   "settings.general.bg.enabled": "Show background photo",
   "settings.general.bg.enabled.needsKey": "Add your Unsplash API key below to enable.",
   "settings.general.bg.apiKey": "Unsplash API key",
@@ -492,6 +494,7 @@
   "settings.models.claude": "Cloud (Claude)",
   "settings.models.claude.unconfigured": "No API key configured.",
   "settings.models.claude.configured": "API key configured - stored in Windows DPAPI.",
+  "settings.models.claude.configured.mac": "API key configured - stored in the macOS Keychain.",
   "settings.models.claude.add": "Add API key…",
   "settings.models.claude.remove": "Remove API key",
 
