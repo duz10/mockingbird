@@ -137,6 +137,58 @@ pub const OPEN_BACKOFF: std::time::Duration = std::time::Duration::from_millis(1
 /// determinism + worst-case bound.
 pub const PASTE_CONSUME_GRACE: std::time::Duration = std::time::Duration::from_millis(30);
 
+/// macOS-only: lead time between writing the pasteboard and posting Cmd+V.
+///
+/// `arboard::set_text` lands the write on `NSPasteboard` synchronously, but
+/// the synthesized Cmd+V is delivered ASYNCHRONOUSLY (`CGEventPost` →
+/// HID tap → WindowServer → the target app's run loop). This small lead
+/// guarantees the write is visible to the target's paste handler before the
+/// keystroke arrives, closing the second, subtler half of the race (target
+/// reads a *pre-write* pasteboard). Kept small so it adds no perceptible
+/// lag. macOS-scoped: the Windows path is byte-identical and untouched.
+#[cfg(target_os = "macos")]
+pub const MAC_SET_PROPAGATE_DELAY: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// macOS-only: how long to wait AFTER posting Cmd+V before restoring the
+/// caller's clipboard. **This is the core paste-race fix.**
+///
+/// On Windows the target consumes the paste synchronously off the message
+/// pump, so 30 ms ([`PASTE_CONSUME_GRACE`]) suffices. On macOS the paste is
+/// consumed asynchronously — the target reads `NSPasteboard` some tens of ms
+/// after the HID event lands — so restoring after only 30 ms frequently
+/// wins the race and the app reads the RESTORED (previous) clipboard,
+/// pasting the old contents instead of the transcript (the user-reported
+/// intermittent bug). 120 ms sits comfortably above the observed HID→app
+/// read latency with headroom, while staying well under the perceptible-lag
+/// threshold: the paste itself already appeared at Cmd+V time, so this delay
+/// only defers the (invisible) clipboard restore, never the transcript.
+#[cfg(target_os = "macos")]
+pub const MAC_PASTE_CONSUME_GRACE: std::time::Duration = std::time::Duration::from_millis(120);
+
+/// macOS-only pure guard: given the `NSPasteboard.changeCount` observed
+/// immediately after we wrote the transcript (`after_write`) and the count
+/// observed just before we restore (`before_restore`), decide whether
+/// restoring the caller's clipboard is safe.
+///
+/// The macOS twin of [`SequenceAnalysis::classify`] — but with a crucial
+/// difference: it demands **strict equality** rather than tolerating a `+1`
+/// advance. `changeCount` is a monotonic counter bumped by exactly 1 on
+/// every pasteboard WRITE, and Cmd+V is a pure READ on macOS (it never bumps
+/// the count). So `after_write == before_restore` means "the pasteboard
+/// still holds exactly our transcript, untouched." ANY advance means someone
+/// else wrote after us — a third-party clipboard manager, OR (the race we
+/// must defend) a rapid SECOND dictation whose write would be clobbered if
+/// we restored the stale `C0`. Tolerating `+1` (as Windows does for apps
+/// that re-copy during paste) would re-open exactly that second-dictation
+/// clobber, so we don't. Cost of strict equality: if a clipboard manager
+/// re-writes during paste we skip the restore (user keeps the transcript on
+/// the clipboard rather than `C0`) — a safe paper cut, surfaced as
+/// [`PasteOutcome::OkClipboardNotRestored`].
+#[cfg(target_os = "macos")]
+pub fn mac_change_count_safe_to_restore(after_write: isize, before_restore: isize) -> bool {
+    after_write == before_restore
+}
+
 /// Outcome of a single `with_saved_clipboard` invocation — surfaced to
 /// the orchestrator so the DB `injection_status` column can record
 /// whether the restore happened cleanly.
@@ -353,12 +405,15 @@ where
 ///    restored; images and custom pasteboard flavors are lost around a
 ///    dictation. This mirrors the Windows path's deliberate skip of
 ///    non-`HGLOBAL` formats — a paper cut, never a crash.
-/// 2. **No change-count divergence skip.** Unlike the Win32 path
-///    (which consults `GetClipboardSequenceNumber` to avoid clobbering
-///    a concurrent writer), v1 restores unconditionally. `arboard`
-///    does not surface `NSPasteboard.changeCount`; a future leaf could
-///    drop to raw `NSPasteboard` for full parity. The single-user
-///    dictation workload makes the race vanishingly rare.
+/// 2. ~~No change-count divergence skip.~~ **CLOSED** (paste-race fix).
+///    The macOS path now consults `NSPasteboard.changeCount` (read via
+///    `objc2-app-kit`, a pure query — arboard remains the sole WRITER)
+///    to skip the restore when another writer touched the pasteboard
+///    after our transcript write, exactly like the Win32
+///    `GetClipboardSequenceNumber` divergence check. This also defends
+///    the rapid-second-dictation clobber. See
+///    [`mac_change_count_safe_to_restore`] +
+///    [`MAC_PASTE_CONSUME_GRACE`].
 #[cfg(target_os = "macos")]
 pub fn with_saved_clipboard<F>(payload: &str, paste_fn: F) -> AppResult<PasteOutcome>
 where
@@ -385,9 +440,29 @@ where
 mod mac {
     use super::*;
     use arboard::Clipboard;
+    use objc2_app_kit::NSPasteboard;
 
-    /// See [`super::with_saved_clipboard`] (macOS arm) for the contract
-    /// and the documented parity gaps.
+    /// Read the general pasteboard's monotonic `changeCount`.
+    ///
+    /// A read-only `NSPasteboard` query — the macOS analogue of Win32
+    /// `GetClipboardSequenceNumber`. It does NOT write the pasteboard, so
+    /// the "arboard is the sole writer" discipline (PLAN §12 #17) holds.
+    /// `changeCount` increments by exactly 1 on every write; Cmd+V is a
+    /// pure read and never bumps it.
+    fn pasteboard_change_count() -> isize {
+        NSPasteboard::generalPasteboard().changeCount()
+    }
+
+    /// See [`super::with_saved_clipboard`] (macOS arm) for the contract.
+    ///
+    /// Ordering (the paste-race fix): snapshot `C0` → write transcript `T`
+    /// → record `changeCount` → **lead delay** so the write propagates →
+    /// Cmd+V → **consume grace** so the target reads `T` before we touch
+    /// the pasteboard → restore `C0` **only if** `changeCount` is
+    /// unchanged (nobody wrote after us). The two delays + the changeCount
+    /// guard are what keep the restore from beating the target's read
+    /// (which pasted the previous clipboard) and from clobbering a rapid
+    /// second dictation.
     pub fn with_saved_clipboard<F>(payload: &str, paste_fn: F) -> AppResult<PasteOutcome>
     where
         F: FnOnce() -> AppResult<()>,
@@ -395,37 +470,64 @@ mod mac {
         let mut clipboard = Clipboard::new()
             .map_err(|e| AppError::Injection(format!("open macOS pasteboard: {e}")))?;
 
-        // 1. Snapshot. `Err`/empty → treat as "no text to restore".
+        // 1. Snapshot C0. `Err`/empty → treat as "no text to restore".
         let saved = clipboard.get_text().ok();
 
-        // 2. Write the payload.
+        // 2. Write the transcript payload (T).
         clipboard
             .set_text(payload.to_owned())
             .map_err(|e| AppError::Injection(format!("set macOS pasteboard text: {e}")))?;
 
+        // Record the changeCount our write produced. Any later advance means
+        // ANOTHER writer (clipboard manager, or a rapid second dictation)
+        // touched the pasteboard after us → we must NOT restore over them.
+        let change_count_after_write = pasteboard_change_count();
+
+        // 2a. Let the write fully propagate before the keystroke lands, so
+        // the target never reads a pre-write pasteboard. See
+        // [`MAC_SET_PROPAGATE_DELAY`].
+        std::thread::sleep(MAC_SET_PROPAGATE_DELAY);
+
         // 3. Paste (caller's Cmd+V keypost). Errors still need restore.
         let paste_result = paste_fn();
 
-        // Give the focused app time to read the pasteboard before we
-        // overwrite it again — same rationale as [`PASTE_CONSUME_GRACE`].
-        std::thread::sleep(PASTE_CONSUME_GRACE);
+        // 4. Wait for the target to CONSUME the paste before touching the
+        // pasteboard again. THE core race fix — see
+        // [`MAC_PASTE_CONSUME_GRACE`]. Restoring before this window closes
+        // is exactly what made the app paste the previous clipboard.
+        std::thread::sleep(MAC_PASTE_CONSUME_GRACE);
 
-        // 4. Restore the snapshot (best-effort; see parity gap #2).
-        let outcome = match saved {
-            Some(prev) => match clipboard.set_text(prev) {
-                Ok(()) => PasteOutcome::Ok,
-                Err(e) => {
-                    tracing::warn!("macOS clipboard restore failed (best-effort): {e}");
-                    PasteOutcome::OkClipboardNotRestored
+        // 5. Restore C0 — but only if the pasteboard STILL holds exactly
+        // our transcript (changeCount unchanged). The macOS twin of the
+        // Win32 sequence-number divergence check; also defends the
+        // rapid-second-dictation clobber. See
+        // [`mac_change_count_safe_to_restore`].
+        let before_restore = pasteboard_change_count();
+        let outcome = if !mac_change_count_safe_to_restore(change_count_after_write, before_restore)
+        {
+            tracing::info!(
+                "macOS pasteboard changeCount advanced ({change_count_after_write} → \
+                 {before_restore}) after our write; skipping restore to avoid clobbering a \
+                 newer clipboard owner"
+            );
+            PasteOutcome::OkClipboardNotRestored
+        } else {
+            match saved {
+                Some(prev) => match clipboard.set_text(prev) {
+                    Ok(()) => PasteOutcome::Ok,
+                    Err(e) => {
+                        tracing::warn!("macOS clipboard restore failed (best-effort): {e}");
+                        PasteOutcome::OkClipboardNotRestored
+                    }
+                },
+                None => {
+                    // Nothing meaningful preceded our write — clear our
+                    // transcript so it doesn't linger on the clipboard.
+                    if let Err(e) = clipboard.clear() {
+                        tracing::warn!("macOS clipboard clear failed (best-effort): {e}");
+                    }
+                    PasteOutcome::Ok
                 }
-            },
-            None => {
-                // Nothing meaningful preceded our write — clear our
-                // payload so the dictation text doesn't linger.
-                if let Err(e) = clipboard.clear() {
-                    tracing::warn!("macOS clipboard clear failed (best-effort): {e}");
-                }
-                PasteOutcome::Ok
             }
         };
 
@@ -931,6 +1033,70 @@ mod tests {
         // across every windows-rs release we care about. If this
         // changes, every Win32 program on Earth breaks.
         assert_eq!(CF_UNICODETEXT_ID, 13);
+    }
+
+    // -----------------------------------------------------------------
+    // macOS paste-race fix — changeCount guard + timing (pure/deterministic)
+    // -----------------------------------------------------------------
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_restore_safe_only_when_change_count_unchanged() {
+        // Read-only paste: Cmd+V never bumps changeCount, so the count we
+        // recorded after our write is still current at restore time → the
+        // pasteboard still holds our transcript → safe to restore C0.
+        assert!(mac_change_count_safe_to_restore(100, 100));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_restore_skipped_when_a_second_writer_advanced_the_count() {
+        // The rapid-SECOND-dictation guard: dictation #2's set_text bumps
+        // changeCount by 1 while dictation #1 is still in its post-paste
+        // grace window. #1 must SKIP its restore — restoring the stale C0
+        // here would clobber #2's freshly-written transcript. Strict
+        // equality (NOT the Windows +1 tolerance) is what makes this hold.
+        assert!(
+            !mac_change_count_safe_to_restore(100, 101),
+            "a +1 advance means a second writer (e.g. dictation #2) owns the \
+             pasteboard; restoring C0 would clobber it"
+        );
+        // A third-party clipboard manager writing multiple times → also skip.
+        assert!(!mac_change_count_safe_to_restore(100, 105));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_restore_skipped_if_count_somehow_regressed() {
+        // changeCount is monotonic in practice, but the guard must reject a
+        // regression cleanly rather than treat it as "unchanged".
+        assert!(!mac_change_count_safe_to_restore(100, 99));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_restore_happens_after_the_paste_is_consumed() {
+        // Ordering proof: the restore is gated behind the consume grace,
+        // which on macOS is strictly longer than the Windows message-pump
+        // grace (30 ms) — the whole point of the fix. If someone "tunes"
+        // MAC_PASTE_CONSUME_GRACE back down to the Windows value, the race
+        // reopens; this test pins the invariant.
+        assert!(
+            MAC_PASTE_CONSUME_GRACE > PASTE_CONSUME_GRACE,
+            "macOS async paste needs a longer consume window than the \
+             synchronous Windows message-pump path"
+        );
+        // The propagate lead must be positive (write visible before Cmd+V)
+        // and small relative to the consume grace (no perceptible lag).
+        assert!(MAC_SET_PROPAGATE_DELAY > std::time::Duration::ZERO);
+        assert!(MAC_SET_PROPAGATE_DELAY < MAC_PASTE_CONSUME_GRACE);
+        // Guard against a laggy over-tune: keep the total added latency
+        // (which only defers the invisible restore) under ~200 ms.
+        assert!(
+            MAC_SET_PROPAGATE_DELAY + MAC_PASTE_CONSUME_GRACE
+                <= std::time::Duration::from_millis(200),
+            "total added delay must stay well under the perceptible-lag budget"
+        );
     }
 
     // -----------------------------------------------------------------

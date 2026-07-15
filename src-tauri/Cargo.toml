@@ -177,6 +177,13 @@ objc2-foundation = { version = "0.3", features = [
 objc2-app-kit = { version = "0.3", features = [
     "NSWorkspace",
     "NSRunningApplication",
+    # ADR-0058 (paste-race fix) — read-only `NSPasteboard.changeCount`, the
+    # macOS twin of Win32 `GetClipboardSequenceNumber`. Used to skip the
+    # clipboard restore when another writer (clipboard manager, or a rapid
+    # second dictation) touched the pasteboard after our transcript write.
+    # NO pasteboard WRITE goes through objc2 — arboard stays the sole writer
+    # (PLAN §12 #17); this is a pure query.
+    "NSPasteboard",
 ] }
 
 # ADR-0068 / mb-mac-v1.5.3 — Phase 4b ScreenCaptureKit system-audio
