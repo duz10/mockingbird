@@ -22,6 +22,10 @@
   "comingSoon.activity.body": "Activity capture isn't available on macOS yet. It's live on Windows today and is on the way to your Mac in a future update. Dictation and Meetings are fully supported here in the meantime.",
   "comingSoon.kg.body": "The Knowledge Graph isn't available on macOS yet. It's live on Windows today and is on the way to your Mac in a future update. Dictation and Meetings are fully supported here in the meantime.",
   "comingSoon.cc.activityHint": "coming soon on macOS",
+
+  "error.boundary.title": "Something went wrong",
+  "error.boundary.body": "Mockingbird hit an unexpected error and couldn't finish rendering this screen. Your dictations and settings are safe. Reload to get back to a working state.",
+  "error.boundary.reload": "Reload",
   "activity.empty.title": "No activity sessions yet",
   "activity.empty.body": "Open the Command Center (Right Ctrl + Space) and pick Activity to start one.",
   "activity.list.startedAt": "Started",

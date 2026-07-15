@@ -1,0 +1,44 @@
+/* mb-e3z — fallback panel styling. Uses design tokens only so it
+   matches the app's surfaces/type in both themes. Deliberately minimal:
+   this renders when the app is already in a bad state, so it must not
+   depend on anything that could itself be broken. */
+
+.wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: var(--s-5);
+  box-sizing: border-box;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  max-width: 28rem;
+  padding: var(--s-5);
+  text-align: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+  box-shadow: var(--shadow-2);
+}
+
+.title {
+  margin: 0;
+  font: var(--type-lg);
+  color: var(--on-surf);
+}
+
+.body {
+  margin: 0;
+  font: var(--type-sm);
+  color: var(--on-surf-muted);
+}
+
+.action {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--s-2);
+}
