@@ -193,6 +193,39 @@ pub fn param_billions(model_id: &str) -> Option<f32> {
     None
 }
 
+/// mb-mac-v1.6.4 — RAM-aware **runtime** fallback chain (Layer 2).
+///
+/// Layer 1 ([`select_model`]) *predictively* picks a model that should
+/// fit the memory budget. This is the defence-in-depth safety net for
+/// the borderline case where the chosen model still fails to LOAD /
+/// times out at runtime (e.g. a 12 GB box where the tier guessed 7B but
+/// it won't coexist with Whisper-Metal + the OS). It returns the
+/// installed models strictly SMALLER than `current` (by parsed param
+/// count), largest-first, so the runtime can step down one tier at a
+/// time until one loads.
+///
+/// Models that can't be parsed, that equal `current`, or that are `>=`
+/// `current` are excluded. If `current` itself can't be parsed we
+/// return an empty chain (we can't order a step-down safely). Pure +
+/// deterministic → unit-testable on every platform. The *wiring* is
+/// macOS-gated: the caller only builds this chain behind
+/// `#[cfg(target_os = "macos")]`, so on Windows the chain is always
+/// empty and the runtime step-down never fires (byte-identical).
+pub fn fallback_chain(current: &str, installed: &[String]) -> Vec<String> {
+    let Some(current_b) = param_billions(current) else {
+        return Vec::new();
+    };
+    let mut smaller: Vec<(f32, String)> = installed
+        .iter()
+        .filter(|m| m.as_str() != current)
+        .filter_map(|m| param_billions(m).map(|b| (b, m.clone())))
+        .filter(|(b, _)| *b < current_b)
+        .collect();
+    // Largest-first: step down one tier at a time (least quality loss).
+    smaller.sort_by(|(a, _), (b, _)| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    smaller.into_iter().map(|(_, m)| m).collect()
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Platform-gated budget provider.
 // ─────────────────────────────────────────────────────────────────────
@@ -283,6 +316,24 @@ pub fn resolve_effective_model(
         );
     }
     effective
+}
+
+/// macOS glue: build the runtime step-down chain for the effective
+/// model on THIS machine, reusing the installed-models list.
+///
+/// Lists the installed Ollama models and orders those strictly smaller
+/// than `effective_model` largest-first via [`fallback_chain`]. Lives
+/// behind `#[cfg(target_os = "macos")]` so the chain is only ever
+/// populated on macOS — on Windows the runtime step-down stays inert
+/// (byte-identical). An unreachable Ollama / empty list yields an
+/// empty chain (the passthrough net still protects the user).
+#[cfg(target_os = "macos")]
+pub fn runtime_fallback_chain(
+    provider: &crate::cleanup::OllamaProvider,
+    effective_model: &str,
+) -> Vec<String> {
+    let installed = provider.list_models().unwrap_or_default();
+    fallback_chain(effective_model, &installed)
 }
 
 #[cfg(test)]
@@ -447,6 +498,60 @@ mod tests {
     }
 
     // ── parse_memsize ─────────────────────────────────────────────────
+
+    // ── fallback_chain (mb-mac-v1.6.4 runtime step-down) ──────────────
+
+    #[test]
+    fn fallback_chain_orders_smaller_models_largest_first() {
+        let inst = installed(&[
+            "qwen2.5:7b-instruct-q4_K_M",
+            "qwen2.5:3b-instruct-q4_K_M",
+            "gemma2:2b-instruct-q4_K_M",
+            "qwen2.5:0.5b",
+        ]);
+        // Stepping down from 7B: 3B, then 2B, then 0.5B (never the 7B).
+        assert_eq!(
+            fallback_chain("qwen2.5:7b-instruct-q4_K_M", &inst),
+            vec![
+                "qwen2.5:3b-instruct-q4_K_M".to_string(),
+                "gemma2:2b-instruct-q4_K_M".to_string(),
+                "qwen2.5:0.5b".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn fallback_chain_excludes_equal_and_larger_and_self() {
+        let inst = installed(&[
+            "qwen2.5:7b-instruct-q4_K_M",
+            "other:3b-instruct-q4_K_M",
+            "qwen2.5:3b-instruct-q4_K_M", // same size as current, different tag
+        ]);
+        // From the 3B: only strictly-smaller models qualify. The 7B is
+        // larger; the sibling 3B is equal → both excluded. Nothing left.
+        assert_eq!(
+            fallback_chain("qwen2.5:3b-instruct-q4_K_M", &inst),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn fallback_chain_empty_when_current_unparseable() {
+        let inst = installed(&["qwen2.5:3b-instruct-q4_K_M"]);
+        assert_eq!(
+            fallback_chain("nomic-embed-text", &inst),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn fallback_chain_skips_unparseable_installed() {
+        let inst = installed(&["nomic-embed-text", "gemma2:2b-instruct-q4_K_M"]);
+        assert_eq!(
+            fallback_chain("qwen2.5:7b-instruct-q4_K_M", &inst),
+            vec!["gemma2:2b-instruct-q4_K_M".to_string()]
+        );
+    }
 
     #[test]
     fn parse_memsize_reads_8gib() {

@@ -32,12 +32,71 @@ pub(super) fn make_default_cleaner(
     db: &Arc<Mutex<Connection>>,
     config: &OrchestratorConfig,
 ) -> Box<dyn Cleaner> {
+    // At boot, warm the model up (the first real dictation is still
+    // seconds-to-minutes away). If Ollama is down, fall back to
+    // passthrough — the self-heal re-check (mb-58i) will upgrade us on
+    // a later dictation if Ollama comes up.
+    build_llm_cleaner(db, config, true).unwrap_or_else(|| Box::new(PassthroughCleaner::new()))
+}
+
+/// mb-58i — lazy Ollama self-heal at a dictation boundary.
+///
+/// The cleaner is built ONCE at [`DictationRuntime`] spawn. If Ollama
+/// wasn't running then, we fell back to [`PassthroughCleaner`] and
+/// would stay on raw passthrough until an app restart — even after the
+/// user starts Ollama. This re-checks that, cheaply, at the START of a
+/// dictation:
+///
+///   * If the current cleaner is NOT the passthrough fallback (i.e. we
+///     already have a live [`LlmCleaner`]), return `None` immediately —
+///     **no health check, no cost**. A healthy cleaner never pays for
+///     this. (The default `Cleaner::model_name()` is `"passthrough"`;
+///     `LlmCleaner` reports its provider/model, never that literal, so
+///     this is a reliable "am I the fallback?" signal.)
+///   * If we ARE on passthrough, re-run the Ollama health check via
+///     [`build_llm_cleaner`]. If Ollama is now reachable, return the
+///     freshly-built `LlmCleaner` for the caller to swap in; if it's
+///     still down, return `None` (behaviour identical to today).
+///
+/// Called only at dictation boundaries (not per-keystroke), so it can
+/// re-check at most once per dictation — no thrash, no background
+/// thread. Cross-platform: helps Windows too if Ollama is restarted
+/// after the app (flag for main-merge; when Ollama stays down the
+/// behaviour is byte-identical to before).
+pub(super) fn maybe_upgrade_from_passthrough(
+    current: &dyn Cleaner,
+    db: &Arc<Mutex<Connection>>,
+    config: &OrchestratorConfig,
+) -> Option<Box<dyn Cleaner>> {
+    if current.model_name() != "passthrough" {
+        // Already have a live LlmCleaner — skip the health check entirely.
+        return None;
+    }
+    // We're on the fallback. Don't warm up: the real dictation about to
+    // run IS the warm-up shot, so a separate warm-up thread would just
+    // race it for the same VRAM slot.
+    let upgraded = build_llm_cleaner(db, config, false)?;
+    tracing::info!("cleaner: Ollama now reachable; self-healed passthrough → LlmCleaner (mb-58i)");
+    Some(upgraded)
+}
+
+/// Build a live [`LlmCleaner`] IFF the mode looks up cleanly AND Ollama
+/// is reachable; otherwise `None` (the caller decides the fallback).
+///
+/// `warmup` controls whether we fire the background cold-load shot:
+/// `true` at boot (first dictation is far off), `false` on the mb-58i
+/// self-heal path (the imminent real request is the warm-up).
+fn build_llm_cleaner(
+    db: &Arc<Mutex<Connection>>,
+    config: &OrchestratorConfig,
+    warmup: bool,
+) -> Option<Box<dyn Cleaner>> {
     let lookup = {
         let conn = match db.lock() {
             Ok(g) => g,
             Err(_) => {
                 tracing::warn!("cleaner: db mutex poisoned at boot; using passthrough");
-                return Box::new(PassthroughCleaner::new());
+                return None;
             }
         };
         conn.query_row(
@@ -60,7 +119,7 @@ pub(super) fn make_default_cleaner(
                 mode = %config.mode_slug,
                 "cleaner: mode lookup failed; using passthrough"
             );
-            return Box::new(PassthroughCleaner::new());
+            return None;
         }
     };
 
@@ -119,6 +178,18 @@ pub(super) fn make_default_cleaner(
                 (effective, prompt_override, small_model_fidelity)
             };
 
+            // mb-mac-v1.6.4 — RAM-aware runtime fallback chain (Layer 2).
+            // macOS only: the installed models strictly smaller than the
+            // effective model, largest-first, so a runtime load/timeout
+            // failure can step DOWN instead of dropping to passthrough.
+            // Empty on every non-macOS target → the retry loop is inert
+            // and the Windows cleanup path is byte-identical.
+            #[cfg(not(target_os = "macos"))]
+            let runtime_fallback: Vec<String> = Vec::new();
+            #[cfg(target_os = "macos")]
+            let runtime_fallback =
+                crate::cleanup::model_select::runtime_fallback_chain(&provider, &model_id);
+
             tracing::info!(
                 model = %model_id,
                 temperature,
@@ -135,8 +206,10 @@ pub(super) fn make_default_cleaner(
             // first real dictation still times out, which is no
             // worse than today's behavior. (LESSONS 2026-05-17
             // phase5-smoketest, third pass.)
-            spawn_ollama_warmup(model_id.clone(), temperature as f32);
-            Box::new(
+            if warmup {
+                spawn_ollama_warmup(model_id.clone(), temperature as f32);
+            }
+            Some(Box::new(
                 LlmCleaner::new(
                     Box::new(provider),
                     Arc::clone(db),
@@ -146,8 +219,9 @@ pub(super) fn make_default_cleaner(
                 )
                 .with_prompt_mode_override(prompt_override)
                 .with_small_model_fidelity(small_model_fidelity)
-                .with_user_prompt_override(user_prompt_override),
-            )
+                .with_user_prompt_override(user_prompt_override)
+                .with_runtime_fallback_models(runtime_fallback),
+            ))
         }
         Err(e) => {
             tracing::warn!(
@@ -155,7 +229,7 @@ pub(super) fn make_default_cleaner(
                 "cleaner: Ollama health check failed; falling back to passthrough \
                  (start Ollama + pull the model to enable LLM cleanup)"
             );
-            Box::new(PassthroughCleaner::new())
+            None
         }
     }
 }

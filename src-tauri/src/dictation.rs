@@ -1025,6 +1025,18 @@ impl DictationOrchestrator {
         // Cleanup.
         self.recording_window
             .set_state(crate::recording_window::state::CLEANING, Some(&mode_slug));
+        // mb-58i — lazy Ollama self-heal. If we booted while Ollama was
+        // down we're on the passthrough fallback; re-check now (cheap —
+        // only pings when currently on passthrough) and swap in a real
+        // LlmCleaner if Ollama has since come up. No-op / zero-cost once
+        // a live cleaner is in place.
+        if let Some(upgraded) = crate::dictation::runtime_cleaner::maybe_upgrade_from_passthrough(
+            self.cleaner.as_ref(),
+            &self.db,
+            &self.config,
+        ) {
+            self.cleaner = upgraded;
+        }
         let cleanup_start = Instant::now();
         tracing::info!(mode = %mode_slug, "dictation: cleanup begin");
         let cleaned_text = match self.cleaner.clean(&raw_text, &mode_slug) {

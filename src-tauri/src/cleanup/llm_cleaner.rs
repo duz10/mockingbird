@@ -40,7 +40,7 @@ use crate::db::{dictionary, prompts};
 use crate::error::{AppError, AppResult};
 use crate::settings::{model::SettingKey, Settings};
 
-use super::provider::{CleanupProvider, CleanupRequest};
+use super::provider::{CleanupProvider, CleanupRequest, CleanupResult};
 
 /// Suffix stamped onto `model_used` when the shrink-fallback trips.
 /// Stable string so downstream provenance queries can grep for it.
@@ -479,6 +479,15 @@ pub struct LlmCleaner {
     /// behind `#[cfg(target_os = "macos")]`); `None` everywhere else, so
     /// the 7B / Windows path is byte-identical.
     user_prompt_override: Option<String>,
+    /// mb-mac-v1.6.4 — RAM-aware **runtime** fallback chain (Layer 2).
+    /// Installed models strictly smaller than `model_id`, largest-first
+    /// (see [`super::model_select::fallback_chain`]). When the selected
+    /// model FAILS to load / times out at runtime, [`Self::run_cleanup`]
+    /// steps DOWN through this chain and retries. Populated ONLY at the
+    /// macOS effective-model seam in `dictation/runtime_cleaner.rs`;
+    /// EMPTY everywhere else (every non-macOS target), so the retry loop
+    /// is a no-op and the Windows cleanup path is byte-identical.
+    runtime_fallback_models: Vec<String>,
 }
 
 impl LlmCleaner {
@@ -507,6 +516,7 @@ impl LlmCleaner {
             prompt_mode_override: None,
             small_model_fidelity: false,
             user_prompt_override: None,
+            runtime_fallback_models: Vec::new(),
         }
     }
 
@@ -543,6 +553,73 @@ impl LlmCleaner {
     pub fn with_user_prompt_override(mut self, body: Option<String>) -> Self {
         self.user_prompt_override = body;
         self
+    }
+
+    /// Builder-style setter for the RAM-aware runtime fallback chain
+    /// (mb-mac-v1.6.4). `models` is the installed-model step-down chain
+    /// (largest-first, all smaller than `model_id`). An empty vec (the
+    /// default — every non-macOS target) disables the runtime step-down
+    /// entirely, keeping the Windows cleanup path byte-identical.
+    pub fn with_runtime_fallback_models(mut self, models: Vec<String>) -> Self {
+        self.runtime_fallback_models = models;
+        self
+    }
+
+    /// mb-mac-v1.6.4 — RAM-aware runtime fallback (Layer 2). When the
+    /// selected model fails to LOAD / times out at runtime, step DOWN
+    /// through [`Self::runtime_fallback_models`] (largest-first, all
+    /// smaller than the current model) and retry the provider call once
+    /// per candidate. Returns the first success as `(result, model_id)`,
+    /// or `None` when the chain is empty OR every candidate also failed
+    /// (the caller then surfaces the ORIGINAL error).
+    ///
+    /// Borrows `&self` only (no `&mut`), so the caller can persist the
+    /// winning model into `self.model_id` after this returns. On every
+    /// non-macOS target the chain is empty, so this returns `None`
+    /// immediately without touching the provider — byte-identical.
+    fn try_runtime_step_down(
+        &self,
+        original_err: &AppError,
+        prompt: &str,
+        raw: &str,
+        mode_slug: &str,
+    ) -> Option<(CleanupResult, String)> {
+        if self.runtime_fallback_models.is_empty() {
+            return None;
+        }
+        tracing::warn!(
+            model = %self.model_id,
+            error = %original_err,
+            candidates = ?self.runtime_fallback_models,
+            "cleanup: selected model failed at runtime; stepping down to a smaller \
+             installed model (mb-mac-v1.6.4)"
+        );
+        for candidate in &self.runtime_fallback_models {
+            let req = CleanupRequest {
+                prompt,
+                raw_transcript: raw,
+                model_id: candidate,
+                temperature: self.temperature,
+                max_tokens: self.max_tokens,
+                mode_slug,
+            };
+            match self.provider.cleanup(req) {
+                Ok(r) => {
+                    tracing::info!(
+                        from = %self.model_id,
+                        to = %candidate,
+                        "cleanup: runtime step-down succeeded"
+                    );
+                    return Some((r, candidate.clone()));
+                }
+                Err(e) => tracing::warn!(
+                    candidate = %candidate,
+                    error = %e,
+                    "cleanup: runtime step-down candidate also failed; trying next"
+                ),
+            }
+        }
+        None
     }
 
     /// Read the configured shrink-fallback threshold. Defaults to the
@@ -822,7 +899,26 @@ impl LlmCleaner {
             max_tokens: self.max_tokens,
             mode_slug,
         };
-        let mut result = self.provider.cleanup(req)?;
+        let mut result = match self.provider.cleanup(req) {
+            Ok(r) => r,
+            Err(e) => {
+                // mb-mac-v1.6.4 — RAM-aware runtime fallback (Layer 2).
+                // The selected model failed to load / timed out; try
+                // stepping down to a smaller installed model. Empty chain
+                // (Windows / non-macOS) → `None` → surface the original
+                // error, exactly as `?` did before.
+                match self.try_runtime_step_down(&e, &built.prompt, &pre_text, mode_slug) {
+                    Some((r, used)) => {
+                        // Persist the step-down so subsequent dictations go
+                        // straight to the smaller model instead of re-
+                        // failing on the too-big one every time.
+                        self.model_id = used;
+                        r
+                    }
+                    None => return Err(e),
+                }
+            }
+        };
 
         // ADR 0065 — small-model example-leak guard. Symmetric twin of
         // the shrink-fallback below: that guard catches DROPPED content,
@@ -2150,5 +2246,100 @@ mod tests {
             "without a user override the tier slug must resolve; got: {:?}",
             cleaner.prompt_label()
         );
+    }
+
+    // ── mb-mac-v1.6.4 RAM-aware runtime fallback (Layer 2) ────────────
+
+    /// Provider that fails for any model id containing `fail_substr`
+    /// (simulating a runtime load / timeout) and succeeds otherwise,
+    /// echoing the model id it served so the test can assert which one
+    /// actually ran.
+    struct SelectiveFailProvider {
+        fail_substr: &'static str,
+    }
+    impl CleanupProvider for SelectiveFailProvider {
+        fn cleanup(&self, request: CleanupRequest<'_>) -> AppResult<CleanupResult> {
+            if request.model_id.contains(self.fail_substr) {
+                return Err(AppError::Cleanup(format!(
+                    "simulated load timeout for {}",
+                    request.model_id
+                )));
+            }
+            Ok(CleanupResult {
+                text: format!("cleaned by {}", request.model_id),
+                model_used: request.model_id.to_string(),
+                latency_ms: 0,
+                input_tokens: None,
+                output_tokens: None,
+            })
+        }
+        fn provider_name(&self) -> &'static str {
+            "selective-fail"
+        }
+        fn supports_model(&self, _model_id: &str) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn runtime_step_down_falls_to_next_smaller_installed_on_load_failure() {
+        // 7B fails to load; the chain steps down to the installed 3B.
+        let cleaner = LlmCleaner::new(
+            Box::new(SelectiveFailProvider { fail_substr: "7b" }),
+            fresh_db(),
+            "qwen2.5:7b-instruct-q4_K_M".into(),
+            0.3,
+            256,
+        )
+        .with_runtime_fallback_models(vec![
+            "qwen2.5:3b-instruct-q4_K_M".into(),
+            "gemma2:2b-instruct-q4_K_M".into(),
+        ]);
+        let err = AppError::Cleanup("selected model failed".into());
+        let (result, used) = cleaner
+            .try_runtime_step_down(&err, "the prompt", "the raw text", "normal")
+            .expect("should step down to a smaller installed model");
+        assert_eq!(used, "qwen2.5:3b-instruct-q4_K_M");
+        assert_eq!(result.model_used, "qwen2.5:3b-instruct-q4_K_M");
+        assert_eq!(result.text, "cleaned by qwen2.5:3b-instruct-q4_K_M");
+    }
+
+    #[test]
+    fn runtime_step_down_is_noop_with_empty_chain_windows_byte_identical() {
+        // Every non-macOS target: empty chain → None, provider never
+        // re-invoked → the caller surfaces the original error, exactly
+        // as `?` did before this net existed.
+        let cleaner = LlmCleaner::new(
+            Box::new(SelectiveFailProvider { fail_substr: "7b" }),
+            fresh_db(),
+            "qwen2.5:7b-instruct-q4_K_M".into(),
+            0.3,
+            256,
+        );
+        let err = AppError::Cleanup("selected model failed".into());
+        assert!(cleaner
+            .try_runtime_step_down(&err, "p", "r", "normal")
+            .is_none());
+    }
+
+    #[test]
+    fn runtime_step_down_returns_none_when_every_candidate_also_fails() {
+        // Provider fails for ALL models → no candidate loads → None, so
+        // the caller falls through to the passthrough / raw net.
+        let cleaner = LlmCleaner::new(
+            Box::new(SelectiveFailProvider { fail_substr: "" }), // "" ⊂ every id
+            fresh_db(),
+            "qwen2.5:7b-instruct-q4_K_M".into(),
+            0.3,
+            256,
+        )
+        .with_runtime_fallback_models(vec![
+            "qwen2.5:3b-instruct-q4_K_M".into(),
+            "gemma2:2b-instruct-q4_K_M".into(),
+        ]);
+        let err = AppError::Cleanup("selected model failed".into());
+        assert!(cleaner
+            .try_runtime_step_down(&err, "p", "r", "normal")
+            .is_none());
     }
 }
