@@ -3,15 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Mockingbird - Local-first voice dictation for Windows</title>
-  <meta name="description" content="Local-first voice dictation, meeting capture, and knowledge graph capture for Windows. Fully on-device. Privacy-respecting. Zero telemetry.">
+  <title>Mockingbird - Local-first voice dictation for Windows and macOS</title>
+  <meta name="description" content="Local-first voice dictation and meeting capture for Windows and macOS (Apple Silicon). Fully on-device. Privacy-respecting. Zero telemetry.">
   <meta name="color-scheme" content="light dark">
 
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="styles.css">
 
-  <meta property="og:title" content="Mockingbird - Local-first voice dictation for Windows">
-  <meta property="og:description" content="Local-first voice dictation, meeting capture, and knowledge graph capture for Windows. Fully on-device. Privacy-respecting. Zero telemetry.">
+  <meta property="og:title" content="Mockingbird - Local-first voice dictation for Windows and macOS">
+  <meta property="og:description" content="Local-first voice dictation and meeting capture for Windows and macOS (Apple Silicon). Fully on-device. Privacy-respecting. Zero telemetry.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://duz10.github.io/mockingbird/">
   <meta property="og:image" content="https://duz10.github.io/mockingbird/og-image.png">
@@ -27,12 +27,13 @@
     <header class="hero">
       <img class="hero-mark" src="favicon.svg" alt="" aria-hidden="true" width="72" height="72">
       <h1>Mockingbird</h1>
-      <p class="tagline">Local-first voice dictation, meeting capture, and knowledge graph capture for Windows.</p>
+      <p class="tagline">Local-first voice dictation and meeting capture for Windows and macOS. Knowledge graph capture on Windows today. Fully on-device, zero telemetry.</p>
       <p class="cta-row">
         <a class="btn btn-primary" href="https://github.com/duz10/mockingbird/releases">Download for Windows</a>
+        <a class="btn btn-secondary" href="#macos-install">Build for macOS</a>
         <a class="btn btn-secondary" href="https://github.com/duz10/mockingbird">View on GitHub</a>
       </p>
-      <p class="hero-note">Beta release. Windows 10+ required. macOS support is source-build only; see the research doc on GitHub.</p>
+      <p class="hero-note">Beta release. Windows 10+ has a downloadable installer; macOS 15+ (Apple Silicon) is a source build you compile yourself - <a href="#macos-install">steps below</a>.</p>
     </header>
 
     <section class="maintainer" aria-labelledby="maintainer-h">
@@ -96,6 +97,7 @@
             projects them into wiki-linked Markdown. Optional Obsidian vault sync turns
             captured fragments into a navigable knowledge base.
           </p>
+          <p class="platform-note"><strong>Windows only for now.</strong> The knowledge graph, activity capture, and mobile sync layers have not yet been ported to macOS.</p>
         </article>
 
       </div>
@@ -142,13 +144,16 @@
       <h2 id="privacy-h">Privacy promise</h2>
       <p>
         Mockingbird runs entirely on your machine. No telemetry. No analytics. No phone-home.
-        API keys for optional cloud surfaces (Claude, Unsplash) are encrypted via Windows DPAPI
-        and never leave your computer except in the direct API call you opted into.
+        API keys for optional cloud surfaces (Claude, Unsplash) are encrypted via the OS keystore -
+        Windows DPAPI on Windows, the Keychain on macOS - and never leave your computer except in
+        the direct API call you opted into.
       </p>
     </section>
 
     <section class="quickstart" aria-labelledby="quickstart-h">
       <h2 id="quickstart-h">Quick start</h2>
+
+      <h3>Windows</h3>
       <ol class="steps">
         <li>
           <strong>Download the MSI</strong> from the
@@ -164,9 +169,39 @@
           into the app that had focus.
         </li>
       </ol>
+
+      <h3 id="macos-install">macOS (Apple Silicon)</h3>
+      <p class="note">
+        There is no signed installer or <code>.dmg</code> for macOS - it is a source build you
+        compile yourself. You do not need full Xcode, just the Command Line Tools. Requires
+        <strong>macOS 15+</strong> (the ScreenCaptureKit floor for meeting capture).
+      </p>
+      <ol class="steps">
+        <li>
+          <strong>Install the toolchain.</strong> Command Line Tools
+          (<code>xcode-select --install</code>), <code>cmake</code> (<code>brew install cmake</code>),
+          <a href="https://rustup.rs/">Rust 1.77+</a>, and <a href="https://nodejs.org/">Node 20+</a>.
+        </li>
+        <li>
+          <strong>Clone the repo and build:</strong> <code>cargo tauri build</code>. No CUDA
+          wrapper is needed on macOS - STT is Metal-accelerated automatically.
+        </li>
+        <li>
+          <strong>Open the <code>.app</code></strong> from <code>target/release/bundle/macos/</code>.
+          The first launch is blocked by Gatekeeper because the build is unsigned - right-click
+          the app, choose <code>Open</code>, then confirm. macOS remembers the choice afterward.
+        </li>
+        <li>
+          <strong>Grant permissions when prompted:</strong> Microphone, Input Monitoring,
+          Accessibility, and Screen Recording (the last is required for system-audio meeting
+          capture). Dictation and meeting capture both run fully on-device, same as Windows.
+        </li>
+      </ol>
       <p class="note">
         Full installation walkthrough including model setup and optional cloud LLM
         configuration: <a href="https://github.com/duz10/mockingbird/blob/main/INSTALL.md">INSTALL.md</a>.
+        macOS build background lives in the
+        <a href="https://github.com/duz10/mockingbird/blob/main/docs/research/macos-implementation-notes.md">macOS implementation notes</a>.
       </p>
     </section>
 
@@ -187,19 +222,24 @@
       <details>
         <summary>Does it work on macOS?</summary>
         <p>
-          Not yet, not as a packaged build. The codebase is structured for cross-platform
-          support behind trait boundaries, but macOS-specific integrations (audio capture,
-          paste injection, secrets) are not wired up. Source builds may work for the curious;
-          see
-          <a href="https://github.com/duz10/mockingbird/blob/main/docs/research/macos-implementation-notes.md">the macOS research note</a>.
+          Yes - on Apple Silicon, as a source build you compile yourself. There is no signed
+          installer or <code>.dmg</code>; you build the <code>.app</code> with the Command Line
+          Tools, Rust, and Node (see the <a href="#macos-install">macOS quick start</a>). It needs
+          <strong>macOS 15+</strong>, and the first launch requires the Gatekeeper right-click to
+          Open because the build is unsigned. <strong>Dictation and meeting capture</strong> both
+          work on macOS with the same local-first, on-device model as Windows. The knowledge graph,
+          activity capture, and mobile sync layers are <strong>Windows-only for now</strong> and
+          have not yet been ported. Background:
+          <a href="https://github.com/duz10/mockingbird/blob/main/docs/research/macos-implementation-notes.md">the macOS implementation notes</a>.
         </p>
       </details>
 
       <details>
         <summary>Where does my data live?</summary>
         <p>
-          Locally, in <code>%LOCALAPPDATA%\Mockingbird</code>. Transcripts, settings, the
-          SQLite database, and any vault projection all stay on your machine. Full detail
+          Locally - <code>%LOCALAPPDATA%\Mockingbird</code> on Windows,
+          <code>~/Library/Application Support/com.dustin.mockingbird</code> on macOS. Transcripts,
+          settings, the SQLite database, and any vault projection all stay on your machine. Full detail
           in
           <a href="https://github.com/duz10/mockingbird/blob/main/PRIVACY.md">PRIVACY.md</a>.
         </p>

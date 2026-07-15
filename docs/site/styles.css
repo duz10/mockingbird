@@ -110,6 +110,13 @@ code {
 }
 .feature-card p { color: var(--fg-muted); font-size: 0.95rem; margin-bottom: 0; }
 .feature-icon { color: var(--accent); margin-bottom: 0.5rem; }
+.feature-card .platform-note {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.feature-card .platform-note strong { color: var(--accent); }
 
 /* Screenshots */
 .screenshots { display: flex; flex-direction: column; gap: 1.5rem; }
