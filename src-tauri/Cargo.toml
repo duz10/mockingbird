@@ -366,6 +366,16 @@ path = "src/dev_bins/stt_test.rs"
 name = "mac_whisper_metal_smoke"
 path = "src/dev_bins/mac_whisper_metal_smoke.rs"
 
+# macOS port Phase 5 (mb-mac-v1.6.2) -- Metal STT parity eval judge
+# (`mac-v1-parity-whisper-metal`). Runs the PRODUCTION Metal-backed
+# WhisperStt over the reference corpus (eval/stt_reference_transcripts.json),
+# computes WER/CER vs ground truth, and asserts Metal engaged + aggregate
+# WER/CER within budget. macOS + metal only; a no-op stub (exit 2)
+# elsewhere. Drives `stt::parity_macos_v1::run_parity_eval`.
+[[example]]
+name = "mac_whisper_parity_smoke"
+path = "src/dev_bins/mac_whisper_parity_smoke.rs"
+
 # macOS port Phase 2 (mb-mac-v1.3.2) — ORT load-dynamic dylib discovery
 # smoke (`mac-p2-ort-dylib`). macOS only; no-op stub elsewhere. Drives
 # `audio::judges_macos_v1::ort_vad_session_smoke`.

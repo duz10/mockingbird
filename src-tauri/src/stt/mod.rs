@@ -18,6 +18,12 @@ pub mod whisper;
 #[cfg(all(target_os = "macos", feature = "metal"))]
 pub mod judges_macos_v1;
 
+// macOS port Phase 5 (mb-mac-v1.6.2): Metal STT parity eval + WER/CER
+// metric (judge `mac-v1-parity-whisper-metal`). The WER/CER metric is
+// pure text math and stays UN-gated so it compiles + unit-tests on every
+// target; only the `run_parity_eval` driver inside is `macos + metal`.
+pub mod parity_macos_v1;
+
 use std::path::PathBuf;
 
 // AppError is used unconditionally: `models_dir()` constructs it on every
