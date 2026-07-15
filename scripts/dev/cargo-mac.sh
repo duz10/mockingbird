@@ -40,19 +40,32 @@ export PATH="${HOME}/.cargo/bin:${PATH}"
 # --- 2. Parallelism cap -----------------------------------------------------
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 
-# --- 2b. macOS deployment target (whisper.cpp std::filesystem fix) -----------
-# whisper-rs-sys compiles ggml/whisper.cpp via the `cmake` crate, which routes
-# the `cc` crate's default compiler flags into CMAKE_CXX_FLAGS. When
-# MACOSX_DEPLOYMENT_TARGET is unset, `cc` appends `-mmacosx-version-min=10.13`
-# AFTER cmake's own (SDK-derived) `-mmacosx-version-min`. clang honours the
-# LAST such flag, so the effective target collapses to 10.13 -- below 10.15,
-# where libc++ marks std::filesystem::path unavailable. ggml-backend-reg.cpp
-# uses std::filesystem, so a from-scratch RELEASE native compile fails with
-# "'path' is unavailable: introduced in macOS 10.15" (20 errors, cmake exits
-# 2). Debug builds only "worked" because the .o was cached before target/ was
-# cleaned. Pinning the deployment target makes both -mmacosx-version-min flags
-# agree at an arm64-safe floor (Big Sur 11.0 >= 10.15). Caller override wins.
-export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"
+# --- 2b. macOS deployment target (whisper.cpp native-build floor) ------------
+# whisper-rs-sys compiles ggml/whisper.cpp via the `cmake`/`cc` crates. clang's
+# effective -mmacosx-version-min decides two things on a from-scratch RELEASE
+# native compile:
+#   1. COMPILE: below 10.15, libc++ marks std::filesystem::path unavailable, so
+#      ggml-backend-reg.cpp fails with "'path' is unavailable: introduced in
+#      macOS 10.15" (20 errors, cmake exits 2).
+#   2. LINK: below macOS 15, ggml-metal's `@available(macOS 15, *)` guards for
+#      Metal residency sets (MTLResidencySet, 15.0-only) become RUNTIME checks
+#      that call the compiler-rt builtin `___isPlatformVersionAtLeast`, which
+#      rustc's linker does not pull in -> undefined-symbol link failure.
+# 15.0 is also the app's real floor -- ScreenCaptureKit unified single-session
+# audio capture requires macOS 15+ (see AGENTS-MACBUILD.md).
+#
+# IMPORTANT -- which layer actually governs the target:
+#   * For PLAIN cargo verbs (build/check/test/clippy without tauri) this export
+#     is authoritative: without it `cc` defaults to 11.0 for aarch64, and this
+#     pins those paths to 15.0 for parity with the shipped .app.
+#   * For `cargo tauri {build,dev}` this export is IGNORED. tauri-cli
+#     unconditionally set_var("MACOSX_DEPLOYMENT_TARGET", <minimumSystemVersion>)
+#     (build.rs), whose default is "10.13" -- so the deployment target for the
+#     release .app is owned by `bundle.macOS.minimumSystemVersion` in
+#     src-tauri/tauri.conf.json (set to "15.0"). Keep the two in sync there;
+#     changing only this line will NOT fix a `tauri build`. (mb-d6i)
+# Caller override wins.
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-15.0}"
 
 # --- 3. Model + ORT runtime env ---------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -103,6 +103,9 @@
       "wix": {
         "version": "0.2.0.2"
       }
+    },
+    "macOS": {
+      "minimumSystemVersion": "15.0"
     }
   },
   "plugins": {
