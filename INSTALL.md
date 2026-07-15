@@ -133,7 +133,8 @@ end-to-end today; build from source with the Mac wrapper:
 ```bash
 git clone https://github.com/duz10/mockingbird.git
 cd mockingbird
-brew install jq            # used by the model fetch script
+xcode-select --install     # Command Line Tools (compiler, git) if not present
+brew install cmake jq      # cmake: whisper-rs-sys build.rs (whisper.cpp); jq: model fetch script
 scripts/download-onnxruntime.sh
 scripts/download-models.sh  # Whisper GGUF + Silero VAD into ./models
 scripts/dev/cargo-mac.sh tauri dev     # or: cargo-mac.sh tauri build
@@ -141,6 +142,12 @@ scripts/dev/cargo-mac.sh tauri dev     # or: cargo-mac.sh tauri build
 
 Whisper runs on the **Metal** GPU backend (the wrapper auto-injects
 `--features mockingbird/metal`).
+
+> **Toolchain note:** `cmake` is a hard prerequisite — `whisper-rs-sys`'s
+> `build.rs` shells out to it to compile the bundled `whisper.cpp`. Unlike
+> the Windows path (where Visual Studio ships CMake), macOS Command Line
+> Tools does **not** include it, so `brew install cmake` is required. You
+> also need Rust 1.77+ (via [rustup](https://rustup.rs/)) and Node 20+.
 
 ### Granting permissions (Privacy & Security / TCC)
 

@@ -248,15 +248,18 @@ For a forker willing to maintain a macOS build but not pay for an Apple
 Developer account, the user-facing install instructions look like this:
 
 1. Install Xcode Command Line Tools: `xcode-select --install`.
-2. Install Rust 1.77+ via [rustup](https://rustup.rs/).
-3. Install Node 20+ via [nvm](https://github.com/nvm-sh/nvm) or
+2. Install `cmake` (`brew install cmake`) — `whisper-rs-sys`'s `build.rs`
+   needs it to compile the bundled `whisper.cpp`, and Command Line Tools
+   does not ship it. (Phase 0's toolchain verify missed this — mb-mac-v1.8.)
+3. Install Rust 1.77+ via [rustup](https://rustup.rs/).
+4. Install Node 20+ via [nvm](https://github.com/nvm-sh/nvm) or
    [Homebrew](https://brew.sh/) (`brew install node`).
-4. Clone the fork's repo.
-5. Optional: install [Ollama](https://ollama.com/download) and pull the
+5. Clone the fork's repo.
+6. Optional: install [Ollama](https://ollama.com/download) and pull the
    recommended local model.
-6. Build: `cargo tauri build` (no wrapper needed on macOS; CUDA env
+7. Build: `cargo tauri build` (no wrapper needed on macOS; CUDA env
    plumbing is Windows-specific).
-7. Open the `.app` from `target/release/bundle/macos/`.
+8. Open the `.app` from `target/release/bundle/macos/`.
 
 The first time the user opens the app, Gatekeeper will refuse to
 launch it because it is not signed. The remedy is documented and
