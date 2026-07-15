@@ -22,7 +22,8 @@ does touch the Windows build surface — those are the strict-better bug fixes a
 structural moves enumerated in **Section C**, which is where your Windows-side
 review time should go.
 
-**Scope:** ~45 feature commits (+2 PR-prep commits below), **166 files**,
+**Scope:** ~45 feature commits (+3 PR-prep commits: reclaim helper, this
+summary, and a CRLF→LF renormalize), **166 files**,
 **~+18,100 / −900 lines**. The bulk is additive macOS platform code and tests.
 
 ---
