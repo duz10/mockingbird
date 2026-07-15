@@ -10,8 +10,9 @@ import { describe, it, expect } from "vitest";
 import { dbfsToFill } from "./MeetingOverlay";
 
 describe("dbfsToFill (ADR 0032 / mb-nig)", () => {
-  it("collapses the no-data sentinel (0 exact) to a flat bar", () => {
-    expect(dbfsToFill(0)).toBe(0);
+  it("collapses the no-data value (null) to a flat bar", () => {
+    // mb-x1d: "no data yet" is now `null`, distinct from a real reading.
+    expect(dbfsToFill(null)).toBe(0);
   });
 
   it("clamps DBFS_FLOOR (-100) and below to 0", () => {
@@ -33,11 +34,11 @@ describe("dbfsToFill (ADR 0032 / mb-nig)", () => {
     expect(dbfsToFill(-75)).toBeCloseTo(0.25, 6);
   });
 
-  it("treats 0 specially — it's the sentinel, NOT '0 dBFS clipping'", () => {
-    // This is the design choice that lets the UI distinguish "no
-    // data yet" from "signal at clipping". A reading of exactly 0
-    // collapses to 0; a reading of +0.0001 (anomaly) snaps to 1.
-    expect(dbfsToFill(0)).toBe(0);
-    expect(dbfsToFill(0.0001)).toBe(1);
+  it("treats 0 as a REAL full-scale reading, not 'no data' (mb-x1d)", () => {
+    // mb-x1d fix: a full-scale 0 dBFS (clipping) reading fills the bar;
+    // only `null` means "no data yet". Previously 0 was the sentinel and
+    // wrongly collapsed to a flat bar.
+    expect(dbfsToFill(0)).toBe(1);
+    expect(dbfsToFill(null)).toBe(0);
   });
 });

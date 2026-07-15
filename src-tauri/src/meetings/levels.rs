@@ -14,14 +14,20 @@
 //! VU bar (the eye can't distinguish < ~1 dB on a 100-pixel bar).
 //! No risk of mutex poisoning across the owner threads.
 //!
-//! ## Sentinel convention
+//! ## No-data vs. silence (mb-x1d)
 //!
-//! * `0.0` (the initial atomic value) is the "no data yet" sentinel.
-//!   The UI maps it to a flat bar (no glow).
-//! * [`DBFS_FLOOR`] (`-100.0`) is "silence" — below any realistic
-//!   noise floor. UI maps to a fully-dim bar.
-//! * `0.0` returned from [`compute_dbfs`] on a non-empty buffer means
-//!   full-scale i16 (clipping). UI may choose to flash the bar.
+//! [`compute_dbfs`] returns `Option<f32>` so "no data" is unambiguous
+//! and can never collide with a legitimate reading:
+//! * `None` — no samples observed yet (empty buffer). The UI maps it to
+//!   a flat bar (no glow). Distinct from ANY real dBFS value.
+//! * `Some(`[`DBFS_FLOOR`]`)` (`-100.0`) — "silence": an all-zero buffer,
+//!   below any realistic noise floor. UI maps to a fully-dim bar.
+//! * `Some(0.0)` — full-scale i16 (clipping). A real reading that the
+//!   old `0.0` sentinel used to misread as "no data".
+//!
+//! In the lock-free [`LevelsState`] the "never updated" state is stored
+//! as the reserved [`NO_DATA_CDB`] sentinel (`i32::MIN`, a value the
+//! ×100 scaling can never produce), mapped back to `None` on read.
 //!
 //! ## Charter
 //!
@@ -37,21 +43,26 @@ use crate::meetings::capture::Channel;
 /// realistic capture path.
 pub const DBFS_FLOOR: f32 = -100.0;
 
-/// Sentinel meaning "no samples observed yet on this channel".
-pub const DBFS_NO_DATA: f32 = 0.0;
+/// Reserved `cdb` (dBFS × 100) value meaning "no samples observed yet".
+/// `i32::MIN` can never be produced by a real reading — `compute_dbfs`
+/// is bounded to `[DBFS_FLOOR, 0.0]` → `[-10_000, 0]` after scaling — so
+/// it unambiguously encodes "no data" in the atomics without colliding
+/// with a legitimate full-scale `0.0` dBFS reading. (mb-x1d)
+pub const NO_DATA_CDB: i32 = i32::MIN;
 
 /// Peak-amplitude dBFS for an i16 PCM buffer.
 ///
-/// * `samples.is_empty()` → [`DBFS_NO_DATA`] (== `0.0`). Treat as
-///   "no data yet" upstream; **not** the same as "silence".
-/// * All-zero buffer → [`DBFS_FLOOR`].
-/// * `±i16::MAX` peak → `0.0` dBFS (full scale).
-/// * Mid-range peak → `20 * log10(peak / 32767)`.
+/// * `samples.is_empty()` → `None` ("no data yet"; **not** "silence").
+///   Explicitly distinct from every real reading, including full-scale
+///   `Some(0.0)`. (mb-x1d)
+/// * All-zero buffer → `Some(`[`DBFS_FLOOR`]`)`.
+/// * `±i16::MAX` peak → `Some(0.0)` (full scale).
+/// * Mid-range peak → `Some(20 * log10(peak / 32767))`.
 ///
 /// Pure: no allocation, no I/O, deterministic.
-pub fn compute_dbfs(samples: &[i16]) -> f32 {
+pub fn compute_dbfs(samples: &[i16]) -> Option<f32> {
     if samples.is_empty() {
-        return DBFS_NO_DATA;
+        return None;
     }
     // Peak amplitude. `i16::MIN.unsigned_abs()` is 32768 which fits
     // in u32; we cap at 32767 (i16::MAX) so the final ratio never
@@ -64,11 +75,22 @@ pub fn compute_dbfs(samples: &[i16]) -> f32 {
         .unwrap_or(0)
         .min(i16::MAX as u32);
     if peak == 0 {
-        return DBFS_FLOOR;
+        return Some(DBFS_FLOOR);
     }
     let ratio = peak as f32 / i16::MAX as f32;
     let db = 20.0 * ratio.log10();
-    db.max(DBFS_FLOOR)
+    Some(db.max(DBFS_FLOOR))
+}
+
+/// Map a stored `cdb` back to `Option<f32>` dBFS, honoring the
+/// [`NO_DATA_CDB`] sentinel.
+fn read_cdb(slot: &AtomicI32) -> Option<f32> {
+    let cdb = slot.load(Ordering::Relaxed);
+    if cdb == NO_DATA_CDB {
+        None
+    } else {
+        Some(cdb as f32 / 100.0)
+    }
 }
 
 /// Lock-free holder for the most-recent (mic, sys) dBFS pair.
@@ -79,11 +101,12 @@ pub struct LevelsState {
 }
 
 impl LevelsState {
-    /// Fresh holder; both channels initialised to [`DBFS_NO_DATA`].
+    /// Fresh holder; both channels initialised to the [`NO_DATA_CDB`]
+    /// sentinel (reported as `None` until the first `update`).
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            mic_cdb: AtomicI32::new(0),
-            sys_cdb: AtomicI32::new(0),
+            mic_cdb: AtomicI32::new(NO_DATA_CDB),
+            sys_cdb: AtomicI32::new(NO_DATA_CDB),
         })
     }
 
@@ -93,8 +116,10 @@ impl LevelsState {
     /// tick thread can distinguish "channel inactive" (still the
     /// initial sentinel) from "channel active, currently silent".
     pub fn update(&self, channel: Channel, samples: &[i16]) {
-        let db = compute_dbfs(samples);
-        let cdb = (db * 100.0).round() as i32;
+        let cdb = match compute_dbfs(samples) {
+            Some(db) => (db * 100.0).round() as i32,
+            None => NO_DATA_CDB,
+        };
         let slot = match channel {
             Channel::Mic => &self.mic_cdb,
             Channel::Sys => &self.sys_cdb,
@@ -103,11 +128,9 @@ impl LevelsState {
     }
 
     /// Snapshot `(mic_db, sys_db)`. Each channel that has never been
-    /// `update`d reports [`DBFS_NO_DATA`].
-    pub fn snapshot(&self) -> (f32, f32) {
-        let mic = self.mic_cdb.load(Ordering::Relaxed) as f32 / 100.0;
-        let sys = self.sys_cdb.load(Ordering::Relaxed) as f32 / 100.0;
-        (mic, sys)
+    /// `update`d (or whose last drain was empty) reports `None`. (mb-x1d)
+    pub fn snapshot(&self) -> (Option<f32>, Option<f32>) {
+        (read_cdb(&self.mic_cdb), read_cdb(&self.sys_cdb))
     }
 }
 
@@ -130,14 +153,17 @@ mod tests {
     #[test]
     fn silence_is_floor() {
         let buf = vec![0i16; 1024];
-        let db = compute_dbfs(&buf);
-        assert_eq!(db, DBFS_FLOOR, "all-zero buffer should clamp to DBFS_FLOOR");
+        assert_eq!(
+            compute_dbfs(&buf),
+            Some(DBFS_FLOOR),
+            "all-zero buffer should clamp to DBFS_FLOOR"
+        );
     }
 
     #[test]
     fn full_scale_is_zero() {
         let buf = vec![i16::MAX; 1024];
-        let db = compute_dbfs(&buf);
+        let db = compute_dbfs(&buf).expect("non-empty buffer -> Some");
         assert!(approx(db, 0.0), "i16::MAX peak should be ~0 dBFS, got {db}");
     }
 
@@ -145,7 +171,7 @@ mod tests {
     fn half_scale_is_minus_six() {
         // amplitude ratio 0.5 → 20 * log10(0.5) ≈ -6.02 dBFS
         let buf = vec![i16::MAX / 2; 1024];
-        let db = compute_dbfs(&buf);
+        let db = compute_dbfs(&buf).expect("non-empty buffer -> Some");
         assert!(
             db > -6.5 && db < -5.5,
             "half-scale should be ~-6 dBFS, got {db}"
@@ -153,9 +179,18 @@ mod tests {
     }
 
     #[test]
-    fn empty_input_is_no_data_sentinel() {
-        assert_eq!(compute_dbfs(&[]), DBFS_NO_DATA);
-        assert_eq!(compute_dbfs(&[]), 0.0);
+    fn empty_input_is_none() {
+        assert_eq!(compute_dbfs(&[]), None);
+    }
+
+    #[test]
+    fn full_scale_zero_is_not_no_data() {
+        // mb-x1d regression: a legitimate full-scale 0 dBFS reading must
+        // be distinguishable from "no data yet". Under the old `0.0`
+        // sentinel these were indistinguishable.
+        let full = compute_dbfs(&vec![i16::MAX; 256]);
+        assert_eq!(full, Some(0.0), "full-scale peak reads Some(0.0)");
+        assert_ne!(full, compute_dbfs(&[]), "full-scale 0 dBFS != no-data");
     }
 
     #[test]
@@ -163,7 +198,7 @@ mod tests {
         // i16::MIN.unsigned_abs() is 32768; ensure the cap-at-32767
         // path keeps the ratio ≤ 1.0 and the result ≤ 0.0.
         let buf = vec![i16::MIN; 64];
-        let db = compute_dbfs(&buf);
+        let db = compute_dbfs(&buf).expect("non-empty buffer -> Some");
         assert!(
             db <= 0.0 + EPS,
             "i16::MIN peak should clamp to ≤ 0 dBFS, got {db}"
@@ -173,19 +208,37 @@ mod tests {
     #[test]
     fn levels_state_update_then_snapshot_roundtrip() {
         let state = LevelsState::new();
-        // Initial: both channels at sentinel.
-        assert_eq!(state.snapshot(), (DBFS_NO_DATA, DBFS_NO_DATA));
+        // Initial: both channels report no data.
+        assert_eq!(state.snapshot(), (None, None));
 
         // Mic update only.
         state.update(Channel::Mic, &vec![i16::MAX; 256]);
         let (mic, sys) = state.snapshot();
-        assert!(approx(mic, 0.0), "mic should read ~0 dBFS, got {mic}");
-        assert_eq!(sys, DBFS_NO_DATA, "sys untouched");
+        assert!(
+            approx(mic.expect("mic updated"), 0.0),
+            "mic should read ~0 dBFS, got {mic:?}"
+        );
+        assert_eq!(sys, None, "sys untouched");
 
         // Sys update; mic unaffected.
         state.update(Channel::Sys, &vec![0i16; 256]);
         let (mic, sys) = state.snapshot();
-        assert!(approx(mic, 0.0), "mic still ~0, got {mic}");
-        assert_eq!(sys, DBFS_FLOOR, "sys silenced");
+        assert!(
+            approx(mic.expect("mic still set"), 0.0),
+            "mic still ~0, got {mic:?}"
+        );
+        assert_eq!(sys, Some(DBFS_FLOOR), "sys silenced");
+    }
+
+    #[test]
+    fn full_scale_update_is_distinct_from_fresh_channel() {
+        // mb-x1d: a channel that drained a full-scale (0 dBFS) buffer
+        // must NOT read the same as a never-updated channel.
+        let state = LevelsState::new();
+        state.update(Channel::Mic, &vec![i16::MAX; 256]);
+        let (mic, sys) = state.snapshot();
+        assert_eq!(mic, Some(0.0), "drained full-scale -> Some(0.0)");
+        assert_eq!(sys, None, "never-updated -> None");
+        assert_ne!(mic, sys);
     }
 }

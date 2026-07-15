@@ -336,9 +336,10 @@ impl TwinStreamCapture {
         Arc::clone(&self.levels)
     }
 
-    /// Snapshot the current per-channel dBFS levels. Inactive
-    /// channels report [`crate::meetings::levels::DBFS_NO_DATA`].
-    pub fn current_levels(&self) -> (f32, f32) {
+    /// Snapshot the current per-channel dBFS levels. Inactive channels
+    /// (never drained) report `None` — distinct from a real full-scale
+    /// `Some(0.0)` reading. (mb-x1d)
+    pub fn current_levels(&self) -> (Option<f32>, Option<f32>) {
         self.levels.snapshot()
     }
 

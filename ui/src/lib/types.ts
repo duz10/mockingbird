@@ -706,8 +706,11 @@ export interface MeetingProgressEvent {
 export interface MeetingTickEvent {
   uuid: string;
   elapsedMs: number;
-  micDb: number;
-  sysDb: number;
+  // mb-x1d: `null` == "no data yet" (channel never drained), distinct
+  // from a real full-scale `0` dBFS reading. The Rust emitter sends JSON
+  // `null` for the no-data sentinel.
+  micDb: number | null;
+  sysDb: number | null;
 }
 
 /** ADR 0046 Iter 2 / mb-vg3p — typed snapshot of every Mobile-Sync

@@ -509,21 +509,18 @@ fn current_levels_reflects_per_channel_dbfs_after_drain() {
     // levels so the lifecycle.rs tick emitter can forward them to
     // the overlay. This test pins the shape end-to-end through the
     // stub-capture seam.
-    use crate::meetings::levels::{DBFS_FLOOR, DBFS_NO_DATA};
+    use crate::meetings::levels::DBFS_FLOOR;
 
     let dir = tempfile::tempdir().unwrap();
-    // Mic: HALF-scale i16 → ~-6 dBFS. Sys: silence → DBFS_FLOOR after
-    // the first non-empty drain.
+    // Mic: FULL-scale i16 → exactly 0.0 dBFS. Sys: silence → DBFS_FLOOR
+    // after the first non-empty drain.
     //
-    // mb-mac-v1.9: this used to feed FULL-scale `i16::MAX`, which
-    // `compute_dbfs` maps to exactly 0.0 dBFS -- the SAME value as the
-    // `DBFS_NO_DATA` sentinel (0.0). That made the `assert_ne!(mic_db,
-    // DBFS_NO_DATA)` sanity check below unsatisfiable (a real full-
-    // scale reading is indistinguishable from "no data"). A half-scale
-    // feed gives a clearly-negative reading that is distinct from both
-    // the sentinel and DBFS_FLOOR. The underlying sentinel-collision
-    // smell is tracked in mb-x1d.
-    let mic_feed = stub_feed(vec![vec![i16::MAX / 2; 16_000]]);
+    // mb-x1d (now FIXED): a full-scale mic reading is `Some(0.0)` and a
+    // never-drained channel is `None`, so a real 0 dBFS is no longer
+    // indistinguishable from "no data" (the old `0.0`-sentinel collision).
+    // Feeding full-scale here is exactly the case that used to be
+    // unassertable; the `is_some()` sanity checks below now hold.
+    let mic_feed = stub_feed(vec![vec![i16::MAX; 16_000]]);
     let sys_feed = stub_feed(vec![vec![0i16; 16_000]]);
     let mut twin = TwinStreamCapture::start_with(
         "levels-test".into(),
@@ -535,7 +532,7 @@ fn current_levels_reflects_per_channel_dbfs_after_drain() {
     .unwrap();
 
     // Initial snapshot may race the first drain on a fast box but is
-    // always one of {(NO_DATA, NO_DATA), (~-6, FLOOR)} — either is
+    // always one of {(None, None), (Some(0.0), Some(FLOOR))} — either is
     // valid for the contract.
     let _ = twin.current_levels();
 
@@ -547,16 +544,19 @@ fn current_levels_reflects_per_channel_dbfs_after_drain() {
     drop(trailing);
 
     let (mic_db, sys_db) = twin.current_levels();
-    // Half-scale peak → 20*log10(16383/32767) ≈ -6.02 dBFS.
-    assert!(
-        mic_db > -7.0 && mic_db < -5.0,
-        "half-scale mic should read ~-6 dBFS post-drain, got {mic_db}"
+    // Full-scale peak → exactly 0.0 dBFS (clipping).
+    assert_eq!(
+        mic_db,
+        Some(0.0),
+        "full-scale mic should read 0 dBFS post-drain, got {mic_db:?}"
     );
     assert_eq!(
-        sys_db, DBFS_FLOOR,
-        "sys all-zero should report DBFS_FLOOR, got {sys_db}"
+        sys_db,
+        Some(DBFS_FLOOR),
+        "sys all-zero should report DBFS_FLOOR, got {sys_db:?}"
     );
-    // Sanity: neither channel should still be the no-data sentinel.
-    assert_ne!(mic_db, DBFS_NO_DATA);
-    assert_ne!(sys_db, DBFS_NO_DATA);
+    // mb-x1d sanity: both channels have real data (Some), NOT the
+    // no-data `None` -- even though mic is exactly 0 dBFS.
+    assert!(mic_db.is_some());
+    assert!(sys_db.is_some());
 }
