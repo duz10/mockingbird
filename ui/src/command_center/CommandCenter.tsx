@@ -193,37 +193,52 @@ export function CommandCenter(): JSX.Element | null {
 
   if (snap.state === "closed") return null;
 
+  const showWelcome = snap.firstRun && snap.state === "modePicker";
+
   return (
     <div className={styles.root} aria-modal data-state={snap.state}>
-      <div className={styles.card} ref={cardRef} role="dialog">
-        {snap.firstRun && snap.state === "modePicker" && (
-          <>
-            <header className={styles.welcomeBand}>
-              <h2 className={styles.welcomeTitle}>Welcome to Mockingbird</h2>
-              <p className={styles.welcomeBody}>
-                Press <kbd>Right&nbsp;Ctrl</kbd> + <kbd>Space</kbd> any time to
-                pop this card back up.
-              </p>
-            </header>
-            <button
-              type="button"
-              className={styles.closeButton}
-              aria-label="Close welcome card"
-              onClick={() => void dismissCommandCenter()}
-            >
-              <svg
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.75"
-                strokeLinecap="round"
-                aria-hidden="true"
-                focusable="false"
-              >
-                <path d="M4 4 L12 12 M12 4 L4 12" />
-              </svg>
-            </button>
-          </>
+      <div
+        className={styles.card}
+        ref={cardRef}
+        role="dialog"
+        // Drives the top gutter that keeps the always-present close
+        // button from overlapping the tiles/session row (the welcome
+        // band supplies its own clearance).
+        data-welcome={showWelcome ? "true" : undefined}
+      >
+        {/* Always-present close affordance — parity with the recording
+            overlay's X (which sits next to the mode pill). Same dismiss
+            path as Esc + outside-click + tray re-click. On macOS the CC
+            opens from the tray and has no chord to toggle it shut, so
+            this X is the primary close; on Windows it's an additive
+            bonus alongside the chord toggle. */}
+        <button
+          type="button"
+          className={styles.closeButton}
+          aria-label="Close"
+          onClick={() => void dismissCommandCenter()}
+        >
+          <svg
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path d="M4 4 L12 12 M12 4 L4 12" />
+          </svg>
+        </button>
+
+        {showWelcome && (
+          <header className={styles.welcomeBand}>
+            <h2 className={styles.welcomeTitle}>Welcome to Mockingbird</h2>
+            <p className={styles.welcomeBody}>
+              Press <kbd>Right&nbsp;Ctrl</kbd> + <kbd>Space</kbd> any time to
+              pop this card back up.
+            </p>
+          </header>
         )}
 
         {(snap.state === "modePicker" || snap.state === "launching") && (
