@@ -40,6 +40,20 @@ export PATH="${HOME}/.cargo/bin:${PATH}"
 # --- 2. Parallelism cap -----------------------------------------------------
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 
+# --- 2b. macOS deployment target (whisper.cpp std::filesystem fix) -----------
+# whisper-rs-sys compiles ggml/whisper.cpp via the `cmake` crate, which routes
+# the `cc` crate's default compiler flags into CMAKE_CXX_FLAGS. When
+# MACOSX_DEPLOYMENT_TARGET is unset, `cc` appends `-mmacosx-version-min=10.13`
+# AFTER cmake's own (SDK-derived) `-mmacosx-version-min`. clang honours the
+# LAST such flag, so the effective target collapses to 10.13 -- below 10.15,
+# where libc++ marks std::filesystem::path unavailable. ggml-backend-reg.cpp
+# uses std::filesystem, so a from-scratch RELEASE native compile fails with
+# "'path' is unavailable: introduced in macOS 10.15" (20 errors, cmake exits
+# 2). Debug builds only "worked" because the .o was cached before target/ was
+# cleaned. Pinning the deployment target makes both -mmacosx-version-min flags
+# agree at an arm64-safe floor (Big Sur 11.0 >= 10.15). Caller override wins.
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"
+
 # --- 3. Model + ORT runtime env ---------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
