@@ -37,6 +37,8 @@
 
 import { expect, test, type ConsoleMessage } from "@playwright/test";
 
+import { forceWindowsHost } from "./kg-host";
+
 const EMPTY_DASHBOARD = {
   counts: { totalEntities: 0, totalEntries: 0, entitiesByType: [] },
   queueStatus: {
@@ -86,14 +88,19 @@ test.describe("KG Phase 1D.4 -- Retrieval band (mb-6hm2)", () => {
       consoleErrors.push(`[pageerror] ${err.message}`);
     });
 
+    // KG is Windows-only; force the fixture host to "windows" so the KG
+    // route renders the real UI (not the macOS coming-soon path) —
+    // mb-0cg. Must precede the first navigation.
+    await forceWindowsHost(page);
+
     // ── Assertion 1: Toggle OFF -> no FilterBar ─────────────────
     await page.goto("/#/knowledge-graph");
     await expect(
       page.getByRole("heading", { name: /knowledge graph is off/i }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("group", { name: /^filter by$/i }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("group", { name: /^filter by$/i })).toHaveCount(
+      0,
+    );
     await page.screenshot({
       path: "test-results/kg-retrieval-1-toggle-off.png",
     });
@@ -103,6 +110,7 @@ test.describe("KG Phase 1D.4 -- Retrieval band (mb-6hm2)", () => {
     // Retrieval band is the unit under test.
     await page.addInitScript((dash) => {
       window.__MOCKINGBIRD_FIXTURES__ = {
+        host_os: "windows", // mb-0cg — keep KG on the Windows code path
         kg_settings_get_all: { kgGraphEnabled: true },
         kg_dashboard_snapshot: dash,
         kg_search_entries: [],
@@ -123,9 +131,7 @@ test.describe("KG Phase 1D.4 -- Retrieval band (mb-6hm2)", () => {
     // Retrieval band (the only chip-strip on the page when chips
     // are unselected is the recent-activity band's, which is
     // empty in this fixture).
-    await expect(
-      page.getByText(/pick an entity or tag above/i),
-    ).toBeVisible();
+    await expect(page.getByText(/pick an entity or tag above/i)).toBeVisible();
     await page.screenshot({
       path: "test-results/kg-retrieval-2-idle.png",
     });
@@ -169,9 +175,7 @@ test.describe("KG Phase 1D.4 -- Retrieval band (mb-6hm2)", () => {
       page.getByLabel(/^open concept page for entity mom$/i).first(),
     ).toBeVisible();
     // Idle copy gone now that the filter is active.
-    await expect(
-      page.getByText(/pick an entity or tag above/i),
-    ).toHaveCount(0);
+    await expect(page.getByText(/pick an entity or tag above/i)).toHaveCount(0);
 
     await page.screenshot({
       path: "test-results/kg-retrieval-3-entity-chip-applied.png",
@@ -213,9 +217,7 @@ test.describe("KG Phase 1D.4 -- Retrieval band (mb-6hm2)", () => {
     });
     // Bounce the tag chip to force re-evaluation with the new
     // search result.
-    await page
-      .getByRole("button", { name: /remove tag family/i })
-      .click();
+    await page.getByRole("button", { name: /remove tag family/i }).click();
     await tagInput.focus();
     await (await page.getByRole("option", { name: /family/i })).click();
 
@@ -238,9 +240,7 @@ test.describe("KG Phase 1D.4 -- Retrieval band (mb-6hm2)", () => {
       page.getByRole("button", { name: /remove tag family/i }),
     ).toHaveCount(0);
     // Idle copy back.
-    await expect(
-      page.getByText(/pick an entity or tag above/i),
-    ).toBeVisible();
+    await expect(page.getByText(/pick an entity or tag above/i)).toBeVisible();
     await page.screenshot({
       path: "test-results/kg-retrieval-5-cleared.png",
     });

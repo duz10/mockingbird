@@ -20,6 +20,8 @@
 
 import { expect, test, type ConsoleMessage } from "@playwright/test";
 
+import { forceWindowsHost } from "./kg-host";
+
 test.describe("KG Phase 1C.1 — Settings KG tab (mb-ucmx)", () => {
   test("renders, toggles, and conditionally reveals the indexing notice", async ({
     page,
@@ -35,6 +37,9 @@ test.describe("KG Phase 1C.1 — Settings KG tab (mb-ucmx)", () => {
     });
 
     // ── Assertion 1: Settings page + KG tab present ──────────────
+    // KG is Windows-only; force the fixture host so the KG tab renders
+    // instead of the macOS coming-soon path (mb-0cg).
+    await forceWindowsHost(page);
     await page.goto("/#/settings");
 
     const tabs = page.getByRole("navigation", { name: /settings sections/i });

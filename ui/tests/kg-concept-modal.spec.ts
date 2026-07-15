@@ -31,6 +31,8 @@
 
 import { expect, test, type ConsoleMessage } from "@playwright/test";
 
+import { forceWindowsHost } from "./kg-host";
+
 const RECENT_ROW = {
   entryId: 100,
   title: "Talked with Mom about the calculus assignment",
@@ -99,6 +101,11 @@ test.describe("KG Phase 1D.4 -- concept modal (mb-6hm2 / mb-sx6p)", () => {
       consoleErrors.push(`[pageerror] ${err.message}`);
     });
 
+    // KG is Windows-only; force the fixture host to "windows" so the KG
+    // route renders the real UI (not the macOS coming-soon path) —
+    // mb-0cg. Must precede the first navigation.
+    await forceWindowsHost(page);
+
     // ── Assertion 1: Toggle OFF -> no concept-page buttons ─────
     await page.goto("/#/knowledge-graph");
     await expect(
@@ -115,6 +122,7 @@ test.describe("KG Phase 1D.4 -- concept modal (mb-6hm2 / mb-sx6p)", () => {
     await page.addInitScript(
       ({ dash, entityDetail, tagDetail }) => {
         window.__MOCKINGBIRD_FIXTURES__ = {
+          host_os: "windows", // mb-0cg — keep KG on the Windows code path
           kg_settings_get_all: { kgGraphEnabled: true },
           kg_dashboard_snapshot: dash,
           kg_entity_detail: entityDetail,
@@ -147,9 +155,9 @@ test.describe("KG Phase 1D.4 -- concept modal (mb-6hm2 / mb-sx6p)", () => {
     await expect(
       entityDialog.getByRole("heading", { level: 2, name: /^mom$/i }),
     ).toBeVisible();
-    await expect(
-      entityDialog.getByLabel(/^entity type$/i),
-    ).toHaveText(/person/i);
+    await expect(entityDialog.getByLabel(/^entity type$/i)).toHaveText(
+      /person/i,
+    );
     await expect(entityDialog.getByText(/3 mentions/)).toBeVisible();
     await expect(entityDialog.getByText(/^also known as$/i)).toBeVisible();
     await expect(entityDialog.getByText(/^Mama$/)).toBeVisible();
