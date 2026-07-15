@@ -38,6 +38,7 @@ import { MeetingsIcon, SearchIcon } from "../design/Icon";
 import { t } from "../i18n";
 import { formatDuration, formatRelative, truncate } from "../lib/format";
 import { meetings } from "../lib/meetings";
+import { useAppStore } from "../lib/store";
 import { isTauri } from "../lib/tauri";
 import type {
   MeetingDetail,
@@ -69,6 +70,13 @@ const SEARCH_DEBOUNCE_MS = 200;
 export function MeetingsPage() {
   const navigate = useNavigate();
   const { uuid: routeUuid } = useParams<{ uuid?: string }>();
+
+  // macOS-port (mb-7rl tail): the meeting VK-chord (Right Ctrl + M) is
+  // `#[cfg(windows)]` and macOS keyboards have no Right Control, so the
+  // hotkey copy would be a lie on Mac -> point to the buttons instead.
+  // `isMac` is `null` on Windows/pre-boot, keeping Windows copy
+  // byte-identical (the `isMac ?` branch only fires when it's `true`).
+  const isMac = useAppStore((s) => s.isMac);
 
   // List state
   const [summaries, setSummaries] = useState<MeetingSummary[] | null>(null);
@@ -459,7 +467,9 @@ export function MeetingsPage() {
         <EmptyState
           icon={<MeetingsIcon size={28} />}
           title={t("meetings.empty.title")}
-          subtitle={t("meetings.empty.subtitle")}
+          subtitle={t(
+            isMac ? "meetings.empty.subtitle.mac" : "meetings.empty.subtitle",
+          )}
         />
       );
     }
@@ -479,7 +489,7 @@ export function MeetingsPage() {
         onSelect={handleSelect}
       />
     );
-  }, [summaries, searchHits, selectedUuid, handleSelect]);
+  }, [summaries, searchHits, selectedUuid, handleSelect, isMac]);
 
   /* -------- render ------------------------------------------------ */
 
@@ -487,7 +497,7 @@ export function MeetingsPage() {
     <>
       <PageHeader
         title={t("meetings.title")}
-        subtitle={t("meetings.subtitle")}
+        subtitle={t(isMac ? "meetings.subtitle.mac" : "meetings.subtitle")}
       />
 
       <div className={styles.shell}>

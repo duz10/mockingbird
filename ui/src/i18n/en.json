@@ -601,6 +601,7 @@
 
   "meetings.title": "Meetings",
   "meetings.subtitle": "Hours-long recordings - push to start, push to stop. Stays on your machine. Use Right Ctrl + M anywhere, or the buttons below.",
+  "meetings.subtitle.mac": "Hours-long recordings - push to start, push to stop. Stays on your machine. Use the buttons below to start and stop.",
   "meetings.start": "Start meeting",
   "meetings.stop": "Stop meeting",
   "meetings.starting": "Starting…",
@@ -628,6 +629,7 @@
   "meetings.search.noResults": "No matches.",
   "meetings.empty.title": "No meetings recorded yet",
   "meetings.empty.subtitle": "Press Right Ctrl + M anywhere, or the Start button above. Recordings persist locally and never leave your machine.",
+  "meetings.empty.subtitle.mac": "Use the Start button above to begin. Recordings persist locally and never leave your machine.",
   "meetings.detail.untitled": "Untitled meeting",
   "meetings.detail.duration": "Duration",
   "meetings.detail.source": "Source",
