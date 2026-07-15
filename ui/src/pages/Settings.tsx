@@ -142,6 +142,7 @@ export function SettingsPage() {
               settings={settings}
               applyTheme={applyTheme}
               patch={patch}
+              isMac={isMac}
             />
           )}
           {tab === "models" && <ModelsPanel settings={settings} patch={patch} />}
@@ -250,7 +251,8 @@ function GeneralPanel({
   settings,
   applyTheme,
   patch,
-}: PanelProps & { applyTheme: (theme: ThemeChoice) => void }) {
+  isMac,
+}: PanelProps & { applyTheme: (theme: ThemeChoice) => void; isMac: boolean }) {
   const setTheme = (theme: ThemeChoice) => {
     applyTheme(theme);
     void patch("ui.theme", theme, { theme });
@@ -315,21 +317,34 @@ function GeneralPanel({
           />
         }
       />
-      {/* Phase 10 Wave 1A deferral landed in 1B: surface the
-          `command_center_chord` setting so users can rebind. Stored
-          as a free-form string (e.g. "RightCtrl+Space") parsed by
-          `command_center::parse_chord` on the Rust side. A bad chord
-          falls back to the default without breaking the app. */}
-      <CommandCenterChordRow />
-      {/* Phase 10 Wave 4 — Activity Capture audio toggle (ADR 0041).
-          Default OFF (privacy by default). The Command Center reads
-          this at session-start time; the IPC `activity_start` defaults
-          to it when no explicit `withAudio` is passed. */}
-      <SettingsActivityAudioRow />
-      {/* Phase 10 Wave 5 — Hardening (ADR 0042 retention + ADR 0043
-          exclusion rules). PDF export lives on the per-session view,
-          not here. */}
-      <SettingsActivityHardeningRow />
+      {/* macOS-port (v1 honest-surface) — the following General rows are
+          Windows-only under the hood, so hide them on macOS:
+            - Command Center chord: the chord hotkey installer is
+              `#[cfg(target_os = "windows")]` (macOS opens the CC from
+              the tray), so rebinding a chord that can't fire is a lie.
+            - Activity audio + hardening: Activity capture is Windows-
+              only (macOS ships a no-op sampler; the feature is "coming
+              soon" on macOS), so its settings shouldn't show here.
+          Windows renders all three exactly as before (isMac === false). */}
+      {!isMac ? (
+        <>
+          {/* Phase 10 Wave 1A deferral landed in 1B: surface the
+              `command_center_chord` setting so users can rebind. Stored
+              as a free-form string (e.g. "RightCtrl+Space") parsed by
+              `command_center::parse_chord` on the Rust side. A bad chord
+              falls back to the default without breaking the app. */}
+          <CommandCenterChordRow />
+          {/* Phase 10 Wave 4 — Activity Capture audio toggle (ADR 0041).
+              Default OFF (privacy by default). The Command Center reads
+              this at session-start time; the IPC `activity_start`
+              defaults to it when no explicit `withAudio` is passed. */}
+          <SettingsActivityAudioRow />
+          {/* Phase 10 Wave 5 — Hardening (ADR 0042 retention + ADR 0043
+              exclusion rules). PDF export lives on the per-session view,
+              not here. */}
+          <SettingsActivityHardeningRow />
+        </>
+      ) : null}
       </Card>
       <BackgroundCard />
     </>

@@ -30,6 +30,7 @@ import type { EffectiveModel, ModeRow } from "../lib/types";
 
 import { MacModelControl, MacRamWarning } from "./ModesMacModel";
 import { MacPromptEditor } from "./ModesMacPrompt";
+import { ModesCommandsComingSoon } from "./ModesCommandsComingSoon";
 import styles from "./Modes.module.css";
 
 const SAVE_DEBOUNCE_MS = 400;
@@ -112,6 +113,10 @@ export function ModesPage() {
     if (!isMac || modes.length === 0) return;
     for (const m of modes) {
       if (DEPRECATED_SLUGS.has(m.slug)) continue;
+      // AI command modes are "coming soon" on macOS (Windows-only
+      // trigger), so their cards + model picker don't render — skip
+      // the effective-model fetch for them.
+      if (!isTranscriptionSlug(m.slug)) continue;
       refreshEffective(m.slug);
     }
   }, [isMac, modes, refreshEffective]);
@@ -246,7 +251,11 @@ export function ModesPage() {
           </section>
         ) : null}
 
-        {commands.length > 0 ? (
+        {/* AI command modes: Windows-only trigger, so render an honest
+            "coming soon" note on macOS instead of un-invokable cards. */}
+        {isMac ? (
+          <ModesCommandsComingSoon />
+        ) : commands.length > 0 ? (
           <section className={styles.group} aria-labelledby="modes-cmd-heading">
             <header className={styles.groupHeader}>
               <h2 id="modes-cmd-heading" className={styles.groupTitle}>

@@ -27,6 +27,7 @@ import {
   stopActiveCommandCenterSession,
 } from "../lib/command_center";
 import { api } from "../lib/tauri";
+import { dictationPttLabel } from "../lib/keys";
 import type {
   CcStateSnapshot,
   RecordingKind,
@@ -48,6 +49,8 @@ const MODES: ReadonlyArray<{
   {
     kind: "dictation",
     title: "Dictation",
+    // Windows fallback; ModePicker overrides this per-platform (Right
+    // Alt on Windows, Right Option on macOS).
     hint: "or just hold Right Alt",
   },
   {
@@ -234,10 +237,19 @@ export function CommandCenter(): JSX.Element | null {
         {showWelcome && (
           <header className={styles.welcomeBand}>
             <h2 className={styles.welcomeTitle}>Welcome to Mockingbird</h2>
-            <p className={styles.welcomeBody}>
-              Press <kbd>Right&nbsp;Ctrl</kbd> + <kbd>Space</kbd> any time to
-              pop this card back up.
-            </p>
+            {isMac ? (
+              // macOS has no Command Center chord (Windows-only hotkey
+              // path), so point the user at the menu-bar tray instead.
+              <p className={styles.welcomeBody}>
+                Open Mockingbird from the menu&nbsp;bar any time to pop this
+                card back up.
+              </p>
+            ) : (
+              <p className={styles.welcomeBody}>
+                Press <kbd>Right&nbsp;Ctrl</kbd> + <kbd>Space</kbd> any time to
+                pop this card back up.
+              </p>
+            )}
           </header>
         )}
 
@@ -277,11 +289,18 @@ function ModePicker({ launchingKind, onPick, isMac }: ModePickerProps): JSX.Elem
         const comingSoon = isMac && m.kind === "activity";
         const disabled =
           (m.disabled ?? false) || comingSoon || launchingKind != null;
+        // The dictation tile's hint names the PTT key, which is
+        // platform-specific (Right Alt on Windows, Right Option on
+        // macOS). Compute it so Windows stays byte-identical.
+        const baseHint =
+          m.kind === "dictation"
+            ? `or just hold ${dictationPttLabel(isMac)}`
+            : m.hint;
         const hint = comingSoon
           ? "coming soon on macOS"
           : isLaunchingThis
             ? "starting…"
-            : m.hint;
+            : baseHint;
         return (
           <button
             key={m.kind}

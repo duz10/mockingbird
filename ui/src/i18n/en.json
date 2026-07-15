@@ -197,6 +197,7 @@
   "modes.section.transcription.help": "Exactly one is active. Right-Alt always uses the selected mode.",
   "modes.section.commands": "AI command modes",
   "modes.section.commands.help": "Act on selected or clipboard text. Each has its own hotkey when enabled.",
+  "modes.section.commands.comingSoonMac": "AI command modes are triggered by a global command hotkey that's Windows-only, so they aren't available on macOS yet. Dictation is fully supported here in the meantime.",
   "modes.active": "Active",
   "modes.setActive": "Use this mode",
   "modes.enabled": "Enabled",

@@ -31,6 +31,8 @@ import { useNavigate } from "react-router-dom";
 import { Button, Card, Spinner } from "../components/primitives";
 import { Switch } from "../design/components";
 import { t } from "../i18n";
+import { dictationPttLabel } from "../lib/keys";
+import { useAppStore } from "../lib/store";
 import { api } from "../lib/tauri";
 import type { SettingsSnapshot } from "../lib/types";
 
@@ -323,6 +325,10 @@ function VramReadout({
 /* ------------------------------------------------------------------ */
 
 function ActivationCard() {
+  // Alt == Option on macOS: show the native key name. `isMac` is null
+  // until host_os() resolves and false on Windows — both keep the
+  // Windows label (byte-identical).
+  const isMac = useAppStore((s) => s.isMac);
   return (
     <Card title={t("settings.dictation.activation")}>
       <div className={styles.readonlyRow}>
@@ -330,7 +336,9 @@ function ActivationCard() {
           {t("settings.dictation.activation.ptt")}
         </span>
         <span className={styles.readonlyValue}>
-          {t("settings.dictation.activation.ptt.value")}
+          {isMac
+            ? dictationPttLabel(true)
+            : t("settings.dictation.activation.ptt.value")}
         </span>
       </div>
       <div className={styles.readonlyRow}>
