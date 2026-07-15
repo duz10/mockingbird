@@ -30,7 +30,9 @@
 
 import { Link } from "react-router-dom";
 
+import { ComingSoon } from "../../components/ComingSoon";
 import { EmptyState, PageHeader, Spinner } from "../../components/primitives";
+import { KnowledgeGraphIcon } from "../../design/Icon";
 import { t } from "../../i18n";
 import { useAppStore } from "../../lib/store";
 
@@ -39,6 +41,25 @@ import styles from "./Dashboard.module.css";
 
 export function KnowledgeGraphPage() {
   const kgGraphEnabled = useAppStore((s) => s.kgGraphEnabled);
+  const isMac = useAppStore((s) => s.isMac);
+
+  // macOS-port (v1 honest-surface) — the Knowledge Graph is
+  // Windows-only: the filing worker, reverse-watcher and KG-inbox
+  // courier are all `#[cfg(target_os = "windows")]` (bead mb-0cg), so
+  // the queue never drains on macOS and the graph stays empty.
+  // Render "Coming soon" instead of an empty dashboard. This guard
+  // fires BEFORE the kgGraphEnabled checks (and before any `kg_*` IPC),
+  // so it also upholds the graph-off-UI invariant. The Settings -> KG
+  // tab is hidden on macOS too, so a user can't even flip the toggle.
+  if (isMac) {
+    return (
+      <ComingSoon
+        title={t("kg.dashboard.title")}
+        body={t("comingSoon.kg.body")}
+        icon={<KnowledgeGraphIcon size={28} />}
+      />
+    );
+  }
 
   // Pre-boot: store hasn't resolved yet. Render a spinner rather
   // than the disabled-state so the page doesn't flash incorrect

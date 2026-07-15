@@ -15,6 +15,13 @@
   "activity.beta.heading": "Beta - proven concept, not yet release-grade.",
   "activity.beta.body": "Mockingbird is capturing activity events and assembling timeline blocks. The remaining gap to call this stable is the granularity of task-level recording - distinguishing meaningful work-units from incidental focus changes well enough to produce a quality summary. Improvements landing iteratively.",
   "sidebar.betaTag": "BETA",
+  "sidebar.comingSoonTag": "SOON",
+  "sidebar.comingSoonAria": "Coming soon on macOS",
+
+  "comingSoon.title": "Coming soon on macOS",
+  "comingSoon.activity.body": "Activity capture isn't available on macOS yet. It's live on Windows today and is on the way to your Mac in a future update. Dictation and Meetings are fully supported here in the meantime.",
+  "comingSoon.kg.body": "The Knowledge Graph isn't available on macOS yet. It's live on Windows today and is on the way to your Mac in a future update. Dictation and Meetings are fully supported here in the meantime.",
+  "comingSoon.cc.activityHint": "coming soon on macOS",
   "activity.empty.title": "No activity sessions yet",
   "activity.empty.body": "Open the Command Center (Right Ctrl + Space) and pick Activity to start one.",
   "activity.list.startedAt": "Started",

@@ -35,6 +35,18 @@ interface AppState {
    */
   kgGraphEnabled: boolean | null;
   /**
+   * macOS-port (v1 honest-surface) — is the host macOS? `null` until
+   * the first `host_os()` IPC resolves at App boot. Lives in the
+   * app-store (rather than per-page state) because SEVERAL surfaces
+   * subscribe to it to render the "Coming soon" treatment on the
+   * features that don't yet work on macOS (Activity, Knowledge Graph,
+   * Mobile Sync): the **Sidebar** (Coming-soon badge), the **Activity**
+   * + **Knowledge Graph** pages (Coming-soon body), and **Settings**
+   * (hide the KG + Mobile-Sync tabs). Windows resolves it to `false`
+   * so the entire surface is byte-identical to today.
+   */
+  isMac: boolean | null;
+  /**
    * `mb-v7pd` (v0.2.0-beta.1 smoke fix Bug 3) — runtime-resolved app
    * version string (e.g. `"0.2.0-beta.1"`). Sourced from Tauri's
    * `getVersion()` IPC at app boot so the sidebar can never display
@@ -49,6 +61,7 @@ interface AppState {
   setActiveModeSlug: (slug: string | null) => void;
   setSettings: (settings: SettingsSnapshot | null) => void;
   setKgGraphEnabled: (on: boolean | null) => void;
+  setIsMac: (isMac: boolean | null) => void;
   setAppVersion: (v: string | null) => void;
   setSelectedSession: (s: SessionDetail | null) => void;
   applyTheme: (theme: ThemeChoice) => void;
@@ -59,12 +72,14 @@ export const useAppStore = create<AppState>((set) => ({
   activeModeSlug: null,
   settings: null,
   kgGraphEnabled: null,
+  isMac: null,
   appVersion: null,
   selectedSession: null,
   setModes: (modes) => set({ modes }),
   setActiveModeSlug: (slug) => set({ activeModeSlug: slug }),
   setSettings: (settings) => set({ settings }),
   setKgGraphEnabled: (on) => set({ kgGraphEnabled: on }),
+  setIsMac: (isMac) => set({ isMac }),
   setAppVersion: (v) => set({ appVersion: v }),
   setSelectedSession: (s) => set({ selectedSession: s }),
   applyTheme: (theme) => {

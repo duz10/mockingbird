@@ -113,8 +113,18 @@ export function SettingsPage() {
           <TabBtn id="models" active={tab} setActive={setTab} label={t("settings.tab.models")} />
           <TabBtn id="dictation" active={tab} setActive={setTab} label={t("settings.tab.dictation")} />
           <TabBtn id="meeting" active={tab} setActive={setTab} label={t("settings.tab.meeting")} />
-          <TabBtn id="mobileSync" active={tab} setActive={setTab} label={t("settings.tab.mobileSync")} />
-          <TabBtn id="kg" active={tab} setActive={setTab} label={t("settings.tab.kg")} />
+          {/* macOS-port (v1 honest-surface) — Mobile Sync + Knowledge
+              Graph are Coming soon on macOS (their backends are
+              Windows-only), so hide their Settings tabs on macOS. This
+              also prevents a Mac user from enabling MobileSyncEnabled /
+              KgGraphEnabled and hitting a non-functional path. Windows
+              shows both tabs exactly as today. */}
+          {!isMac ? (
+            <TabBtn id="mobileSync" active={tab} setActive={setTab} label={t("settings.tab.mobileSync")} />
+          ) : null}
+          {!isMac ? (
+            <TabBtn id="kg" active={tab} setActive={setTab} label={t("settings.tab.kg")} />
+          ) : null}
           {isMac ? (
             <TabBtn
               id="permissions"
@@ -139,8 +149,8 @@ export function SettingsPage() {
             <SettingsDictationTab settings={settings} patch={patch} />
           )}
           {tab === "meeting" && <SettingsMeetingTab />}
-          {tab === "mobileSync" && <SettingsMobileSyncTab />}
-          {tab === "kg" && (
+          {tab === "mobileSync" && !isMac && <SettingsMobileSyncTab />}
+          {tab === "kg" && !isMac && (
             <SettingsKgTab onOpenMobileSync={() => setTab("mobileSync")} />
           )}
           {tab === "permissions" && isMac && <SettingsPermissionsTab />}

@@ -26,6 +26,7 @@ import {
   pickCommandCenterMode,
   stopActiveCommandCenterSession,
 } from "../lib/command_center";
+import { api } from "../lib/tauri";
 import type {
   CcStateSnapshot,
   RecordingKind,
@@ -72,6 +73,21 @@ export function CommandCenter(): JSX.Element | null {
   // subsystem.
   const sessionStartedAt = useRef<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
+
+  // macOS-port (v1 honest-surface) — Activity capture is Windows-only
+  // (macOS ships a no-op StubSampler), so the Activity tile is disabled
+  // on macOS to stop a user starting a session that would capture
+  // nothing. The Command Center runs in its own webview, so it can't
+  // read the main window's app store; resolve the host OS locally.
+  // Defaults to `false` (Windows-parity) until the probe resolves and
+  // on any failure, so a failed probe never disables a Windows tile.
+  const [isMac, setIsMac] = useState(false);
+  useEffect(() => {
+    void api
+      .host_os()
+      .then((os) => setIsMac(os === "macos"))
+      .catch(() => {});
+  }, []);
 
   // Snapshot on mount + subscribe to live updates.
   useEffect(() => {
@@ -216,6 +232,7 @@ export function CommandCenter(): JSX.Element | null {
               snap.state === "launching" ? snap.kind ?? null : null
             }
             onPick={onPickMode}
+            isMac={isMac}
           />
         )}
 
@@ -230,14 +247,26 @@ export function CommandCenter(): JSX.Element | null {
 interface ModePickerProps {
   launchingKind: RecordingKind | null;
   onPick: (kind: RecordingKind) => void;
+  /** macOS-port — when true, the Activity tile is disabled + relabelled
+   *  "coming soon on macOS" (its backend is Windows-only). */
+  isMac: boolean;
 }
 
-function ModePicker({ launchingKind, onPick }: ModePickerProps): JSX.Element {
+function ModePicker({ launchingKind, onPick, isMac }: ModePickerProps): JSX.Element {
   return (
     <div className={styles.modePicker} role="group" aria-label="Pick a recording mode">
       {MODES.map((m) => {
         const isLaunchingThis = launchingKind === m.kind;
-        const disabled = (m.disabled ?? false) || launchingKind != null;
+        // Activity is Coming soon on macOS: disable the tile so it can't
+        // launch a capture-nothing session.
+        const comingSoon = isMac && m.kind === "activity";
+        const disabled =
+          (m.disabled ?? false) || comingSoon || launchingKind != null;
+        const hint = comingSoon
+          ? "coming soon on macOS"
+          : isLaunchingThis
+            ? "starting…"
+            : m.hint;
         return (
           <button
             key={m.kind}
@@ -245,13 +274,12 @@ function ModePicker({ launchingKind, onPick }: ModePickerProps): JSX.Element {
             className={styles.modeTile}
             data-kind={m.kind}
             data-launching={isLaunchingThis ? "true" : undefined}
+            data-coming-soon={comingSoon ? "true" : undefined}
             disabled={disabled}
             onClick={() => onPick(m.kind)}
           >
             <span className={styles.modeTileTitle}>{m.title}</span>
-            <span className={styles.modeTileHint}>
-              {isLaunchingThis ? "starting…" : m.hint}
-            </span>
+            <span className={styles.modeTileHint}>{hint}</span>
           </button>
         );
       })}

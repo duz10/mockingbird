@@ -26,6 +26,7 @@ export function App({ children }: AppProps) {
   const setSettings = useAppStore((s) => s.setSettings);
   const setActiveModeSlug = useAppStore((s) => s.setActiveModeSlug);
   const setKgGraphEnabled = useAppStore((s) => s.setKgGraphEnabled);
+  const setIsMac = useAppStore((s) => s.setIsMac);
   const setAppVersion = useAppStore((s) => s.setAppVersion);
   const applyTheme = useAppStore((s) => s.applyTheme);
 
@@ -51,6 +52,19 @@ export function App({ children }: AppProps) {
   useEffect(() => {
     void migrateUnsplashApiKey();
   }, []);
+
+  // macOS-port (v1 honest-surface) — resolve the host OS once so the
+  // cross-route "Coming soon" treatment (Activity / Knowledge Graph /
+  // Mobile Sync) can gate on it. Fire-and-forget; on any failure
+  // `isMac` stays `null`, which every consumer treats as "not Mac"
+  // (i.e. the full Windows-parity surface), so a failed probe can
+  // never hide a Windows feature.
+  useEffect(() => {
+    void api
+      .host_os()
+      .then((os) => setIsMac(os === "macos"))
+      .catch(() => setIsMac(false));
+  }, [setIsMac]);
 
   // Boot — hydrate cross-route state from IPC. Each setter fires
   // independently in `bootApp`: a single rejected IPC does NOT
