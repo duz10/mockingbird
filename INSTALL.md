@@ -1,6 +1,11 @@
 # Installing Mockingbird
 
-Three tiers, pick whichever fits.
+**On macOS (Apple Silicon)?** The tiers below are the Windows path. Jump
+straight to [macOS (Apple Silicon, source build)](#macos-apple-silicon-source-build)
+— macOS is a from-source build with the full dictation + meeting-capture
+experience.
+
+On Windows, three tiers, pick whichever fits.
 
 - **Tier 1: Easy.** MSI installer. Dictation works out of the box. No cleanup LLM.
 - **Tier 2: Standard.** MSI installer plus local Ollama for cleanup. Recommended.
@@ -125,23 +130,50 @@ The MSI lands under `target\release\bundle\msi\`. It is unsigned. If you want a 
 
 ---
 
-## macOS (developer preview, Apple Silicon)
+## macOS (Apple Silicon, source build)
 
-macOS support is in active development (the macOS port). Dictation runs
-end-to-end today; build from source with the Mac wrapper:
+macOS runs the **full experience** — voice dictation *and* meeting capture,
+both with local LLM cleanup — on Apple Silicon Macs running **macOS 15
+(Sequoia) or newer** (the ScreenCaptureKit floor for meeting system-audio
+capture). Whisper runs on the **Metal** GPU backend.
+
+There is **no signed installer for macOS**: you build the `.app` from
+source (steps below). The build is straightforward and self-contained —
+the resulting `.app` bundles the Whisper + Silero models, so a built-`.app`
+user does not fetch models separately. macOS prerequisites are listed in
+[`PREREQS.md`](./PREREQS.md#building-from-source-on-macos-apple-silicon).
+
+> **Windows-only for now.** Activity capture, the Knowledge Graph
+> pipeline, and Mobile Sync are not wired on macOS yet — those surfaces
+> show as "coming soon" in the Mac build. Dictation, meeting capture, and
+> cleanup are at Windows parity.
+
+### Build the `.app`
 
 ```bash
 git clone https://github.com/duz10/mockingbird.git
 cd mockingbird
+
+# Toolchain (see PREREQS for details):
 xcode-select --install     # Command Line Tools (compiler, git) if not present
 brew install cmake jq      # cmake: whisper-rs-sys build.rs (whisper.cpp); jq: model fetch script
-scripts/download-onnxruntime.sh
-scripts/download-models.sh  # Whisper GGUF + Silero VAD into ./models
-scripts/dev/cargo-mac.sh tauri dev     # or: cargo-mac.sh tauri build
+# Rust 1.77+ via https://rustup.rs and Node 20+ (e.g. `brew install node`)
+
+# Fetch the runtime model files into ./models FIRST — the build bundles
+# them into the .app, so they must be present before `tauri build`.
+scripts/download-onnxruntime.sh   # libonnxruntime.dylib
+scripts/download-models.sh        # Whisper GGUF + Silero VAD into ./models
+
+# Build the self-contained .app. The macOS config overlay bundles the
+# models (+ ORT dylib) into Contents/Resources/models/ and pins the
+# macOS 15 floor; --bundles app produces just the .app (skips the DMG).
+scripts/dev/cargo-mac.sh tauri build --config src-tauri/tauri.macos.conf.json --bundles app
 ```
 
-Whisper runs on the **Metal** GPU backend (the wrapper auto-injects
-`--features mockingbird/metal`).
+The wrapper auto-injects `--features mockingbird/metal` (Metal GPU
+Whisper). The bundle lands at
+`target/release/bundle/macos/Mockingbird.app` — double-click-and-go, no
+Xcode and no dev env vars needed at runtime.
 
 > **Toolchain note:** `cmake` is a hard prerequisite — `whisper-rs-sys`'s
 > `build.rs` shells out to it to compile the bundled `whisper.cpp`. Unlike
@@ -149,13 +181,66 @@ Whisper runs on the **Metal** GPU backend (the wrapper auto-injects
 > Tools does **not** include it, so `brew install cmake` is required. You
 > also need Rust 1.77+ (via [rustup](https://rustup.rs/)) and Node 20+.
 
+### Run from source instead (developer loop)
+
+If you just want to iterate on the code rather than produce a shippable
+`.app`, run the dev server directly:
+
+```bash
+scripts/dev/cargo-mac.sh tauri dev
+```
+
+The dev build is **not** bundled, so it reads the models from `./models`
+at runtime (the wrapper exports `MODEL_PATH` + `ORT_DYLIB_PATH` for you) —
+which is why the `download-*.sh` scripts above are required for the dev
+loop too. See the permissions note below for the dev-vs-`.app` TCC quirk.
+
+### First launch: Gatekeeper
+
+The `.app` is unsigned, so on first open macOS Gatekeeper will refuse a
+plain double-click ("Mockingbird can't be opened because Apple cannot
+check it for malicious software"). **Right-click the app → Open**, then
+confirm in the dialog. You only need to do this once; subsequent launches
+open normally. (Code signing is not on the roadmap for the beta.)
+
+### Local cleanup (Ollama) on macOS
+
+Cleanup works the same as on Windows — install [Ollama for
+macOS](https://ollama.com/download) and pull a model:
+
+```bash
+ollama pull qwen2.5:7b-instruct-q4_K_M   # ~4.7 GB, parity cleanup model
+```
+
+Mockingbird selects the cleanup model **based on your Mac's unified
+memory** (ADR 0064):
+
+- **16 GB or more** → the full **7B** model, byte-identical cleanup quality
+  to the Windows path. Pull `qwen2.5:7b-instruct-q4_K_M` as above.
+- **8 GB (or any &lt; 16 GB)** → auto-downshifts to a **3B** model so it
+  coexists with Whisper-Metal in RAM. Pull it with:
+  ```bash
+  ollama pull qwen2.5:3b-instruct-q4_K_M   # ~1.9 GB
+  ```
+
+Without Ollama running, dictation still works — you just get Whisper's
+raw transcript with **no cleanup pass** (passthrough). The Anthropic
+Claude API cloud option also works on macOS; the key is stored in the
+macOS **Keychain** (the Mac equivalent of Windows DPAPI).
+
 ### Granting permissions (Privacy & Security / TCC)
 
-Mockingbird needs three macOS permissions to dictate:
+Mockingbird needs **four** macOS permissions for the full experience.
+Three are for dictation; the fourth (Screen Recording) is what lets
+meeting capture record system audio:
 
-- **Microphone** — to record your voice.
-- **Input Monitoring** — to see the Right Option hotkey globally.
-- **Accessibility** — to paste the transcript into the focused app.
+- **Microphone** — to record your voice (dictation + meetings).
+- **Input Monitoring** — to see the Right Option hotkey globally (dictation).
+- **Accessibility** — to paste the transcript into the focused app, and
+  for the secure-input guard (dictation).
+- **Screen Recording** — required by ScreenCaptureKit to capture system
+  audio during **meeting capture**. Dictation works without it; meeting
+  capture's system-audio channel does not.
 
 **Which app you grant depends on how you launched Mockingbird — and this
 trips people up.** macOS attributes the Input Monitoring and Accessibility
