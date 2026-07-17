@@ -155,15 +155,30 @@ pub const MAC_SET_PROPAGATE_DELAY: std::time::Duration = std::time::Duration::fr
 /// On Windows the target consumes the paste synchronously off the message
 /// pump, so 30 ms ([`PASTE_CONSUME_GRACE`]) suffices. On macOS the paste is
 /// consumed asynchronously — the target reads `NSPasteboard` some tens of ms
-/// after the HID event lands — so restoring after only 30 ms frequently
-/// wins the race and the app reads the RESTORED (previous) clipboard,
-/// pasting the old contents instead of the transcript (the user-reported
-/// intermittent bug). 120 ms sits comfortably above the observed HID→app
-/// read latency with headroom, while staying well under the perceptible-lag
-/// threshold: the paste itself already appeared at Cmd+V time, so this delay
-/// only defers the (invisible) clipboard restore, never the transcript.
+/// after the HID event lands (`CGEventPost` → HID tap → WindowServer → the
+/// target's run loop) — so restoring too early wins the race and the app
+/// reads the RESTORED (previous) clipboard, pasting the old contents instead
+/// of the transcript.
+///
+/// **mb-yxs (P0 regression on the release `.app`, reopened mb-22y).** The
+/// original 120 ms was tuned against `cargo tauri dev`; on the bundled
+/// release `.app` the target consistently reads the pasteboard *later* than
+/// 120 ms, so the restore beat every read and the app pasted the previous
+/// clipboard EVERY time. The [`mac_change_count_safe_to_restore`] guard
+/// cannot rescue this: Cmd+V is a read-only event that never bumps
+/// `changeCount`, so the guard is *structurally blind* to "target has not
+/// consumed yet" — it always reports "safe to restore." Paste correctness
+/// therefore rests ENTIRELY on this grace out-lasting the target's read.
+///
+/// The grace is generous BY DESIGN: it defers only the *invisible* C0
+/// restore (and the recording-window hide), never the transcript — the
+/// paste already appeared at Cmd+V time. So there is no perceptible-lag
+/// reason to keep it tight, and every reason to give it real headroom over
+/// the worst-case HID→app read latency. 400 ms clears the observed release
+/// `.app` read latency with a ~3× margin while the completion pill lingering
+/// a few hundred ms longer is imperceptible.
 #[cfg(target_os = "macos")]
-pub const MAC_PASTE_CONSUME_GRACE: std::time::Duration = std::time::Duration::from_millis(120);
+pub const MAC_PASTE_CONSUME_GRACE: std::time::Duration = std::time::Duration::from_millis(400);
 
 /// macOS-only pure guard: given the `NSPasteboard.changeCount` observed
 /// immediately after we wrote the transcript (`after_write`) and the count
@@ -470,6 +485,12 @@ mod mac {
         let mut clipboard = Clipboard::new()
             .map_err(|e| AppError::Injection(format!("open macOS pasteboard: {e}")))?;
 
+        // Timeline anchor: the pasteboard state BEFORE we touch anything.
+        // Logged so a live re-test can prove the full changeCount timeline
+        // (before → after-write → before-restore) from the `.app` logs
+        // alone — the evidence that was missing when mb-22y "regressed."
+        let change_count_before_write = pasteboard_change_count();
+
         // 1. Snapshot C0. `Err`/empty → treat as "no text to restore".
         let saved = clipboard.get_text().ok();
 
@@ -482,6 +503,14 @@ mod mac {
         // ANOTHER writer (clipboard manager, or a rapid second dictation)
         // touched the pasteboard after us → we must NOT restore over them.
         let change_count_after_write = pasteboard_change_count();
+        tracing::info!(
+            change_count_before_write,
+            change_count_after_write,
+            wrote_advanced = change_count_after_write > change_count_before_write,
+            payload_len = payload.len(),
+            consume_grace_ms = MAC_PASTE_CONSUME_GRACE.as_millis() as u64,
+            "macOS paste: transcript written to pasteboard; awaiting target consume"
+        );
 
         // 2a. Let the write fully propagate before the keystroke lands, so
         // the target never reads a pre-write pasteboard. See
@@ -506,12 +535,19 @@ mod mac {
         let outcome = if !mac_change_count_safe_to_restore(change_count_after_write, before_restore)
         {
             tracing::info!(
-                "macOS pasteboard changeCount advanced ({change_count_after_write} → \
-                 {before_restore}) after our write; skipping restore to avoid clobbering a \
-                 newer clipboard owner"
+                change_count_after_write,
+                before_restore,
+                "macOS paste: pasteboard changeCount advanced after our write; \
+                 skipping restore to avoid clobbering a newer clipboard owner"
             );
             PasteOutcome::OkClipboardNotRestored
         } else {
+            tracing::info!(
+                change_count_after_write,
+                before_restore,
+                "macOS paste: consume grace elapsed, changeCount unchanged; \
+                 restoring the caller's clipboard (C0)"
+            );
             match saved {
                 Some(prev) => match clipboard.set_text(prev) {
                     Ok(()) => PasteOutcome::Ok,
@@ -1090,12 +1126,19 @@ mod tests {
         // and small relative to the consume grace (no perceptible lag).
         assert!(MAC_SET_PROPAGATE_DELAY > std::time::Duration::ZERO);
         assert!(MAC_SET_PROPAGATE_DELAY < MAC_PASTE_CONSUME_GRACE);
-        // Guard against a laggy over-tune: keep the total added latency
-        // (which only defers the invisible restore) under ~200 ms.
+        // mb-yxs: the guard is structurally blind to an unconsumed read
+        // (Cmd+V never bumps changeCount), so paste correctness rests
+        // ENTIRELY on this grace out-lasting the target's HID→app read
+        // latency. The old ceiling (<=200 ms total) was a mistaken
+        // "perceptible-lag budget" — the grace defers only the INVISIBLE
+        // C0 restore, never the transcript, so there is no lag to bound.
+        // Pin a headroom FLOOR instead: the release `.app` read latency
+        // consistently exceeded 120 ms, so demand a generous margin.
         assert!(
-            MAC_SET_PROPAGATE_DELAY + MAC_PASTE_CONSUME_GRACE
-                <= std::time::Duration::from_millis(200),
-            "total added delay must stay well under the perceptible-lag budget"
+            MAC_PASTE_CONSUME_GRACE >= std::time::Duration::from_millis(350),
+            "consume grace must carry real headroom over the worst-case macOS \
+             HID→app pasteboard-read latency; a tight window is what made the \
+             release .app paste the stale clipboard every time (mb-yxs)"
         );
     }
 
