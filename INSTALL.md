@@ -1,9 +1,9 @@
 # Installing Mockingbird
 
 **On macOS (Apple Silicon)?** The tiers below are the Windows path. Jump
-straight to [macOS (Apple Silicon, source build)](#macos-apple-silicon-source-build)
-— macOS is a from-source build with the full dictation + meeting-capture
-experience.
+straight to [macOS (Apple Silicon)](#macos-apple-silicon) — three install
+methods (Homebrew, `.dmg`, or from source) with the full dictation +
+meeting-capture experience.
 
 On Windows, three tiers, pick whichever fits.
 
@@ -130,18 +130,44 @@ The MSI lands under `target\release\bundle\msi\`. It is unsigned. If you want a 
 
 ---
 
-## macOS (Apple Silicon, source build)
+## macOS (Apple Silicon)
 
 macOS runs the **full experience** — voice dictation *and* meeting capture,
 both with local LLM cleanup — on Apple Silicon Macs running **macOS 15
 (Sequoia) or newer** (the ScreenCaptureKit floor for meeting system-audio
 capture). Whisper runs on the **Metal** GPU backend.
 
-There is **no signed installer for macOS**: you build the `.app` from
-source (steps below). The build is straightforward and self-contained —
-the resulting `.app` bundles the Whisper + Silero models, so a built-`.app`
-user does not fetch models separately. macOS prerequisites are listed in
-[`PREREQS.md`](./PREREQS.md#building-from-source-on-macos-apple-silicon).
+There is **no Apple-signed installer** (no Apple Developer account), so
+every download path is unsigned — the difference is only *how much*
+Gatekeeper you touch. Three methods, cleanest first:
+
+1. **Homebrew cask (cleanest — no Gatekeeper friction).** *Activates once
+   the tap is live post-release.* `brew` strips the quarantine flag on
+   install, so there is no Gatekeeper wall:
+   ```bash
+   brew install --cask duz10/mockingbird/mockingbird
+   ```
+   (First `brew tap duz10/mockingbird https://github.com/duz10/mockingbird`
+   if you haven't tapped it. See
+   [`docs/macos-port/homebrew-tap.md`](./docs/macos-port/homebrew-tap.md).)
+
+2. **Direct `.dmg` download.** *Activates once the first release is
+   published.* Download `Mockingbird_<version>_aarch64.dmg` from the
+   [Releases](https://github.com/duz10/mockingbird/releases) page, open
+   it, and drag **Mockingbird.app** to **Applications**. Because it's
+   unsigned you must clear Gatekeeper once — see
+   [First launch: Gatekeeper](#first-launch-gatekeeper) below.
+
+3. **Build from source (works today).** No release required — clone and
+   build the self-contained `.app` yourself (steps below).
+
+> **Availability:** methods **1** and **2** light up only after the first
+> public release is cut (post-merge, from the CI macOS lane). The
+> **source build works right now**. All three produce the same
+> self-contained (~600 MB) app: the Whisper + Silero models and the ONNX
+> Runtime dylib are bundled, so users never fetch models separately.
+> macOS prerequisites for the source build are in
+> [`PREREQS.md`](./PREREQS.md#building-from-source-on-macos-apple-silicon).
 
 > **Windows-only for now.** Activity capture, the Knowledge Graph
 > pipeline, and Mobile Sync are not wired on macOS yet — those surfaces
@@ -197,11 +223,26 @@ loop too. See the permissions note below for the dev-vs-`.app` TCC quirk.
 
 ### First launch: Gatekeeper
 
-The `.app` is unsigned, so on first open macOS Gatekeeper will refuse a
-plain double-click ("Mockingbird can't be opened because Apple cannot
-check it for malicious software"). **Right-click the app → Open**, then
-confirm in the dialog. You only need to do this once; subsequent launches
-open normally. (Code signing is not on the roadmap for the beta.)
+Applies to the **`.dmg` download** and a **locally built `.app`** — the
+Homebrew cask (method 1) strips quarantine on install, so it skips this
+entirely.
+
+The `.app` is unsigned, so on first open macOS Gatekeeper refuses a plain
+double-click ("Mockingbird can't be opened because Apple cannot check it
+for malicious software"). On **macOS 15 (Sequoia)** the old
+right-click → Open shortcut is **gone**. Clear it one of two ways (one
+time only; later launches open normally):
+
+- **System Settings** → **Privacy & Security** → scroll to the blocked-app
+  notice → **Open Anyway** → confirm. (You may need to double-click the
+  app once first to trigger the notice.)
+- **Or the one-liner** (strips the quarantine flag directly):
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/Mockingbird.app
+  ```
+  (Point it at wherever the `.app` lives if not in `/Applications`.)
+
+(Code signing is not on the roadmap for the beta.)
 
 ### Local cleanup (Ollama) on macOS
 

@@ -27,9 +27,16 @@
 # entries are unambiguous, and lists the three runtime DLLs in
 # bundle.resources so they ship inside the MSI.
 #
-# macOS slot is commented out and will be enabled when Phase 9 lands.
-# Source-build remains the documented path for users outside Windows
-# until then.
+#   * macos-latest + variant=cpu -> Mockingbird_x.y.z_aarch64.dmg
+#       Apple Silicon. Whisper runs on the Metal GPU backend. The .dmg
+#       is self-contained (~600 MB): the whisper-large-v3-turbo GGUF,
+#       silero_vad.onnx, and libonnxruntime.dylib are fetched on the
+#       runner (download-models.sh + download-onnxruntime.sh) and copied
+#       into Contents/Resources/models/ by the macOS config overlay
+#       (src-tauri/tauri.macos.conf.json). Shipped UNSIGNED (no Apple
+#       Developer account) -- Gatekeeper is cleared via the Homebrew
+#       cask (quarantine stripped on install) or the documented
+#       xattr / "Open Anyway" path. Roughly 600 MB download/installed.
 #
 # No code-signing secrets are wired for the beta. Bundles ship unsigned
 # per charter. Future signing will plug in via
@@ -64,12 +71,31 @@ jobs:
             target: x86_64-pc-windows-msvc
             variant: cuda
             tauri_args: --target x86_64-pc-windows-msvc --config src-tauri/tauri.cuda.conf.json --features mockingbird/cuda
-          # - os: macos-latest
-          #   target: aarch64-apple-darwin
-          #   variant: cpu
-          #   tauri_args: --target aarch64-apple-darwin
-          # macOS slot: enable when Phase 9 lands. Source-build path
-          # is the documented user route per docs/research/.
+          # macOS (Apple Silicon) beta lane. Mirrors the Windows CPU
+          # lane's tauri-action approach but bundles a self-contained
+          # ~600 MB .dmg for aarch64-apple-darwin:
+          #   * UNSIGNED -- no Apple Developer account. Signing/
+          #     notarization inputs are left empty, same beta posture as
+          #     the Windows MSIs. Users clear Gatekeeper via Homebrew
+          #     cask (strips quarantine) or the documented
+          #     `xattr -dr com.apple.quarantine` / "Open Anyway"
+          #     (System Settings > Privacy & Security on Sequoia 15).
+          #   * Models are gitignored, so they are FETCHED ON THE RUNNER
+          #     (download-models.sh + download-onnxruntime.sh) before the
+          #     build. The macOS config overlay
+          #     (src-tauri/tauri.macos.conf.json) copies them into
+          #     Contents/Resources/models/ so the .dmg is self-contained
+          #     (Whisper GGUF + Silero VAD + libonnxruntime.dylib).
+          #   * --features mockingbird/metal -> Whisper on the Metal GPU
+          #     backend (mirrors how the Windows cuda lane injects
+          #     --features mockingbird/cuda). minimumSystemVersion 15.0
+          #     in tauri.conf.json governs the deployment-target floor.
+          #   * tauri-action attaches the resulting .dmg to the SAME
+          #     draft release as the MSIs.
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            variant: cpu
+            tauri_args: --target aarch64-apple-darwin --config src-tauri/tauri.macos.conf.json --features mockingbird/metal --bundles dmg
 
     runs-on: ${{ matrix.os }}
 
@@ -88,6 +114,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Install macOS build tools (cmake, jq)
+        if: matrix.os == 'macos-latest'
+        # cmake: whisper-rs-sys build.rs compiles the bundled whisper.cpp
+        # (macOS Command Line Tools does NOT ship cmake, unlike VS on
+        # Windows). jq: required by download-models.sh to read
+        # scripts/model-manifest.json. curl + tar are already native.
+        run: brew install cmake jq
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -130,6 +164,29 @@ jobs:
         shell: pwsh
         run: |
           powershell -File scripts\dev\stage-cuda-runtime.ps1
+
+      - name: macOS - fetch models + build tuning
+        if: matrix.os == 'macos-latest'
+        # The models are gitignored, so fetch them into ./models BEFORE
+        # the build -- the macOS config overlay bundles ./models/* into
+        # Contents/Resources/models/, so they must exist first. Both
+        # scripts default OUTPUT_DIR to <repo>/models and need no dev env
+        # vars the runner lacks. ONNX Runtime first so its versioned
+        # dylib (libonnxruntime.1.22.0.dylib, referenced by the overlay)
+        # is present.
+        #
+        # Parallelism: macos-latest arm64 runners are RAM-constrained
+        # (comparable to the 8 GB dev box, whose cargo-mac.sh caps jobs
+        # at 2). 3 is a safe ceiling for whisper.cpp + Metal shader
+        # compiles; dial down if the first real run OOMs. Note:
+        # `cargo tauri build` derives MACOSX_DEPLOYMENT_TARGET from
+        # bundle.macOS.minimumSystemVersion (15.0) in tauri.conf.json,
+        # so no deployment-target export is needed here.
+        run: |
+          echo "CARGO_BUILD_JOBS=3" >> "$GITHUB_ENV"
+          echo "CMAKE_BUILD_PARALLEL_LEVEL=3" >> "$GITHUB_ENV"
+          scripts/download-onnxruntime.sh
+          scripts/download-models.sh
 
       - name: Build and bundle
         uses: tauri-apps/tauri-action@v0
