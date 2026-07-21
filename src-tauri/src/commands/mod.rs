@@ -17,6 +17,10 @@
 
 pub mod active_mode;
 pub mod activity;
+// Cleanup-engine status (Ollama up/down + effective model) for the UI
+// signposting on Settings / Dictations / Modes. Additive + cross-platform;
+// the surfaces that consume it are isMac-gated.
+pub mod cleanup_status;
 pub mod dictation;
 pub mod dictionary;
 pub mod insights;
@@ -99,6 +103,8 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         modes::update_mode,
         active_mode::get_active_mode,
         active_mode::set_active_mode,
+        // Cleanup-engine status signposting (Ollama/passthrough).
+        cleanup_status::cleanup_status,
         // ADR 0066 — per-mode effective-model picker + override layer (macOS).
         model_override::get_effective_model,
         model_override::set_mode_model_override,

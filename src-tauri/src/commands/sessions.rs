@@ -83,6 +83,14 @@ fn to_summary(conn: &Connection, s: &sessions::Session) -> SessionSummary {
         // 'ptt'); ship the wire string straight from the enum so we
         // never accidentally diverge from `StartMode::as_db_str`.
         start_mode: s.start_mode.as_db_str().to_string(),
+        // The model recorded on the cleaned transcript row (or
+        // `"passthrough"` when cleanup was a no-op). Drives the macOS
+        // Dictations Raw/Cleaned badge. Cheap per-row lookup, mirroring
+        // `pick_summary_text`.
+        model_used: transcripts::get_stage(conn, s.id, transcripts::Stage::Cleaned)
+            .ok()
+            .flatten()
+            .and_then(|t| t.model_used),
     }
 }
 

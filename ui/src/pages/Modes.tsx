@@ -21,7 +21,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useNavigate } from "react-router-dom";
+
 import { PageHeader, Spinner } from "../components/primitives";
+import { CleanupModesNotice } from "../components/CleanupStatus";
 import { t } from "../i18n";
 import { useAppStore } from "../lib/store";
 import { api } from "../lib/tauri";
@@ -52,6 +55,7 @@ const MODELS_DATALIST_ID = "ollama-installed-models";
 const DEPRECATED_SLUGS: ReadonlySet<string> = new Set(["verbose", "fragment"]);
 
 export function ModesPage() {
+  const navigate = useNavigate();
   const modes = useAppStore((s) => s.modes);
   const setModes = useAppStore((s) => s.setModes);
   const activeModeSlug = useAppStore((s) => s.activeModeSlug);
@@ -225,6 +229,17 @@ export function ModesPage() {
                 {t("modes.section.transcription.help")}
               </p>
             </header>
+            {/* macOS-only: inline notice when cleanup is passthrough
+                (Ollama offline / no model) so the model pickers below
+                don't imply cleanup is running. isMac-gated → Windows
+                byte-identical (the status hook never fires there). */}
+            {isMac ? (
+              <CleanupModesNotice
+                onSetup={() =>
+                  navigate("/settings", { state: { tab: "models" } })
+                }
+              />
+            ) : null}
             {/* macOS-only <16 GB explainer (ADR 0066). No-op elsewhere. */}
             {isMac ? <MacRamWarning budgetGb={budgetGb} /> : null}
             <div

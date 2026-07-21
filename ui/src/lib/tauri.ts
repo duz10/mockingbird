@@ -33,6 +33,7 @@ import type {
   LlmPassPromptArg,
   LlmPassResult,
   MeetingSettingsSnapshot,
+  CleanupStatus,
   EffectiveModel,
   EffectivePrompt,
   ModeRow,
@@ -180,6 +181,14 @@ export const api = {
     invoke<void>("update_mode", { slug, patch }),
   get_active_mode: () => invoke<ActiveMode>("get_active_mode"),
   set_active_mode: (slug: string) => invoke<void>("set_active_mode", { slug }),
+
+  /**
+   * Live cleanup-engine status (Ollama up/down + effective model) for
+   * the isMac-gated signposting on Settings / Dictations / Modes.
+   * Cross-platform safe: on non-macOS `ramTier` is null and the
+   * effective model is the parity default (identity).
+   */
+  cleanup_status: () => invoke<CleanupStatus>("cleanup_status"),
 
   /**
    * ADR 0066 — the effective cleanup model for a mode (what will
@@ -730,6 +739,21 @@ function fixtureFor<T>(command: string, args?: object): T {
       // Preview/tests run in a browser — pretend macOS so the
       // permissions tab is exercisable in `npm run preview`.
       return fixture(command, "macos") as T;
+    case "cleanup_status":
+      // Mirror the 8 GB-Mac canary with Ollama up + the 3B pulled:
+      // cleanup active on the RAM-aware 3B. (Flip ollamaReachable/
+      // cleanupActive to preview the passthrough surfaces.)
+      return fixture(command, {
+        ollamaReachable: true,
+        cleanupActive: true,
+        effectiveModel: "qwen2.5:3b-instruct-q4_K_M",
+        installedModels: [
+          "qwen2.5:3b-instruct-q4_K_M",
+          "gemma2:2b-instruct-q4_K_M",
+        ],
+        recommendedPull: "qwen2.5:3b",
+        ramTier: "small",
+      } as CleanupStatus) as T;
     case "get_effective_model":
       // ADR 0066 — mirror the 8 GB-Mac canary: configured 7B, but the
       // RAM-aware layer downsizes to the 3B; no user pin ("Auto").
@@ -1147,6 +1171,9 @@ export const FIXTURES: {
     // in-app session so the IN_APP pill renders in Vite preview
     // / Playwright snapshots.
     startMode: i % 5 === 4 ? "in_app" : "ptt",
+    // Every 3rd fixture row is passthrough (raw) so the macOS
+    // Dictations Raw/Cleaned badge is exercised in preview.
+    modelUsed: i % 3 === 2 ? "passthrough" : "qwen2.5:3b-instruct-q4_K_M",
   })),
   sessionDetails: [
     {

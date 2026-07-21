@@ -13,8 +13,10 @@
 // user sees the change before the IPC round-trip.
 
 import { useCallback, useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 
 import { Button, Card, PageHeader, Spinner } from "../components/primitives";
+import { CleanupEngineCard } from "../components/CleanupStatus";
 import { CATEGORIES } from "../components/UnsplashBackground/categories";
 import {
   clearUnsplashApiKey,
@@ -63,7 +65,12 @@ export function SettingsPage() {
   const setSettings = useAppStore((s) => s.setSettings);
   const applyTheme = useAppStore((s) => s.applyTheme);
 
-  const [tab, setTab] = useState<Tab>("general");
+  // Deep-link support: other pages (Dictations/Modes cleanup signposting)
+  // navigate here with `state: { tab: "models" }` to land on the Models
+  // tab. Defaults to "general" for a plain sidebar click.
+  const location = useLocation();
+  const initialTab = (location.state as { tab?: Tab } | null)?.tab ?? "general";
+  const [tab, setTab] = useState<Tab>(initialTab);
 
   // mb-mac-v1.4.6 — the macOS permissions tab only exists on macOS.
   // Detected once via `host_os()`; cheaper + more robust than UA sniffing.
@@ -593,6 +600,10 @@ function ModelsPanel({ settings, patch }: PanelProps) {
   const isMac = useAppStore((s) => s.isMac);
   return (
     <>
+      {/* macOS-only Cleanup-engine status card (source of truth for the
+          Ollama/passthrough signposting). isMac-gated → Windows byte-
+          identical. Re-checks on window focus via the shared hook. */}
+      {isMac ? <CleanupEngineCard /> : null}
       <Card title={t("settings.models.ollama")}>
         <p style={{ color: "var(--on-surf-muted)", margin: 0, font: "var(--type-sm)" }}>
           {t("settings.models.ollama.help")}

@@ -19,7 +19,9 @@
 // thinner.
 
 import { EmptyState, Pill } from "../components/primitives";
+import { DictationCleanupBadge } from "../components/CleanupStatus";
 import { SearchIcon } from "../design/Icon";
+import { useAppStore } from "../lib/store";
 import { t } from "../i18n";
 import {
   formatDuration,
@@ -99,6 +101,9 @@ function SessionRow({
   active: boolean;
   onClick: () => void;
 }) {
+  // macOS-only cleanup badge (Raw / Cleaned). isMac-gated → Windows
+  // rows are byte-identical.
+  const isMac = useAppStore((s) => s.isMac);
   return (
     <div
       className={`${styles.row} ${active ? styles.rowActive : ""}`}
@@ -125,6 +130,12 @@ function SessionRow({
         <span>·</span>
         <span>{formatDuration(session.durationMs)}</span>
         {renderStatusPill(session)}
+        {isMac ? (
+          <>
+            <span>·</span>
+            <DictationCleanupBadge modelUsed={session.modelUsed} />
+          </>
+        ) : null}
       </div>
     </div>
   );

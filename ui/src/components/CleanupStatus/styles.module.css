@@ -1,0 +1,156 @@
+/* Shared cleanup-status signposting styles. Tokens only — no literals. */
+
+.statusRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+
+.statusText {
+  color: var(--on-surf);
+  font: var(--type-sm);
+  margin: 0;
+}
+
+.model {
+  color: var(--on-surf-muted);
+}
+
+/* ── Enable-cleanup setup block (Settings card, off state) ─────────── */
+
+.setup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--surf-border, var(--on-surf-faint));
+}
+
+.setupTitle {
+  font: var(--type-sm-strong, var(--type-sm));
+  color: var(--on-surf);
+  margin: 0;
+}
+
+.setupIntro,
+.ramNote {
+  color: var(--on-surf-muted);
+  font: var(--type-sm);
+  margin: 0;
+}
+
+.ramNote {
+  color: var(--on-surf-faint);
+  font: var(--type-xs);
+}
+
+.steps {
+  margin: 0;
+  padding-left: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  color: var(--on-surf-muted);
+  font: var(--type-sm);
+}
+
+.step {
+  line-height: 1.5;
+}
+
+.cmdRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-1);
+  flex-wrap: wrap;
+}
+
+.cmd {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--type-xs-size, 0.8rem);
+  background: var(--surf-sunken, rgba(0, 0, 0, 0.06));
+  color: var(--on-surf);
+  padding: var(--s-1) var(--s-2);
+  border-radius: var(--radius-sm, 6px);
+  user-select: all;
+}
+
+.link {
+  color: var(--accent, var(--on-surf));
+  text-decoration: underline;
+}
+
+/* ── Per-dictation badge ──────────────────────────────────────────── */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  font: var(--type-xs);
+  padding: 0 var(--s-1);
+  border-radius: var(--radius-sm, 6px);
+  white-space: nowrap;
+}
+
+.badgeRaw {
+  color: var(--on-surf-faint);
+  border: 1px solid var(--on-surf-faint);
+}
+
+.badgeCleaned {
+  color: var(--on-surf-muted);
+  border: 1px solid var(--on-surf-faint);
+}
+
+/* ── Dismissible passthrough banner (Dictations) ──────────────────── */
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  margin-bottom: var(--s-3);
+  border-radius: var(--radius-md, 8px);
+  background: var(--surf-raised, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--on-surf-faint);
+}
+
+.bannerText {
+  flex: 1;
+  color: var(--on-surf-muted);
+  font: var(--type-sm);
+  margin: 0;
+}
+
+.bannerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+}
+
+/* ── Inline notice (Modes) ────────────────────────────────────────── */
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--radius-md, 8px);
+  background: var(--surf-raised, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--on-surf-faint);
+  color: var(--on-surf-muted);
+  font: var(--type-sm);
+}
+
+.linkBtn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent, var(--on-surf));
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}

@@ -101,6 +101,12 @@ export interface SessionSummary {
    *  when there was no target app. Defaults to `"ptt"` for
    *  pre-migration-017 rows. */
   startMode: StartMode;
+  /** The cleanup model recorded on the cleaned transcript row
+   *  (`"qwen2.5:3b-…"` or `"passthrough"`), or `null`/absent on rows
+   *  with no cleaned stage. Drives the macOS Dictations Raw/Cleaned
+   *  badge (isMac-gated render). Optional so pre-existing fixtures /
+   *  test constructions stay valid. */
+  modelUsed?: string | null;
 }
 
 export interface SessionDetail {
@@ -183,6 +189,34 @@ export interface EffectiveModel {
   overrideModel: string | null;
   budgetGb: number | null;
   ollamaReachable: boolean;
+}
+
+/**
+ * Live cleanup-engine status — "am I getting AI-cleaned text or raw
+ * passthrough?". Powers the isMac-gated signposting on Settings,
+ * Dictations, and Modes (shared `CleanupStatus` component). Backed by
+ * the `cleanup_status` command, which composes the same Ollama health
+ * check + RAM-aware model selection the dictation thread uses.
+ */
+export interface CleanupStatus {
+  /** `true` iff Ollama answered `/api/tags` — the service is running. */
+  ollamaReachable: boolean;
+  /**
+   * `true` iff Ollama is reachable AND a usable cleanup model resolves.
+   * When `false`, dictations are saved RAW (passthrough).
+   */
+  cleanupActive: boolean;
+  /**
+   * The RAM-aware effective model that WOULD run, when one resolves.
+   * `null` when cleanup is off (passthrough).
+   */
+  effectiveModel: string | null;
+  /** Locally-pulled Ollama model tags. Empty when Ollama is down. */
+  installedModels: string[];
+  /** The model tag to suggest the user `ollama pull` (universal 3B). */
+  recommendedPull: string;
+  /** `"high"` (>= 16 GiB) / `"small"`, or `null` with no budget signal. */
+  ramTier: "small" | "high" | null;
 }
 
 /**
