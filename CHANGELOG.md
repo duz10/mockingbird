@@ -8,6 +8,48 @@ follows [Semantic Versioning](https://semver.org/).
 
 _Nothing yet._
 
+## [0.3.0-beta.1] - 2026-07-23
+
+First cross-platform release. Mockingbird now ships a native macOS
+(Apple Silicon) build alongside the existing Windows installers. Both
+platforms are built from the same source tree and gated by a shared
+cross-platform CI matrix (`windows-2022` + `macos-latest`). No data
+migrations, no schema changes; upgrade is a straight
+installer-over-installer replacement on Windows.
+
+### Added
+
+- **macOS (Apple Silicon) build.** A self-contained, unsigned
+  `Mockingbird_x.y.z_aarch64.dmg` built on `macos-latest`. Whisper
+  runs on the Metal GPU backend; the Whisper GGUF, Silero VAD ONNX,
+  and ONNX Runtime dylib are fetched on the runner and bundled into
+  `Contents/Resources/models/` so the `.dmg` is self-contained.
+  Gatekeeper is cleared via the Homebrew cask (quarantine stripped on
+  install) or the documented `xattr` / "Open Anyway" path. Minimum
+  system version is macOS 15.0.
+
+### Infrastructure
+
+- **CI: cross-platform build matrix.** The Rust lint-and-test gate now
+  runs on both `windows-2022` and `macos-latest` (macOS via
+  `--features mockingbird/metal`), so regressions to the shared
+  cross-platform surface are caught on either platform automatically.
+  The UI gate and `cargo-audit` stay Windows-only to avoid the 10x
+  billing multiplier on macOS runner minutes.
+- **CI: retired the port-only git hooks** (`block-push-to-main`,
+  `block-windows-rs-edit-on-macport`) that were only relevant while the
+  macOS port lived on a side branch; they are no longer needed now that
+  the port has merged to `main`.
+
+### Known limitations
+
+- **macOS build is unsigned.** No Apple Developer signing or
+  notarization in the beta, same posture as the unsigned Windows MSIs.
+  Gatekeeper must be cleared manually (Homebrew cask or
+  `xattr -dr com.apple.quarantine` / "Open Anyway").
+- **Apple Silicon only.** The `.dmg` targets `aarch64-apple-darwin`;
+  no Intel (`x86_64`) macOS build ships in this release.
+
 ## [0.2.0-beta.2] - 2026-06-16
 
 Second beta iteration on the v0.2.0 line. Dictionary UI improvements
