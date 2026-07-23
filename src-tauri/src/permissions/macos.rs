@@ -16,6 +16,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use block2::RcBlock;
+use dispatch2::DispatchQueue;
 use objc2::runtime::Bool;
 use objc2::{class, msg_send};
 use objc2_foundation::NSString;
@@ -70,37 +71,68 @@ pub fn request_microphone_access() -> PermissionState {
     // the existing grant and never re-prompts. Short-circuit so we don't
     // needlessly block, and so the UI gets the actionable state.
     if !matches!(current, PermissionState::NotDetermined) {
+        tracing::info!(
+            target: "permissions",
+            ?current,
+            "mic request: already decided; not prompting (macOS won't re-prompt) — UI falls back to Settings when denied"
+        );
         return current;
     }
 
     let (tx, rx) = mpsc::channel::<bool>();
-    // The completion handler is invoked exactly once, on an arbitrary
-    // dispatch queue, with the grant result. We ferry a wake-up back over
-    // a channel and re-read the authoritative status afterwards.
-    let handler = RcBlock::new(move |_granted: Bool| {
-        let _ = tx.send(true);
+    tracing::info!(
+        target: "permissions",
+        "mic request: NotDetermined -> dispatching requestAccess to the MAIN thread to show the TCC prompt"
+    );
+
+    // mb-47k: the TCC prompt can ONLY be presented from the AppKit main
+    // thread / main run-loop. Tauri command handlers run off the main
+    // thread (async command thread-pool), so calling `requestAccess`
+    // directly here resolves `denied` WITHOUT ever showing the prompt.
+    // Hop onto the main dispatch queue; the completion handler still fires
+    // on an arbitrary queue and wakes us over the channel. Only the
+    // `Send` `tx` crosses the boundary — the non-`Send` `RcBlock` is built
+    // and used entirely on the main thread inside the closure.
+    DispatchQueue::main().exec_async(move || {
+        let handler = RcBlock::new(move |granted: Bool| {
+            let granted = granted.as_bool();
+            tracing::info!(target: "permissions", granted, "mic request: completion handler fired");
+            let _ = tx.send(granted);
+        });
+
+        // SAFETY: `+[AVCaptureDevice requestAccessForMediaType:completionHandler:]`
+        // is a class method that (a) shows the TCC prompt when status is
+        // NotDetermined and (b) invokes the passed block exactly once with
+        // the resulting `BOOL`. AVFoundation copies (retains) the block
+        // synchronously, so dropping our `RcBlock` handle at end of scope
+        // is sound. `AVMediaTypeAudio` is the linked AVFoundation
+        // media-type constant also used by the preflight above.
+        unsafe {
+            let cls = class!(AVCaptureDevice);
+            let _: () = msg_send![
+                cls,
+                requestAccessForMediaType: AVMediaTypeAudio,
+                completionHandler: &*handler,
+            ];
+        }
     });
 
-    // SAFETY: `+[AVCaptureDevice requestAccessForMediaType:completionHandler:]`
-    // is a class method that (a) shows the TCC prompt when the status is
-    // NotDetermined and (b) invokes the passed block exactly once with the
-    // resulting `BOOL`. It is documented safe to call from any thread and
-    // copies (retains) the block synchronously, so dropping our `RcBlock`
-    // handle after this call is sound. `AVMediaTypeAudio` is the linked
-    // AVFoundation media-type constant also used by the preflight above.
-    unsafe {
-        let cls = class!(AVCaptureDevice);
-        let _: () = msg_send![
-            cls,
-            requestAccessForMediaType: AVMediaTypeAudio,
-            completionHandler: &*handler,
-        ];
+    // Block (on this off-main command thread) until the user answers or
+    // the safety timeout elapses; either way, return the fresh
+    // authoritative status.
+    match rx.recv_timeout(MIC_PROMPT_WAIT) {
+        Ok(granted) => {
+            tracing::info!(target: "permissions", granted, "mic request: user answered the prompt")
+        }
+        Err(_) => tracing::warn!(
+            target: "permissions",
+            timeout_secs = MIC_PROMPT_WAIT.as_secs(),
+            "mic request: timed out waiting for the TCC answer; re-reading status"
+        ),
     }
-
-    // Block until the user answers (or the safety timeout elapses); either
-    // way, return the fresh authoritative status.
-    let _ = rx.recv_timeout(MIC_PROMPT_WAIT);
-    microphone_state()
+    let result = microphone_state();
+    tracing::info!(target: "permissions", ?result, "mic request: final status after prompt");
+    result
 }
 
 /// Fire the microphone TCC prompt **without blocking** — used on the
@@ -111,18 +143,36 @@ pub fn prompt_microphone_access_async() {
     if !matches!(microphone_state(), PermissionState::NotDetermined) {
         return;
     }
-    let handler = RcBlock::new(move |_granted: Bool| {});
-    // SAFETY: identical contract to `request_microphone_access`; we simply
-    // don't wait for the completion handler. AVFoundation retains the block
-    // synchronously, so dropping our handle here is sound.
-    unsafe {
-        let cls = class!(AVCaptureDevice);
-        let _: () = msg_send![
-            cls,
-            requestAccessForMediaType: AVMediaTypeAudio,
-            completionHandler: &*handler,
-        ];
-    }
+    tracing::info!(
+        target: "permissions",
+        "mic capture-path prompt: NotDetermined -> dispatching requestAccess to the MAIN thread"
+    );
+    // mb-47k: this fires from `CpalCapture::start` on the cpal audio
+    // thread — NOT the main thread — so it has the same main-thread
+    // requirement as `request_microphone_access`. Hop onto the main queue
+    // so the prompt can actually display; we just don't block for the
+    // answer here (the panel button is the blocking, user-initiated path).
+    DispatchQueue::main().exec_async(move || {
+        let handler = RcBlock::new(move |granted: Bool| {
+            tracing::info!(
+                target: "permissions",
+                granted = granted.as_bool(),
+                "mic capture-path prompt: answered"
+            );
+        });
+        // SAFETY: identical contract to `request_microphone_access`; we
+        // simply don't wait for the completion handler. AVFoundation
+        // retains the block synchronously, so dropping our handle at end
+        // of scope is sound.
+        unsafe {
+            let cls = class!(AVCaptureDevice);
+            let _: () = msg_send![
+                cls,
+                requestAccessForMediaType: AVMediaTypeAudio,
+                completionHandler: &*handler,
+            ];
+        }
+    });
 }
 
 // --- Input Monitoring: IOKit ------------------------------------------------
