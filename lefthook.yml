@@ -56,11 +56,11 @@ pre-commit:
     # These run on every commit; each self-gates on git state (branch,
     # staged paths, target file). Validated via
     # `python scripts/dev/hooks/_test_macport_hooks.py`.
-    block-windows-rs-edit-on-macport:
-      run: python3 scripts/dev/hooks/block-windows-rs-edit-on-macport.py
-      skip:
-        - merge
-        - rebase
+    #
+    # block-windows-rs-edit-on-macport was RETIRED after the macos-port ->
+    # main merge (8e6cd5d): with no macos-port branch, the branch-gated
+    # windows.rs guard is moot. block-stt-swap stays -- the whisper-rs/metal
+    # STT-parity guard is branch-independent.
     block-stt-swap:
       run: python3 scripts/dev/hooks/block-stt-swap.py
       skip:
@@ -75,11 +75,10 @@ pre-commit:
 pre-push:
   parallel: false
   commands:
-    # macOS-port wiggum hook (Phase 0 Leaf 0.4). Reads git's pre-push
-    # stdin contract; refuses pushes targeting refs/heads/main from this
-    # Mac. Validated via `_test_macport_hooks.py`.
-    block-push-to-main:
-      run: python3 scripts/dev/hooks/block-push-to-main.py
+    # block-push-to-main was RETIRED after the macos-port -> main merge
+    # (8e6cd5d): it existed only to stop the Mac clone from pushing the
+    # port branch onto main. Branch discipline on main is now enforced by
+    # GitHub branch protection + the reviewed-PR workflow, not a local hook.
     rust-test:
       glob: "*.rs"
       env:
