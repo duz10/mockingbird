@@ -203,3 +203,27 @@ jobs:
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') || contains(github.ref_name, 'alpha') }}
           args: ${{ matrix.tauri_args }}
+
+      - name: macOS - verify the .app is ad-hoc signed (guardrail)
+        if: matrix.os == 'macos-latest'
+        # Regression guard for the "damaged and should be uninstalled"
+        # Gatekeeper failure. Without bundle.macOS.signingIdentity "-"
+        # (set in tauri.macos.conf.json), tauri never runs `codesign`
+        # over the assembled bundle, so the only signature is the one the
+        # linker auto-applies to the inner Mach-O -- the bundle seals no
+        # Resources (Sealed Resources=none) and `codesign --verify` fails
+        # with "code has no resources but signature indicates they must
+        # be present". A downloaded copy then reads as "damaged". Fail the
+        # release here rather than ship an un-launchable .dmg.
+        run: |
+          set -euo pipefail
+          # Locate the assembled bundle regardless of workspace target-dir
+          # layout (root ./target vs ./src-tauri/target).
+          APP="$(find . -type d -path '*/release/bundle/macos/Mockingbird.app' -print -quit)"
+          test -n "$APP" || { echo 'ERROR: Mockingbird.app not found'; exit 1; }
+          echo "Verifying signature of $APP"
+          codesign -dv --verbose=4 "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          # Confirm the bundled model/dylib Resources are actually sealed.
+          codesign -dv --verbose=4 "$APP" 2>&1 | grep -q 'Sealed Resources version' \
+            || { echo 'ERROR: bundle Resources are not sealed'; exit 1; }

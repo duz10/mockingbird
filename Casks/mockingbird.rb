@@ -34,7 +34,7 @@ cask "mockingbird" do
   # single-session system-audio capture requires 15+, matching
   # bundle.macOS.minimumSystemVersion in tauri.conf.json.
   depends_on arch: :arm64
-  depends_on macos: ">= :sequoia"
+  depends_on macos: :sequoia
 
   app "Mockingbird.app"
 
