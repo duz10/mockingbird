@@ -22,8 +22,8 @@
 # Gatekeeper wall via this path -- that is the whole point of shipping a
 # cask alongside the raw .dmg.
 cask "mockingbird" do
-  version "0.3.0-beta.1"
-  sha256 "7768d7ebad91f03e24215df2dedf5a2185438a066ea532b861b2b21f894f7170"
+  version "0.3.0-beta.2"
+  sha256 "90eae61bf8ee3ec403b41a9e310d622eb26224e689b2a96202c8a57a2bc7ba9e"
 
   url "https://github.com/duz10/mockingbird/releases/download/v#{version}/Mockingbird_#{version}_aarch64.dmg"
   name "Mockingbird"
