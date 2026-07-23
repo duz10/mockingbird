@@ -136,22 +136,33 @@ jobs:
         working-directory: ui
         run: npm run build
 
-      # tauri.macos.conf.json bundles three model artifacts as `resources`
-      # (whisper gguf, silero VAD onnx, ORT dylib). tauri-build's build
-      # script validates those source paths EXIST even under `cargo check`
-      # -- and they're gitignored downloaded artifacts absent in CI. This
-      # is a compile-only gate, not a bundle, so we stub empty placeholders
-      # to satisfy the existence check rather than download ~1.6 GB of real
-      # models. The real artifacts are fetched by the download scripts at
-      # release time (release.yml). The base tauri.conf.json declares no
+      # The macOS leg is a Rust compile/lint gate; it deliberately skips the
+      # (platform-independent) UI build to save 10x-billed mac minutes. But
+      # two build-time checks read on-disk assets the Windows leg produces
+      # for free, so we stub them here. This is a check gate, not a bundle:
+      #
+      #  1. tauri.macos.conf.json bundles three model artifacts as
+      #     `resources` (whisper gguf, silero VAD onnx, ORT dylib).
+      #     tauri-build validates those source paths EXIST even under
+      #     `cargo check`. They're gitignored downloads absent in CI, so we
+      #     touch empty placeholders instead of fetching ~1.6 GB of models.
+      #  2. tauri::generate_context!() panics at compile time if
+      #     build.frontendDist (../ui/dist) doesn't exist. On Windows the
+      #     `npm run build` step creates it; here we stub a minimal dist so
+      #     the Rust codegen proceeds.
+      #
+      # Real assets are produced by `npm run build` + the download scripts
+      # at release time (release.yml). The base tauri.conf.json declares no
       # models resources, so the Windows leg needs none of this.
-      - name: Stub macOS bundle resources (check-only)
+      - name: Stub check-only assets (models + ui/dist)
         if: matrix.os == 'macos-latest'
         run: |
           mkdir -p models
           touch models/whisper-large-v3-turbo-q5_0.bin
           touch models/silero_vad.onnx
           touch models/libonnxruntime.1.22.0.dylib
+          mkdir -p ui/dist
+          echo '<!doctype html><title>ci-stub</title>' > ui/dist/index.html
 
       - name: Cargo fmt check
         run: cargo fmt --all -- --check
