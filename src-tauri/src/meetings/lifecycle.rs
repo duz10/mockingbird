@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 
 use tauri::Emitter;
 
-use crate::meetings::levels::{LevelsState, DBFS_NO_DATA};
+use crate::meetings::levels::LevelsState;
 
 use crate::error::{AppError, AppResult};
 use crate::meetings::capture::{MeetingSource, TwinStreamCapture};
@@ -575,17 +575,29 @@ pub(crate) fn now_iso() -> String {
 /// on the wire and in the DB.
 pub(crate) fn uuid_v4_simple() -> String {
     use std::hash::{Hash, Hasher};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+    // Process-local monotonic sequence mixed into the hash so two
+    // calls that land in the SAME clock tick still differ. On Apple
+    // Silicon release builds `SystemTime::now()` in a tight loop can
+    // return identical `as_nanos()` (the effective clock resolution
+    // is coarser than 1 ns), which without this counter produced
+    // duplicate ids (mb-mac-v1.5.1: the `uuid_v4_simple_unique_and_hex`
+    // flake surfaced deterministically on M3 / --release).
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     let mut h = std::collections::hash_map::DefaultHasher::new();
     nanos.hash(&mut h);
+    seq.hash(&mut h);
     std::thread::current().id().hash(&mut h);
     let lo = h.finish();
     let mut h2 = std::collections::hash_map::DefaultHasher::new();
     lo.hash(&mut h2);
+    seq.hash(&mut h2);
     nanos.wrapping_mul(0x9E37_79B9_7F4A_7C15).hash(&mut h2);
     let hi = h2.finish();
     format!("{hi:016x}{lo:016x}")
@@ -606,8 +618,11 @@ const TICK_INTERVAL: Duration = Duration::from_millis(250);
 pub(crate) fn build_tick_payload(
     uuid: &str,
     elapsed_ms: u128,
-    levels: (f32, f32),
+    levels: (Option<f32>, Option<f32>),
 ) -> serde_json::Value {
+    // mb-x1d: `None` (no data yet) serializes to JSON `null`, unambiguous
+    // against a real full-scale `Some(0.0)` reading. The overlay treats
+    // `null` as "flat bar".
     let (mic_db, sys_db) = levels;
     serde_json::json!({
         "uuid": uuid,
@@ -634,7 +649,7 @@ fn spawn_tick_emitter(
         .spawn(move || {
             // Emit a first tick immediately so the overlay shows
             // a baseline state without waiting 250ms.
-            let payload = build_tick_payload(&uuid, 0, (DBFS_NO_DATA, DBFS_NO_DATA));
+            let payload = build_tick_payload(&uuid, 0, (None, None));
             let _ = app_handle.emit("meeting:tick", payload);
 
             while running.load(Ordering::Relaxed) {
@@ -660,7 +675,7 @@ mod tests {
     fn build_tick_payload_shape() {
         // ADR 0032 / mb-nig: pin the JSON shape so the UI's typed
         // MeetingTickEvent stays in sync with the Rust emitter.
-        let v = build_tick_payload("abc123", 1500, (-6.0, -100.0));
+        let v = build_tick_payload("abc123", 1500, (Some(-6.0), Some(-100.0)));
         assert_eq!(v["uuid"], "abc123");
         assert_eq!(v["elapsedMs"], 1500u64);
         assert!((v["micDb"].as_f64().unwrap() - (-6.0)).abs() < 1e-3);
@@ -669,13 +684,13 @@ mod tests {
 
     #[test]
     fn build_tick_payload_initial_sentinel() {
-        // A fresh meeting that hasn't drained yet should serialize
-        // the no-data sentinel (0.0) so the UI can render flat bars
-        // (vs. a fully-dim "silence" bar).
-        let v = build_tick_payload("u", 0, (DBFS_NO_DATA, DBFS_NO_DATA));
+        // mb-x1d: a fresh meeting that hasn't drained yet serializes the
+        // no-data state as JSON `null` (not `0.0`) so the UI can render
+        // flat bars without confusing it with a real full-scale reading.
+        let v = build_tick_payload("u", 0, (None, None));
         assert_eq!(v["elapsedMs"], 0u64);
-        assert_eq!(v["micDb"].as_f64().unwrap(), 0.0);
-        assert_eq!(v["sysDb"].as_f64().unwrap(), 0.0);
+        assert!(v["micDb"].is_null(), "no-data mic serializes to null");
+        assert!(v["sysDb"].is_null(), "no-data sys serializes to null");
     }
 
     #[test]

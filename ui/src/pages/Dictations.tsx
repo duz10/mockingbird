@@ -35,6 +35,7 @@
 // zero KG-aware state, and zero KG component imports.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import {
   Button,
@@ -42,6 +43,7 @@ import {
   PageHeader,
   Spinner,
 } from "../components/primitives";
+import { CleanupPassthroughBanner } from "../components/CleanupStatus";
 import { DictationRecordButton } from "./DictationRecordButton";
 import { HistoryIcon, PlusIcon, SearchIcon } from "../design/Icon";
 import { t } from "../i18n";
@@ -72,6 +74,8 @@ export function DictationsPage() {
   const [isImporting, setIsImporting] = useState(false);
 
   const setSelectedSession = useAppStore((s) => s.setSelectedSession);
+  const isMac = useAppStore((s) => s.isMac);
+  const navigate = useNavigate();
 
   // Initial list fetch.
   useEffect(() => {
@@ -268,6 +272,15 @@ export function DictationsPage() {
               PTT. Self-contained -- owns its own dictation:state
               subscription. */}
           <DictationRecordButton />
+
+          {/* macOS-only: nag once (dismissible) when the CURRENT cleanup
+              state is passthrough so raw dictations aren't a mystery.
+              isMac-gated → Windows byte-identical. */}
+          {isMac ? (
+            <CleanupPassthroughBanner
+              onSetup={() => navigate("/settings", { state: { tab: "models" } })}
+            />
+          ) : null}
 
           <SearchInput value={query} onChange={setQuery} />
           {leftPaneContent}

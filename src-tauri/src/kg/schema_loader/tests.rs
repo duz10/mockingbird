@@ -172,20 +172,32 @@ fn closed_vocab_path_still_active_via_env_override() {
     let _lock = SCHEMA_ENV_LOCK.lock().expect("acquire schema env lock");
 
     let dir = unique_tmp_dir("kg-schema-closed-vocab-env");
-    std::fs::create_dir_all(&dir).unwrap();
-    let schema = "\
-```yaml
-schema_version: 1
-schema_revision: test-closed-vocab
-```
-
-#### Vocabulary list
-
-- `alpha`
-- `beta`
-- `gamma`
-";
+    std::fs::create_dir_all(dir.join("prompts")).unwrap();
+    // mb-mac-v1.9: the loader grew well past the original minimal
+    // fixture -- it now requires the Categories/Entry-types closed
+    // enums, a model-defaults table, profile assignments, and reads
+    // every referenced prompt body off disk. Build a *valid*
+    // env-override tree by reusing the bundled SCHEMA.md + prompts
+    // (same pattern as `env_override_round_trips_against_bundled`),
+    // then append a `#### Vocabulary list` section -- the bundled
+    // schema is open-vocab -- so the closed-vocab flag flips on
+    // exactly {alpha, beta, gamma}. (The old hand-rolled minimal
+    // SCHEMA.md only ever "passed" because Windows gates `--no-run`.)
+    let schema =
+        format!("{BUNDLED_SCHEMA}\n\n#### Vocabulary list\n\n- `alpha`\n- `beta`\n- `gamma`\n");
     std::fs::write(dir.join("SCHEMA.md"), schema).unwrap();
+    for relpath in [
+        "prompts/segment.md",
+        "prompts/classify.md",
+        "prompts/extract.md",
+        "prompts/extract.mid-confident.md",
+        "prompts/extract.closed-vocab.mid-confident.md",
+        "prompts/extract_entities.md",
+        "prompts/extract_entities.mid-confident.md",
+    ] {
+        let body = bundled_prompt(relpath).expect("bundled prompt present");
+        std::fs::write(dir.join(relpath), body).unwrap();
+    }
 
     let _guard = EnvGuard::set(SCHEMA_DIR_ENV, dir.to_str().unwrap());
     let s = Schema::load_default().expect("load env-override schema");

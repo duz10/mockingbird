@@ -6,10 +6,12 @@ What you need to run Mockingbird, and what's optional but nice.
 
 ### Operating system
 
-- **Windows 10 build 19041 (May 2020 Update) or newer**, or **Windows 11** (any build).
-- 64-bit only. There is no 32-bit build.
+- **Windows 10 build 19041 (May 2020 Update) or newer**, or **Windows 11** (any build). 64-bit only; there is no 32-bit build.
+- **macOS 15 (Sequoia) or newer, Apple Silicon** (M1 or later). This is a source build — there is no signed installer for macOS. The floor is macOS 15 because meeting capture uses ScreenCaptureKit's single-session system-audio API, which is 15+. See [`INSTALL.md`](./INSTALL.md#macos-apple-silicon-source-build) for the build steps.
 
-Older Windows 10 builds (pre-19041) lack the WebView2 APIs and modern audio capture surface Mockingbird relies on.
+Older Windows 10 builds (pre-19041) lack the WebView2 APIs and modern audio capture surface Mockingbird relies on. Intel Macs are not supported (no Metal-tuned build); Linux has no build yet.
+
+> **What's on macOS today:** voice dictation and meeting capture, both with local LLM cleanup, at Windows parity. **Windows-only for now:** Activity capture, the Knowledge Graph pipeline, and Mobile Sync — these show as "coming soon" in the Mac build.
 
 ### Runtime libraries
 
@@ -39,9 +41,10 @@ If you are building from source and want to compile WITH CUDA support, see [`INS
 
 ### Ollama for local LLM cleanup
 
-- [Ollama](https://ollama.com/) installed and running on `http://localhost:11434` (the default).
+- [Ollama](https://ollama.com/) installed and running on `http://localhost:11434` (the default). Available for both Windows and macOS.
 - A pulled chat model. The recommended default is `qwen2.5:7b-instruct-q4_K_M` (about 4.7 GB).
-- The smaller `qwen2.5:3b` is documented as a degraded "tags only" mode for the knowledge graph features. It is not recommended for general cleanup.
+- The smaller `qwen2.5:3b` is documented as a degraded "tags only" mode for the knowledge graph features. It is not recommended for general cleanup on Windows.
+- **macOS is RAM-aware (ADR 0064).** On Apple Silicon, Mockingbird picks the cleanup model from unified memory: **16 GB or more → the parity 7B**; **less than 16 GB (e.g. an 8 GB Mac) → auto-downshift to `qwen2.5:3b-instruct-q4_K_M`** (about 1.9 GB) so it coexists with Whisper-Metal. Pull whichever your Mac will use. See [`INSTALL.md`](./INSTALL.md#local-cleanup-ollama-on-macos).
 
 Without Ollama (or a Claude API key, see below), dictation still produces a raw Whisper transcript. You just lose the punctuation and filler-word cleanup pass.
 
@@ -78,6 +81,8 @@ Backgrounds are purely cosmetic. The app works without this.
 
 ## For building from source
 
+### Windows
+
 In addition to the runtime requirements above:
 
 - **Rust 1.77 or newer** via [rustup](https://rustup.rs/).
@@ -88,3 +93,21 @@ In addition to the runtime requirements above:
 - *(Optional)* **CUDA Toolkit 12.8** if you want CUDA-accelerated Whisper from your local build.
 
 See [`INSTALL.md`](./INSTALL.md) Tier 3 for the actual build commands.
+
+### Building from source on macOS (Apple Silicon)
+
+macOS is source-build only — there is no installer. You need:
+
+- **macOS 15 (Sequoia) or newer** on **Apple Silicon** (M1+).
+- **Xcode Command Line Tools** — `xcode-select --install` (provides the clang compiler + git).
+- **CMake** — `brew install cmake`. This is a **hard prerequisite**: `whisper-rs-sys`'s `build.rs` shells out to CMake to compile the bundled `whisper.cpp`. Unlike Windows (where Visual Studio ships CMake), the macOS Command Line Tools do **not** include it.
+- **jq** — `brew install jq`. Used by `scripts/download-models.sh` to read the model manifest.
+- **Rust 1.77 or newer** via [rustup](https://rustup.rs/).
+- **Node 20 or newer** (e.g. `brew install node`).
+- **[Ollama for macOS](https://ollama.com/download)** if you want cleanup (optional; see the RAM-aware note above).
+
+Whisper runs on the **Metal** GPU backend — no CUDA on macOS. The build
+bundles the Whisper + Silero models into the `.app`, so a built-`.app`
+user doesn't fetch models separately. See
+[`INSTALL.md`](./INSTALL.md#macos-apple-silicon-source-build) for the
+exact build commands, permissions, and Gatekeeper steps.

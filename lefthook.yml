@@ -8,37 +8,82 @@
 #
 # Bypass an individual run (rarely): LEFTHOOK=0 git commit ...
 
+# Why the rust hooks carry an `env: PATH` prepend
+# ------------------------------------------------
+# lefthook spawns hook commands in a minimal shell that does NOT have
+# rustup's ~/.cargo/bin on PATH, so bare `cargo` exits 127 (command not
+# found) on macOS unless you manually `export PATH` first (recurring
+# friction; kennel drawers 59/73). lefthook expands `$HOME`/`$PATH` in
+# env values (Go os.Expand), so prepending the rustup bin dir fixes it.
+# Cross-platform-safe: on Windows cargo lives elsewhere and is already on
+# PATH, so a (possibly empty) `$HOME/.cargo/bin` prefix is an inert,
+# nonexistent leading entry — cargo still resolves from the real PATH.
 pre-commit:
   parallel: true
   commands:
     rust-fmt:
       glob: "*.rs"
+      env:
+        PATH: "$HOME/.cargo/bin:$PATH"
       run: cargo fmt --check -- {staged_files}
       skip:
         - merge
         - rebase
     rust-clippy:
       glob: "*.rs"
+      env:
+        PATH: "$HOME/.cargo/bin:$PATH"
       run: cargo clippy --all-targets -- -D warnings
       skip:
         - merge
         - rebase
     ts-lint:
+      # ts-lint repointed from `npm run lint` to `tsc --noEmit` until
+      # ESLint v9 migration (mb-yxh) lands -- npm run lint fails on the
+      # broken flat-config, not on real violations. tsc type-checks the
+      # whole project (can't scope to staged files) and is macOS+Windows
+      # safe. Revert to `npm run lint` once mb-yxh seals.
       glob: "{*.ts,*.tsx}"
       root: ui/
-      run: npm run lint -- --no-warn-ignored {staged_files}
+      run: npx tsc --noEmit
       skip:
         - merge
         - rebase
     py-syntax:
       glob: "scripts/dev/hooks/*.py"
       run: python -m py_compile {staged_files}
+    # macOS-port wiggum hooks (added Phase 0 Leaf 0.4).
+    # These run on every commit; each self-gates on git state (branch,
+    # staged paths, target file). Validated via
+    # `python scripts/dev/hooks/_test_macport_hooks.py`.
+    block-windows-rs-edit-on-macport:
+      run: python3 scripts/dev/hooks/block-windows-rs-edit-on-macport.py
+      skip:
+        - merge
+        - rebase
+    block-stt-swap:
+      run: python3 scripts/dev/hooks/block-stt-swap.py
+      skip:
+        - merge
+        - rebase
+    verify-cargo-build-jobs:
+      run: python3 scripts/dev/hooks/verify-cargo-build-jobs.py
+      skip:
+        - merge
+        - rebase
 
 pre-push:
   parallel: false
   commands:
+    # macOS-port wiggum hook (Phase 0 Leaf 0.4). Reads git's pre-push
+    # stdin contract; refuses pushes targeting refs/heads/main from this
+    # Mac. Validated via `_test_macport_hooks.py`.
+    block-push-to-main:
+      run: python3 scripts/dev/hooks/block-push-to-main.py
     rust-test:
       glob: "*.rs"
+      env:
+        PATH: "$HOME/.cargo/bin:$PATH"
       run: cargo test --quiet
       skip:
         - rebase

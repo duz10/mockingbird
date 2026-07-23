@@ -9,6 +9,15 @@
 //! in `Cargo.toml` once CUDA 12.x is installed side-by-side, and the
 //! GPU path activates automatically. See bd issue `mb-ltq`.
 
+// macOS port (.4.7a): `WhisperStt` is un-gated to `any(windows, macos)` —
+// whisper-rs is cross-platform and `use_gpu(true)` engages Metal when built
+// `--features metal`. These imports/consts are orphaned only on Linux/other
+// until that backend lands.
+#![cfg_attr(
+    not(any(target_os = "windows", target_os = "macos")),
+    allow(unused_imports, dead_code)
+)]
+
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -20,7 +29,7 @@ use crate::error::{AppError, AppResult};
 const MODEL_FILENAME: &str = "whisper-large-v3-turbo-q5_0.bin";
 const MODEL_ID: &str = "whisper-large-v3-turbo-q5_0";
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub struct WhisperStt {
     ctx: WhisperContext,
     /// Whether the loaded `ctx` was successfully initialised with GPU
@@ -29,7 +38,7 @@ pub struct WhisperStt {
     gpu_loaded: bool,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 impl WhisperStt {
     /// GPU-first, CPU-fallback constructor.
     ///
@@ -102,7 +111,7 @@ impl WhisperStt {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 impl SpeechToText for WhisperStt {
     fn transcribe(&mut self, req: TranscribeRequest<'_>) -> AppResult<Transcript> {
         let started = Instant::now();
@@ -247,7 +256,7 @@ impl SpeechToText for WhisperStt {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 fn locate_whisper_model() -> AppResult<PathBuf> {
     // Honor an explicit override env first (used by stt_test --model-path).
     if let Ok(p) = std::env::var("WHISPER_MODEL_PATH") {
@@ -268,7 +277,7 @@ fn locate_whisper_model() -> AppResult<PathBuf> {
     Ok(candidate)
 }
 
-#[cfg(all(test, target_os = "windows"))]
+#[cfg(all(test, any(target_os = "windows", target_os = "macos")))]
 mod tests {
     use super::*;
 

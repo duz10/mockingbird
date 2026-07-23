@@ -45,10 +45,21 @@ fn bootstrap_preserves_user_files_when_subtree_populated() {
     let td = TempDir::new().unwrap();
     let p = kg_subtree_paths(td.path());
 
-    // Pre-create with user content in each subfolder.
+    // Pre-create the FULL subtree (all directories) with user
+    // content. `bootstrap_kg_subtree` reports `AlreadyExists` only
+    // when EVERY directory is already present (root + inbox +
+    // entries + history + entities + projects + tags); pre-creating
+    // only a subset makes it fill the gaps and report `Created`.
+    // (mb-mac-v1.9: the `entities`/`projects`/`tags` dirs were added
+    // to the bootstrap set after this test was written; it pre-made
+    // only the original three and so saw `Created` on the first real
+    // Mac run.)
     fs::create_dir_all(&p.entries).unwrap();
     fs::create_dir_all(&p.inbox).unwrap();
     fs::create_dir_all(&p.history).unwrap();
+    fs::create_dir_all(&p.entities).unwrap();
+    fs::create_dir_all(&p.projects).unwrap();
+    fs::create_dir_all(&p.tags).unwrap();
 
     let user_entry = p.entries.join("my-precious-note.md");
     let user_inbox_audio = p.inbox.join("memo.m4a");

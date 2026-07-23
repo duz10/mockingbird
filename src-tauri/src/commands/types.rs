@@ -175,6 +175,13 @@ pub struct SessionSummary {
     /// the UI list-pill can render IN_APP instead of the
     /// (semantically wrong) ABORTED_FOCUS_CHANGED for in-app rows.
     pub start_mode: String,
+    /// The cleanup model recorded on the cleaned transcript row
+    /// (`transcripts.model_used`) — e.g. `"qwen2.5:3b-instruct-q4_K_M"`
+    /// or `"passthrough"`. `None` on rows with no cleaned stage. Drives
+    /// the macOS Dictations "Raw / Cleaned" badge; the field is additive
+    /// and the badge is isMac-gated, so Windows carries it but never
+    /// renders it (byte-identical UI).
+    pub model_used: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

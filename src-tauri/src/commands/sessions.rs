@@ -83,6 +83,14 @@ fn to_summary(conn: &Connection, s: &sessions::Session) -> SessionSummary {
         // 'ptt'); ship the wire string straight from the enum so we
         // never accidentally diverge from `StartMode::as_db_str`.
         start_mode: s.start_mode.as_db_str().to_string(),
+        // The model recorded on the cleaned transcript row (or
+        // `"passthrough"` when cleanup was a no-op). Drives the macOS
+        // Dictations Raw/Cleaned badge. Cheap per-row lookup, mirroring
+        // `pick_summary_text`.
+        model_used: transcripts::get_stage(conn, s.id, transcripts::Stage::Cleaned)
+            .ok()
+            .flatten()
+            .and_then(|t| t.model_used),
     }
 }
 
@@ -161,9 +169,20 @@ pub fn get_session_detail(db: State<'_, AppStateHandle>, id: i64) -> Result<Sess
     //      within seconds instead of producing a mystery UI bug that
     //      survives three smoketest rounds. (LESSONS 2026-05-17
     //      phase5-smoketest, fourth pass.)
+    // ADR 0065 v2 — prefer `sessions.effective_prompt_label` (the prompt
+    // that ACTUALLY ran, e.g. "normal_small v2") over the mode's
+    // canonical `prompt_id` version. The canonical version lies on the
+    // macOS RAM-aware downsize path: the cleaner runs the `normal_small`
+    // override while `sessions.prompt_id` still points at normal@v5, so
+    // pre-028 the UI showed "Prompt: v5" even though normal_small ran
+    // (kennel drawer 91 / session-12 diagnosis). COALESCE falls back to
+    // the canonical version on historical rows + the non-override path,
+    // where `effective_prompt_label` is NULL.
     let (model_used, prompt_version, dictionary_version) = conn
         .query_row(
-            "SELECT t.model_used, 'v' || p.version, s.dictionary_snapshot_id \
+            "SELECT t.model_used, \
+                    COALESCE(s.effective_prompt_label, 'v' || p.version), \
+                    s.dictionary_snapshot_id \
              FROM transcripts t \
              JOIN sessions s ON s.id = t.session_id \
              LEFT JOIN prompts p ON p.id = s.prompt_id \

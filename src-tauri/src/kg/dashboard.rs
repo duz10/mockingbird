@@ -309,7 +309,16 @@ mod tests {
                 tags: Vec::new(),
             }],
             flagged_for_review: Vec::new(),
-            upcoming_due: Vec::new(),
+            // One item so the element-level `dueIso` camelCase field
+            // actually appears in the serialized output -- with an
+            // empty vec the field name is never emitted and the
+            // camelCase assertion below has nothing to match.
+            // (mb-mac-v1.9: fixture previously left this empty.)
+            upcoming_due: vec![UpcomingDue {
+                entry_id: 7,
+                title: "Renew domain".into(),
+                due_iso: "2026-06-30T00:00:00Z".into(),
+            }],
         };
         let s = serde_json::to_string(&snap).unwrap();
         for field in [

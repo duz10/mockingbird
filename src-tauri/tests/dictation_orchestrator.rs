@@ -304,7 +304,13 @@ fn happy_path_injects_calls_writes_three_transcripts_and_ok_status() {
         1,
         "injector should have been called exactly once, got {calls:?}"
     );
-    assert_eq!(calls[0].0, "hello world");
+    // Injection gets the paste payload, which appends ONE trailing
+    // space so consecutive dictations stay word-separated (see
+    // `dictation::paste_payload`). The persisted transcript keeps no
+    // trailing space (asserted via the DB rows below).
+    // (mb-mac-v1.9: assertion predated the paste-payload helper and
+    // had never executed -- Windows gates `--no-run`.)
+    assert_eq!(calls[0].0, "hello world ");
     assert_eq!(calls[0].1, InjectionStrategy::Paste);
 
     // --- Session row exists with full provenance + injection_status = "ok".
@@ -434,9 +440,14 @@ fn cleaned_text_round_trips_through_injector_call_verbatim() {
 
     let calls = injector.calls();
     assert_eq!(calls.len(), 1);
+    // The cleaner preserves the text byte-for-byte; the injector then
+    // receives the paste payload (cleaned text + one trailing space,
+    // per `dictation::paste_payload`). (mb-mac-v1.9: assertion
+    // predated the paste-payload trailing space.)
     assert_eq!(
-        calls[0].0, weird,
-        "passthrough cleaner must preserve the text byte-for-byte"
+        calls[0].0,
+        format!("{weird} "),
+        "passthrough cleaner must preserve the text byte-for-byte (plus the paste-payload trailing space)"
     );
 }
 
@@ -457,6 +468,24 @@ fn llm_cleanup_runs_in_orchestrator_and_injects_cleaned_text() {
     let db = Database::open_in_memory().expect("open in-memory db");
     let config = default_normal_config(&db.conn).expect("default normal config");
     let db_arc = Arc::new(Mutex::new(db.conn));
+
+    // mb-mac-v1.9: this test asserts the LLM actually ran
+    // (`model_used == "stub-normal"`). The 2-word "hello world" input
+    // would otherwise trip the ADR 0047 §Wave 2.2 short-utterance
+    // LLM-skip and return preprocessor output stamped
+    // "preprocessor-only" -- the text coincidentally matches, but the
+    // LLM is never invoked. Disable the skip so the stub provider
+    // runs. (Surfaced on Mac's first real `cargo test`; Windows gates
+    // `--no-run`.)
+    {
+        let conn = db_arc.lock().unwrap();
+        mockingbird_lib::settings::Settings::new(&conn)
+            .set(
+                mockingbird_lib::settings::model::SettingKey::LlmSkipWordThreshold,
+                &0u32,
+            )
+            .unwrap();
+    }
 
     // LlmCleaner needs model_id/temp/max_tokens — pull from the mode row.
     let (model_id, temperature, max_tokens) = {
@@ -513,8 +542,11 @@ fn llm_cleanup_runs_in_orchestrator_and_injects_cleaned_text() {
     // The stub provider's `normal` mode capitalises + adds a period.
     let calls = injector.calls();
     assert_eq!(calls.len(), 1, "got {calls:?}");
+    // Stub's normal-mode transform ("Hello world.") + the paste-payload
+    // trailing space handed to the injector. (mb-mac-v1.9: assertion
+    // predated the paste-payload trailing space.)
     assert_eq!(
-        calls[0].0, "Hello world.",
+        calls[0].0, "Hello world. ",
         "LlmCleaner output should be the stub's normal-mode transform, not raw"
     );
 
@@ -531,11 +563,19 @@ fn llm_cleanup_runs_in_orchestrator_and_injects_cleaned_text() {
     assert_eq!(cleaned_row.text, "Hello world.");
     assert_eq!(final_row.text, "Hello world.");
     // Stub provider returns `stub-{mode_slug}`; LlmCleaner forwards
-    // that into `last_model_used`, and the orchestrator persists it.
-    assert_eq!(
-        cleaned_row.model_used.as_deref(),
-        Some("stub-normal"),
-        "cleaned-row model_used should reflect the actual model the provider used"
+    // that into `last_model_used` and now appends the preprocessor
+    // version suffix (`+<PREPROCESSOR_VERSION>`, e.g. `+preproc@v1`)
+    // for two-stage provenance. We assert the provider half via a
+    // prefix match so the test doesn't break each time the
+    // preprocessor version bumps. (mb-mac-v1.9: was an exact match on
+    // the bare `stub-normal`, stale since the suffix landed.)
+    let cleaned_model = cleaned_row
+        .model_used
+        .as_deref()
+        .expect("cleaned row must carry model_used");
+    assert!(
+        cleaned_model.starts_with("stub-normal"),
+        "cleaned-row model_used should reflect the actual model the provider used; got {cleaned_model:?}"
     );
 }
 

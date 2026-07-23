@@ -118,6 +118,25 @@ fn empty_db() -> Arc<Mutex<Connection>> {
 /// `path`. Used by the idempotency test to pre-seed the DB.
 fn insert_session_with_audio_path(db: &Arc<Mutex<Connection>>, path: &Path) -> i64 {
     let conn = db.lock().unwrap();
+    // Seed the FK parents the `sessions` row references. A fresh
+    // `apply_all` DB seeds `modes` + `prompts` but NOT
+    // `dictionary_snapshots` / `example_sets`, so the previously
+    // hardcoded `id = 1` for those two violated the foreign key
+    // (extended_code 787). (mb-mac-v1.9: surfaced on Mac's first
+    // real test run; Windows gates `--no-run` so the insert never
+    // executed.)
+    conn.execute(
+        "INSERT INTO dictionary_snapshots (term_ids) VALUES ('[]')",
+        [],
+    )
+    .unwrap();
+    let snapshot_id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO example_sets (mode_slug, example_ids) VALUES ('normal', '[]')",
+        [],
+    )
+    .unwrap();
+    let example_set_id = conn.last_insert_rowid();
     let new = NewSession {
         uuid: uuid::Uuid::new_v4().to_string(),
         mode_id: 1,
@@ -130,8 +149,8 @@ fn insert_session_with_audio_path(db: &Arc<Mutex<Connection>>, path: &Path) -> i
         audio_duration_ms: 1000,
         audio_blob_path: Some(path.to_string_lossy().into_owned()),
         prompt_id: 1,
-        dictionary_snapshot_id: 1,
-        example_set_id: 1,
+        dictionary_snapshot_id: snapshot_id,
+        example_set_id,
         start_mode: StartMode::InApp,
         source: SessionSource::MobileInbox,
         capture_kind: CaptureKind::KgNote,

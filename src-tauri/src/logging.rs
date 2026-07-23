@@ -216,8 +216,12 @@ mod tests {
             scrub("PAT=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"),
             "PAT=gh<REDACTED>"
         );
+        // 36-char body after `ghs_` per GitHub PAT docs (a..z = 26,
+        // 0..9 = 10). (mb-mac-v1.9: the prior input had two trailing
+        // `AB` chars -> a 38-char body the 36-char regex correctly
+        // leaves, so the assertion was wrong, not the scrubber.)
         assert_eq!(
-            scrub("srv=ghs_abcdefghijklmnopqrstuvwxyz0123456789AB"),
+            scrub("srv=ghs_abcdefghijklmnopqrstuvwxyz0123456789"),
             "srv=gh<REDACTED>"
         );
         // Not-a-PAT cases: wrong prefix, too short.
@@ -263,7 +267,11 @@ mod tests {
             "<HEX40_REDACTED>"
         );
         // 39-char hex must NOT hit; 41-char hex must NOT hit on the boundary.
-        let nine = "123456789abcdef0123456789abcdef012345678"; // 39 chars
+        // 39 chars (one short of the 40-hex trigger). (mb-mac-v1.9:
+        // the prior literal was actually 40 chars -- a miscount that
+        // the hex40 regex correctly redacted; the boundary test, not
+        // the scrubber, was wrong.)
+        let nine = "123456789abcdef0123456789abcdef01234567"; // 39 chars
         assert_eq!(scrub(nine), nine);
         let one = "123456789abcdef0123456789abcdef0123456789a"; // 41 chars
         assert_eq!(scrub(one), one);

@@ -21,13 +21,19 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useNavigate } from "react-router-dom";
+
 import { PageHeader, Spinner } from "../components/primitives";
+import { CleanupModesNotice } from "../components/CleanupStatus";
 import { t } from "../i18n";
 import { useAppStore } from "../lib/store";
 import { api } from "../lib/tauri";
 import { isTranscriptionSlug } from "../lib/types";
-import type { ModeRow } from "../lib/types";
+import type { EffectiveModel, ModeRow } from "../lib/types";
 
+import { MacModelControl, MacRamWarning } from "./ModesMacModel";
+import { MacPromptEditor } from "./ModesMacPrompt";
+import { ModesCommandsComingSoon } from "./ModesCommandsComingSoon";
 import styles from "./Modes.module.css";
 
 const SAVE_DEBOUNCE_MS = 400;
@@ -49,6 +55,7 @@ const MODELS_DATALIST_ID = "ollama-installed-models";
 const DEPRECATED_SLUGS: ReadonlySet<string> = new Set(["verbose", "fragment"]);
 
 export function ModesPage() {
+  const navigate = useNavigate();
   const modes = useAppStore((s) => s.modes);
   const setModes = useAppStore((s) => s.setModes);
   const activeModeSlug = useAppStore((s) => s.activeModeSlug);
@@ -59,6 +66,22 @@ export function ModesPage() {
   // Installed Ollama tags for the model dropdown. Empty = Ollama
   // unreachable; the input falls back to free-text-only.
   const [installedModels, setInstalledModels] = useState<string[]>([]);
+  // macOS gets the enhanced effective-model control (ADR 0066). Detected
+  // once via host_os(); non-macOS keeps the legacy free-text field →
+  // Windows byte-identical.
+  const [isMac, setIsMac] = useState(false);
+  // Per-transcription-mode effective model (configured/effective/override/
+  // budget). Only populated on macOS.
+  const [effectiveModels, setEffectiveModels] = useState<
+    Record<string, EffectiveModel>
+  >({});
+
+  // Re-fetch one mode's effective model (after an override set/clear).
+  const refreshEffective = useCallback((slug: string) => {
+    void api.get_effective_model(slug).then((em) => {
+      setEffectiveModels((prev) => ({ ...prev, [slug]: em }));
+    });
+  }, []);
 
   // First-load: re-fetch modes + active selection if not warm.
   useEffect(() => {
@@ -80,7 +103,27 @@ export function ModesPage() {
     // Fire-and-forget. IPC returns [] on Ollama-unreachable so we
     // never reject — no .catch needed.
     void api.list_installed_models().then(setInstalledModels);
+    // Detect host OS once; gates the enhanced macOS model control.
+    void api.host_os().then((os) => setIsMac(os === "macos"));
   }, [modes.length, activeModeSlug, setModes, setActiveModeSlug]);
+
+  // macOS: fetch the effective model for every (non-deprecated) mode —
+  // both transcription AND AI command modes (ADR 0066 Part A) — once we
+  // know we're on a Mac and modes are loaded. `get_effective_model` is
+  // generic by slug (the modes/override tables hold every mode), so the
+  // command modes get the same truthful Auto/RAM-aware picker. Non-macOS
+  // skips this entirely — the legacy field needs no IPC.
+  useEffect(() => {
+    if (!isMac || modes.length === 0) return;
+    for (const m of modes) {
+      if (DEPRECATED_SLUGS.has(m.slug)) continue;
+      // AI command modes are "coming soon" on macOS (Windows-only
+      // trigger), so their cards + model picker don't render — skip
+      // the effective-model fetch for them.
+      if (!isTranscriptionSlug(m.slug)) continue;
+      refreshEffective(m.slug);
+    }
+  }, [isMac, modes, refreshEffective]);
 
   const handlePatch = useCallback(
     async (slug: string, patch: Partial<ModeRow>) => {
@@ -134,6 +177,16 @@ export function ModesPage() {
     return { transcription, commands };
   }, [modes]);
 
+  // The detected unified-memory budget (macOS) — same for every mode, so
+  // we read it off whichever effective payload has arrived first. Drives
+  // the <16 GB warning. null until the first fetch resolves / off-macOS.
+  const budgetGb = useMemo(() => {
+    for (const em of Object.values(effectiveModels)) {
+      if (em.budgetGb !== null) return em.budgetGb;
+    }
+    return null;
+  }, [effectiveModels]);
+
   if (modes.length === 0) {
     return (
       <>
@@ -176,6 +229,19 @@ export function ModesPage() {
                 {t("modes.section.transcription.help")}
               </p>
             </header>
+            {/* macOS-only: inline notice when cleanup is passthrough
+                (Ollama offline / no model) so the model pickers below
+                don't imply cleanup is running. isMac-gated → Windows
+                byte-identical (the status hook never fires there). */}
+            {isMac ? (
+              <CleanupModesNotice
+                onSetup={() =>
+                  navigate("/settings", { state: { tab: "models" } })
+                }
+              />
+            ) : null}
+            {/* macOS-only <16 GB explainer (ADR 0066). No-op elsewhere. */}
+            {isMac ? <MacRamWarning budgetGb={budgetGb} /> : null}
             <div
               className={styles.cards}
               role="radiogroup"
@@ -189,6 +255,9 @@ export function ModesPage() {
                   isActive={m.slug === activeModeSlug}
                   justSaved={savedSlug === m.slug}
                   installedModels={installedModels}
+                  isMac={isMac}
+                  effective={effectiveModels[m.slug]}
+                  onOverrideChanged={() => refreshEffective(m.slug)}
                   onPatch={(patch) => void handlePatch(m.slug, patch)}
                   onSetActive={() => void handleSetActive(m.slug)}
                 />
@@ -197,7 +266,11 @@ export function ModesPage() {
           </section>
         ) : null}
 
-        {commands.length > 0 ? (
+        {/* AI command modes: Windows-only trigger, so render an honest
+            "coming soon" note on macOS instead of un-invokable cards. */}
+        {isMac ? (
+          <ModesCommandsComingSoon />
+        ) : commands.length > 0 ? (
           <section className={styles.group} aria-labelledby="modes-cmd-heading">
             <header className={styles.groupHeader}>
               <h2 id="modes-cmd-heading" className={styles.groupTitle}>
@@ -216,6 +289,9 @@ export function ModesPage() {
                   isActive={false}
                   justSaved={savedSlug === m.slug}
                   installedModels={installedModels}
+                  isMac={isMac}
+                  effective={effectiveModels[m.slug]}
+                  onOverrideChanged={() => refreshEffective(m.slug)}
                   onPatch={(patch) => void handlePatch(m.slug, patch)}
                   onSetActive={() => {
                     /* not applicable for command modes */
@@ -256,6 +332,16 @@ interface ModeCardProps {
    * Vec = no suggestions; input still accepts any string.
    */
   installedModels: string[];
+  /** macOS gets the enhanced effective-model control (ADR 0066). When
+   *  false (every non-macOS target), the legacy free-text field renders
+   *  → Windows byte-identical. Defaults to false for command modes. */
+  isMac?: boolean;
+  /** The effective-model payload for this (transcription) mode. Only
+   *  provided on macOS; undefined while the fetch is in flight. */
+  effective?: EffectiveModel;
+  /** Called after the user changes the per-mode override so the parent
+   *  can re-fetch the effective model. */
+  onOverrideChanged?: () => void;
   onPatch: (patch: Partial<ModeRow>) => void;
   onSetActive: () => void;
 }
@@ -266,6 +352,9 @@ function ModeCard({
   isActive,
   justSaved,
   installedModels,
+  isMac = false,
+  effective,
+  onOverrideChanged,
   onPatch,
   onSetActive,
 }: ModeCardProps) {
@@ -420,30 +509,49 @@ function ModeCard({
           </select>
         </div>
 
-        <div className={styles.field}>
-          <label className={styles.fieldLabel} htmlFor={`${mode.slug}-model`}>
-            {t("modes.field.model")}
-          </label>
-          {/*
-            `list=` makes this a combobox: typing filters the
-            datalist suggestions, but the user can also free-text
-            any model tag (useful for cloud providers or a model
-            they're about to `ollama pull`). The empty-installed
-            case degrades to a plain text input — no broken UX.
-          */}
-          <input
-            id={`${mode.slug}-model`}
-            className={styles.input}
-            list={MODELS_DATALIST_ID}
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder={
-              installedModels.length === 0
-                ? t("modes.field.model.empty")
-                : undefined
-            }
+        {isMac && effective ? (
+          /*
+            macOS enhanced control (ADR 0066): a dropdown of installed
+            models + "Auto (RAM-aware)" that shows the EFFECTIVE model
+            (post-substitution) and supports a per-mode pin + revert. The
+            modes-table model_id is NOT written on this path — the pin
+            lives in the separate override table, keeping Auto = today's
+            behaviour. Applies to BOTH transcription and AI command
+            modes on macOS (Part A). Non-macOS falls through to the
+            legacy free-text field below (Windows byte-identical).
+          */
+          <MacModelControl
+            slug={mode.slug}
+            installedModels={installedModels}
+            effective={effective}
+            onChanged={() => onOverrideChanged?.()}
           />
-        </div>
+        ) : (
+          <div className={styles.field}>
+            <label className={styles.fieldLabel} htmlFor={`${mode.slug}-model`}>
+              {t("modes.field.model")}
+            </label>
+            {/*
+              `list=` makes this a combobox: typing filters the
+              datalist suggestions, but the user can also free-text
+              any model tag (useful for cloud providers or a model
+              they're about to `ollama pull`). The empty-installed
+              case degrades to a plain text input — no broken UX.
+            */}
+            <input
+              id={`${mode.slug}-model`}
+              className={styles.input}
+              list={MODELS_DATALIST_ID}
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder={
+                installedModels.length === 0
+                  ? t("modes.field.model.empty")
+                  : undefined
+              }
+            />
+          </div>
+        )}
 
         <div className={styles.field}>
           <label className={styles.fieldLabel} htmlFor={`${mode.slug}-temp`}>
@@ -477,6 +585,14 @@ function ModeCard({
           />
         </div>
       </div>
+
+      {/*
+        macOS-only editable prompt (ADR 0067), dictation modes only. The
+        editor self-fetches its effective prompt; off-macOS it never
+        mounts → Windows byte-identical. Command modes are out of scope
+        for now (prompt editing is a dictation-tone power feature).
+      */}
+      {isMac && isTranscription ? <MacPromptEditor slug={mode.slug} /> : null}
 
       <div className={styles.saveRow}>
         {justSaved ? (

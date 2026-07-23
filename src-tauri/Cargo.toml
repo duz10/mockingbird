@@ -65,9 +65,6 @@ chrono             = { workspace = true }
 uuid               = { workspace = true }
 thiserror          = { workspace = true }
 
-[target.'cfg(windows)'.dependencies]
-windows = { workspace = true }
-
 # Phase 3 — per-app injection-strategy override table (ADR 0016).
 phf     = { workspace = true }
 
@@ -118,11 +115,136 @@ notify-debouncer-full = { workspace = true }
 # scoped tests because `[dependencies]` is a superset.
 tempfile  = { workspace = true }
 
+# mb-mac-v1.2.3 (macOS port) — ONLY genuinely Windows-specific dep here.
+# The crates above were inadvertently scoped under this cfg(windows)
+# target during the Windows-only era; they are cross-platform and have
+# been relocated into [dependencies] so the macOS build links them.
+# This is a no-op for Windows (that target sees [dependencies] +
+# this block as one set). `windows` stays here by design.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+
+# macOS-only deps. Target-gated so Windows/Linux builds never see them.
+[target.'cfg(target_os = "macos")'.dependencies]
+# ADR-0056 / mb-mac-v1.4.1 — Keychain-backed SecretStore. Apple's
+# canonical Rust Security.framework binding (MIT OR Apache-2.0); exposes
+# the generic-password primitives the `KeychainSecretStore` round-trips.
+security-framework = "3"
+
+# ADR-0057 / mb-mac-v1.4.4 — global dictation hotkey via CGEventTap.
+# Servo's CoreGraphics / CoreFoundation bindings (MIT OR Apache-2.0).
+# `core-graphics` provides `CGEventTap` + the CFMachPort→runloop-source
+# plumbing; `core-foundation` provides the `CFRunLoop` the tap thread
+# pumps (and the thread-safe `CFRunLoopStop` teardown). Low-level by
+# design — parity with the Windows `WH_KEYBOARD_LL` hook (ADR 0015),
+# which the hotkey state machine needs for key-up visibility.
+core-graphics = "0.24"
+core-foundation = "0.10"
+
+# ADR-0058 / mb-mac-v1.4.2 — Cmd+V paste injection clipboard layer.
+# Cross-platform clipboard crate (Apache-2.0 OR MIT). Supplies the
+# text save/restore around the synthesized Cmd+V keypost — the macOS
+# analogue of the Win32 save/restore dance in `injection/paste.rs`
+# (ADR 0018). `default-features = false` drops the `image-data`
+# feature (and the heavy `image` dep tree); dictation only round-trips
+# text. The Cmd+V keystroke itself is synthesized via `core-graphics`.
+arboard = { version = "3", default-features = false }
+
+# ADR-0059 / mb-mac-v1.4.3 — Accessibility AX secure-input detection.
+# Raw Apple Accessibility (AX) FFI (MIT OR Apache-2.0). Reads the
+# system-wide focused UI element's role to detect
+# `AXSecureTextField` (password fields) — the macOS twin of the
+# Windows per-element `ES_PASSWORD` check in `secure_guard.rs`. The
+# coarse system-wide `IsSecureEventInputEnabled()` belt-and-suspenders
+# signal is linked from the Carbon framework directly (no crate).
+accessibility-sys = "0.1"
+
+# ADR-0060 / mb-mac-v1.4.5 — NSWorkspace frontmost-app reader.
+# madsmtm's `objc2` family (MIT) — the modern, maintained, memory-safe
+# Objective-C bindings, preferred over the older `cocoa`/`objc` crates
+# (unmaintained, manual retain/release). ALREADY in the tree transitively
+# via Tauri (objc2 0.6 / objc2-*-kit 0.3), so this adds no new vendor:
+# we just opt into the `NSWorkspace` + `NSRunningApplication` class
+# features. `NSWorkspace.frontmostApplication` yields bundle id + name +
+# pid with NO Accessibility grant (the cheap path the plan calls for).
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = [
+    "NSString",
+    "NSURL",
+    "NSArray",
+    "NSError",
+] }
+objc2-app-kit = { version = "0.3", features = [
+    "NSWorkspace",
+    "NSRunningApplication",
+    # ADR-0058 (paste-race fix) — read-only `NSPasteboard.changeCount`, the
+    # macOS twin of Win32 `GetClipboardSequenceNumber`. Used to skip the
+    # clipboard restore when another writer (clipboard manager, or a rapid
+    # second dictation) touched the pasteboard after our transcript write.
+    # NO pasteboard WRITE goes through objc2 — arboard stays the sole writer
+    # (PLAN §12 #17); this is a pure query.
+    "NSPasteboard",
+] }
+
+# ADR-0068 / mb-mac-v1.5.3 — Phase 4b ScreenCaptureKit system-audio
+# capture. The spike (kennel drawer 110) confirmed the
+# `objc2-screen-capture-kit` crate exposes the full audio-capture
+# surface (SCStreamConfiguration audio props, SCShareableContent /
+# SCContentFilter, SCStream lifecycle, the SCStreamOutput delegate +
+# `SCStreamOutputType::Audio`, and CMSampleBuffer PCM extraction via
+# objc2-core-media) — so NO Swift/ObjC sidecar and NO full Xcode are
+# needed (CLT-only; the framework is linked at load time by the crate,
+# same discipline as ADR 0060's NSWorkspace bindings). System audio
+# only: the mic stays on the 4a CoreAudio `CpalCapture` (two
+# independent streams, mirroring Windows cpal+WASAPI). All four crates
+# are macOS-target-gated, so Windows/Linux never see them.
+objc2-screen-capture-kit = { version = "0.3", features = [
+    "SCStream",
+    "SCShareableContent",
+    "SCError",
+    "objc2-core-media",
+    "dispatch2",
+    "block2",
+] }
+objc2-core-media = { version = "0.3", features = [
+    "CMSampleBuffer",
+    "CMBlockBuffer",
+    "CMFormatDescription",
+    "objc2-core-audio-types",
+    "objc2",
+] }
+objc2-core-audio-types = "0.3"
+objc2-core-foundation = "0.3"
+dispatch2 = "0.3"
+block2 = "0.6"
+
+# ADR-0061 / mb-mac-v1.4.6 — first-launch permissions onboarding.
+# The four status-query APIs are reached via direct framework linking
+# (the same raw-FFI discipline Wave B2 used for Carbon / accessibility):
+#   - Microphone:       AVCaptureDevice.authorizationStatusForMediaType
+#                       (AVFoundation framework, AVMediaTypeAudio static)
+#   - Input Monitoring: IOHIDCheckAccess (IOKit framework)
+#   - Accessibility:    AXIsProcessTrusted (via accessibility-sys, above)
+#   - Screen Recording: CGPreflightScreenCaptureAccess (CoreGraphics)
+# None of these prompt; they are silent preflight reads. No extra crate
+# is needed — `objc2`/`objc2-foundation` (above) supply the NSString +
+# msg_send plumbing the AVFoundation call uses.
+
 [dev-dependencies]
 rstest    = { workspace = true }
 proptest  = { workspace = true }
 mockall   = { workspace = true }
 criterion = { workspace = true }
+
+# mb-mac-v1.4.7a — dev-only `_exit(2)` for the macOS dictation-backend
+# judge shim. Once onnxruntime (the VAD `ort` session) has been loaded in
+# a process, its global thread-pool teardown aborts during the libc
+# `exit()` atexit/static-destructor chain ("mutex lock failed"), turning a
+# PASS into SIGABRT (exit 134). `_exit` skips that buggy teardown so the
+# judge reports its true 0/1 status. dev-dep only: never linked into the
+# shipped `mockingbird` binary (examples DO get dev-dependencies). libc is
+# already in the graph transitively (cpal/coreaudio-sys) — no new vendor.
+libc      = "0.2"
 
 # mb-1z0m Round 4 fix gate — enables `tauri::test::mock_builder` /
 # `mock_context` / `noop_assets` for the `state_extractor_sees_*`
@@ -237,6 +359,113 @@ path = "src/dev_bins/generate_fixtures.rs"
 name = "stt_test"
 path = "src/dev_bins/stt_test.rs"
 
+# macOS port Phase 2 (mb-mac-v1.3.3) — Metal-backend transcript judge
+# (`mac-p2-metal-transcript`). Runs on macOS only; a no-op stub on other
+# targets. Drives `stt::judges_macos_v1::metal_transcript_probe`.
+[[example]]
+name = "mac_whisper_metal_smoke"
+path = "src/dev_bins/mac_whisper_metal_smoke.rs"
+
+# macOS port Phase 5 (mb-mac-v1.6.2) -- Metal STT parity eval judge
+# (`mac-v1-parity-whisper-metal`). Runs the PRODUCTION Metal-backed
+# WhisperStt over the reference corpus (eval/stt_reference_transcripts.json),
+# computes WER/CER vs ground truth, and asserts Metal engaged + aggregate
+# WER/CER within budget. macOS + metal only; a no-op stub (exit 2)
+# elsewhere. Drives `stt::parity_macos_v1::run_parity_eval`.
+[[example]]
+name = "mac_whisper_parity_smoke"
+path = "src/dev_bins/mac_whisper_parity_smoke.rs"
+
+# macOS port Phase 2 (mb-mac-v1.3.2) — ORT load-dynamic dylib discovery
+# smoke (`mac-p2-ort-dylib`). macOS only; no-op stub elsewhere. Drives
+# `audio::judges_macos_v1::ort_vad_session_smoke`.
+[[example]]
+name = "mac_ort_vad_smoke"
+path = "src/dev_bins/mac_ort_vad_smoke.rs"
+
+# macOS port Phase 3 (mb-mac-v1.4.7a) — dictation-backend un-gate judge
+# (`mac-p3-dictation-backends-ungated`). macOS + metal only; a no-op stub
+# (exit 2) elsewhere. Drives
+# `dictation::judges_macos_v1::ungate_backends_probe`: asserts the three
+# `make_default_*` factories return Ok and the production WhisperStt
+# transcribes jfk.wav via a confirmed Metal backend.
+[[example]]
+name = "mac_dictation_backends_smoke"
+path = "src/dev_bins/mac_dictation_backends_smoke.rs"
+
+# macOS port Phase 3 `.4.7c` (mb-mac-v1.4.7c) — DictationRuntime spawn +
+# teardown judge (`mac-p3-dictation-runtime-spawn`, ADR 0063). Real
+# listener + thread wiring + Drop teardown; doubled device backends.
+# macOS only; exits 2 elsewhere.
+[[example]]
+name = "mac_dictation_runtime_smoke"
+path = "src/dev_bins/mac_dictation_runtime_smoke.rs"
+
+# macOS port Phase 4a (mb-mac-v1.5.1) — mic-only meeting roundtrip judge
+# (`mac-p4a-mic-meeting-roundtrip`). Drives a mic-only meeting through
+# the real pipeline (test-double mic → chunker WAV+CRC32 → Whisper Metal
+# → formatter → persist → read-back) and asserts system-audio stays
+# unavailable (4b). macOS only; exits 2 elsewhere. Drives
+# `meetings::judges_macos_v1::mic_meeting_roundtrip_probe`.
+[[example]]
+name = "mac_meeting_mic_smoke"
+path = "src/dev_bins/mac_meeting_mic_smoke.rs"
+
+# macOS port Phase 4b (mb-mac-v1.5.3, ADR 0068) — system-audio meeting
+# roundtrip judge (`mac-p4b-sys-meeting-roundtrip`). Drives a
+# system-only meeting through the real pipeline (doubled system source
+# → chunker WAV+CRC32 (Channel::Sys) → Whisper Metal → formatter →
+# persist → read-back) AND smokes the REAL SckSysCapture (construct +
+# start/stop, live audio deferred to the grant-gated user test). macOS
+# only; exits 2 elsewhere. Drives
+# `meetings::judges_macos_v1::sys_meeting_roundtrip_probe`.
+[[example]]
+name = "mac_meeting_sys_smoke"
+path = "src/dev_bins/mac_meeting_sys_smoke.rs"
+
+# macOS port Phase 3a (mb-mac-v1.4.1) — Keychain roundtrip judge
+# (`mac-p3a-keychain-roundtrip`). macOS only; exits 2 elsewhere. Drives
+# `secrets::judges_macos_v1::keychain_roundtrip_probe`.
+[[example]]
+name = "mac_keychain_smoke"
+path = "src/dev_bins/mac_keychain_smoke.rs"
+
+# macOS port Phase 3 (mb-mac-v1.4.4) — global-hotkey roundtrip judge
+# (`mac-p3d-hotkey-roundtrip`). macOS only; exits 2 elsewhere. Drives
+# `hotkey::judges_macos_v1::hotkey_roundtrip_probe` — the deterministic
+# translation→state-machine boundary (the OS event-tap capture itself
+# is verified in the permission-gated `mac-p3-dictation-e2e`).
+[[example]]
+name = "mac_hotkey_smoke"
+path = "src/dev_bins/mac_hotkey_smoke.rs"
+
+# macOS port Phase 3 (mb-mac-v1.4.2) — paste clipboard save/restore
+# judge (`mac-p3b-paste-clipboard-saverestore`). macOS only; exits 2
+# elsewhere. Drives `injection::judges_macos_v1::paste_clipboard_saverestore_probe`
+# — the deterministic save/restore assertion (the Cmd+V keypost itself
+# needs Accessibility and is verified in `mac-p3-dictation-e2e`).
+[[example]]
+name = "mac_paste_smoke"
+path = "src/dev_bins/mac_paste_smoke.rs"
+
+# macOS port Phase 3 (mb-mac-v1.4.3) — secure-input abort judge
+# (`mac-p3c-secure-input-aborts`). macOS only; exits 2 elsewhere.
+# Drives `injection::judges_macos_v1::secure_input_aborts_probe` — the
+# AX query sits behind a mockable seam so the abort decision is
+# deterministic without a real Accessibility grant.
+[[example]]
+name = "mac_secure_input_smoke"
+path = "src/dev_bins/mac_secure_input_smoke.rs"
+
+# macOS port Phase 3 Wave C (mb-mac-v1.4.5) — frontmost-app reader judge
+# (`mac-p3e-frontmost-app-readable`). macOS only; exits 2 elsewhere.
+# Drives `window_context::judges_macos_v1::frontmost_app_readable_probe`
+# — the permission-free `NSWorkspace.frontmostApplication` read (bundle
+# id + localized name); the AX-gated window title is deferred (ADR 0060).
+[[example]]
+name = "mac_frontmost_smoke"
+path = "src/dev_bins/mac_frontmost_smoke.rs"
+
 [[example]]
 name = "learn"
 path = "src/dev_bins/learn.rs"
@@ -244,6 +473,31 @@ path = "src/dev_bins/learn.rs"
 [[example]]
 name = "cleaner_punctuation_eval"
 path = "src/dev_bins/cleaner_punctuation_eval.rs"
+
+# macOS port Phase 5 (mb-mac-v1.6.1) — live-Ollama dictation cleanup
+# proof. Mirrors `make_default_cleaner`: migrated DB → normal mode →
+# real OllamaProvider + LlmCleaner → clean(). Cross-platform (no cfg
+# gate); needs `ollama serve` + the configured model pulled.
+[[example]]
+name = "mac_cleanup_ollama_probe"
+path = "src/dev_bins/mac_cleanup_ollama_probe.rs"
+
+# macOS port Phase 5 (mb-mac-v1.6.3) — RAM-aware model-selection judge
+# (ADR 0064). Mocked-budget asserts run cross-platform; the real
+# `sysctl hw.memsize` sub-check is macOS-only and needs `ollama serve`
+# with qwen2.5:3b pulled to prove the 7B→3B downgrade on the 8 GB canary.
+[[example]]
+name = "mac_ram_aware_select_probe"
+path = "src/dev_bins/mac_ram_aware_select_probe.rs"
+
+# macOS port Phase 5 (mb-l97) — content-coverage fidelity fallback live
+# validation. Constructs the real LlmCleaner on the 8 GB downsize wiring
+# (3B + normal_small + small_model_fidelity) and proves the user's
+# problem transcript never drops a load-bearing sentence. Needs
+# `ollama serve` with qwen2.5:3b pulled.
+[[example]]
+name = "mac_fidelity_fallback_probe"
+path = "src/dev_bins/mac_fidelity_fallback_probe.rs"
 
 [[example]]
 name = "mode_eval"
@@ -278,6 +532,28 @@ audible-beeps    = []
 # is a no-op and we run on CPU; with it on, GPU init is attempted and
 # falls back to CPU if the driver is missing or OOM (ADR 0011).
 cuda             = ["whisper-rs/cuda"]
+
+# Opt-in Metal acceleration for the whisper_rs STT crate (macOS /
+# Apple Silicon).
+#
+# Mirror of `cuda` above, for the macOS port (mb-mac-v1.3.1). Kept OUT
+# of `default` for the same reason `cuda` is: the metal feature pulls
+# in Apple's Metal framework + a Metal-backed ggml build that does NOT
+# compile on Windows/Linux, so making it default would break the
+# cross-platform `cargo build`. Local macOS dev turns this on via the
+# `scripts/dev/cargo-mac.sh` wrapper, which auto-injects
+# `--features mockingbird/metal` for build-y cargo verbs (the Mac
+# analogue of cargo-with-cuda.ps1). Runtime behaviour: with this
+# feature off, `WhisperContextParameters::use_gpu(true)` is a no-op and
+# we run on CPU; with it on, ggml initialises the Metal backend and
+# Whisper runs on the GPU, falling back to CPU if Metal init fails.
+#
+# The `raw-api` feature is pulled in alongside so the macOS Metal judge
+# probe (`stt::judges_macos_v1`) can install a ggml/whisper log callback
+# via the re-exported `whisper_rs_sys` and CONFIRM the Metal backend
+# actually engaged (vs a silent CPU fallback). raw-api only re-exports
+# the -sys bindings; it does not change runtime behaviour.
+metal            = ["whisper-rs/metal", "whisper-rs/raw-api"]
 
 # Notes:
 # - Phase 2 Wave 4 added `whisper-rs` (currently CPU-only; see bd mb-ltq).

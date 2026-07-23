@@ -23,10 +23,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
+import { ComingSoon } from "../components/ComingSoon";
 import { EmptyState, PageHeader, Pill, Spinner } from "../components/primitives";
 import { ActivityIcon } from "../design/Icon";
 import { t } from "../i18n";
 import { activityApi, parseSnapshotJson } from "../lib/activity";
+import { useAppStore } from "../lib/store";
 import { ActivityBlocksPanel } from "./ActivityBlocks";
 import type {
   ActivityEventRow,
@@ -94,7 +96,30 @@ function durationOf(row: ActivitySessionRow): string {
   return formatDuration(Math.max(0, end - row.startedAt));
 }
 
+// macOS-port (v1 honest-surface) — Activity capture is Windows-only
+// (the sampler is a `StubSampler` on macOS: it emits one `layer_error`
+// and captures nothing, and the UIA deep-snapshot + audio layers are
+// all `#[cfg(target_os = "windows")]`). So on macOS we render a
+// "Coming soon" state INSTEAD of mounting the real page — this also
+// keeps the page's list/detail IPC effects from firing pointlessly.
+// The Command Center's Activity tile is disabled on macOS too, so a
+// user can't start a capture-nothing session. Reversible: drop this
+// gate when the macOS sampler lands.
 export function ActivityPage() {
+  const isMac = useAppStore((s) => s.isMac);
+  if (isMac) {
+    return (
+      <ComingSoon
+        title={t("activity.title")}
+        body={t("comingSoon.activity.body")}
+        icon={<ActivityIcon size={28} />}
+      />
+    );
+  }
+  return <ActivityPageInner />;
+}
+
+function ActivityPageInner() {
   const { id: paramId } = useParams<{ id?: string }>();
   const navigate = useNavigate();
 

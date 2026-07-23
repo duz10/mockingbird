@@ -40,7 +40,7 @@ use crate::db::{dictionary, prompts};
 use crate::error::{AppError, AppResult};
 use crate::settings::{model::SettingKey, Settings};
 
-use super::provider::{CleanupProvider, CleanupRequest};
+use super::provider::{CleanupProvider, CleanupRequest, CleanupResult};
 
 /// Suffix stamped onto `model_used` when the shrink-fallback trips.
 /// Stable string so downstream provenance queries can grep for it.
@@ -100,6 +100,333 @@ fn maybe_promote_to_q5(model_id: &str, prefer_q5: bool) -> String {
     }
 }
 
+/// ASCII-case-insensitive substring search returning the byte offset of
+/// the first match. Unlike `haystack.to_lowercase().find(..)` this
+/// preserves byte offsets into the ORIGINAL `haystack` (lowercasing can
+/// change byte lengths for some Unicode), so the offset is always safe
+/// to slice/`replace_range`. The needle is matched ASCII-case-folded;
+/// non-ASCII bytes must match exactly. Sufficient for our sentinels,
+/// which are pure ASCII.
+fn find_ascii_ci(haystack: &str, needle: &str) -> Option<usize> {
+    let (hb, nb) = (haystack.as_bytes(), needle.as_bytes());
+    if nb.is_empty() || nb.len() > hb.len() {
+        return None;
+    }
+    (0..=hb.len() - nb.len()).find(|&i| hb[i..i + nb.len()].eq_ignore_ascii_case(nb))
+}
+
+/// Punctuation-insensitive, case-insensitive containment test: does
+/// `haystack` contain `needle` ignoring ASCII punctuation + case +
+/// whitespace runs? Used to decide whether a sentinel was actually
+/// DICTATED (and is therefore content, not a leak): raw STT is lower-
+/// case and lacks the terminal punctuation / colon that the baked-in
+/// example carries, so a strict match would wrongly flag legitimately
+/// dictated content as a leak.
+fn loosely_contains(haystack: &str, needle: &str) -> bool {
+    fn norm(s: &str) -> String {
+        s.chars()
+            .map(|c| {
+                if c.is_ascii_punctuation() {
+                    ' '
+                } else {
+                    c.to_ascii_lowercase()
+                }
+            })
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+    norm(haystack).contains(&norm(needle))
+}
+
+/// Collapse runs of blank lines left behind after excising a leaked
+/// example, and trim leading/trailing whitespace. Intra-line spacing is
+/// left untouched (we never want to mangle a code block on the rare
+/// guard path).
+fn collapse_blank_lines(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev_blank = false;
+    for line in s.lines() {
+        let trimmed_end = line.trim_end();
+        if trimmed_end.is_empty() {
+            if !out.is_empty() && !prev_blank {
+                out.push('\n');
+            }
+            prev_blank = true;
+        } else {
+            out.push_str(trimmed_end);
+            out.push('\n');
+            prev_blank = false;
+        }
+    }
+    out.trim().to_string()
+}
+
+/// Small-model example-leak guard (ADR 0065). Strip any baked-in
+/// example `sentinel` that leaked into `cleaned` but was NOT present in
+/// `raw_input` (case-insensitive). Returns the (possibly shortened)
+/// text and a bool that is `true` iff at least one sentinel was
+/// removed.
+///
+/// Only ever removes text the model could not have legitimately
+/// produced from its input — a sentinel that also appears in the input
+/// is real user content and is left alone. This is the symmetric twin
+/// of the shrink-fallback guard (which catches DROPPED content). The
+/// caller scopes it to the small-model override path so the 7B /
+/// Windows path runs none of this logic.
+fn strip_leaked_examples(cleaned: &str, raw_input: &str, sentinels: &[&str]) -> (String, bool) {
+    let mut out = cleaned.to_string();
+    let mut stripped = false;
+    for s in sentinels {
+        // If the speaker actually dictated the sentinel, it is content,
+        // not a leak — leave it. Punctuation-insensitive because raw
+        // STT lacks the example's colon / terminal period.
+        if loosely_contains(raw_input, s) {
+            continue;
+        }
+        while let Some(pos) = find_ascii_ci(&out, s) {
+            out.replace_range(pos..pos + s.len(), "");
+            stripped = true;
+        }
+    }
+    if stripped {
+        out = collapse_blank_lines(&out);
+    }
+    (out, stripped)
+}
+
+/// Leading meta-preambles a weak (≈3B) model prepends despite the
+/// prompt's "output only the cleaned text" rule (ADR 0065 v2 — the
+/// `Here's your cleaned transcript:` failure on Dustin's 8 GB Mac).
+/// Stored WITHOUT apostrophes / punctuation because
+/// [`normalise_preamble`] strips those before comparison, so both the
+/// ASCII `Here's` and the curly `Here\u{2019}s` an LLM tends to emit
+/// both match.
+const NORMAL_SMALL_PREAMBLE_PHRASES: &[&str] = &[
+    "heres your cleaned transcript",
+    "here is your cleaned transcript",
+    "heres the cleaned transcript",
+    "here is the cleaned transcript",
+    "heres your cleaned text",
+    "here is your cleaned text",
+    "heres the cleaned text",
+    "here is the cleaned text",
+    "heres your cleaned version",
+    "here is your cleaned version",
+    "heres the cleaned version",
+    "here is the cleaned version",
+    "heres the cleaned dictation",
+    "here is the cleaned dictation",
+    "heres the cleaned up text",
+    "here is the cleaned up text",
+];
+
+/// Leading conversational interjections (followed by a comma) a weak
+/// model opens with (`Sure, ...`, `Okay, ...`). Normalised, no punct.
+const NORMAL_SMALL_PREAMBLE_INTERJECTIONS: &[&str] = &[
+    "sure",
+    "okay",
+    "ok",
+    "certainly",
+    "of course",
+    "got it",
+    "alright",
+];
+
+/// Provenance suffix stamped onto `model_used` when the small-model
+/// preamble guard stripped (or fell back over) a leading meta-preamble.
+/// Twin of [`EXAMPLE_LEAK_GUARD_SUFFIX`]. ADR 0065 v2.
+const PREAMBLE_GUARD_SUFFIX: &str = "-preamble-guard";
+
+/// Lowercase + drop apostrophes/quotes/periods + collapse whitespace,
+/// so a candidate preamble segment compares cleanly against the
+/// punctuation-free phrase tables above.
+fn normalise_preamble(s: &str) -> String {
+    s.chars()
+        .filter(|c| !matches!(*c, '\'' | '\u{2019}' | '`' | '.' | '"'))
+        .map(|c| c.to_ascii_lowercase())
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Strip a single leading meta-preamble from the START of `cleaned`
+/// (ADR 0065 v2). Two conservative cases:
+///   A. a colon-terminated cleaned-transcript lead-in
+///      (`Here's your cleaned transcript:`), and
+///   B. a `Sure,` / `Okay,`-style interjection (which may itself be
+///      followed by a case-A lead-in).
+/// Only the very first short segment is considered and only KNOWN
+/// phrases match, so genuine list lead-ins (`I need these three
+/// things:`, `Here's my list of keyboard supplies:`) and mid-content
+/// colons are never touched. Returns the (possibly shortened) text and
+/// whether anything was stripped. The caller scopes it to the
+/// small-model override path so the 7B / Windows path runs none of it.
+fn strip_meta_preamble(cleaned: &str) -> (String, bool) {
+    let leading_ws = cleaned.len() - cleaned.trim_start().len();
+    let body = &cleaned[leading_ws..];
+
+    // Case A — colon-terminated meta lead-in on the first line.
+    if let Some(colon_rel) = body.find(':') {
+        let segment = &body[..colon_rel];
+        if !segment.contains('\n') && segment.len() <= 80 {
+            let norm = normalise_preamble(segment);
+            if NORMAL_SMALL_PREAMBLE_PHRASES.iter().any(|p| norm == *p) {
+                return (body[colon_rel + 1..].trim_start().to_string(), true);
+            }
+        }
+    }
+
+    // Case B — leading interjection + comma ("Sure, ...", "Okay, ...").
+    if let Some(comma_rel) = body.find(',') {
+        let segment = &body[..comma_rel];
+        if !segment.contains('\n') && segment.len() <= 24 {
+            let norm = normalise_preamble(segment);
+            if NORMAL_SMALL_PREAMBLE_INTERJECTIONS
+                .iter()
+                .any(|p| norm == *p)
+            {
+                // An interjection can be followed by a case-A lead-in
+                // ("Sure, here's your cleaned transcript:"); recurse to
+                // peel that too.
+                let (inner, _) = strip_meta_preamble(body[comma_rel + 1..].trim_start());
+                return (inner, true);
+            }
+        }
+    }
+
+    (cleaned.to_string(), false)
+}
+
+/// Distinctive example sentences baked into the `normal_small` prompt
+/// (ADR 0065). On weak (≈3B) local models the few-shot examples can
+/// leak verbatim into the output (in-context example bleed). These
+/// strings are the canaries: if one appears in the cleaned output but
+/// was NOT in the raw input, it is a leaked example, not user content.
+///
+/// They are compile-time constants kept in lockstep with the example
+/// block of `src-tauri/src/cleanup/prompts/normal_small.md`. Edit the
+/// prompt's examples → update these (the unit tests assert the guard
+/// behaviour, not the exact text, so they won't catch drift on their
+/// own — keep them paired).
+const NORMAL_SMALL_EXAMPLE_SENTINELS: &[&str] = &[
+    "Example input number three is a run-on sentence.",
+    "It shows two independent clauses that should be split apart.",
+    "Here's my list of keyboard supplies:",
+];
+
+/// Provenance suffix stamped onto `model_used` when the small-model
+/// example-leak guard stripped (or fell back over) a leaked example
+/// sentence. Symmetric twin of [`SHRINK_FALLBACK_SUFFIX`]: that guard
+/// catches DROPPED content, this one catches ADDED content. ADR 0065.
+const EXAMPLE_LEAK_GUARD_SUFFIX: &str = "-example-leak-guard";
+
+/// Provenance suffix stamped onto `model_used` when the Phase 5
+/// content-coverage fidelity fallback fired (mb-l97): the small-model
+/// LLM output dropped a whole spoken sentence the deterministic
+/// preprocessor had preserved, so we returned the faithful preprocessor
+/// text instead. Sibling of [`SHRINK_FALLBACK_SUFFIX`] — a stricter,
+/// per-sentence guard that catches the one-sentence drops the loose
+/// length-ratio guard missed.
+const COVERAGE_FALLBACK_SUFFIX: &str = "-coverage-fallback";
+
+/// How many CONSECUTIVE salient (content) words must vanish from the LLM
+/// output — relative to their order in the preprocessor output — before
+/// we call it a dropped phrase/sentence and fall back. A run of 3 is the
+/// signal of a genuinely lost clause ("testing in-app dictation",
+/// "I want to buy some groceries" are each 3 salient words); isolated
+/// one- or two-word misses are treated as legitimate rephrase/dedup and
+/// never trip the guard. Deliberately a CONTIGUOUS-run test rather than a
+/// whole-text ratio: the preprocessor emits a single run-on block (it
+/// only adds terminal punctuation, it does NOT segment sentences), so a
+/// ratio over the whole transcript stays high even when one clause is
+/// dropped — exactly the blind spot that let session 12's opening slip
+/// past the loose shrink guard (live-validated 2026-06-23, mb-l97).
+const COVERAGE_MIN_DROPPED_RUN: usize = 3;
+
+/// Function words / fillers that carry no content signal. Excluded from
+/// the salient-word set so a legitimate rephrase ("I want to buy" → "I'd
+/// like to get") isn't punished for swapping connective tissue — only a
+/// genuine loss of nouns/verbs/proper-nouns can trip the guard. Kept
+/// deliberately small + lowercase; matched after [`coverage_normalise`].
+const COVERAGE_STOPWORDS: &[&str] = &[
+    "a", "an", "the", "i", "im", "ive", "id", "you", "we", "they", "it", "he", "she", "me", "my",
+    "your", "our", "their", "to", "of", "in", "on", "at", "by", "for", "and", "or", "but", "so",
+    "is", "am", "are", "was", "were", "be", "been", "being", "this", "that", "these", "those",
+    "some", "any", "do", "does", "did", "have", "has", "had", "will", "would", "can", "could",
+    "should", "just", "um", "uh", "like", "as", "with", "from", "into", "up", "out", "if", "then",
+    "there", "here", "now",
+];
+
+/// Lowercase, drop punctuation, convert hyphens to spaces. Mirrors the
+/// `mode_eval` harness's `normalise` so the runtime guard and the
+/// offline eval agree on what "the same word" means.
+fn coverage_normalise(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .map(|c| if c == '-' { ' ' } else { c })
+        .filter(|c| !"*_`#[]()<>\"'.,;:!?".contains(*c))
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Content-coverage fidelity check (Phase 5, mb-l97). The small-model
+/// path's last-resort guarantee that the LLM never silently drops a whole
+/// spoken clause.
+///
+/// Walks the DETERMINISTIC preprocessor output's salient words IN ORDER
+/// and asks: is there a run of >= [`COVERAGE_MIN_DROPPED_RUN`] CONSECUTIVE
+/// salient words that are entirely absent from the LLM output? A dropped
+/// clause leaves exactly that fingerprint (its content words vanish as a
+/// contiguous block); a legitimate rephrase that swaps connective tissue
+/// but keeps the nouns/verbs does not. Returns the dropped phrase (joined
+/// for logging) or `None` when no such run exists.
+///
+/// Conservative by construction:
+///   * Grounds on the PREPROCESSOR output (not raw STT), so the filler
+///     removal + stutter/self-correction dedup the preprocessor already
+///     did are never counted as "dropped content" — only the LLM stage is
+///     judged.
+///   * Only salient words count (function words / fillers excluded), so a
+///     rephrase that keeps the content words passes cleanly.
+///   * Requires a CONTIGUOUS run, not a whole-text ratio — the
+///     preprocessor emits one run-on block (no sentence segmentation), so
+///     a ratio stays high even when a single clause is dropped. This was
+///     live-validated against the 3B: the ratio/per-sentence approach
+///     missed a dropped "testing in-app dictation"; the contiguous-run
+///     test catches it (mb-l97).
+fn coverage_drop(preprocessor_text: &str, llm_text: &str) -> Option<String> {
+    let llm_norm = coverage_normalise(llm_text);
+    let llm_words: std::collections::HashSet<&str> = llm_norm.split_whitespace().collect();
+
+    let pre_norm = coverage_normalise(preprocessor_text);
+    // Ordered, NOT de-duplicated: positional adjacency is the signal.
+    let pre_seq: Vec<&str> = pre_norm
+        .split_whitespace()
+        .filter(|w| w.len() >= 2 && !COVERAGE_STOPWORDS.contains(w))
+        .collect();
+
+    let mut run: Vec<&str> = Vec::new();
+    for w in pre_seq {
+        if llm_words.contains(w) {
+            if run.len() >= COVERAGE_MIN_DROPPED_RUN {
+                return Some(run.join(" "));
+            }
+            run.clear();
+        } else {
+            run.push(w);
+        }
+    }
+    if run.len() >= COVERAGE_MIN_DROPPED_RUN {
+        return Some(run.join(" "));
+    }
+    None
+}
+
 /// Cleaner backed by a real LLM provider.
 pub struct LlmCleaner {
     provider: Box<dyn CleanupProvider>,
@@ -108,10 +435,59 @@ pub struct LlmCleaner {
     temperature: f32,
     max_tokens: u32,
     last_model_used: Mutex<String>,
+    /// The prompt (slug + version) the LAST `clean()` call actually
+    /// resolved, e.g. `"normal_small v2"`. `None` until the first LLM
+    /// cleanup, and reset to `None` on any path that resolves no LLM
+    /// prompt (level=None/Light, skip-short-utterance). Surfaced via
+    /// [`Cleaner::prompt_label`] so the persistence layer can record
+    /// the prompt that was REALLY used in `sessions.effective_prompt_label`
+    /// — fixing the pre-028 Metadata bug where the UI always showed the
+    /// mode's canonical prompt version (normal@v5) even when the macOS
+    /// downsize override ran `normal_small` (kennel drawer 91).
+    last_prompt_label: Mutex<Option<String>>,
     /// Deterministic pre-pass that runs BEFORE the LLM call. Stateless;
     /// see [`super::preprocessor`] module docs + ADR 0022 for the
     /// pipeline rationale.
     preprocessor: Preprocessor,
+    /// Optional prompt-slug override (ADR 0065). When `Some(slug)`, the
+    /// High-level cleanup path resolves its prompt from `slug` instead
+    /// of the tone `mode_slug` (e.g. `normal_small` instead of
+    /// `normal`). Set ONLY at the macOS RAM-aware downsize seam in
+    /// `dictation/runtime_cleaner.rs`; `None` everywhere else, so the
+    /// 7B / Windows path is byte-identical and `normal@v5` is never
+    /// re-evaluated. Also gates the example-leak guard below — that
+    /// new logic runs ONLY when this is `Some`.
+    prompt_mode_override: Option<String>,
+    /// Whether the dictation thread is running a DOWNSIZED model on this
+    /// machine — the effective model differs from the mode's parity
+    /// default (RAM-aware auto-downsize on a small Mac, or a user pin to
+    /// a smaller model). Gates the Phase 5 content-coverage fidelity
+    /// fallback (mb-l97): on the small-model path we never let the LLM
+    /// silently drop a whole spoken sentence — we fall back to the
+    /// faithful preprocessor text instead. Set ONLY at the macOS
+    /// effective-model seam in `dictation/runtime_cleaner.rs`; `false`
+    /// everywhere else (every non-macOS target + the 7B parity path), so
+    /// the coverage logic never runs there and the Windows / 7B cleanup
+    /// path is byte-identical.
+    small_model_fidelity: bool,
+    /// A user-authored cleanup prompt for this mode (ADR 0067). When
+    /// `Some(body)`, the High-level cleanup path uses this body VERBATIM
+    /// and SKIPS the small-model tier substitution — precedence is:
+    /// user prompt override > tier substitution (`normal_small`) > mode
+    /// default. Set ONLY at the macOS effective-model seam in
+    /// `dictation/runtime_cleaner.rs` (read from `mode_prompt_overrides`
+    /// behind `#[cfg(target_os = "macos")]`); `None` everywhere else, so
+    /// the 7B / Windows path is byte-identical.
+    user_prompt_override: Option<String>,
+    /// mb-mac-v1.6.4 — RAM-aware **runtime** fallback chain (Layer 2).
+    /// Installed models strictly smaller than `model_id`, largest-first
+    /// (see [`super::model_select::fallback_chain`]). When the selected
+    /// model FAILS to load / times out at runtime, [`Self::run_cleanup`]
+    /// steps DOWN through this chain and retries. Populated ONLY at the
+    /// macOS effective-model seam in `dictation/runtime_cleaner.rs`;
+    /// EMPTY everywhere else (every non-macOS target), so the retry loop
+    /// is a no-op and the Windows cleanup path is byte-identical.
+    runtime_fallback_models: Vec<String>,
 }
 
 impl LlmCleaner {
@@ -135,8 +511,115 @@ impl LlmCleaner {
             temperature,
             max_tokens,
             last_model_used: Mutex::new(provider_name.to_string()),
+            last_prompt_label: Mutex::new(None),
             preprocessor: Preprocessor::new(),
+            prompt_mode_override: None,
+            small_model_fidelity: false,
+            user_prompt_override: None,
+            runtime_fallback_models: Vec::new(),
         }
+    }
+
+    /// Builder-style setter for the prompt-slug override (ADR 0065).
+    ///
+    /// Consumes + returns `self` so the call site reads as one
+    /// expression: `LlmCleaner::new(..).with_prompt_mode_override(o)`.
+    /// Passing `None` is an explicit no-op that leaves the default
+    /// tone-mode behaviour intact — that is exactly what the non-macOS
+    /// build does, keeping the Windows path byte-identical.
+    pub fn with_prompt_mode_override(mut self, override_slug: Option<String>) -> Self {
+        self.prompt_mode_override = override_slug;
+        self
+    }
+
+    /// Builder-style setter for the small-model fidelity flag (Phase 5,
+    /// mb-l97). `true` enables the content-coverage fallback below;
+    /// `false` (the default) is a no-op that leaves the cleanup path
+    /// exactly as it was — that is what the non-macOS build and the 7B
+    /// parity path do, keeping Windows / parity byte-identical.
+    pub fn with_small_model_fidelity(mut self, enabled: bool) -> Self {
+        self.small_model_fidelity = enabled;
+        self
+    }
+
+    /// Builder-style setter for the user prompt override (ADR 0067).
+    ///
+    /// `Some(body)` makes the High-level cleanup path use `body` verbatim
+    /// and skip the small-model tier substitution (precedence: user
+    /// override > tier > default). `None` (the default — every non-macOS
+    /// target + any mode the user hasn't customised) is a no-op that
+    /// leaves prompt resolution exactly as before, keeping Windows
+    /// byte-identical.
+    pub fn with_user_prompt_override(mut self, body: Option<String>) -> Self {
+        self.user_prompt_override = body;
+        self
+    }
+
+    /// Builder-style setter for the RAM-aware runtime fallback chain
+    /// (mb-mac-v1.6.4). `models` is the installed-model step-down chain
+    /// (largest-first, all smaller than `model_id`). An empty vec (the
+    /// default — every non-macOS target) disables the runtime step-down
+    /// entirely, keeping the Windows cleanup path byte-identical.
+    pub fn with_runtime_fallback_models(mut self, models: Vec<String>) -> Self {
+        self.runtime_fallback_models = models;
+        self
+    }
+
+    /// mb-mac-v1.6.4 — RAM-aware runtime fallback (Layer 2). When the
+    /// selected model fails to LOAD / times out at runtime, step DOWN
+    /// through [`Self::runtime_fallback_models`] (largest-first, all
+    /// smaller than the current model) and retry the provider call once
+    /// per candidate. Returns the first success as `(result, model_id)`,
+    /// or `None` when the chain is empty OR every candidate also failed
+    /// (the caller then surfaces the ORIGINAL error).
+    ///
+    /// Borrows `&self` only (no `&mut`), so the caller can persist the
+    /// winning model into `self.model_id` after this returns. On every
+    /// non-macOS target the chain is empty, so this returns `None`
+    /// immediately without touching the provider — byte-identical.
+    fn try_runtime_step_down(
+        &self,
+        original_err: &AppError,
+        prompt: &str,
+        raw: &str,
+        mode_slug: &str,
+    ) -> Option<(CleanupResult, String)> {
+        if self.runtime_fallback_models.is_empty() {
+            return None;
+        }
+        tracing::warn!(
+            model = %self.model_id,
+            error = %original_err,
+            candidates = ?self.runtime_fallback_models,
+            "cleanup: selected model failed at runtime; stepping down to a smaller \
+             installed model (mb-mac-v1.6.4)"
+        );
+        for candidate in &self.runtime_fallback_models {
+            let req = CleanupRequest {
+                prompt,
+                raw_transcript: raw,
+                model_id: candidate,
+                temperature: self.temperature,
+                max_tokens: self.max_tokens,
+                mode_slug,
+            };
+            match self.provider.cleanup(req) {
+                Ok(r) => {
+                    tracing::info!(
+                        from = %self.model_id,
+                        to = %candidate,
+                        "cleanup: runtime step-down succeeded"
+                    );
+                    return Some((r, candidate.clone()));
+                }
+                Err(e) => tracing::warn!(
+                    candidate = %candidate,
+                    error = %e,
+                    "cleanup: runtime step-down candidate also failed; trying next"
+                ),
+            }
+        }
+        None
     }
 
     /// Read the configured shrink-fallback threshold. Defaults to the
@@ -219,6 +702,15 @@ impl LlmCleaner {
     /// so `clean()` can swallow errors + log them while keeping the
     /// happy path readable.
     fn run_cleanup(&mut self, raw: &str, mode_slug: &str) -> AppResult<String> {
+        // Reset the per-call prompt provenance. Paths that resolve no
+        // LLM prompt (None / Light / skip-short-utterance) leave it
+        // `None`, so the Metadata falls back to the mode's canonical
+        // version rather than reporting a stale label from a previous
+        // dictation on this long-lived cleaner instance.
+        if let Ok(mut slot) = self.last_prompt_label.lock() {
+            *slot = None;
+        }
+
         // -1. Cleanup-level dial (ADR 0047 §Wave 2.1). Branches:
         //     - None   -> raw STT passthrough (skip preprocessor + LLM)
         //     - Light  -> preprocessor only (skip LLM regardless)
@@ -299,13 +791,61 @@ impl LlmCleaner {
             .db
             .lock()
             .map_err(|_| AppError::Cleanup("db mutex poisoned during cleanup".into()))?;
-        let prompt_slug = if matches!(level, DictationCleanupLevel::Medium) {
-            ADDITIVE_PROMPT_MODE_SLUG
-        } else {
-            mode_slug
-        };
-        let prompt = prompts::get_latest_for_mode(&conn, prompt_slug)?
-            .ok_or_else(|| AppError::Cleanup(format!("no prompt for mode {prompt_slug:?}")))?;
+        // Prompt-body + few-shot-slug resolution. Precedence (highest
+        // first):
+        //   Medium level        -> additive prompt (level dial wins; it
+        //                           is orthogonal to tone and ignores
+        //                           mode_slug). ADR 0047 §Wave 2.1.
+        //   user prompt override -> the user-authored body, VERBATIM,
+        //                           skipping the tier substitution. ADR
+        //                           0067; set only at the macOS seam.
+        //   tier override set    -> the override slug (e.g.
+        //                           `normal_small`), set ONLY at the macOS
+        //                           downsize seam. ADR 0065.
+        //   otherwise            -> the tone mode_slug, exactly as before.
+        // On the 7B / Windows path BOTH overrides are always `None`, so
+        // this collapses to the pre-ADR-0065 `mode_slug` behaviour.
+        //
+        // `few_shot_slug` keys example selection; the user-override case
+        // reuses the tone mode's examples (a custom prompt is still a
+        // `normal`/`casual`/`formal` tone edit).
+        let (prompt_body, prompt_label, few_shot_slug): (String, String, &str) =
+            if matches!(level, DictationCleanupLevel::Medium) {
+                let prompt = prompts::get_latest_for_mode(&conn, ADDITIVE_PROMPT_MODE_SLUG)?
+                    .ok_or_else(|| {
+                        AppError::Cleanup(format!(
+                            "no prompt for mode {ADDITIVE_PROMPT_MODE_SLUG:?}"
+                        ))
+                    })?;
+                let label = format!("{ADDITIVE_PROMPT_MODE_SLUG} v{}", prompt.version);
+                (prompt.body, label, ADDITIVE_PROMPT_MODE_SLUG)
+            } else if let Some(body) = self.user_prompt_override.as_deref() {
+                // ADR 0067 — a user-authored prompt beats the tier
+                // substitution and the shipped default. Used verbatim.
+                (body.to_string(), format!("{mode_slug} custom"), mode_slug)
+            } else {
+                let slug = self.prompt_mode_override.as_deref().unwrap_or(mode_slug);
+                let prompt = prompts::get_latest_for_mode(&conn, slug)?
+                    .ok_or_else(|| AppError::Cleanup(format!("no prompt for mode {slug:?}")))?;
+                (prompt.body, format!("{slug} v{}", prompt.version), slug)
+            };
+
+        // Truthful prompt provenance (ADR 0065 v2 + 0067). Record EXACTLY
+        // which prompt won resolution so (a) every dictation logs the
+        // prompt that ran and (b) the persistence layer can stamp
+        // `sessions.effective_prompt_label` instead of inferring it from
+        // the mode's canonical `prompt_id` (which lies on the macOS
+        // downsize / user-override paths).
+        tracing::info!(
+            label = %prompt_label,
+            model = %self.model_id,
+            tier_override = self.prompt_mode_override.as_deref().unwrap_or("none"),
+            user_override = self.user_prompt_override.is_some(),
+            "cleanup prompt resolved"
+        );
+        if let Ok(mut slot) = self.last_prompt_label.lock() {
+            *slot = Some(prompt_label.clone());
+        }
 
         // 3. Dictionary + examples. Dictionary: all (already small).
         //    Examples: top-N per mode, app context unknown at this
@@ -318,14 +858,14 @@ impl LlmCleaner {
         //    examples for `normal_additive`, the prompt's three
         //    baked-in examples carry the few-shot load.
         let dict = dictionary::list_all(&conn)?;
-        let candidates = few_shot::select_candidates(&conn, prompt_slug, None)?;
+        let candidates = few_shot::select_candidates(&conn, few_shot_slug, None)?;
         let examples = few_shot::fit_to_budget(candidates);
         drop(conn); // release lock before the HTTP call.
 
         // 4. Assemble. The LLM sees the pre-processed transcript, not
         //    the raw STT. The raw row in the DB is untouched (ADR 0010).
         let built = prompt_builder::build(prompt_builder::PromptInputs {
-            system_prompt: &prompt.body,
+            system_prompt: &prompt_body,
             dictionary: &dict,
             examples: &examples,
             foreground_app: None,
@@ -359,7 +899,144 @@ impl LlmCleaner {
             max_tokens: self.max_tokens,
             mode_slug,
         };
-        let result = self.provider.cleanup(req)?;
+        let mut result = match self.provider.cleanup(req) {
+            Ok(r) => r,
+            Err(e) => {
+                // mb-mac-v1.6.4 — RAM-aware runtime fallback (Layer 2).
+                // The selected model failed to load / timed out; try
+                // stepping down to a smaller installed model. Empty chain
+                // (Windows / non-macOS) → `None` → surface the original
+                // error, exactly as `?` did before.
+                match self.try_runtime_step_down(&e, &built.prompt, &pre_text, mode_slug) {
+                    Some((r, used)) => {
+                        // Persist the step-down so subsequent dictations go
+                        // straight to the smaller model instead of re-
+                        // failing on the too-big one every time.
+                        self.model_id = used;
+                        r
+                    }
+                    None => return Err(e),
+                }
+            }
+        };
+
+        // ADR 0065 — small-model example-leak guard. Symmetric twin of
+        // the shrink-fallback below: that guard catches DROPPED content,
+        // this one catches ADDED content (a baked-in few-shot example
+        // sentence the weak 3B copied verbatim into its output). Scoped
+        // to the small-model override path via `prompt_mode_override`,
+        // so the 7B / Windows path runs ZERO new logic and stays
+        // byte-identical.
+        // ADR 0065 v2 — small-model preamble guard. Weak models prepend
+        // a chatty "Here's your cleaned transcript:" despite the prompt's
+        // output-only rule. Strip it BEFORE the shrink-fallback check
+        // below so (a) the user never sees the preamble and (b) the
+        // word-count guard sees the REAL content length — a preamble
+        // inflates the count and can mask dropped sentences (exactly how
+        // session 12's dropped opening slipped past the 0.65 guard).
+        // Scoped to the override path; the 7B / Windows path runs none
+        // of this.
+        let mut preamble_stripped = false;
+        if self.prompt_mode_override.is_some() {
+            let (guarded, stripped) = strip_meta_preamble(&result.text);
+            if stripped {
+                preamble_stripped = true;
+                if guarded.trim().is_empty() {
+                    tracing::warn!(
+                        mode = mode_slug,
+                        prompt = %prompt_label,
+                        model = %result.model_used,
+                        "preamble guard: cleaned output was entirely a meta-preamble; \
+                         falling back to preprocessor output"
+                    );
+                    let stamped = format!(
+                        "{}+{}{PREAMBLE_GUARD_SUFFIX}",
+                        result.model_used, PREPROCESSOR_VERSION
+                    );
+                    if let Ok(mut slot) = self.last_model_used.lock() {
+                        *slot = stamped;
+                    }
+                    return Ok(pre_text);
+                }
+                tracing::warn!(
+                    mode = mode_slug,
+                    prompt = %prompt_label,
+                    model = %result.model_used,
+                    "preamble guard: stripped a leading meta-preamble from output"
+                );
+                result.text = guarded;
+            }
+        }
+
+        let mut example_leak_stripped = false;
+        if self.prompt_mode_override.is_some() {
+            let (guarded, stripped) =
+                strip_leaked_examples(&result.text, raw, NORMAL_SMALL_EXAMPLE_SENTINELS);
+            if stripped {
+                example_leak_stripped = true;
+                if guarded.trim().is_empty() {
+                    // The output was ENTIRELY a leaked example — there is
+                    // nothing real to inject. Fall back to the
+                    // deterministic preprocessor output (never inject an
+                    // empty cleanup).
+                    tracing::warn!(
+                        mode = mode_slug,
+                        prompt = %prompt_label,
+                        model = %result.model_used,
+                        "example-leak guard: cleaned output was entirely a leaked \
+                         example; falling back to preprocessor output"
+                    );
+                    let stamped = format!(
+                        "{}+{}{EXAMPLE_LEAK_GUARD_SUFFIX}",
+                        result.model_used, PREPROCESSOR_VERSION
+                    );
+                    if let Ok(mut slot) = self.last_model_used.lock() {
+                        *slot = stamped;
+                    }
+                    return Ok(pre_text);
+                }
+                tracing::warn!(
+                    mode = mode_slug,
+                    prompt = %prompt_label,
+                    model = %result.model_used,
+                    "example-leak guard: stripped a leaked few-shot example from output"
+                );
+                result.text = guarded;
+            }
+        }
+
+        // Phase 5 / mb-l97 — content-coverage fidelity fallback.
+        // Scoped to the small-model path (effective model downsized off
+        // parity, set at the macOS seam). The loose length-ratio guard
+        // below is blind to a SINGLE dropped sentence when the rest of
+        // the output is long enough to keep the word-count ratio above
+        // threshold (exactly how session 12's opening sentence slipped
+        // past). This per-sentence check catches that: if any
+        // substantial preprocessor sentence is largely absent from the
+        // LLM output, fall back to the faithful preprocessor text — the
+        // user's #1 rule (never drop content) wins over polish. Runs ONLY
+        // when `small_model_fidelity` is set, so the 7B / Windows path
+        // executes none of this and stays byte-identical.
+        if self.small_model_fidelity {
+            if let Some(dropped) = coverage_drop(&pre_text, &result.text) {
+                tracing::warn!(
+                    mode = mode_slug,
+                    prompt = %prompt_label,
+                    model = %result.model_used,
+                    dropped_sentence = %dropped,
+                    "content-coverage fallback (mb-l97): small-model output dropped a \
+                     spoken sentence; returning faithful preprocessor output"
+                );
+                let stamped = format!(
+                    "{}+{}{COVERAGE_FALLBACK_SUFFIX}",
+                    result.model_used, PREPROCESSOR_VERSION
+                );
+                if let Ok(mut slot) = self.last_model_used.lock() {
+                    *slot = stamped;
+                }
+                return Ok(pre_text);
+            }
+        }
 
         // ADR 0047 §Wave 1.2 — length-ratio sanity check. If the LLM
         // returned a transcript materially shorter than what the
@@ -420,7 +1097,7 @@ impl LlmCleaner {
         // model_used column). At level=Medium also stamp the additive
         // infix so the dial choice is recoverable from `model_used`
         // alone. At Q5 opt-in, append the q5-opt-in suffix likewise.
-        let stamped_model = if matches!(level, DictationCleanupLevel::Medium) {
+        let mut stamped_model = if matches!(level, DictationCleanupLevel::Medium) {
             format!(
                 "{}{ADDITIVE_INFIX}+{}{q5_suffix}",
                 result.model_used, PREPROCESSOR_VERSION
@@ -428,6 +1105,16 @@ impl LlmCleaner {
         } else {
             format!("{}+{}{q5_suffix}", result.model_used, PREPROCESSOR_VERSION)
         };
+        // ADR 0065 — record when the example-leak guard stripped (but
+        // did not fully suppress) a leaked example, so provenance is
+        // recoverable from `model_used` alone.
+        if example_leak_stripped {
+            stamped_model.push_str(EXAMPLE_LEAK_GUARD_SUFFIX);
+        }
+        // ADR 0065 v2 — likewise record a stripped meta-preamble.
+        if preamble_stripped {
+            stamped_model.push_str(PREAMBLE_GUARD_SUFFIX);
+        }
         if let Ok(mut slot) = self.last_model_used.lock() {
             *slot = stamped_model.clone();
         }
@@ -489,6 +1176,10 @@ impl Cleaner for LlmCleaner {
         let leaked: &'static str = Box::leak(guard.clone().into_boxed_str());
         leaked
     }
+
+    fn prompt_label(&self) -> Option<String> {
+        self.last_prompt_label.lock().ok().and_then(|g| g.clone())
+    }
 }
 
 #[cfg(test)]
@@ -502,6 +1193,126 @@ mod tests {
     fn fresh_db() -> Arc<Mutex<Connection>> {
         let db = Database::open_in_memory().unwrap();
         Arc::new(Mutex::new(db.conn))
+    }
+
+    // ── ADR 0065 v2 small-model preamble guard ───────────────────────
+
+    #[test]
+    fn preamble_guard_strips_colon_terminated_meta_lead_in() {
+        // The exact session-12 failure (with the curly apostrophe an
+        // LLM actually emits).
+        let (out, stripped) =
+            strip_meta_preamble("Here\u{2019}s your cleaned transcript:\n\nI need these things.");
+        assert!(stripped);
+        assert_eq!(out, "I need these things.");
+    }
+
+    #[test]
+    fn preamble_guard_strips_ascii_apostrophe_variant() {
+        let (out, stripped) = strip_meta_preamble("Here's your cleaned transcript: bananas");
+        assert!(stripped);
+        assert_eq!(out, "bananas");
+    }
+
+    #[test]
+    fn preamble_guard_strips_interjection_then_meta() {
+        let (out, stripped) = strip_meta_preamble("Sure, here is the cleaned text:\nbuy groceries");
+        assert!(stripped);
+        assert_eq!(out, "buy groceries");
+    }
+
+    #[test]
+    fn preamble_guard_leaves_genuine_list_lead_ins_untouched() {
+        // A real Normal-mode lead-in ends in a colon too — it must NOT
+        // be mistaken for a meta-preamble.
+        let lead_in = "I need these three things:\n- bananas\n- eggs";
+        let (out, stripped) = strip_meta_preamble(lead_in);
+        assert!(!stripped);
+        assert_eq!(out, lead_in);
+
+        let keyboard = "Here's my list of keyboard supplies:\n- air duster";
+        let (out2, stripped2) = strip_meta_preamble(keyboard);
+        assert!(!stripped2);
+        assert_eq!(out2, keyboard);
+    }
+
+    #[test]
+    fn preamble_guard_leaves_clean_content_untouched() {
+        let clean = "I want to buy some groceries. I need bananas, eggs, and shampoo.";
+        let (out, stripped) = strip_meta_preamble(clean);
+        assert!(!stripped);
+        assert_eq!(out, clean);
+    }
+
+    // ── ADR 0065 small-model example-leak guard ──────────────────────
+
+    #[test]
+    fn find_ascii_ci_matches_case_insensitively_with_real_offsets() {
+        assert_eq!(find_ascii_ci("hello WORLD", "world"), Some(6));
+        assert_eq!(find_ascii_ci("hello world", "WORLD"), Some(6));
+        assert_eq!(find_ascii_ci("nope", "world"), None);
+        assert_eq!(find_ascii_ci("", "x"), None);
+        assert_eq!(find_ascii_ci("abc", ""), None);
+    }
+
+    #[test]
+    fn guard_strips_leaked_example_not_in_input() {
+        // The classic leak: 3B prepends a baked-in example sentence to
+        // the real (grocery) cleanup.
+        let leaked = "Example input number three is a run-on sentence.\n\n\
+                      Bananas, eggs, and shampoo.";
+        let raw = "i need bananas eggs shampoo";
+        let (out, stripped) = strip_leaked_examples(leaked, raw, NORMAL_SMALL_EXAMPLE_SENTINELS);
+        assert!(stripped, "the leaked sentinel should have been detected");
+        assert!(
+            !out.contains("Example input number three"),
+            "sentinel must be removed; got: {out}"
+        );
+        assert!(
+            out.contains("Bananas, eggs, and shampoo."),
+            "real content must survive; got: {out}"
+        );
+    }
+
+    #[test]
+    fn guard_keeps_sentinel_that_was_actually_dictated() {
+        // If the speaker really dictated the keyboard-supplies line, it
+        // is content, not a leak — do not strip it.
+        let cleaned = "Here's my list of keyboard supplies:\n\n- air duster";
+        let raw = "here's my list of keyboard supplies first is air duster";
+        let (out, stripped) = strip_leaked_examples(cleaned, raw, NORMAL_SMALL_EXAMPLE_SENTINELS);
+        assert!(!stripped, "dictated content must not be treated as a leak");
+        assert_eq!(out, cleaned);
+    }
+
+    #[test]
+    fn guard_noop_when_no_sentinel_present() {
+        let cleaned = "Bananas, eggs, and shampoo.";
+        let (out, stripped) = strip_leaked_examples(
+            cleaned,
+            "bananas eggs shampoo",
+            NORMAL_SMALL_EXAMPLE_SENTINELS,
+        );
+        assert!(!stripped);
+        assert_eq!(out, cleaned);
+    }
+
+    #[test]
+    fn guard_reports_fully_leaked_output_as_empty_after_strip() {
+        // Output that is ONLY a leaked example collapses to empty, which
+        // the caller uses to trigger the preprocessor fallback.
+        let leaked = "Example input number three is a run-on sentence. \
+                      It shows two independent clauses that should be split apart.";
+        let (out, stripped) = strip_leaked_examples(
+            leaked,
+            "totally different input",
+            NORMAL_SMALL_EXAMPLE_SENTINELS,
+        );
+        assert!(stripped);
+        assert!(
+            out.trim().is_empty(),
+            "expected empty after strip; got: {out:?}"
+        );
     }
 
     /// Test-only cleanup provider that returns a caller-supplied
@@ -554,6 +1365,14 @@ mod tests {
     #[test]
     fn clean_modes_produce_different_output() {
         let db = fresh_db();
+        // Isolate from the Wave 2.2 short-utterance skip (which would
+        // bypass the LLM for this 5-word input, making every mode
+        // return identical preprocessor output) and the Wave 1.2
+        // shrink-fallback guard (which would reject `fragment`'s
+        // deliberately shorter output). Both guards have dedicated
+        // tests. (mb-mac-v1.9)
+        disable_skip(&db);
+        disable_shrink_guard(&db);
         let mut cleaner = LlmCleaner::new(
             Box::new(StubCleanupProvider),
             db,
@@ -561,20 +1380,31 @@ mod tests {
             0.3,
             256,
         );
-        // We need prompts seeded for the alt modes; seed migrations
-        // already seed normal/verbose/fragment.
+        // Seed migrations seed normal/verbose/fragment. We do NOT
+        // assert normal != verbose: once the preprocessor has
+        // capitalised + punctuated this short input, the `normal`
+        // (capitalise + period) and `verbose` (identity) stub
+        // transforms coincide -- a stub artifact, not a routing
+        // failure. `fragment` (first-half, lowercased) stays
+        // distinct from both, which is what proves mode routing.
+        // (mb-mac-v1.9: previously asserted normal != verbose.)
         let raw = "the quick brown fox jumps";
         let n = cleaner.clean(raw, "normal").unwrap();
         let v = cleaner.clean(raw, "verbose").unwrap();
         let f = cleaner.clean(raw, "fragment").unwrap();
-        assert_ne!(n, v);
-        assert_ne!(v, f);
         assert_ne!(n, f);
+        assert_ne!(v, f);
     }
 
     #[test]
     fn clean_missing_prompt_falls_back_to_raw() {
         let db = fresh_db();
+        // Disable the Wave 2.2 short-utterance skip: the 1-word input
+        // below would otherwise short-circuit to preprocessor output
+        // BEFORE the prompt lookup runs, so the missing-prompt ->
+        // fallback path under test would never be exercised.
+        // (mb-mac-v1.9)
+        disable_skip(&db);
         let mut cleaner = LlmCleaner::new(
             Box::new(StubCleanupProvider),
             db,
@@ -808,6 +1638,11 @@ mod tests {
         let provider = ConfigurableStubCleanupProvider {
             text_to_return: "LLM RAN ON LISTY INPUT".into(),
         };
+        // The 5-word fingerprint is intentionally shorter than the
+        // 10-word input; disable the Wave 1.2 shrink-fallback guard
+        // so it survives -- this test is about the listy override of
+        // the skip, not the shrink guard. (mb-mac-v1.9)
+        disable_shrink_guard(&db);
         let mut cleaner = LlmCleaner::new(
             Box::new(provider),
             db,
@@ -872,6 +1707,27 @@ mod tests {
         let conn = db.lock().unwrap();
         Settings::new(&conn)
             .set(SettingKey::DictationCleanupLevel, &level)
+            .unwrap();
+    }
+
+    /// Disable the Wave 1.2 shrink-fallback guard so a test can assert
+    /// the provider's (possibly short) output passes through verbatim.
+    /// The guard itself is covered by the `shrink_fallback_*` tests.
+    /// (mb-mac-v1.9)
+    fn disable_shrink_guard(db: &Arc<Mutex<Connection>>) {
+        let conn = db.lock().unwrap();
+        Settings::new(&conn)
+            .set(SettingKey::LlmShrinkFallbackThreshold, &0.0f32)
+            .unwrap();
+    }
+
+    /// Disable the Wave 2.2 short-utterance LLM-skip so a test that
+    /// uses a short input still routes through the provider. The skip
+    /// itself is covered by the `llm_skip_*` tests. (mb-mac-v1.9)
+    fn disable_skip(db: &Arc<Mutex<Connection>>) {
+        let conn = db.lock().unwrap();
+        Settings::new(&conn)
+            .set(SettingKey::LlmSkipWordThreshold, &0u32)
             .unwrap();
     }
 
@@ -945,6 +1801,11 @@ mod tests {
         let provider = ConfigurableStubCleanupProvider {
             text_to_return: "Medium output.".into(),
         };
+        // The short "Medium output." fingerprint would trip the
+        // Wave 1.2 shrink-fallback guard against the long input; this
+        // test is about the additive-prompt branch, not the guard.
+        // (mb-mac-v1.9)
+        disable_shrink_guard(&db);
         let mut cleaner = LlmCleaner::new(
             Box::new(provider),
             db,
@@ -982,6 +1843,10 @@ mod tests {
         let provider = ConfigurableStubCleanupProvider {
             text_to_return: "High output.".into(),
         };
+        // The short "High output." fingerprint would trip the Wave 1.2
+        // shrink-fallback guard against the long input; this test is
+        // about the level=High provenance, not the guard. (mb-mac-v1.9)
+        disable_shrink_guard(&db);
         let mut cleaner = LlmCleaner::new(
             Box::new(provider),
             db,
@@ -1209,5 +2074,272 @@ mod tests {
             !model.contains("q5-opt-in"),
             "q5-opt-in suffix must be absent when substitution didn't fire; got: {model}"
         );
+    }
+
+    // -------- Phase 5 / mb-l97 — content-coverage fidelity fallback. -----
+
+    #[test]
+    fn coverage_normalise_strips_punct_and_hyphens() {
+        assert_eq!(coverage_normalise("In-app  Dictation."), "in app dictation");
+    }
+
+    #[test]
+    fn coverage_drop_flags_a_contiguous_dropped_clause() {
+        // The preprocessor emits ONE run-on block (it doesn't segment);
+        // the LLM dropped the opening clause entirely → its three salient
+        // words vanish as a contiguous run.
+        let pre =
+            "Testing in-app dictation I want to buy some groceries I need bananas eggs shampoo";
+        let llm = "I want to buy some groceries. I need bananas, eggs, shampoo.";
+        let dropped = coverage_drop(pre, llm).expect("should flag the dropped clause");
+        assert_eq!(dropped, "testing app dictation");
+    }
+
+    #[test]
+    fn coverage_drop_flags_dropped_middle_clause() {
+        let pre = "I want to buy some groceries I need bananas eggs shampoo";
+        // The grocery clause is gone; bananas/eggs/shampoo remain.
+        let llm = "I need bananas, eggs and shampoo.";
+        let dropped = coverage_drop(pre, llm).expect("should flag the dropped clause");
+        assert_eq!(dropped, "want buy groceries");
+    }
+
+    #[test]
+    fn coverage_drop_passes_when_content_preserved() {
+        let pre = "I want to buy some groceries I need bananas eggs shampoo";
+        // Reformatted as a list but every salient word survives.
+        let llm = "I want to buy some groceries. I need:\n- bananas\n- eggs\n- shampoo";
+        assert!(coverage_drop(pre, llm).is_none());
+    }
+
+    #[test]
+    fn coverage_drop_tolerates_scattered_one_and_two_word_misses() {
+        // A rephrase that drops a couple of NON-adjacent content words
+        // (here "really" and "big") must not trip — only a contiguous run
+        // of >= 3 missing salient words is a dropped clause.
+        let pre = "I really need to grab a big coffee before the long meeting";
+        let llm = "I need to grab coffee before the meeting";
+        assert!(coverage_drop(pre, llm).is_none());
+    }
+
+    #[test]
+    fn coverage_fallback_fires_on_small_model_path() {
+        let db = fresh_db();
+        // Isolate the coverage guard: the loose length-ratio guard would
+        // also catch a big drop, so turn it off to prove THIS guard
+        // fires; and the input is long enough that the short-utterance
+        // skip never engages.
+        disable_shrink_guard(&db);
+        // "period" cues give the preprocessor real sentence boundaries.
+        let raw = "i want to buy some groceries period i need bananas \
+                   eggs and shampoo period call the dentist tomorrow afternoon";
+        // The model drops the whole opening sentence.
+        let provider = ConfigurableStubCleanupProvider {
+            text_to_return: "I need bananas, eggs and shampoo. \
+                             Call the dentist tomorrow afternoon."
+                .into(),
+        };
+        let mut cleaner = LlmCleaner::new(
+            Box::new(provider),
+            db,
+            "qwen2.5:3b-instruct-q4_K_M".into(),
+            0.3,
+            256,
+        )
+        .with_small_model_fidelity(true);
+        let out = cleaner.clean(raw, "normal").unwrap();
+        assert!(
+            out.to_lowercase().contains("buy some groceries"),
+            "fallback must return the faithful preprocessor text; got: {out}"
+        );
+        let model = cleaner.model_name();
+        assert!(
+            model.contains("coverage-fallback"),
+            "model_name should record the coverage fallback; got: {model}"
+        );
+    }
+
+    #[test]
+    fn coverage_fallback_inert_off_small_model_path_byte_identical() {
+        // Same dropped-sentence output, but small_model_fidelity unset
+        // (the default — every non-macOS target + the 7B parity path).
+        // The guard must NOT run: the LLM output passes through verbatim.
+        let db = fresh_db();
+        disable_shrink_guard(&db);
+        let raw = "i want to buy some groceries period i need bananas \
+                   eggs and shampoo period call the dentist tomorrow afternoon";
+        let provider = ConfigurableStubCleanupProvider {
+            text_to_return: "I need bananas, eggs and shampoo. \
+                             Call the dentist tomorrow afternoon."
+                .into(),
+        };
+        let mut cleaner = LlmCleaner::new(
+            Box::new(provider),
+            db,
+            "qwen2.5:7b-instruct-q4_K_M".into(),
+            0.3,
+            256,
+        );
+        let out = cleaner.clean(raw, "normal").unwrap();
+        assert!(
+            !out.to_lowercase().contains("buy some groceries"),
+            "off the small-model path the LLM output must pass through; got: {out}"
+        );
+        assert!(
+            !cleaner.model_name().contains("coverage-fallback"),
+            "coverage fallback must not fire off the small-model path"
+        );
+    }
+
+    // -------- ADR 0067 — user prompt override precedence. --------------
+
+    #[test]
+    fn user_prompt_override_wins_over_tier_substitution() {
+        // Both a tier substitution (normal_small) AND a user prompt
+        // override are set. Precedence: the user override wins → the
+        // resolved prompt label is the custom one, not the tier slug.
+        let db = fresh_db();
+        disable_skip(&db);
+        disable_shrink_guard(&db);
+        let mut cleaner = LlmCleaner::new(
+            Box::new(StubCleanupProvider),
+            db,
+            "qwen2.5:3b-instruct-q4_K_M".into(),
+            0.3,
+            256,
+        )
+        .with_prompt_mode_override(Some("normal_small".to_string()))
+        .with_user_prompt_override(Some("Use my house style; keep it terse.".to_string()));
+        let _ = cleaner
+            .clean("please clean this up a little bit thanks friend", "normal")
+            .unwrap();
+        assert_eq!(
+            cleaner.prompt_label().as_deref(),
+            Some("normal custom"),
+            "user prompt override must win over the normal_small tier substitution"
+        );
+    }
+
+    #[test]
+    fn no_user_prompt_override_keeps_tier_substitution_label() {
+        // Without a user override, the tier substitution still wins →
+        // label is the tier slug (the unchanged ADR 0065 behaviour).
+        let db = fresh_db();
+        disable_skip(&db);
+        disable_shrink_guard(&db);
+        let mut cleaner = LlmCleaner::new(
+            Box::new(StubCleanupProvider),
+            db,
+            "qwen2.5:3b-instruct-q4_K_M".into(),
+            0.3,
+            256,
+        )
+        .with_prompt_mode_override(Some("normal_small".to_string()));
+        let _ = cleaner
+            .clean("please clean this up a little bit thanks friend", "normal")
+            .unwrap();
+        assert!(
+            cleaner
+                .prompt_label()
+                .as_deref()
+                .is_some_and(|l| l.starts_with("normal_small v")),
+            "without a user override the tier slug must resolve; got: {:?}",
+            cleaner.prompt_label()
+        );
+    }
+
+    // ── mb-mac-v1.6.4 RAM-aware runtime fallback (Layer 2) ────────────
+
+    /// Provider that fails for any model id containing `fail_substr`
+    /// (simulating a runtime load / timeout) and succeeds otherwise,
+    /// echoing the model id it served so the test can assert which one
+    /// actually ran.
+    struct SelectiveFailProvider {
+        fail_substr: &'static str,
+    }
+    impl CleanupProvider for SelectiveFailProvider {
+        fn cleanup(&self, request: CleanupRequest<'_>) -> AppResult<CleanupResult> {
+            if request.model_id.contains(self.fail_substr) {
+                return Err(AppError::Cleanup(format!(
+                    "simulated load timeout for {}",
+                    request.model_id
+                )));
+            }
+            Ok(CleanupResult {
+                text: format!("cleaned by {}", request.model_id),
+                model_used: request.model_id.to_string(),
+                latency_ms: 0,
+                input_tokens: None,
+                output_tokens: None,
+            })
+        }
+        fn provider_name(&self) -> &'static str {
+            "selective-fail"
+        }
+        fn supports_model(&self, _model_id: &str) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn runtime_step_down_falls_to_next_smaller_installed_on_load_failure() {
+        // 7B fails to load; the chain steps down to the installed 3B.
+        let cleaner = LlmCleaner::new(
+            Box::new(SelectiveFailProvider { fail_substr: "7b" }),
+            fresh_db(),
+            "qwen2.5:7b-instruct-q4_K_M".into(),
+            0.3,
+            256,
+        )
+        .with_runtime_fallback_models(vec![
+            "qwen2.5:3b-instruct-q4_K_M".into(),
+            "gemma2:2b-instruct-q4_K_M".into(),
+        ]);
+        let err = AppError::Cleanup("selected model failed".into());
+        let (result, used) = cleaner
+            .try_runtime_step_down(&err, "the prompt", "the raw text", "normal")
+            .expect("should step down to a smaller installed model");
+        assert_eq!(used, "qwen2.5:3b-instruct-q4_K_M");
+        assert_eq!(result.model_used, "qwen2.5:3b-instruct-q4_K_M");
+        assert_eq!(result.text, "cleaned by qwen2.5:3b-instruct-q4_K_M");
+    }
+
+    #[test]
+    fn runtime_step_down_is_noop_with_empty_chain_windows_byte_identical() {
+        // Every non-macOS target: empty chain → None, provider never
+        // re-invoked → the caller surfaces the original error, exactly
+        // as `?` did before this net existed.
+        let cleaner = LlmCleaner::new(
+            Box::new(SelectiveFailProvider { fail_substr: "7b" }),
+            fresh_db(),
+            "qwen2.5:7b-instruct-q4_K_M".into(),
+            0.3,
+            256,
+        );
+        let err = AppError::Cleanup("selected model failed".into());
+        assert!(cleaner
+            .try_runtime_step_down(&err, "p", "r", "normal")
+            .is_none());
+    }
+
+    #[test]
+    fn runtime_step_down_returns_none_when_every_candidate_also_fails() {
+        // Provider fails for ALL models → no candidate loads → None, so
+        // the caller falls through to the passthrough / raw net.
+        let cleaner = LlmCleaner::new(
+            Box::new(SelectiveFailProvider { fail_substr: "" }), // "" ⊂ every id
+            fresh_db(),
+            "qwen2.5:7b-instruct-q4_K_M".into(),
+            0.3,
+            256,
+        )
+        .with_runtime_fallback_models(vec![
+            "qwen2.5:3b-instruct-q4_K_M".into(),
+            "gemma2:2b-instruct-q4_K_M".into(),
+        ]);
+        let err = AppError::Cleanup("selected model failed".into());
+        assert!(cleaner
+            .try_runtime_step_down(&err, "p", "r", "normal")
+            .is_none());
     }
 }

@@ -10,6 +10,12 @@
 //! on a 1 s sine input in pre-CUDA Wave 4; on GPU they finish in
 //! sub-second. See `docs/judges/phase-2/cuda-verified.md`.
 
+// macOS port: this whole integration test exercises the Windows-only `WhisperStt`
+// (`#[cfg(target_os = "windows")]`). Gate the entire file to Windows until the
+// cross-platform STT backend lands (Phase 3/4); compiles to an empty test bin
+// on other targets.
+#![cfg(target_os = "windows")]
+
 use std::path::PathBuf;
 
 use mockingbird_lib::stt::whisper::WhisperStt;

@@ -55,6 +55,61 @@ fn channel_tag_strings_match_chunker() {
 }
 
 // ---------------------------------------------------------------------
+// Production mic-builder validation (Phase 4a fix)
+// ---------------------------------------------------------------------
+
+/// Phase 4a correctness gate: the *production* `build_mic_capture()`
+/// must return a real `CpalCapture`-backed `AudioCapture` on macOS,
+/// NOT the old `Err("... Phase 9 ...")` stub.
+///
+/// The 4a judge (`judges_macos_v1`) drove the pipeline with a
+/// `WavMicCapture` test double, so it never exercised the real
+/// builder — a live Meetings-page meeting on macOS would have errored
+/// at `TwinStreamCapture::start()`. This test closes that gap by
+/// asserting the real builder directly.
+///
+/// `CpalCapture::new()` constructs lazily (it builds a cpal host + an
+/// orphan ring; the actual CoreAudio input device is opened on
+/// `start()`), so `build_mic_capture()` returns `Ok(..)` regardless of
+/// whether a live mic is present in CI. An `Ok` therefore proves the
+/// macOS arm resolved to the `CpalCapture` path rather than the `Err`
+/// stub — the exact regression we're guarding.
+///
+/// When a live default input device IS present (dev boxes, not
+/// headless CI), we additionally smoke-test the full lifecycle
+/// (`start()` → one `drain()` → `stop()`) to prove the returned
+/// capture is functional CoreAudio, not just constructible.
+#[cfg(target_os = "macos")]
+#[test]
+fn build_mic_capture_returns_real_cpal_on_macos() {
+    let cap = build_mic_capture();
+    assert!(
+        cap.is_ok(),
+        "build_mic_capture() must return Ok (real CpalCapture) on macOS, \
+         not the Phase-9 Err stub; got {:?}",
+        cap.as_ref().err()
+    );
+    let mut cap = cap.unwrap();
+
+    // If a real default input device is available, prove the capture
+    // is functional CoreAudio end-to-end: open the stream, pull one
+    // drain, tear down. `drain()` returning any count (including 0 in
+    // silence) without error is the functional contract we need.
+    let live_mic = super::probe_sources()
+        .map(|p| p.mic_available)
+        .unwrap_or(false);
+    if live_mic {
+        cap.start()
+            .expect("CoreAudio mic start() should succeed on a box with a default input");
+        let mut buf = Vec::new();
+        let _ = cap
+            .drain(&mut buf)
+            .expect("drain() from a live CoreAudio mic should not error");
+        cap.stop().expect("CoreAudio mic stop() should succeed");
+    }
+}
+
+// ---------------------------------------------------------------------
 // Synthetic StubCapture for TwinStreamCapture integration tests
 // ---------------------------------------------------------------------
 
@@ -454,11 +509,17 @@ fn current_levels_reflects_per_channel_dbfs_after_drain() {
     // levels so the lifecycle.rs tick emitter can forward them to
     // the overlay. This test pins the shape end-to-end through the
     // stub-capture seam.
-    use crate::meetings::levels::{DBFS_FLOOR, DBFS_NO_DATA};
+    use crate::meetings::levels::DBFS_FLOOR;
 
     let dir = tempfile::tempdir().unwrap();
-    // Mic: full-scale i16 → ~0 dBFS. Sys: silence → DBFS_FLOOR after
-    // the first non-empty drain.
+    // Mic: FULL-scale i16 → exactly 0.0 dBFS. Sys: silence → DBFS_FLOOR
+    // after the first non-empty drain.
+    //
+    // mb-x1d (now FIXED): a full-scale mic reading is `Some(0.0)` and a
+    // never-drained channel is `None`, so a real 0 dBFS is no longer
+    // indistinguishable from "no data" (the old `0.0`-sentinel collision).
+    // Feeding full-scale here is exactly the case that used to be
+    // unassertable; the `is_some()` sanity checks below now hold.
     let mic_feed = stub_feed(vec![vec![i16::MAX; 16_000]]);
     let sys_feed = stub_feed(vec![vec![0i16; 16_000]]);
     let mut twin = TwinStreamCapture::start_with(
@@ -471,7 +532,7 @@ fn current_levels_reflects_per_channel_dbfs_after_drain() {
     .unwrap();
 
     // Initial snapshot may race the first drain on a fast box but is
-    // always one of {(NO_DATA, NO_DATA), (~0, FLOOR)} — either is
+    // always one of {(None, None), (Some(0.0), Some(FLOOR))} — either is
     // valid for the contract.
     let _ = twin.current_levels();
 
@@ -483,15 +544,19 @@ fn current_levels_reflects_per_channel_dbfs_after_drain() {
     drop(trailing);
 
     let (mic_db, sys_db) = twin.current_levels();
-    assert!(
-        (mic_db - 0.0).abs() < 0.5,
-        "mic should read ~0 dBFS post-drain, got {mic_db}"
+    // Full-scale peak → exactly 0.0 dBFS (clipping).
+    assert_eq!(
+        mic_db,
+        Some(0.0),
+        "full-scale mic should read 0 dBFS post-drain, got {mic_db:?}"
     );
     assert_eq!(
-        sys_db, DBFS_FLOOR,
-        "sys all-zero should report DBFS_FLOOR, got {sys_db}"
+        sys_db,
+        Some(DBFS_FLOOR),
+        "sys all-zero should report DBFS_FLOOR, got {sys_db:?}"
     );
-    // Sanity: neither channel should still be the no-data sentinel.
-    assert_ne!(mic_db, DBFS_NO_DATA);
-    assert_ne!(sys_db, DBFS_NO_DATA);
+    // mb-x1d sanity: both channels have real data (Some), NOT the
+    // no-data `None` -- even though mic is exactly 0 dBFS.
+    assert!(mic_db.is_some());
+    assert!(sys_db.is_some());
 }

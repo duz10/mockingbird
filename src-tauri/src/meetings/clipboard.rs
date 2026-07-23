@@ -176,13 +176,38 @@ mod platform {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+mod platform {
+    use arboard::Clipboard;
+
+    use crate::error::{AppError, AppResult};
+
+    /// macOS one-shot clipboard write (Phase 4a). Uses the portable
+    /// `arboard` crate — the same `set_text` path the dictation paste
+    /// injector uses on macOS (`injection::paste` mac arm), so the
+    /// meeting export re-uses the established, judged pasteboard
+    /// abstraction rather than pulling in a second one (DRY).
+    ///
+    /// No save/restore: like the Windows arm, the user *intends* to
+    /// replace their clipboard with the transcript (they clicked
+    /// "Copy to clipboard" on a finished meeting), so we deliberately
+    /// overwrite. This is the meeting-export exception documented in
+    /// the module header, distinct from dictation paste-injection.
+    pub fn copy_text_one_shot(text: &str) -> AppResult<()> {
+        let mut clipboard = Clipboard::new()
+            .map_err(|e| AppError::MeetingCapture(format!("open macOS pasteboard: {e}")))?;
+        clipboard
+            .set_text(text.to_owned())
+            .map_err(|e| AppError::MeetingCapture(format!("set macOS pasteboard text: {e}")))
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 mod platform {
     use crate::error::{AppError, AppResult};
 
-    /// Cross-platform stub. PLAN §10 Phase 9 brings macOS/Linux
-    /// clipboard support; until then, the IPC command surfaces this
-    /// error and the UI toasts.
+    /// Cross-platform stub for the remaining platforms (Linux is
+    /// future work). Surfaces an explicit error the UI toasts.
     pub fn copy_text_one_shot(_text: &str) -> AppResult<()> {
         Err(AppError::MeetingCapture(
             "meeting copy_to_clipboard not yet implemented on this platform".to_string(),
@@ -234,9 +259,19 @@ mod tests {
         assert!(wide.len() >= 7);
     }
 
-    #[cfg(not(target_os = "windows"))]
+    // On macOS (Phase 4a) the export path is real (arboard); mirror
+    // the Windows ignored smoke so it isn't run in CI (mutates the
+    // user's clipboard).
     #[test]
-    fn non_windows_returns_explicit_error() {
+    #[ignore]
+    #[cfg(target_os = "macos")]
+    fn copy_text_round_trips_macos() {
+        copy_text_one_shot("hello from mockingbird").expect("copy");
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[test]
+    fn unsupported_platform_returns_explicit_error() {
         let err = copy_text_one_shot("hello").unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("not yet implemented"), "got: {msg}");

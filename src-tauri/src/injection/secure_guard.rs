@@ -22,6 +22,10 @@
 //! [`crate::window_context::WindowContext::foreground`] and never
 //! reach this code path at all.
 
+// macOS port: these helpers are consumed only by the Windows secure-input path;
+// dead on non-Windows until the cross-platform backend lands (Phase 3/4).
+#![cfg_attr(not(target_os = "windows"), allow(dead_code))]
+
 use crate::window_context::ForegroundWindow;
 
 #[cfg(target_os = "windows")]
@@ -74,6 +78,37 @@ pub struct NeverSecureGuard;
 impl SecureInputGuard for NeverSecureGuard {
     fn is_secure(&self, _fg: &ForegroundWindow) -> bool {
         false
+    }
+}
+
+/// Construct the platform-default secure-input guard (ADR 0063 `.4.7b`).
+///
+/// Mirrors the other `make_default_*` factories
+/// ([`crate::injection::make_default_injector`] /
+/// [`crate::window_context::make_default_context`]) so the dictation
+/// runtime stops hard-constructing `WinSecureInputGuard` directly.
+///
+/// Infallible by design — guard construction is free on both real
+/// platforms — so this returns a plain `Box`, not `AppResult` (YAGNI:
+/// the call-site never used `?`).
+///
+/// | Platform | Guard |
+/// |----------|-------|
+/// | Windows  | [`WinSecureInputGuard`] |
+/// | macOS    | [`MacSecureInputGuard`] |
+/// | other    | [`NeverSecureGuard`] (permissive null — the dictation runtime never spawns there) |
+pub fn make_default_guard() -> Box<dyn SecureInputGuard> {
+    #[cfg(target_os = "windows")]
+    {
+        Box::new(WinSecureInputGuard::new())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Box::new(MacSecureInputGuard::new())
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        Box::new(NeverSecureGuard)
     }
 }
 
@@ -185,6 +220,183 @@ fn focused_edit_is_password(foreground: HWND) -> bool {
 
     let style = unsafe { GetWindowLongPtrW(focused, GWL_STYLE) };
     style_has_es_password(style)
+}
+
+// --------------------------------------------------------------------
+// macOS branch (ADR 0059, mb-mac-v1.4.3)
+// --------------------------------------------------------------------
+//
+// Plugs into the SAME `SecureInputGuard` seam as the Windows guard.
+// Detection signals, OR-combined:
+//
+//   1. **Per-field AX role** (PRIMARY) — the system-wide focused UI
+//      element's `AXRole` equals `AXSecureTextField`. This is the macOS
+//      twin of the Windows per-element `ES_PASSWORD` check. Needs the
+//      Accessibility grant to read the AX tree.
+//   2. **`IsSecureEventInputEnabled()`** (belt-and-suspenders) — a
+//      coarse, system-wide Carbon flag set whenever any app has secure
+//      keyboard entry on. Readable WITHOUT any permission.
+//
+// ## Fail-safe stance (Accessibility not granted)
+//
+// The Windows guard fails *permissive* when a signal can't be read
+// (returns `false`), relying on the upstream null-foreground guard to
+// catch the truly-secure system surfaces. macOS mirrors that for the AX
+// signal: an unreadable AX tree yields `focused_role() == None`, i.e.
+// "not a secure field by this signal". But macOS is MORE conservative
+// than Windows overall, because signal #2 (`IsSecureEventInputEnabled`)
+// works with no grant at all and surfaces system-wide secure input even
+// when AX is blind. And note the natural backstop: the Cmd+V keypost in
+// `macos.rs` is gated on the SAME Accessibility grant, so a denied grant
+// can never silently inject into a password field — the keypost is a
+// no-op too.
+//
+// The AX query sits behind the [`MacSecureInputProbe`] seam so the
+// `mac-p3c-secure-input-aborts` judge can mock it deterministically
+// without a real Accessibility grant.
+
+/// macOS AX role string for a secure (password) text field. Parity with
+/// the Windows `ES_PASSWORD` per-element check.
+#[cfg(target_os = "macos")]
+pub const AX_SECURE_TEXT_FIELD_ROLE: &str = "AXSecureTextField";
+
+/// Mockable seam over the two macOS secure-input signals. The judge
+/// substitutes a fake; production uses [`AxSecureInputProbe`].
+#[cfg(target_os = "macos")]
+pub trait MacSecureInputProbe: Send + Sync {
+    /// `AXRole` of the system-wide focused UI element, or `None` when it
+    /// cannot be determined (no Accessibility grant / no focused
+    /// element).
+    fn focused_role(&self) -> Option<String>;
+    /// The system-wide `IsSecureEventInputEnabled()` Carbon flag.
+    fn secure_event_input_enabled(&self) -> bool;
+}
+
+/// Pure classifier — secure iff system-wide secure input is on OR the
+/// focused element is a secure text field. Testable without any FFI.
+#[cfg(target_os = "macos")]
+pub fn classify_mac_secure(focused_role: Option<&str>, secure_event_input: bool) -> bool {
+    secure_event_input || matches!(focused_role, Some(r) if r == AX_SECURE_TEXT_FIELD_ROLE)
+}
+
+/// Production macOS guard. Composes the two signals via the AX/Carbon
+/// FFI probe. Construction is free; all cost is in `is_secure`.
+#[cfg(target_os = "macos")]
+pub struct MacSecureInputGuard {
+    probe: Box<dyn MacSecureInputProbe>,
+}
+
+#[cfg(target_os = "macos")]
+impl MacSecureInputGuard {
+    /// Production guard backed by the real AX + Carbon FFI probe.
+    pub fn new() -> Self {
+        Self {
+            probe: Box::new(AxSecureInputProbe),
+        }
+    }
+
+    /// Inject a custom probe — used by the `mac-p3c` judge to feed a
+    /// mocked focused-element role deterministically.
+    pub fn with_probe(probe: Box<dyn MacSecureInputProbe>) -> Self {
+        Self { probe }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Default for MacSecureInputGuard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl SecureInputGuard for MacSecureInputGuard {
+    fn is_secure(&self, _fg: &ForegroundWindow) -> bool {
+        // The macOS focused element is read system-wide, not per-window,
+        // so `_fg` is unused (kept for trait parity with Windows).
+        classify_mac_secure(
+            self.probe.focused_role().as_deref(),
+            self.probe.secure_event_input_enabled(),
+        )
+    }
+}
+
+/// Real probe: reads the AX tree + the Carbon secure-input flag.
+#[cfg(target_os = "macos")]
+struct AxSecureInputProbe;
+
+#[cfg(target_os = "macos")]
+impl MacSecureInputProbe for AxSecureInputProbe {
+    fn focused_role(&self) -> Option<String> {
+        // SAFETY: the AX calls below pass only valid, owned references
+        // and balance every Copy-rule retain with a release.
+        unsafe { ax_focused_role() }
+    }
+
+    fn secure_event_input_enabled(&self) -> bool {
+        // SAFETY: `IsSecureEventInputEnabled` has no preconditions.
+        unsafe { IsSecureEventInputEnabled() != 0 }
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "Carbon", kind = "framework")]
+extern "C" {
+    /// Carbon system-wide secure keyboard-entry flag. Returns a Carbon
+    /// `Boolean` (`unsigned char`); readable without any grant.
+    fn IsSecureEventInputEnabled() -> std::os::raw::c_uchar;
+}
+
+/// Read the `AXRole` of the system-wide focused UI element.
+///
+/// Returns `None` when Accessibility is not granted, when there is no
+/// focused element, or on any AX error (the conservative "this signal
+/// says nothing" outcome).
+///
+/// # Safety
+/// Calls Apple AX FFI. Each `…Copy…` result is released exactly once
+/// (Copy rule = caller owns +1).
+#[cfg(target_os = "macos")]
+unsafe fn ax_focused_role() -> Option<String> {
+    use accessibility_sys::{
+        kAXErrorSuccess, kAXFocusedUIElementAttribute, kAXRoleAttribute,
+        AXUIElementCopyAttributeValue, AXUIElementCreateSystemWide, AXUIElementRef,
+    };
+    use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
+    use core_foundation::string::{CFString, CFStringRef};
+
+    let system = AXUIElementCreateSystemWide();
+    if system.is_null() {
+        return None;
+    }
+
+    // 1. Focused UI element.
+    let focused_attr = CFString::from_static_string(kAXFocusedUIElementAttribute);
+    let mut focused: CFTypeRef = std::ptr::null();
+    let err =
+        AXUIElementCopyAttributeValue(system, focused_attr.as_concrete_TypeRef(), &mut focused);
+    CFRelease(system as CFTypeRef);
+    if err != kAXErrorSuccess || focused.is_null() {
+        return None;
+    }
+
+    // 2. `AXRole` of the focused element.
+    let role_attr = CFString::from_static_string(kAXRoleAttribute);
+    let mut role_val: CFTypeRef = std::ptr::null();
+    let err = AXUIElementCopyAttributeValue(
+        focused as AXUIElementRef,
+        role_attr.as_concrete_TypeRef(),
+        &mut role_val,
+    );
+    CFRelease(focused);
+    if err != kAXErrorSuccess || role_val.is_null() {
+        return None;
+    }
+
+    // `role_val` is a CFString owned by us (+1) — wrap_under_create_rule
+    // takes ownership and releases on drop.
+    let role = CFString::wrap_under_create_rule(role_val as CFStringRef);
+    Some(role.to_string())
 }
 
 #[cfg(test)]

@@ -11,14 +11,22 @@ prompts_dir = r'src-tauri\src\cleanup\prompts'
 
 # Map __PROMPT_<NAME>_BODY__ token -> source file (mirrors prompt_loader.rs).
 PROMPT_FILES = {
-    '__PROMPT_NORMAL_BODY__':     'normal.md',
-    '__PROMPT_NORMAL_V2_BODY__':  'normal_v2.md',
-    '__PROMPT_NORMAL_V3_BODY__':  'normal_v3.md',
-    '__PROMPT_VERBOSE_BODY__':    'verbose.md',
-    '__PROMPT_FRAGMENT_BODY__':   'fragment.md',
-    '__PROMPT_REWRITE_BODY__':    'rewrite.md',
-    '__PROMPT_EXPAND_BODY__':     'expand.md',
-    '__PROMPT_SUMMARIZE_BODY__':  'summarize.md',
+    '__PROMPT_NORMAL_BODY__':            'normal.md',
+    '__PROMPT_NORMAL_V2_BODY__':         'normal_v2.md',
+    '__PROMPT_NORMAL_V3_BODY__':         'normal_v3.md',
+    '__PROMPT_NORMAL_V4_BODY__':         'normal_v4.md',
+    '__PROMPT_NORMAL_V5_BODY__':         'normal_v5.md',
+    '__PROMPT_NORMAL_V6_ADDITIVE_BODY__':'normal_v6_additive.md',
+    '__PROMPT_NORMAL_SMALL_BODY__':      'normal_small.md',
+    '__PROMPT_CASUAL_V1_BODY__':         'casual_v1.md',
+    '__PROMPT_CASUAL_V2_BODY__':         'casual_v2.md',
+    '__PROMPT_FORMAL_V1_BODY__':         'formal_v1.md',
+    '__PROMPT_FORMAL_V2_BODY__':         'formal_v2.md',
+    '__PROMPT_VERBOSE_BODY__':           'verbose.md',
+    '__PROMPT_FRAGMENT_BODY__':          'fragment.md',
+    '__PROMPT_REWRITE_BODY__':           'rewrite.md',
+    '__PROMPT_EXPAND_BODY__':            'expand.md',
+    '__PROMPT_SUMMARIZE_BODY__':         'summarize.md',
 }
 
 def load_body(token):

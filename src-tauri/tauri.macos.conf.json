@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.tauri.app/config/2.0.0",
+  "bundle": {
+    "resources": {
+      "../models/whisper-large-v3-turbo-q5_0.bin": "models/whisper-large-v3-turbo-q5_0.bin",
+      "../models/silero_vad.onnx": "models/silero_vad.onnx",
+      "../models/libonnxruntime.1.22.0.dylib": "models/libonnxruntime.dylib"
+    }
+  }
+}

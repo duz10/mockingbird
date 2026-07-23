@@ -10,15 +10,21 @@
 //!
 //! Skips gracefully when the Whisper model isn't on disk.
 
+// macOS port: PathBuf + black_box are consumed only by the Windows-gated
+// bench body below; gate them to match (Phase 3/4 wires the cross-platform STT).
+#[cfg(target_os = "windows")]
 use std::path::PathBuf;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+#[cfg(target_os = "windows")]
+use criterion::black_box;
+use criterion::{criterion_group, criterion_main, Criterion};
 
 #[cfg(target_os = "windows")]
 use mockingbird_lib::stt::whisper::WhisperStt;
 #[cfg(target_os = "windows")]
 use mockingbird_lib::stt::{SpeechToText, TranscribeRequest};
 
+#[cfg(target_os = "windows")]
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/audio")
 }

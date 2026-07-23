@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS Info.plist merge fragment (macOS-port).
+
+  Tauri v2 merges these keys into the generated macOS `Info.plist` for
+  both `cargo tauri dev` and the packaged `.app`. The Windows msi/nsis
+  bundler and the Rust compiler never read this file, so it is inert on
+  Windows (the Windows build stays byte-identical).
+
+  TCC usage strings are REQUIRED: without them the permission prompt is
+  malformed/denied. ScreenCaptureKit additionally delivers *silent*
+  (zero-filled) audio rather than erroring when Screen Recording is not
+  granted (ADR 0068 §6 gotcha B) — the SckSysCapture silent-buffer
+  detector surfaces that at runtime, but the usage string is what makes
+  the grant obtainable in the first place.
+-->
+<plist version="1.0">
+<dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Mockingbird uses the microphone to transcribe your dictation and to capture your side of meetings. Audio is processed entirely on-device.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Mockingbird uses Screen Recording to capture system audio (the other participants) during meeting recording. Only audio is captured; nothing on your screen is recorded or transmitted, and everything is processed on-device.</string>
+</dict>
+</plist>

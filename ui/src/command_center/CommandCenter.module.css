@@ -50,6 +50,13 @@
   }
 }
 
+/* Non-welcome states (mode picker + session card) have no header band,
+ * so reserve a top gutter that houses the absolute close button and
+ * keeps it from overlapping the first row of tiles / the Stop button. */
+.card:not([data-welcome]) {
+  padding-top: 38px;
+}
+
 .welcomeBand {
   display: flex;
   flex-direction: column;
@@ -62,8 +69,10 @@
 }
 
 .closeButton {
-  /* Top-right close affordance for the welcome variant. Calls the
-   * same dismiss path as Esc + outside-click. */
+  /* Always-present top-right close affordance. Calls the same dismiss
+   * path as Esc + outside-click. In the welcome variant the band
+   * clears it horizontally (padding-right); in every other state the
+   * `.card:not([data-welcome])` gutter below clears it vertically. */
   position: absolute;
   top: 8px;
   right: 8px;

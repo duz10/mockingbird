@@ -369,7 +369,12 @@ mod tests {
         let sid = insert_session(&db.conn, 1_000_000).unwrap();
         db.conn
             .execute(
-                "UPDATE activity_sessions SET status = 'completed', ended_at = 1_500_000 WHERE id = ?1",
+                // 1500000, NOT `1_500_000`: SQLite's tokenizer rejects
+                // Rust-style underscore digit separators inside SQL
+                // literals ("unrecognized token"). (mb-mac-v1.9: typo
+                // that only bit once Mac ran the suite for real --
+                // Windows gates with `--no-run`.)
+                "UPDATE activity_sessions SET status = 'completed', ended_at = 1500000 WHERE id = ?1",
                 params![sid],
             )
             .unwrap();

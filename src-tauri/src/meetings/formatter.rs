@@ -75,56 +75,61 @@ pub fn format(
         return Ok(String::new());
     }
 
-    // Step 1+2+3: tokenize each segment, then phrase-pass + filler-pass
-    // + repeat-pass per segment. Per-segment processing keeps the
-    // implementation linear in total token count.
-    let processed: Vec<Vec<String>> = segments
-        .iter()
-        .map(|seg| {
-            let tokens: Vec<&str> = seg.text.split_whitespace().collect();
-            let stripped = strip_phrases_and_fillers(&tokens, filler_set, opts);
-            if opts.strip_repeats {
-                strip_repeats(&stripped)
-            } else {
-                stripped
-            }
-        })
-        .collect();
-
-    // Step 4: join. Skip empty (all-filler) segments but track timing
-    // off the LAST EMITTED segment for paragraph-gap calculation —
-    // gluing across a skipped segment uses the surviving neighbour's
-    // t1 as the reference, which keeps the user's "real silence"
-    // detection correct.
-    let mut out = String::new();
+    // Step 1 — GROUP raw tokens into paragraphs. A paragraph is a run of
+    // segments whose inter-segment gap stays below `paragraph_gap_ms`
+    // (measured off the last segment that CONTRIBUTED words); a gap at or
+    // above the threshold starts a fresh paragraph. Segment text is ALSO
+    // split on any embedded blank line ("\n\n") — which only appears when
+    // already-formatted prose is fed back through `format` — so a prior
+    // pass's paragraph breaks are preserved rather than flattened by
+    // `split_whitespace`. That preservation is one half of what makes
+    // `format` idempotent; `strip_to_fixpoint` (Step 2) is the other. (mb-7k6)
+    let mut paragraphs: Vec<Vec<&str>> = Vec::new();
     let mut prev_t1_ms: Option<u32> = None;
-    for (i, tokens) in processed.iter().enumerate() {
-        if tokens.is_empty() {
-            continue;
-        }
-        if let Some(pt1) = prev_t1_ms {
-            let gap = segments[i].t0_ms.saturating_sub(pt1);
-            if gap >= opts.paragraph_gap_ms {
-                out.push_str("\n\n");
+    for seg in segments {
+        let mut contributed = false;
+        for block in split_into_paragraphs(&seg.text) {
+            let tokens: Vec<&str> = block.split_whitespace().collect();
+            if tokens.is_empty() {
+                continue;
+            }
+            let start_new = if contributed {
+                // A second+ block within one segment is an explicit
+                // paragraph break carried in the (re-fed) segment text.
+                true
+            } else if let Some(pt1) = prev_t1_ms {
+                seg.t0_ms.saturating_sub(pt1) >= opts.paragraph_gap_ms
             } else {
-                out.push(' ');
+                true // the very first paragraph
+            };
+            if start_new || paragraphs.is_empty() {
+                paragraphs.push(tokens);
+            } else if let Some(last) = paragraphs.last_mut() {
+                last.extend(tokens);
             }
+            contributed = true;
         }
-        // Per-segment intra-token joining is single-space — the segment-
-        // boundary handling above is the only place "\n\n" enters.
-        for (tok_idx, tok) in tokens.iter().enumerate() {
-            if tok_idx > 0 {
-                out.push(' ');
-            }
-            out.push_str(tok);
+        if contributed {
+            prev_t1_ms = Some(seg.t1_ms);
         }
-        prev_t1_ms = Some(segments[i].t1_ms);
     }
 
-    // Step 5: capitalization pass.
-    let cased = capitalize(&out, opts);
+    // Step 2 — strip each paragraph's MERGED token stream to a fixpoint
+    // (phrase + filler + repeat passes iterated until nothing more is
+    // removed). Stripping the merged stream (not per-segment) also cleans
+    // fillers/repeats that only appear once two segments are glued (e.g.
+    // "you" + "know" -> the filler phrase "you know"), which is both
+    // strictly better and required for idempotency. Empty (all-filler)
+    // paragraphs drop out.
+    let rendered: Vec<String> = paragraphs
+        .iter()
+        .map(|toks| strip_to_fixpoint(toks, filler_set, opts).join(" "))
+        .filter(|p| !p.is_empty())
+        .collect();
 
-    // Step 6: trim.
+    // Step 3 — join paragraphs with "\n\n", then capitalize + trim.
+    let joined = rendered.join("\n\n");
+    let cased = capitalize(&joined, opts);
     let final_out = if opts.strip_leading_trailing_ws {
         cased.trim().to_string()
     } else {
@@ -132,6 +137,75 @@ pub fn format(
     };
 
     Ok(final_out)
+}
+
+/// Split `text` into paragraph slices on any whitespace run containing a
+/// blank line (>= 2 newlines). Single newlines and spaces stay *inside*
+/// a paragraph (the tokenizer collapses them). Raw STT segment text never
+/// carries "\n\n", so on the production single-pass path this returns
+/// exactly one slice; only already-formatted prose fed back through
+/// `format` exercises the multi-slice branch. Empty / whitespace-only
+/// input yields no slices. (mb-7k6)
+fn split_into_paragraphs(text: &str) -> Vec<&str> {
+    let mut out: Vec<&str> = Vec::new();
+    let mut para_start: Option<usize> = None;
+    let mut run_start = 0usize;
+    let mut run_newlines = 0usize;
+    let mut in_ws = false;
+    for (idx, c) in text.char_indices() {
+        if c.is_whitespace() {
+            if !in_ws {
+                in_ws = true;
+                run_start = idx;
+                run_newlines = 0;
+            }
+            if c == '\n' {
+                run_newlines += 1;
+            }
+        } else {
+            if in_ws && run_newlines >= 2 {
+                if let Some(start) = para_start.take() {
+                    out.push(&text[start..run_start]);
+                }
+            }
+            in_ws = false;
+            if para_start.is_none() {
+                para_start = Some(idx);
+            }
+        }
+    }
+    if let Some(start) = para_start {
+        out.push(&text[start..]);
+    }
+    out
+}
+
+/// Apply the phrase/filler pass and (when enabled) the repeat pass
+/// repeatedly until the token list stops shrinking. A SINGLE pass is not
+/// a fixpoint: removing a middle filler can bring two survivors together
+/// into a *new* filler phrase or repeat (e.g. `you <um> know` -> `you
+/// know`). Iterating to a fixpoint is what lets `format(format(x))`
+/// equal `format(x)` — re-running finds nothing left to remove. Each
+/// pass only deletes tokens, so length is monotonically non-increasing;
+/// equal length means no change, so this terminates in <= tokens.len()
+/// iterations. (mb-7k6)
+fn strip_to_fixpoint(
+    tokens: &[&str],
+    filler_set: &phf::Set<&'static str>,
+    opts: &FormatOpts,
+) -> Vec<String> {
+    let mut current: Vec<String> = tokens.iter().map(|t| t.to_string()).collect();
+    loop {
+        let refs: Vec<&str> = current.iter().map(String::as_str).collect();
+        let mut next = strip_phrases_and_fillers(&refs, filler_set, opts);
+        if opts.strip_repeats {
+            next = strip_repeats(&next);
+        }
+        if next.len() == current.len() {
+            return next;
+        }
+        current = next;
+    }
 }
 
 // ---------- internal helpers (pub(super) for fine-grained tests) ----------
@@ -495,6 +569,33 @@ mod tests {
 
     // ---------- Wave-1 smoke kept (defaults pin) ----------
 
+    // ---------- idempotency (mb-7k6) ----------
+
+    #[test]
+    fn format_is_idempotent_on_paragraph_breaks() {
+        // A >= threshold gap between two segments produces a real "\n\n"
+        // paragraph break. Re-feeding that output as a single segment
+        // must reproduce it byte-for-byte -- pre-fix the break collapsed
+        // back to a single space.
+        let once = fmt(&[
+            seg("the cat sat", 0, 1_000),
+            seg("the dog ran", 4_000, 5_000),
+        ]);
+        assert_eq!(once, "The cat sat\n\nThe dog ran");
+        let twice = fmt(&[seg(&once, 0, 1_000)]);
+        assert_eq!(twice, once);
+    }
+
+    #[test]
+    fn cross_segment_filler_phrase_stripped_and_idempotent() {
+        // "you" (seg 1) + "know" (seg 2) merge into the filler phrase
+        // "you know" within one paragraph -> stripped. Pre-fix this
+        // survived per-segment stripping and broke idempotency.
+        let once = fmt(&[seg("you", 0, 1_000), seg("know this", 1_200, 2_000)]);
+        assert_eq!(once, "This");
+        assert_eq!(fmt(&[seg(&once, 0, 1_000)]), once);
+    }
+
     #[test]
     fn default_opts_match_section_mc_3() {
         let opts = FormatOpts::default();
@@ -563,6 +664,13 @@ mod tests {
         /// re-running the formatter is a fixpoint. This catches
         /// double-stripping bugs, capitalization creep, and
         /// trim-of-trim being non-identity.
+        ///
+        /// mb-7k6: the formatter IS now a fixpoint. Previously it was
+        /// not -- re-formatting collapsed paragraph breaks (".\n\nA" ->
+        /// ". A") and re-stripped fillers/repeats that only appeared
+        /// once segments were glued. The fix preserves "\n\n" through the
+        /// tokenizer (`split_into_paragraphs`) and strips each merged
+        /// paragraph to a fixpoint (`strip_to_fixpoint`).
         #[test]
         fn format_is_idempotent_fixpoint(segments in segments_strategy()) {
             let once = fmt(&segments);

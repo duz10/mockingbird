@@ -532,8 +532,13 @@ fn frontmatter_uses_type_not_entry_type_on_wire() {
     // keyword collision).
     let e = full_task_entry();
     let out = serialize_entry(&e);
+    // `full_task_entry()` carries `EntryType::Note` (the enum has no
+    // `Task` variant -- task/event/idea all map to Note; task-ness is
+    // conveyed via `status`/`due_date`). The wire field is therefore
+    // `type: "note"`. (mb-mac-v1.9: assertion previously expected the
+    // never-emitted literal `"task"`.)
     assert!(
-        out.contains("\ntype: \"task\"\n"),
+        out.contains("\ntype: \"note\"\n"),
         "must emit `type:`, not `entry_type:`: {out}"
     );
     assert!(

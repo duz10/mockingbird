@@ -112,7 +112,12 @@ mod tests {
     fn get_latest_for_mode_returns_highest_version() {
         let db = Database::open_in_memory().unwrap();
         let latest = get_latest_for_mode(&db.conn, "normal").unwrap().unwrap();
-        assert_eq!(latest.version, 1);
+        // The seed migrations (003/005/006/007/010) ship `normal`
+        // prompt versions up through v5, so the latest is 5 (not the
+        // original v1). Bump when a new `normal` prompt version is
+        // seeded. (mb-mac-v1.9: stale `1`; first surfaced on Mac's
+        // first real `cargo test` run — Windows gates `--no-run`.)
+        assert_eq!(latest.version, 5);
         assert_eq!(latest.mode_slug, "normal");
     }
 
@@ -131,7 +136,10 @@ mod tests {
     fn list_for_mode_orders_by_version_desc() {
         let db = Database::open_in_memory().unwrap();
         let list = list_for_mode(&db.conn, "normal").unwrap();
-        assert_eq!(list.len(), 1, "seed has v1 only");
+        // Seed migrations ship `normal` prompt versions v1..=v5.
+        // (mb-mac-v1.9: was `1` / "seed has v1 only" — stale since
+        // the v2-v5 bumps landed.)
+        assert_eq!(list.len(), 5, "seed has v1..=v5");
         // Confirm ordering invariant holds (even with 1 row).
         let versions: Vec<i64> = list.iter().map(|p| p.version).collect();
         let mut sorted = versions.clone();

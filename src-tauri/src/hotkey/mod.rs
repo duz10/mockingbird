@@ -28,10 +28,13 @@ pub mod windows;
 #[cfg(target_os = "macos")]
 pub mod macos;
 
+#[cfg(target_os = "macos")]
+pub mod judges_macos_v1;
+
 #[cfg(target_os = "linux")]
 pub mod linux;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 use crate::error::AppError;
 use crate::error::AppResult;
 
@@ -72,7 +75,12 @@ pub enum HotkeyEvent {
 /// 0015 codifies the rule: read the keystroke, build a [`HotkeyEvent`],
 /// `try_send` on the channel, return immediately. Anything else
 /// risks the Windows low-level-hook timeout and a silent unhook.
-pub trait HotkeyListener: Send {
+///
+/// `Send + Sync`: the listener is stored as a `Box<dyn HotkeyListener>`
+/// field of `DictationRuntime`, which Tauri holds as `Send + Sync`
+/// managed state (ADR 0063). All implementors are trivially `Sync`
+/// (they hold only a key code + a `JoinHandle` + a run-loop pointer).
+pub trait HotkeyListener: Send + Sync {
     /// Install the OS-level hook and begin emitting events on the
     /// provided sender. Idempotent: calling on an already-installed
     /// listener is a no-op.
@@ -96,10 +104,18 @@ pub fn make_default_listener() -> AppResult<Box<dyn HotkeyListener>> {
     {
         Ok(Box::new(windows::WinKeyboardHook::new()?))
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        // macOS port Phase 3 (mb-mac-v1.4.4): CGEventTap-backed
+        // listener (ADR 0057). Construction holds no OS resources;
+        // the tap + Input Monitoring permission are exercised at
+        // `install()`.
+        Ok(Box::new(macos::MacKeyboardHook::new()?))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         Err(AppError::Hotkey(
-            "hotkey listener not implemented for this platform (Phase 9 macOS/Linux)".into(),
+            "hotkey listener not implemented for this platform (Phase 9 Linux)".into(),
         ))
     }
 }

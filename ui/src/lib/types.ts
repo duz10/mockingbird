@@ -101,6 +101,12 @@ export interface SessionSummary {
    *  when there was no target app. Defaults to `"ptt"` for
    *  pre-migration-017 rows. */
   startMode: StartMode;
+  /** The cleanup model recorded on the cleaned transcript row
+   *  (`"qwen2.5:3b-…"` or `"passthrough"`), or `null`/absent on rows
+   *  with no cleaned stage. Drives the macOS Dictations Raw/Cleaned
+   *  badge (isMac-gated render). Optional so pre-existing fixtures /
+   *  test constructions stay valid. */
+  modelUsed?: string | null;
 }
 
 export interface SessionDetail {
@@ -165,6 +171,69 @@ export interface ModeRow {
   maxTokens: number;
   hotkey: string;
   promptVersion: string;
+}
+
+/**
+ * The effective cleanup model for a mode (ADR 0066). Powers the macOS
+ * Modes "Model" control so it shows what will ACTUALLY run, not the
+ * (possibly RAM-substituted) configured parity default.
+ *
+ * `overrideModel === null` means "Auto (RAM-aware)" — `effective` is the
+ * heuristic pick; otherwise `effective === overrideModel` (a user pin).
+ * `budgetGb` is the detected unified-memory budget in whole GiB on macOS,
+ * `null` on every other platform (where Auto is a no-op).
+ */
+export interface EffectiveModel {
+  configured: string;
+  effective: string;
+  overrideModel: string | null;
+  budgetGb: number | null;
+  ollamaReachable: boolean;
+}
+
+/**
+ * Live cleanup-engine status — "am I getting AI-cleaned text or raw
+ * passthrough?". Powers the isMac-gated signposting on Settings,
+ * Dictations, and Modes (shared `CleanupStatus` component). Backed by
+ * the `cleanup_status` command, which composes the same Ollama health
+ * check + RAM-aware model selection the dictation thread uses.
+ */
+export interface CleanupStatus {
+  /** `true` iff Ollama answered `/api/tags` — the service is running. */
+  ollamaReachable: boolean;
+  /**
+   * `true` iff Ollama is reachable AND a usable cleanup model resolves.
+   * When `false`, dictations are saved RAW (passthrough).
+   */
+  cleanupActive: boolean;
+  /**
+   * The RAM-aware effective model that WOULD run, when one resolves.
+   * `null` when cleanup is off (passthrough).
+   */
+  effectiveModel: string | null;
+  /** Locally-pulled Ollama model tags. Empty when Ollama is down. */
+  installedModels: string[];
+  /** The model tag to suggest the user `ollama pull` (universal 3B). */
+  recommendedPull: string;
+  /** `"high"` (>= 16 GiB) / `"small"`, or `null` with no budget signal. */
+  ramTier: "small" | "high" | null;
+}
+
+/**
+ * The effective cleanup PROMPT for a mode (ADR 0067). Powers the macOS
+ * Modes prompt editor: shows the shipped default vs the user's custom
+ * override, with Save + Revert.
+ *
+ * `isOverridden` distinguishes a user-authored prompt (`effectiveBody`
+ * === the override) from the shipped default (`effectiveBody` ===
+ * `defaultBody`). `defaultBody` / `defaultVersion` are the immutable
+ * shipped prompt a Revert restores.
+ */
+export interface EffectivePrompt {
+  defaultBody: string;
+  defaultVersion: number;
+  effectiveBody: string;
+  isOverridden: boolean;
 }
 
 /**
@@ -671,8 +740,11 @@ export interface MeetingProgressEvent {
 export interface MeetingTickEvent {
   uuid: string;
   elapsedMs: number;
-  micDb: number;
-  sysDb: number;
+  // mb-x1d: `null` == "no data yet" (channel never drained), distinct
+  // from a real full-scale `0` dBFS reading. The Rust emitter sends JSON
+  // `null` for the no-data sentinel.
+  micDb: number | null;
+  sysDb: number | null;
 }
 
 /** ADR 0046 Iter 2 / mb-vg3p — typed snapshot of every Mobile-Sync
@@ -755,3 +827,35 @@ export type VaultPathCheck =
       parentVault: string;
       suggestedSibling: string | null;
     };
+
+/* ------------------------------------------------------------------ */
+/* macOS permissions onboarding (mb-mac-v1.4.6 / ADR 0061)            */
+/* ------------------------------------------------------------------ */
+
+/** The four macOS privacy permissions Mockingbird surfaces. Wire-format
+ *  mirror of the Rust `permissions::Permission` enum (serde camelCase). */
+export type PermissionKey =
+  | "microphone"
+  | "inputMonitoring"
+  | "accessibility"
+  | "screenRecording";
+
+/** Grant state of a single permission. Mirror of the Rust
+ *  `permissions::PermissionState` (serde camelCase). `unsupported` is the
+ *  non-macOS answer; `notDetermined` covers both "never asked" and the
+ *  boolean-API "not granted" case (see ADR 0061). */
+export type PermissionState =
+  | "granted"
+  | "denied"
+  | "notDetermined"
+  | "restricted"
+  | "unsupported";
+
+/** All four grant states in one payload — what `mac_permission_statuses`
+ *  returns. Mirror of the Rust `permissions::PermissionStatuses`. */
+export interface PermissionStatuses {
+  microphone: PermissionState;
+  inputMonitoring: PermissionState;
+  accessibility: PermissionState;
+  screenRecording: PermissionState;
+}

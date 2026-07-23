@@ -57,6 +57,16 @@ pub mod ingest_progress;
 pub mod llm_prompts;
 pub mod paste_payload;
 pub mod runtime;
+// ADR 0063 — runtime helpers split out to keep `runtime.rs` under the
+// 600-line cap (cleaner-factory + DB-provenance concerns).
+pub mod runtime_cleaner;
+pub mod runtime_provenance;
+
+// macOS port Phase 3 (.4.7a) — dictation-backend un-gate judge probe.
+// macOS + metal only (it confirms the Metal backend through the
+// production WhisperStt); compiles to nothing elsewhere.
+#[cfg(all(target_os = "macos", feature = "metal"))]
+pub mod judges_macos_v1;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -178,6 +188,17 @@ pub struct DictationOrchestrator {
     /// `SessionsEventBus` recording-window field; nothing in the
     /// existing pipeline behavior changes.
     vault: Arc<crate::vault::export_job::VaultRuntime>,
+
+    /// mb-58i — whether to run the lazy Ollama self-heal at each
+    /// dictation boundary. Set TRUE only for the PRODUCTION cleaner
+    /// built by `runtime_cleaner::make_default_cleaner` (via
+    /// `with_cleaner_self_heal` in `run_dictation_thread`). Stays
+    /// `false` for test-injected cleaner doubles so the self-heal never
+    /// hijacks an injected `PassthroughCleaner` by rebuilding a real
+    /// Ollama-backed `LlmCleaner` off the live DB — which would make the
+    /// orchestrator tests non-deterministic on any box where Ollama
+    /// happens to be running.
+    cleaner_self_heal: bool,
 
     // Per-session transient state.
     state: SessionState,
@@ -627,8 +648,20 @@ impl DictationOrchestrator {
             next_start_is_programmatic,
             next_start_is_kg_note,
             vault,
+            cleaner_self_heal: false,
             state: SessionState::default(),
         }
+    }
+
+    /// mb-58i — enable the lazy Ollama self-heal for this orchestrator.
+    /// Called ONLY by the production spawn path
+    /// (`runtime::run_dictation_thread`) whose cleaner comes from
+    /// `make_default_cleaner`; test doubles never opt in, so an injected
+    /// `PassthroughCleaner` is never silently rebuilt into a real
+    /// Ollama-backed cleaner.
+    pub fn with_cleaner_self_heal(mut self) -> Self {
+        self.cleaner_self_heal = true;
+        self
     }
 
     /// Emit the post-persist UI refetch signal via the
@@ -1015,6 +1048,24 @@ impl DictationOrchestrator {
         // Cleanup.
         self.recording_window
             .set_state(crate::recording_window::state::CLEANING, Some(&mode_slug));
+        // mb-58i — lazy Ollama self-heal. If we booted while Ollama was
+        // down we're on the passthrough fallback; re-check now (cheap —
+        // only pings when currently on passthrough) and swap in a real
+        // LlmCleaner if Ollama has since come up. No-op / zero-cost once
+        // a live cleaner is in place. Gated to the production cleaner
+        // (`cleaner_self_heal`) so it never rebuilds a test-injected
+        // passthrough double off the live DB/Ollama.
+        if self.cleaner_self_heal {
+            if let Some(upgraded) =
+                crate::dictation::runtime_cleaner::maybe_upgrade_from_passthrough(
+                    self.cleaner.as_ref(),
+                    &self.db,
+                    &self.config,
+                )
+            {
+                self.cleaner = upgraded;
+            }
+        }
         let cleanup_start = Instant::now();
         tracing::info!(mode = %mode_slug, "dictation: cleanup begin");
         let cleaned_text = match self.cleaner.clean(&raw_text, &mode_slug) {
@@ -1217,6 +1268,14 @@ impl DictationOrchestrator {
         }
         if let Err(e) = transcripts::insert_cleaned(&conn, id, p.cleaned_text, p.cleanup_model) {
             tracing::warn!(error = ?e, session_id = id, "persist cleaned transcript failed");
+        }
+        // ADR 0065 v2 — stamp the prompt that ACTUALLY ran (e.g.
+        // `normal_small v2` on a downsized Mac) so the Metadata stops
+        // inferring it from the mode's canonical prompt_id (normal@v5).
+        if let Some(label) = self.cleaner.prompt_label() {
+            if let Err(e) = sessions::set_effective_prompt_label(&conn, id, &label) {
+                tracing::warn!(error = ?e, session_id = id, "persist effective_prompt_label failed");
+            }
         }
         if let Some(injected) = p.injected_text {
             if let Err(e) = transcripts::insert_final(&conn, id, injected, Some(p.cleanup_model)) {

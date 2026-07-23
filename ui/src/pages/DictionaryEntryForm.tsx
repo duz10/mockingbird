@@ -11,6 +11,7 @@
 
 import { ChipInput } from "../components/ChipInput";
 import { t } from "../i18n";
+import { useAppStore } from "../lib/store";
 
 import styles from "./AddDictionaryTermDialog.module.css";
 
@@ -32,6 +33,12 @@ export function DictionaryEntryForm({
   onChange,
   autoFocusCanonical,
 }: Props) {
+  // macOS-port (mb-ihg sweep): the app-context example is a Windows
+  // process name (`slack.exe`) on Windows, but on macOS the captured
+  // foreground-app key is the bundle id (see window_context::macos
+  // map_to_foreground). `isMac` is `null` on Windows/pre-boot, so the
+  // Windows placeholder stays byte-identical.
+  const isMac = useAppStore((s) => s.isMac);
   return (
     <div className={styles.form}>
       <label className={styles.field}>
@@ -60,7 +67,11 @@ export function DictionaryEntryForm({
           className={styles.input}
           value={value.appContext}
           onChange={(e) => onChange({ ...value, appContext: e.target.value })}
-          placeholder={t("dictionary.add.placeholder.appContext")}
+          placeholder={t(
+            isMac
+              ? "dictionary.add.placeholder.appContext.mac"
+              : "dictionary.add.placeholder.appContext",
+          )}
           aria-label={t("dictionary.column.appContext")}
         />
       </label>

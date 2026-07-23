@@ -42,7 +42,19 @@ pub fn derive_meeting_title(
     let paragraph = first_substantive_paragraph(body)?;
     let raw_words: Vec<&str> = paragraph.split_whitespace().collect();
     let head = collect_lead_words(&raw_words, MAX_WORDS)?;
-    Some(finalize(&head))
+    let title = finalize(&head);
+    // An all-connector head (e.g. "---") survives `collect_lead_words`
+    // because '-' is a preserved connector glyph, but `finalize`
+    // then strips it down to "". A blank title is meaningless and
+    // would render as an empty meeting header, so fall back to None
+    // (caller substitutes the localized "Untitled meeting").
+    // (mb-mac-v1.9: real bug -- pure-punctuation input returned
+    // Some("") instead of None; surfaced on Mac's first real test run.)
+    if title.is_empty() {
+        None
+    } else {
+        Some(title)
+    }
 }
 
 /// First non-empty, non-whitespace-only channel from the priority list.
@@ -72,7 +84,7 @@ fn first_substantive_paragraph(body: &str) -> Option<String> {
         // otherwise pass and produce nonsense titles.
         let has_substance = stripped
             .split_whitespace()
-            .any(|w| trim_token(w).chars().count() >= MIN_LEAD_TOKEN_LEN);
+            .any(|w| trim_token_core(w).chars().count() >= MIN_LEAD_TOKEN_LEN);
         if has_substance {
             return Some(stripped);
         }
@@ -107,14 +119,16 @@ fn collect_lead_words(words: &[&str], n: usize) -> Option<Vec<String>> {
     // the FIRST word of the title.
     let start = words
         .iter()
-        .position(|w| trim_token(w).chars().count() >= MIN_LEAD_TOKEN_LEN)?;
+        .position(|w| trim_token_core(w).chars().count() >= MIN_LEAD_TOKEN_LEN)?;
     let mut out: Vec<String> = Vec::with_capacity(n);
     for w in words.iter().skip(start) {
-        let cleaned = trim_token(w);
-        if cleaned.is_empty() {
+        // Skip tokens with no substance (pure punctuation, incl. a lone
+        // comma). `trim_token_core` strips commas too, so "," is empty
+        // here; the pushed `trim_token` output keeps interior commas.
+        if trim_token_core(w).is_empty() {
             continue;
         }
-        out.push(cleaned.to_string());
+        out.push(trim_token(w).to_string());
         if out.len() == n {
             break;
         }
@@ -126,28 +140,47 @@ fn collect_lead_words(words: &[&str], n: usize) -> Option<Vec<String>> {
     }
 }
 
-/// Strip leading/trailing punctuation, brackets, and quotes from a
-/// whitespace-separated token. Preserves internal punctuation (so
-/// "don't" stays "don't" and "co-worker" stays "co-worker").
+/// Strip leading/trailing punctuation, brackets, and double-quotes from
+/// a whitespace-separated token for OUTPUT. Preserves `'` (contractions
+/// like "don't"), `-` ("co-worker"), AND `,` — mb-zd0: an interior comma
+/// is content ("Testing, one, two" must keep its commas), so it is NOT a
+/// strippable edge glyph at the token level. A wrapping single-quote or
+/// a trailing comma at the TITLE edge is handled once, in `finalize`.
 fn trim_token(t: &str) -> &str {
     t.trim_matches(|c: char| {
-        c.is_ascii_punctuation() && !matches!(c, '\'' | '-')
-            || c == '"'
-            || c == '“'
-            || c == '”'
-            || c == '‘'
-            || c == '’'
+        c.is_ascii_punctuation() && !matches!(c, '\'' | '-' | ',')
+            || matches!(c, '“' | '”' | '‘' | '’')
+    })
+}
+
+/// Like [`trim_token`] but ALSO strips edge commas. Used only to JUDGE
+/// substance (is this token real enough to start/anchor a title?) — a
+/// comma-only token has no substance and must not qualify, even though
+/// output cleaning keeps interior commas. mb-zd0.
+fn trim_token_core(t: &str) -> &str {
+    t.trim_matches(|c: char| {
+        c.is_ascii_punctuation() && !matches!(c, '\'' | '-') || matches!(c, '“' | '”' | '‘' | '’')
     })
 }
 
 /// Join, char-cap at MAX_CHARS without splitting a token, and
-/// capitalize the first character. Strips a trailing punctuation
-/// glyph if present (don't want titles ending in ",").
+/// capitalize the first character.
+///
+/// mb-zd0: punctuation is trimmed ONLY at the title edges — interior
+/// commas/periods are content and must survive ("Testing, one, two"
+/// keeps its commas). Leading: strip any opening punctuation or
+/// wrapping quote. Trailing: strip closing punctuation but keep a
+/// terminal ")", "]", "!" or "?" (those read as intentional), and
+/// strip a wrapping single/double quote.
 fn finalize(words: &[String]) -> String {
     let joined = words.join(" ");
     let capped = cap_at_chars(&joined, MAX_CHARS);
-    let trimmed = capped.trim_end_matches(|c: char| {
-        c.is_ascii_punctuation() && !matches!(c, ')' | ']' | '!' | '?')
+    let lead_trimmed = capped.trim_start_matches(|c: char| {
+        c.is_ascii_punctuation() || matches!(c, '“' | '”' | '‘' | '’')
+    });
+    let trimmed = lead_trimmed.trim_end_matches(|c: char| {
+        (c.is_ascii_punctuation() && !matches!(c, ')' | ']' | '!' | '?'))
+            || matches!(c, '“' | '”' | '‘' | '’')
     });
     capitalize_first(trimmed)
 }
@@ -220,8 +253,10 @@ mod tests {
     }
 
     #[test]
-    fn strips_trailing_punctuation_on_short_input() {
+    fn strips_trailing_punctuation_keeps_interior_comma() {
         let t = derive("hello, world.").unwrap();
+        // mb-zd0: the interior comma on "hello," is CONTENT and stays;
+        // only the trailing period is trimmed at the title edge.
         assert_eq!(t, "Hello, world");
     }
 
@@ -237,12 +272,32 @@ mod tests {
         assert_eq!(t, "API design sync for Q3");
     }
 
+    // ---- mid-title punctuation (mb-zd0) -----------------------------
+
+    #[test]
+    fn preserves_mid_title_commas() {
+        // mb-zd0: interior commas are content, not noise. Trailing comma
+        // on the capped 5th word is trimmed at the edge.
+        let t = derive("Testing, one, two, three, four, five").unwrap();
+        assert_eq!(t, "Testing, one, two, three, four");
+    }
+
+    #[test]
+    fn strips_wrapping_quotes_keeps_interior_apostrophe() {
+        // mb-zd0: wrapping single-quotes are cosmetic and stripped at the
+        // edges; a real apostrophe inside a word survives.
+        let t = derive("'don't stop believing now'").unwrap();
+        assert_eq!(t, "Don't stop believing now");
+    }
+
     // ---- speaker-label stripping -----------------------------------
 
     #[test]
     fn strips_you_label_from_merged_output() {
         let t = derive("**You:** Alright, let's talk about the budget today.").unwrap();
-        assert_eq!(t, "Alright, let's talk about");
+        // mb-zd0: interior comma on "Alright," preserved; apostrophe in
+        // "let's" preserved.
+        assert_eq!(t, "Alright, let's talk about the");
     }
 
     #[test]
@@ -255,7 +310,8 @@ mod tests {
     fn malformed_label_no_close_left_alone() {
         // Open `**` but no close → don't strip, keep the literal.
         let t = derive("**This is a heading line about widgets").unwrap();
-        // The trim_token call removes leading `*` (ASCII punct, not '\'' or '-').
+        // mb-zd0: the leading `**` is trimmed at the title edge in
+        // `finalize`; interior words are untouched.
         assert_eq!(t, "This is a heading line");
     }
 
@@ -397,7 +453,12 @@ mod tests {
     #[test]
     fn strips_quote_marks_around_tokens() {
         let t = derive("\"quoted\" 'word' here today now").unwrap();
-        assert_eq!(t, "Quoted word here today now");
+        // Double-quotes are stripped but the single-quotes around
+        // 'word' are preserved: `trim_token` deliberately keeps `'`
+        // so contractions like "don't"/"let's" survive, and it can't
+        // tell a wrapping quote from an apostrophe. (mb-mac-v1.9
+        // stale assert; quote-polish tracked in mb-mac-v1.9b.)
+        assert_eq!(t, "Quoted 'word' here today now");
     }
 
     // ---- unicode safety ---------------------------------------------
@@ -421,7 +482,8 @@ mod tests {
         // Mirrors the actual mc-v1 merged output Dustin recorded.
         let body = "**You:** Alright, I'm testing my microphone right now from the mic input.\n\n**Other(s):** Okay, this is big. Researchers at MIT just built an AI agent.";
         let t = derive(body).unwrap();
-        // First paragraph stripped of the speaker label.
+        // First paragraph stripped of the speaker label; mb-zd0: interior
+        // comma on "Alright," preserved, apostrophe in "I'm" preserved.
         assert_eq!(t, "Alright, I'm testing my microphone");
     }
 }

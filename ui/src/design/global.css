@@ -49,6 +49,18 @@ body.recording-body {
   user-select: none;
 }
 
+/* Overlay pages: the <html> canvas must ALSO be transparent, not just
+ * <body>. The base `html, body { background: ... }` rule above paints
+ * the html element with an opaque surface colour, which shows as a
+ * black box in the rounded-corner gap OUTSIDE the pill/card on BOTH
+ * platforms (mb-mac-v1.7). Keyed off the same `recording-body` class
+ * the three overlays (recording / meeting / command_center) already
+ * set on <body>, so it's a single source of truth. Shared Win+Mac
+ * fix — flagged for main-merge. */
+html:has(body.recording-body) {
+  background: transparent;
+}
+
 #root,
 #recording-root {
   min-height: 100dvh;

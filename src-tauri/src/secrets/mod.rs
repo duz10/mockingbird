@@ -1,16 +1,17 @@
 //! Secrets storage abstraction.
 //!
-//! v1 stores user-supplied API keys (Anthropic + Unsplash) on Windows
-//! via DPAPI ([`windows::WinDpapiSecretStore`]). Cross-platform stubs
-//! in [`stub::NullSecretStore`] for tests + CI + non-Windows dev
-//! builds.
+//! Stores user-supplied API keys (Anthropic + Unsplash) per platform:
+//! Windows via DPAPI ([`windows::WinDpapiSecretStore`]); macOS via the
+//! login Keychain ([`macos::KeychainSecretStore`], ADR-0056). Other
+//! targets fall back to the in-memory [`stub::NullSecretStore`] for
+//! tests + CI + Linux dev builds.
 //!
 //! ## Why a trait
 //!
-//! macOS Keychain (Phase 9) plugs in via the same trait. The Tauri
-//! IPC layer holds an [`Arc<dyn SecretStore>`] ([`SecretStoreHandle`])
-//! so command handlers never directly touch the OS surface — keeps
-//! the UI testable + the platform seam clean.
+//! Each OS backend plugs in via the same trait. The Tauri IPC layer
+//! holds an [`Arc<dyn SecretStore>`] ([`SecretStoreHandle`]) so command
+//! handlers never directly touch the OS surface — keeps the UI testable
+//! + the platform seam clean.
 //!
 //! ## What's NOT here
 //!
@@ -77,6 +78,12 @@ pub mod stub;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+#[cfg(target_os = "macos")]
+pub mod macos;
+
+#[cfg(target_os = "macos")]
+pub mod judges_macos_v1;
+
 /// Tauri-managed handle for a [`SecretStore`]. `Arc<dyn …>` so the
 /// concrete platform impl is hidden behind the trait + the same
 /// handle can be cloned cheaply into any command extractor that
@@ -91,10 +98,11 @@ pub type SecretStoreHandle = Arc<dyn SecretStore>;
 /// shareable [`SecretStoreHandle`].
 ///
 /// - Windows: DPAPI-backed (per-user encryption keys, no extra prompt).
-/// - Other targets: falls back to the in-memory [`stub::NullSecretStore`].
-///   v1 ships Windows-only, but `cargo check`/`clippy` on dev macs
-///   still need to compile cross-platform. Phase 9 will swap the
-///   non-Windows branch for a real macOS Keychain impl.
+/// - macOS: Keychain-backed ([`macos::KeychainSecretStore`], ADR-0056 /
+///   mb-mac-v1.4.1) — generic-password items in the login Keychain.
+/// - Other targets: fall back to the in-memory [`stub::NullSecretStore`]
+///   so the binary still links + the trait seam stays exercised on
+///   Linux CI / dev boxes.
 ///
 /// Tests should construct [`stub::NullSecretStore`] directly rather
 /// than going through this helper.
@@ -103,11 +111,15 @@ pub fn make_default_store() -> AppResult<SecretStoreHandle> {
     {
         Ok(Arc::new(windows::WinDpapiSecretStore::new()?))
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
-        // Non-Windows dev builds get a non-persistent in-memory
+        Ok(Arc::new(macos::KeychainSecretStore::new()?))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        // Non-Windows/macOS dev builds get a non-persistent in-memory
         // store so the binary still links + the trait seam stays
-        // exercised. Production ships Windows-only in v1.
+        // exercised.
         Ok(Arc::new(stub::NullSecretStore::new()))
     }
 }

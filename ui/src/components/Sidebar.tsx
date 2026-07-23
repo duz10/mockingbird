@@ -30,6 +30,11 @@ interface NavItem {
    * whose concept is proven but whose UX/quality hasn't crossed the
    * release-grade bar yet (mb-aho4). */
   beta?: boolean;
+  /** macOS-port (v1 honest-surface) — when the host is macOS, render a
+   * "Coming soon" pill (INSTEAD of any BETA pill) because the feature's
+   * backend is still Windows-only. On Windows this flag is inert, so
+   * the nav is byte-identical to today. */
+  comingSoonOnMac?: boolean;
 }
 
 // Base nav. The KG entry is spliced in conditionally below based on
@@ -43,7 +48,7 @@ const NAV_BASE: NavItem[] = [
   { to: "/insights",   label: t("nav.insights"),   Icon: SparklesIcon },
   { to: "/dictations", label: t("nav.dictations"), Icon: HistoryIcon },
   { to: "/meetings",   label: t("nav.meetings"),   Icon: MeetingsIcon },
-  { to: "/activity",   label: t("nav.activity"),   Icon: ActivityIcon, beta: true },
+  { to: "/activity",   label: t("nav.activity"),   Icon: ActivityIcon, beta: true, comingSoonOnMac: true },
   { to: "/dictionary", label: t("nav.dictionary"), Icon: BookIcon },
   { to: "/modes",      label: t("nav.modes"),      Icon: SlidersIcon },
   { to: "/settings",   label: t("nav.settings"),   Icon: SettingsIcon },
@@ -55,6 +60,7 @@ const KG_NAV_ITEM: NavItem = {
   label: t("nav.knowledgeGraph"),
   Icon: KnowledgeGraphIcon,
   beta: true,
+  comingSoonOnMac: true,
 };
 
 export function Sidebar() {
@@ -69,6 +75,10 @@ export function Sidebar() {
   // KG nav item never "flashes visible" before the boot fetch
   // completes -- safer than the reverse.
   const kgGraphEnabled = useAppStore((s) => s.kgGraphEnabled);
+  // macOS-port (v1 honest-surface) — drives the "Coming soon" pill on
+  // features whose backend is still Windows-only. `null`/`false`
+  // (Windows, or pre-boot) => no coming-soon pill => nav byte-identical.
+  const isMac = useAppStore((s) => s.isMac);
   // `mb-v7pd` (v0.2.0-beta.1 smoke fix Bug 3) -- runtime app version
   // from Tauri's `getVersion()`, hydrated at App boot. We display
   // a thin-space placeholder (NOT `v0.1.0`) while null so the
@@ -109,7 +119,12 @@ export function Sidebar() {
         </div>
       ) : null}
       <nav className={styles.nav}>
-        {nav.map(({ to, label, Icon, beta }) => (
+        {nav.map(({ to, label, Icon, beta, comingSoonOnMac }) => {
+          // On macOS the "Coming soon" pill REPLACES the BETA pill:
+          // a not-yet-ported feature isn't "beta", it's absent.
+          const showComingSoon = Boolean(isMac && comingSoonOnMac);
+          const showBeta = Boolean(beta && !showComingSoon);
+          return (
           <NavLink
             key={to}
             to={to}
@@ -122,13 +137,21 @@ export function Sidebar() {
           >
             <Icon size={18} />
             <span className={styles.linkLabel}>{label}</span>
-            {beta ? (
+            {showComingSoon ? (
+              <span
+                className={styles.comingSoonPill}
+                aria-label={t("sidebar.comingSoonAria")}
+              >
+                {t("sidebar.comingSoonTag")}
+              </span>
+            ) : showBeta ? (
               <span className={styles.betaPill} aria-label="Beta feature">
                 {t("sidebar.betaTag")}
               </span>
             ) : null}
           </NavLink>
-        ))}
+          );
+        })}
       </nav>
       <div className={styles.footer}>
         <span className={styles.version} aria-label="App version">

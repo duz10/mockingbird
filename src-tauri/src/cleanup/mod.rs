@@ -17,6 +17,9 @@
 pub mod claude;
 pub mod few_shot;
 pub mod llm_cleaner;
+// ADR 0064 — RAM-aware effective-model selection (macOS unified-memory
+// tier + shared, Windows-byte-identical selector).
+pub mod model_select;
 pub mod ollama;
 pub mod preprocessor;
 pub mod prompt_builder;
@@ -74,6 +77,18 @@ pub enum DictationCleanupLevel {
 /// future provenance-grepping code all reference the same string.
 pub const ADDITIVE_PROMPT_MODE_SLUG: &str = "normal_additive";
 
+/// Mode slug for the tier-gated small-model Normal prompt (ADR 0065).
+///
+/// A hardened variant of `normal@v5` seeded by migration 027 under a
+/// parallel slug (same pattern as [`ADDITIVE_PROMPT_MODE_SLUG`]).
+/// Selected ONLY at the macOS RAM-aware downsize seam in
+/// `dictation/runtime_cleaner.rs::make_default_cleaner` — when the
+/// effective model was downsized off the parity model AND the active
+/// mode is `normal` — via [`LlmCleaner::with_prompt_mode_override`].
+/// On non-macOS the override is never set, so `normal` keeps resolving
+/// to `normal@v5` and the 7B / Windows cleanup path is byte-identical.
+pub const SMALL_MODEL_PROMPT_MODE_SLUG: &str = "normal_small";
+
 /// Cleanup trait. `clean(raw, mode_slug)` returns the polished text
 /// that will be injected.
 pub trait Cleaner: Send {
@@ -92,6 +107,22 @@ pub trait Cleaner: Send {
     /// `"qwen2.5-7b-instruct-q5_k_m"`).
     fn model_name(&self) -> &str {
         "passthrough"
+    }
+
+    /// The prompt (slug + version) this cleaner actually resolved for
+    /// the most recent [`Self::clean`] call, e.g. `"normal_small v2"`.
+    ///
+    /// Persisted into `sessions.effective_prompt_label` so the dictation
+    /// Metadata reports the prompt that REALLY ran rather than inferring
+    /// it from the mode's canonical `prompt_id` (which is wrong on the
+    /// macOS RAM-aware downsize path, where the override runs
+    /// `normal_small` while `prompt_id` still points at normal@v5).
+    ///
+    /// Default `None` — the passthrough cleaner resolves no prompt, and
+    /// any cleaner that doesn't opt in simply leaves the column NULL
+    /// (the Metadata then falls back to the canonical version).
+    fn prompt_label(&self) -> Option<String> {
+        None
     }
 }
 

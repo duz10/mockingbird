@@ -17,6 +17,10 @@
 
 pub mod active_mode;
 pub mod activity;
+// Cleanup-engine status (Ollama up/down + effective model) for the UI
+// signposting on Settings / Dictations / Modes. Additive + cross-platform;
+// the surfaces that consume it are isMac-gated.
+pub mod cleanup_status;
 pub mod dictation;
 pub mod dictionary;
 pub mod insights;
@@ -24,7 +28,13 @@ pub mod kg;
 pub mod learning;
 pub mod legacy;
 pub mod meetings;
+// ADR 0066 — per-mode user model-override layer (macOS effective-model picker).
+pub mod model_override;
 pub mod modes;
+// mb-mac-v1.4.6 (ADR 0061) — macOS permissions onboarding IPC.
+pub mod permissions;
+// ADR 0067 — per-mode user PROMPT-override layer (macOS editable mode prompts).
+pub mod prompt_override;
 pub mod sessions;
 pub mod settings;
 pub mod system;
@@ -93,6 +103,16 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         modes::update_mode,
         active_mode::get_active_mode,
         active_mode::set_active_mode,
+        // Cleanup-engine status signposting (Ollama/passthrough).
+        cleanup_status::cleanup_status,
+        // ADR 0066 — per-mode effective-model picker + override layer (macOS).
+        model_override::get_effective_model,
+        model_override::set_mode_model_override,
+        model_override::clear_mode_model_override,
+        // ADR 0067 — per-mode editable LLM prompt + override layer (macOS).
+        prompt_override::get_effective_prompt,
+        prompt_override::set_mode_prompt_override,
+        prompt_override::clear_mode_prompt_override,
         // Settings (UI panel)
         settings::get_settings,
         settings::update_setting,
@@ -127,6 +147,10 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         system::open_path,
         system::app_paths,
         system::list_installed_models,
+        system::host_os,
+        // macOS permissions onboarding (mb-mac-v1.4.6 / ADR 0061).
+        permissions::mac_permission_statuses,
+        permissions::mac_open_settings_pane,
         // mb-1z0m (Round 3) — JS→Rust IPC-outcome mirror.
         system::report_ipc_status,
         // mb-1z0m (Round 4) — React mount beacon (no state, no args).

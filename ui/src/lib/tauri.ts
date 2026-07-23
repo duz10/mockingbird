@@ -33,7 +33,12 @@ import type {
   LlmPassPromptArg,
   LlmPassResult,
   MeetingSettingsSnapshot,
+  CleanupStatus,
+  EffectiveModel,
+  EffectivePrompt,
   ModeRow,
+  PermissionKey,
+  PermissionStatuses,
   QueueStatus,
   Vocabularies,
   SessionDetail,
@@ -176,6 +181,40 @@ export const api = {
     invoke<void>("update_mode", { slug, patch }),
   get_active_mode: () => invoke<ActiveMode>("get_active_mode"),
   set_active_mode: (slug: string) => invoke<void>("set_active_mode", { slug }),
+
+  /**
+   * Live cleanup-engine status (Ollama up/down + effective model) for
+   * the isMac-gated signposting on Settings / Dictations / Modes.
+   * Cross-platform safe: on non-macOS `ramTier` is null and the
+   * effective model is the parity default (identity).
+   */
+  cleanup_status: () => invoke<CleanupStatus>("cleanup_status"),
+
+  /**
+   * ADR 0066 — the effective cleanup model for a mode (what will
+   * ACTUALLY run, after the macOS RAM-aware substitution / user pin),
+   * for the macOS Modes "Model" control. Cross-platform safe: on
+   * non-macOS `budgetGb` is null and `effective === configured`.
+   */
+  get_effective_model: (slug: string) =>
+    invoke<EffectiveModel>("get_effective_model", { slug }),
+  /** ADR 0066 — pin a specific cleanup model for a mode (bypasses the
+   *  RAM-aware substitution). */
+  set_mode_model_override: (slug: string, modelId: string) =>
+    invoke<void>("set_mode_model_override", { slug, modelId }),
+  /** ADR 0066 — clear a mode's pin → revert to Auto (RAM-aware). */
+  clear_mode_model_override: (slug: string) =>
+    invoke<void>("clear_mode_model_override", { slug }),
+  /** ADR 0067 — the effective cleanup prompt for a mode (shipped default
+   *  vs user override), for the macOS Modes prompt editor. */
+  get_effective_prompt: (slug: string) =>
+    invoke<EffectivePrompt>("get_effective_prompt", { slug }),
+  /** ADR 0067 — persist a user-authored prompt override for a mode. */
+  set_mode_prompt_override: (slug: string, body: string) =>
+    invoke<void>("set_mode_prompt_override", { slug, body }),
+  /** ADR 0067 — clear a mode's prompt override → revert to shipped. */
+  clear_mode_prompt_override: (slug: string) =>
+    invoke<void>("clear_mode_prompt_override", { slug }),
 
   // Settings
   get_settings: () => invoke<SettingsSnapshot>("get_settings"),
@@ -372,6 +411,23 @@ export const api = {
    */
   list_installed_models: () =>
     invoke<string[]>("list_installed_models"),
+
+  /** Host OS string (`std::env::consts::OS`): `"macos"`, `"windows"`,
+   *  `"linux"`, … The Settings page gates the macOS permissions tab on
+   *  `=== "macos"`. mb-mac-v1.4.6. */
+  host_os: () => invoke<string>("host_os"),
+
+  /** macOS permissions onboarding (mb-mac-v1.4.6 / ADR 0061). Returns
+   *  the current grant state of all four privacy permissions. On
+   *  non-macOS every field is `"unsupported"`. The panel polls this on
+   *  mount and on window-focus regain. */
+  mac_permission_statuses: () =>
+    invoke<PermissionStatuses>("mac_permission_statuses"),
+
+  /** Deep-link System Settings to a permission's pane. `permission` is
+   *  one of the `PermissionKey` strings. mb-mac-v1.4.6. */
+  mac_open_settings_pane: (permission: PermissionKey) =>
+    invoke<void>("mac_open_settings_pane", { permission }),
 
   /**
    * mb-1z0m (Round 3) -- fire-and-forget IPC-outcome mirror so JS-side
@@ -679,6 +735,62 @@ function fixtureFor<T>(command: string, args?: object): T {
         "qwen2.5:3b-instruct-q4_K_M",
         "gemma2:2b-instruct-q4_K_M",
       ]) as T;
+    case "host_os":
+      // Preview/tests run in a browser — pretend macOS so the
+      // permissions tab is exercisable in `npm run preview`.
+      return fixture(command, "macos") as T;
+    case "cleanup_status":
+      // Mirror the 8 GB-Mac canary with Ollama up + the 3B pulled:
+      // cleanup active on the RAM-aware 3B. (Flip ollamaReachable/
+      // cleanupActive to preview the passthrough surfaces.)
+      return fixture(command, {
+        ollamaReachable: true,
+        cleanupActive: true,
+        effectiveModel: "qwen2.5:3b-instruct-q4_K_M",
+        installedModels: [
+          "qwen2.5:3b-instruct-q4_K_M",
+          "gemma2:2b-instruct-q4_K_M",
+        ],
+        recommendedPull: "qwen2.5:3b",
+        ramTier: "small",
+      } as CleanupStatus) as T;
+    case "get_effective_model":
+      // ADR 0066 — mirror the 8 GB-Mac canary: configured 7B, but the
+      // RAM-aware layer downsizes to the 3B; no user pin ("Auto").
+      return fixture(command, {
+        configured: "qwen2.5:7b-instruct-q4_K_M",
+        effective: "qwen2.5:3b-instruct-q4_K_M",
+        overrideModel: null,
+        budgetGb: 8,
+        ollamaReachable: true,
+      } as EffectiveModel) as T;
+    case "set_mode_model_override":
+    case "clear_mode_model_override":
+      // Write commands — nothing to fixture in browser preview.
+      return fixture(command, null) as T;
+    case "get_effective_prompt":
+      // ADR 0067 — a shipped default with no user override in preview.
+      return fixture(command, {
+        defaultBody: "You are a dictation cleanup assistant. Clean the transcript.",
+        defaultVersion: 5,
+        effectiveBody:
+          "You are a dictation cleanup assistant. Clean the transcript.",
+        isOverridden: false,
+      } as EffectivePrompt) as T;
+    case "set_mode_prompt_override":
+    case "clear_mode_prompt_override":
+      // Write commands — nothing to fixture in browser preview.
+      return fixture(command, null) as T;
+    case "mac_permission_statuses":
+      return fixture(command, {
+        microphone: "granted",
+        inputMonitoring: "notDetermined",
+        accessibility: "denied",
+        screenRecording: "notDetermined",
+      } as PermissionStatuses) as T;
+    case "mac_open_settings_pane":
+      // Deep-link open is a real OS side-effect; nothing to fixture.
+      return fixture(command, null) as T;
     case "report_ipc_status":
       // mb-1z0m (Round 3) -- fire-and-forget; nothing to fixture.
       return fixture(command, null) as T;
@@ -1059,6 +1171,9 @@ export const FIXTURES: {
     // in-app session so the IN_APP pill renders in Vite preview
     // / Playwright snapshots.
     startMode: i % 5 === 4 ? "in_app" : "ptt",
+    // Every 3rd fixture row is passthrough (raw) so the macOS
+    // Dictations Raw/Cleaned badge is exercised in preview.
+    modelUsed: i % 3 === 2 ? "passthrough" : "qwen2.5:3b-instruct-q4_K_M",
   })),
   sessionDetails: [
     {

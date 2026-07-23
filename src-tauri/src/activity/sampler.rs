@@ -35,6 +35,9 @@
 //! and idles.
 
 #![allow(missing_docs)]
+// macOS port: live impl is `#[cfg(target_os = "windows")]`; these imports are
+// orphaned on non-Windows until the cross-platform backend lands (Phase 3/4).
+#![cfg_attr(not(target_os = "windows"), allow(unused_imports))]
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

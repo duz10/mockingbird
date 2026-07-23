@@ -111,6 +111,28 @@
   line-height: 1;
 }
 
+/* macOS-port (v1 honest-surface) — "Coming soon" pill for features
+ * whose backend is still Windows-only (Activity, Knowledge Graph).
+ * Uses the neutral outline token (NOT the warm-gold warning used by
+ * BETA) so the two read as distinct: BETA = shipping-but-maturing,
+ * SOON = not-here-yet. No new color invented. */
+.comingSoonPill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--md-sys-outline);
+  color: var(--md-sys-on-surface-variant);
+  background: transparent;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex: 0 0 auto;
+  line-height: 1;
+}
+
 .footer {
   margin-top: var(--s-4);
   padding: var(--s-3);

@@ -1,0 +1,41 @@
+{
+  "_doc": [
+    "STT parity ground-truth references for the macOS Metal parity eval",
+    "(judge `mac-v1-parity-whisper-metal`, bead mb-mac-v1.6.2, Phase 5).",
+    "",
+    "Each `clips` entry pins a committed audio fixture (under",
+    "src-tauri/tests/fixtures/audio/) to its HUMAN ground-truth transcript.",
+    "WER/CER are computed against `reference` after normalization",
+    "(lowercase, strip punctuation, collapse whitespace) -- so `reference`",
+    "may be written with natural casing/punctuation for readability.",
+    "",
+    "CORPUS NOTE (honest): only `jfk.wav` is real speech. It is",
+    "whisper.cpp's canonical sample -- the closing line of JFK's 1961",
+    "inaugural address. The other committed fixtures (silent.wav,",
+    "sine_440.wav, mixed.wav) are SYNTHETIC non-speech (see",
+    "src/dev_bins/generate_fixtures.rs: zeros / a 440 Hz tone) with no",
+    "speech content, so they carry no ground-truth transcript and are",
+    "excluded from the WER/CER acceptance (a non-empty transcript over pure",
+    "silence is a benign Whisper hallucination, not a parity signal). To",
+    "widen this corpus, add TTS-rendered speech fixtures (a Helios task,",
+    "per docs/phases/phase2-wave2-brief.md) with their reference text here.",
+    "",
+    "`budget` is the parity acceptance bar (see rationale in the shim",
+    "src/dev_bins/mac_whisper_parity_smoke.rs and the module docs of",
+    "src/stt/parity_macos_v1.rs). large-v3-turbo-q5 on a clean clip like",
+    "jfk.wav is expected to be at or near WER 0; the budget leaves a few %",
+    "of slack for q5 quantization + Metal-vs-CUDA numeric drift."
+  ],
+  "budget": {
+    "wer_max": 0.10,
+    "cer_max": 0.05
+  },
+  "clips": [
+    {
+      "wav": "jfk.wav",
+      "kind": "speech",
+      "source": "whisper.cpp canonical sample; JFK 1961 inaugural address closing line",
+      "reference": "And so, my fellow Americans: ask not what your country can do for you, ask what you can do for your country."
+    }
+  ]
+}

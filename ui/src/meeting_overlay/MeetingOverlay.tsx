@@ -35,18 +35,16 @@ import type {
   MeetingTickEvent,
 } from "../lib/types";
 
-/** Sentinel returned by the Rust emitter when a channel has produced
- *  no data yet (vs. "silence"). Mirrors `DBFS_NO_DATA` in
- *  `src-tauri/src/meetings/levels.rs`. */
-const DBFS_NO_DATA = 0;
 /** Bottom of the dBFS scale we render. Mirrors `DBFS_FLOOR` in
  *  `levels.rs`. -100 dBFS renders as a fully-dim bar. */
 const DBFS_FLOOR = -100;
 
 /** Map a dBFS reading in `[-100, 0]` to a `0..1` fill ratio for the
- *  VU bar. The no-data sentinel collapses to `0` (flat bar). */
-export function dbfsToFill(db: number): number {
-  if (db === DBFS_NO_DATA) return 0;
+ *  VU bar. mb-x1d: `null` == "no data yet" (channel never drained) and
+ *  collapses to `0` (flat bar) — distinct from a real full-scale `0`
+ *  dBFS reading, which fills the bar. */
+export function dbfsToFill(db: number | null): number {
+  if (db === null) return 0;
   if (db <= DBFS_FLOOR) return 0;
   if (db >= 0) return 1;
   // Linear in dB. Future iteration could switch to log-perceptual
@@ -88,8 +86,8 @@ export function MeetingOverlay() {
   // Initialised to the no-data sentinel so first render shows flat
   // bars instead of "silence" (which would be misleading before any
   // drain has happened).
-  const [micDb, setMicDb] = useState<number>(DBFS_NO_DATA);
-  const [sysDb, setSysDb] = useState<number>(DBFS_NO_DATA);
+  const [micDb, setMicDb] = useState<number | null>(null);
+  const [sysDb, setSysDb] = useState<number | null>(null);
   const recordStartRef = useRef<number | null>(null);
   // a11y: the overlay opens as a non-focused window (focus:false in
   // tauri.conf.json so it doesn't steal focus from the user's typing
@@ -567,7 +565,13 @@ function formatStopwatch(seconds: number): string {
 
 /** Twin VU bars (mic + sys). Pure presentational; no IPC. Rendered
  *  inside the recording-mode pill. ADR 0032 / mb-nig. */
-function VuBars({ micDb, sysDb }: { micDb: number; sysDb: number }) {
+function VuBars({
+  micDb,
+  sysDb,
+}: {
+  micDb: number | null;
+  sysDb: number | null;
+}) {
   const micFill = dbfsToFill(micDb);
   const sysFill = dbfsToFill(sysDb);
   return (
@@ -588,7 +592,7 @@ function VuBars({ micDb, sysDb }: { micDb: number; sysDb: number }) {
   );
 }
 
-function formatDb(db: number): string {
-  if (db === DBFS_NO_DATA) return "—";
+function formatDb(db: number | null): string {
+  if (db === null) return "—";
   return `${db.toFixed(0)} dB`;
 }

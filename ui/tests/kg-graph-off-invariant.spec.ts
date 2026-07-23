@@ -43,6 +43,8 @@
 
 import { expect, test, type ConsoleMessage } from "@playwright/test";
 
+import { forceWindowsHost } from "./kg-host";
+
 // The `kg_*` commands authorized to fire while the toggle is OFF.
 // Anything else in the spy's recorded set is a graph-off-invariant
 // breach.
@@ -103,16 +105,22 @@ test.describe("KG graph-off-UI invariant -- 1D.4 tightened (mb-f4gn / mb-6hm2)",
     });
 
     const readCalls = async (): Promise<string[]> =>
-      page.evaluate(
-        () =>
-          (window as unknown as { __KG_IPC_CALLS__: string[] }).__KG_IPC_CALLS__
-            .slice(),
+      page.evaluate(() =>
+        (
+          window as unknown as { __KG_IPC_CALLS__: string[] }
+        ).__KG_IPC_CALLS__.slice(),
       );
 
     const recordedKgCalls = async (): Promise<Set<string>> => {
       const all = await readCalls();
       return new Set(all.filter((c) => c.startsWith("kg_")));
     };
+
+    // KG is Windows-only; force the fixture host to "windows" so the KG
+    // tab + routes render the real UI (not the macOS coming-soon path)
+    // and the off-by-default invariant is tested where KG actually
+    // exists (mb-0cg). Must precede the first navigation.
+    await forceWindowsHost(page);
 
     // ── Walk 1: Settings -> KG tab, toggle OFF ───────────────────
     await page.goto("/#/settings");

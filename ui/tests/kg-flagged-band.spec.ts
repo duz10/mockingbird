@@ -25,6 +25,8 @@
 
 import { expect, test, type ConsoleMessage } from "@playwright/test";
 
+import { forceWindowsHost } from "./kg-host";
+
 const SEEDED_ROW = {
   queueId: 42,
   entryId: 1337,
@@ -86,6 +88,11 @@ test.describe("KG Phase 1D.4 -- Flagged-for-review band (mb-6hm2)", () => {
       consoleErrors.push(`[pageerror] ${err.message}`);
     });
 
+    // KG is Windows-only; force the fixture host to "windows" so the KG
+    // route renders the real UI (not the macOS coming-soon path) —
+    // mb-0cg. Must precede the first navigation.
+    await forceWindowsHost(page);
+
     // ── Assertion 1: Toggle OFF -> disabled-state on /knowledge-graph ─
     await page.goto("/#/knowledge-graph");
     await expect(
@@ -104,6 +111,7 @@ test.describe("KG Phase 1D.4 -- Flagged-for-review band (mb-6hm2)", () => {
     // paint.
     await page.addInitScript((snap) => {
       window.__MOCKINGBIRD_FIXTURES__ = {
+        host_os: "windows", // mb-0cg — keep KG on the Windows code path
         kg_settings_get_all: { kgGraphEnabled: true },
         kg_dashboard_snapshot: snap,
       };
@@ -122,7 +130,12 @@ test.describe("KG Phase 1D.4 -- Flagged-for-review band (mb-6hm2)", () => {
     });
 
     // ── Assertion 3: Seeded row -> entry + pill + retry button ──
-    await page.evaluate((snap) => {
+    // Stage via addInitScript (NOT page.evaluate): Assertion 2's
+    // addInitScript re-runs on every navigation and resets the snapshot
+    // to EMPTY, so a runtime-only (page.evaluate) seed would be wiped by
+    // the reload below. Registering this init script AFTER Assertion 2's
+    // means it runs last on reload and its seeded snapshot wins.
+    await page.addInitScript((snap) => {
       window.__MOCKINGBIRD_FIXTURES__ = {
         ...(window.__MOCKINGBIRD_FIXTURES__ ?? {}),
         kg_dashboard_snapshot: snap,

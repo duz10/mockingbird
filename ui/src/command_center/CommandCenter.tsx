@@ -26,6 +26,8 @@ import {
   pickCommandCenterMode,
   stopActiveCommandCenterSession,
 } from "../lib/command_center";
+import { api } from "../lib/tauri";
+import { dictationPttLabel } from "../lib/keys";
 import type {
   CcStateSnapshot,
   RecordingKind,
@@ -47,6 +49,8 @@ const MODES: ReadonlyArray<{
   {
     kind: "dictation",
     title: "Dictation",
+    // Windows fallback; ModePicker overrides this per-platform (Right
+    // Alt on Windows, Right Option on macOS).
     hint: "or just hold Right Alt",
   },
   {
@@ -72,6 +76,21 @@ export function CommandCenter(): JSX.Element | null {
   // subsystem.
   const sessionStartedAt = useRef<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
+
+  // macOS-port (v1 honest-surface) — Activity capture is Windows-only
+  // (macOS ships a no-op StubSampler), so the Activity tile is disabled
+  // on macOS to stop a user starting a session that would capture
+  // nothing. The Command Center runs in its own webview, so it can't
+  // read the main window's app store; resolve the host OS locally.
+  // Defaults to `false` (Windows-parity) until the probe resolves and
+  // on any failure, so a failed probe never disables a Windows tile.
+  const [isMac, setIsMac] = useState(false);
+  useEffect(() => {
+    void api
+      .host_os()
+      .then((os) => setIsMac(os === "macos"))
+      .catch(() => {});
+  }, []);
 
   // Snapshot on mount + subscribe to live updates.
   useEffect(() => {
@@ -177,37 +196,61 @@ export function CommandCenter(): JSX.Element | null {
 
   if (snap.state === "closed") return null;
 
+  const showWelcome = snap.firstRun && snap.state === "modePicker";
+
   return (
     <div className={styles.root} aria-modal data-state={snap.state}>
-      <div className={styles.card} ref={cardRef} role="dialog">
-        {snap.firstRun && snap.state === "modePicker" && (
-          <>
-            <header className={styles.welcomeBand}>
-              <h2 className={styles.welcomeTitle}>Welcome to Mockingbird</h2>
+      <div
+        className={styles.card}
+        ref={cardRef}
+        role="dialog"
+        // Drives the top gutter that keeps the always-present close
+        // button from overlapping the tiles/session row (the welcome
+        // band supplies its own clearance).
+        data-welcome={showWelcome ? "true" : undefined}
+      >
+        {/* Always-present close affordance — parity with the recording
+            overlay's X (which sits next to the mode pill). Same dismiss
+            path as Esc + outside-click + tray re-click. On macOS the CC
+            opens from the tray and has no chord to toggle it shut, so
+            this X is the primary close; on Windows it's an additive
+            bonus alongside the chord toggle. */}
+        <button
+          type="button"
+          className={styles.closeButton}
+          aria-label="Close"
+          onClick={() => void dismissCommandCenter()}
+        >
+          <svg
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path d="M4 4 L12 12 M12 4 L4 12" />
+          </svg>
+        </button>
+
+        {showWelcome && (
+          <header className={styles.welcomeBand}>
+            <h2 className={styles.welcomeTitle}>Welcome to Mockingbird</h2>
+            {isMac ? (
+              // macOS has no Command Center chord (Windows-only hotkey
+              // path), so point the user at the menu-bar tray instead.
+              <p className={styles.welcomeBody}>
+                Open Mockingbird from the menu&nbsp;bar any time to pop this
+                card back up.
+              </p>
+            ) : (
               <p className={styles.welcomeBody}>
                 Press <kbd>Right&nbsp;Ctrl</kbd> + <kbd>Space</kbd> any time to
                 pop this card back up.
               </p>
-            </header>
-            <button
-              type="button"
-              className={styles.closeButton}
-              aria-label="Close welcome card"
-              onClick={() => void dismissCommandCenter()}
-            >
-              <svg
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.75"
-                strokeLinecap="round"
-                aria-hidden="true"
-                focusable="false"
-              >
-                <path d="M4 4 L12 12 M12 4 L4 12" />
-              </svg>
-            </button>
-          </>
+            )}
+          </header>
         )}
 
         {(snap.state === "modePicker" || snap.state === "launching") && (
@@ -216,6 +259,7 @@ export function CommandCenter(): JSX.Element | null {
               snap.state === "launching" ? snap.kind ?? null : null
             }
             onPick={onPickMode}
+            isMac={isMac}
           />
         )}
 
@@ -230,14 +274,33 @@ export function CommandCenter(): JSX.Element | null {
 interface ModePickerProps {
   launchingKind: RecordingKind | null;
   onPick: (kind: RecordingKind) => void;
+  /** macOS-port — when true, the Activity tile is disabled + relabelled
+   *  "coming soon on macOS" (its backend is Windows-only). */
+  isMac: boolean;
 }
 
-function ModePicker({ launchingKind, onPick }: ModePickerProps): JSX.Element {
+function ModePicker({ launchingKind, onPick, isMac }: ModePickerProps): JSX.Element {
   return (
     <div className={styles.modePicker} role="group" aria-label="Pick a recording mode">
       {MODES.map((m) => {
         const isLaunchingThis = launchingKind === m.kind;
-        const disabled = (m.disabled ?? false) || launchingKind != null;
+        // Activity is Coming soon on macOS: disable the tile so it can't
+        // launch a capture-nothing session.
+        const comingSoon = isMac && m.kind === "activity";
+        const disabled =
+          (m.disabled ?? false) || comingSoon || launchingKind != null;
+        // The dictation tile's hint names the PTT key, which is
+        // platform-specific (Right Alt on Windows, Right Option on
+        // macOS). Compute it so Windows stays byte-identical.
+        const baseHint =
+          m.kind === "dictation"
+            ? `or just hold ${dictationPttLabel(isMac)}`
+            : m.hint;
+        const hint = comingSoon
+          ? "coming soon on macOS"
+          : isLaunchingThis
+            ? "starting…"
+            : baseHint;
         return (
           <button
             key={m.kind}
@@ -245,13 +308,12 @@ function ModePicker({ launchingKind, onPick }: ModePickerProps): JSX.Element {
             className={styles.modeTile}
             data-kind={m.kind}
             data-launching={isLaunchingThis ? "true" : undefined}
+            data-coming-soon={comingSoon ? "true" : undefined}
             disabled={disabled}
             onClick={() => onPick(m.kind)}
           >
             <span className={styles.modeTileTitle}>{m.title}</span>
-            <span className={styles.modeTileHint}>
-              {isLaunchingThis ? "starting…" : m.hint}
-            </span>
+            <span className={styles.modeTileHint}>{hint}</span>
           </button>
         );
       })}

@@ -1,9 +1,11 @@
 # Mockingbird
 
-Local-first voice dictation, meeting capture, and a personal knowledge engine for Windows. Everything runs on your machine. Zero telemetry.
+Local-first voice dictation, meeting capture, and a personal knowledge engine. Everything runs on your machine. Zero telemetry.
 
-![release](https://img.shields.io/badge/release-v0.2.0--beta.1-blue)
-![platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)
+**Platforms.** Windows 10/11 has a downloadable installer (below). **macOS 15+ on Apple Silicon** runs voice dictation and meeting capture (both with local cleanup) at parity — it's a from-source build, no installer yet; see [macOS install](./INSTALL.md#macos-apple-silicon-source-build). Activity capture, the Knowledge Graph, and Mobile Sync are Windows-only for now on the Mac build.
+
+![release](https://img.shields.io/badge/release-v0.2.0--beta.2-blue)
+![platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20%7C%20macOS%2015%2B%20(Apple%20Silicon)-lightgrey)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
 ## Maintainer Statement
@@ -12,7 +14,7 @@ This is a reference implementation. I built it for my own daily use and publishe
 
 ## What it does
 
-Mockingbird is three capabilities in one Windows app.
+Mockingbird is three capabilities in one app.
 
 1. **Voice dictation.** Push-to-talk via a global hotkey (Right Alt by default). Whisper transcribes locally; an optional local LLM tidies the result; the text is pasted into whichever app has focus, with your previous clipboard contents preserved. Three modes (casual, normal, formal) let you pick how much cleanup you want.
 2. **Meeting capture.** Chord-toggled long-form recording. Microphone and system audio are captured in parallel, transcribed by Whisper in rolling 30-second windows, and merged into a two-speaker Markdown transcript. Optional ephemeral LLM summarization is supported and never persisted.
@@ -35,13 +37,13 @@ The fastest path:
 3. The first launch downloads a Whisper model (about 500 MB to 2 GB depending on which variant you pick in Settings).
 4. Press Right Alt and start talking. Release to paste into the focused app.
 
-See [`INSTALL.md`](./INSTALL.md) for the standard and from-source paths, including the optional Ollama integration for local LLM cleanup, and [`PREREQS.md`](./PREREQS.md) for the full hardware and OS requirements.
+See [`INSTALL.md`](./INSTALL.md) for the standard and from-source paths, including the optional Ollama integration for local LLM cleanup, and [`PREREQS.md`](./PREREQS.md) for the full hardware and OS requirements. **On macOS?** Follow the [macOS (Apple Silicon, source build)](./INSTALL.md#macos-apple-silicon-source-build) walkthrough instead — the Quick install above is Windows-only.
 
 ## How it works (high level)
 
 - **Speech to text.** [whisper.cpp](https://github.com/ggerganov/whisper.cpp) via the `whisper-rs` crate. CUDA acceleration when an NVIDIA GPU is available; CPU fallback otherwise.
 - **Voice activity detection.** Silero VAD running on ONNX Runtime, used to gate Whisper and trim leading/trailing silence.
-- **Optional cleanup.** Pluggable provider. [Ollama](https://ollama.com/) running locally (default and recommended) or the Anthropic Claude API (opt-in, BYO key, stored via Windows DPAPI).
+- **Optional cleanup.** Pluggable provider. [Ollama](https://ollama.com/) running locally (default and recommended) or the Anthropic Claude API (opt-in, BYO key, stored via Windows DPAPI / macOS Keychain).
 - **Storage.** SQLite under `%LOCALAPPDATA%\Mockingbird\`. Migrations are append-only.
 - **Shell.** [Tauri 2](https://tauri.app/) with a React 19 + TypeScript frontend in WebView2.
 

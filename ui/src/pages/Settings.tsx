@@ -13,8 +13,10 @@
 // user sees the change before the IPC round-trip.
 
 import { useCallback, useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 
 import { Button, Card, PageHeader, Spinner } from "../components/primitives";
+import { CleanupEngineCard } from "../components/CleanupStatus";
 import { CATEGORIES } from "../components/UnsplashBackground/categories";
 import {
   clearUnsplashApiKey,
@@ -41,6 +43,7 @@ import { SettingsDictationTab } from "./SettingsDictationTab";
 import { SettingsKgTab } from "./SettingsKgTab";
 import { SettingsMeetingTab } from "./SettingsMeetingTab";
 import { SettingsMobileSyncTab } from "./SettingsMobileSyncTab";
+import { SettingsPermissionsTab } from "./SettingsPermissionsTab";
 import styles from "./Settings.module.css";
 
 // ADR 0047 Wave 2C / mb-h0nn: the old `"history"` tab id is now
@@ -54,6 +57,7 @@ type Tab =
   | "meeting"
   | "mobileSync"
   | "kg"
+  | "permissions"
   | "advanced";
 
 export function SettingsPage() {
@@ -61,7 +65,19 @@ export function SettingsPage() {
   const setSettings = useAppStore((s) => s.setSettings);
   const applyTheme = useAppStore((s) => s.applyTheme);
 
-  const [tab, setTab] = useState<Tab>("general");
+  // Deep-link support: other pages (Dictations/Modes cleanup signposting)
+  // navigate here with `state: { tab: "models" }` to land on the Models
+  // tab. Defaults to "general" for a plain sidebar click.
+  const location = useLocation();
+  const initialTab = (location.state as { tab?: Tab } | null)?.tab ?? "general";
+  const [tab, setTab] = useState<Tab>(initialTab);
+
+  // mb-mac-v1.4.6 — the macOS permissions tab only exists on macOS.
+  // Detected once via `host_os()`; cheaper + more robust than UA sniffing.
+  const [isMac, setIsMac] = useState(false);
+  useEffect(() => {
+    void api.host_os().then((os) => setIsMac(os === "macos"));
+  }, []);
 
   // Lazy boot: if the store wasn't populated for some reason, fetch.
   useEffect(() => {
@@ -104,8 +120,26 @@ export function SettingsPage() {
           <TabBtn id="models" active={tab} setActive={setTab} label={t("settings.tab.models")} />
           <TabBtn id="dictation" active={tab} setActive={setTab} label={t("settings.tab.dictation")} />
           <TabBtn id="meeting" active={tab} setActive={setTab} label={t("settings.tab.meeting")} />
-          <TabBtn id="mobileSync" active={tab} setActive={setTab} label={t("settings.tab.mobileSync")} />
-          <TabBtn id="kg" active={tab} setActive={setTab} label={t("settings.tab.kg")} />
+          {/* macOS-port (v1 honest-surface) — Mobile Sync + Knowledge
+              Graph are Coming soon on macOS (their backends are
+              Windows-only), so hide their Settings tabs on macOS. This
+              also prevents a Mac user from enabling MobileSyncEnabled /
+              KgGraphEnabled and hitting a non-functional path. Windows
+              shows both tabs exactly as today. */}
+          {!isMac ? (
+            <TabBtn id="mobileSync" active={tab} setActive={setTab} label={t("settings.tab.mobileSync")} />
+          ) : null}
+          {!isMac ? (
+            <TabBtn id="kg" active={tab} setActive={setTab} label={t("settings.tab.kg")} />
+          ) : null}
+          {isMac ? (
+            <TabBtn
+              id="permissions"
+              active={tab}
+              setActive={setTab}
+              label={t("settings.tab.permissions")}
+            />
+          ) : null}
           <TabBtn id="advanced" active={tab} setActive={setTab} label={t("settings.tab.advanced")} />
         </nav>
 
@@ -115,6 +149,7 @@ export function SettingsPage() {
               settings={settings}
               applyTheme={applyTheme}
               patch={patch}
+              isMac={isMac}
             />
           )}
           {tab === "models" && <ModelsPanel settings={settings} patch={patch} />}
@@ -122,11 +157,14 @@ export function SettingsPage() {
             <SettingsDictationTab settings={settings} patch={patch} />
           )}
           {tab === "meeting" && <SettingsMeetingTab />}
-          {tab === "mobileSync" && <SettingsMobileSyncTab />}
-          {tab === "kg" && (
+          {tab === "mobileSync" && !isMac && <SettingsMobileSyncTab />}
+          {tab === "kg" && !isMac && (
             <SettingsKgTab onOpenMobileSync={() => setTab("mobileSync")} />
           )}
-          {tab === "advanced" && <AdvancedPanel settings={settings} patch={patch} />}
+          {tab === "permissions" && isMac && <SettingsPermissionsTab />}
+          {tab === "advanced" && (
+            <AdvancedPanel settings={settings} patch={patch} isMac={isMac} />
+          )}
         </div>
       </div>
     </>
@@ -222,7 +260,8 @@ function GeneralPanel({
   settings,
   applyTheme,
   patch,
-}: PanelProps & { applyTheme: (theme: ThemeChoice) => void }) {
+  isMac,
+}: PanelProps & { applyTheme: (theme: ThemeChoice) => void; isMac: boolean }) {
   const setTheme = (theme: ThemeChoice) => {
     applyTheme(theme);
     void patch("ui.theme", theme, { theme });
@@ -264,16 +303,25 @@ function GeneralPanel({
           />
         }
       />
-      <Row
-        label={t("settings.general.autostart")}
-        control={
-          <Toggle
-            checked={settings.autostart}
-            onChange={(v) => void patch("ui.autostart", v, { autostart: v })}
-            ariaLabel={t("settings.general.autostart")}
-          />
-        }
-      />
+      {/* mb-i42: the autostart toggle only persists `ui.autostart` — no
+          code registers a macOS LaunchAgent/login-item (no Tauri
+          autostart plugin is wired), so on macOS it is a non-functional
+          setting and is hidden. Windows renders it exactly as today
+          (isMac === false). See the Wave-2a report: autostart is
+          currently a no-op on BOTH platforms; wiring it is a separate
+          cross-platform epic, deliberately NOT smuggled into this wave. */}
+      {!isMac ? (
+        <Row
+          label={t("settings.general.autostart")}
+          control={
+            <Toggle
+              checked={settings.autostart}
+              onChange={(v) => void patch("ui.autostart", v, { autostart: v })}
+              ariaLabel={t("settings.general.autostart")}
+            />
+          }
+        />
+      ) : null}
       <Row
         label={t("settings.general.reducedMotion")}
         help={t("settings.general.reducedMotion.help")}
@@ -287,21 +335,34 @@ function GeneralPanel({
           />
         }
       />
-      {/* Phase 10 Wave 1A deferral landed in 1B: surface the
-          `command_center_chord` setting so users can rebind. Stored
-          as a free-form string (e.g. "RightCtrl+Space") parsed by
-          `command_center::parse_chord` on the Rust side. A bad chord
-          falls back to the default without breaking the app. */}
-      <CommandCenterChordRow />
-      {/* Phase 10 Wave 4 — Activity Capture audio toggle (ADR 0041).
-          Default OFF (privacy by default). The Command Center reads
-          this at session-start time; the IPC `activity_start` defaults
-          to it when no explicit `withAudio` is passed. */}
-      <SettingsActivityAudioRow />
-      {/* Phase 10 Wave 5 — Hardening (ADR 0042 retention + ADR 0043
-          exclusion rules). PDF export lives on the per-session view,
-          not here. */}
-      <SettingsActivityHardeningRow />
+      {/* macOS-port (v1 honest-surface) — the following General rows are
+          Windows-only under the hood, so hide them on macOS:
+            - Command Center chord: the chord hotkey installer is
+              `#[cfg(target_os = "windows")]` (macOS opens the CC from
+              the tray), so rebinding a chord that can't fire is a lie.
+            - Activity audio + hardening: Activity capture is Windows-
+              only (macOS ships a no-op sampler; the feature is "coming
+              soon" on macOS), so its settings shouldn't show here.
+          Windows renders all three exactly as before (isMac === false). */}
+      {!isMac ? (
+        <>
+          {/* Phase 10 Wave 1A deferral landed in 1B: surface the
+              `command_center_chord` setting so users can rebind. Stored
+              as a free-form string (e.g. "RightCtrl+Space") parsed by
+              `command_center::parse_chord` on the Rust side. A bad chord
+              falls back to the default without breaking the app. */}
+          <CommandCenterChordRow />
+          {/* Phase 10 Wave 4 — Activity Capture audio toggle (ADR 0041).
+              Default OFF (privacy by default). The Command Center reads
+              this at session-start time; the IPC `activity_start`
+              defaults to it when no explicit `withAudio` is passed. */}
+          <SettingsActivityAudioRow />
+          {/* Phase 10 Wave 5 — Hardening (ADR 0042 retention + ADR 0043
+              exclusion rules). PDF export lives on the per-session view,
+              not here. */}
+          <SettingsActivityHardeningRow />
+        </>
+      ) : null}
       </Card>
       <BackgroundCard />
     </>
@@ -322,6 +383,11 @@ function GeneralPanel({
 /* ------------------------------------------------------------------ */
 
 function BackgroundCard() {
+  // macOS-port (mb-ihg): the Unsplash key is DPAPI on Windows but the
+  // macOS Keychain (ADR 0056) on Mac, so the storage-mechanism copy must
+  // be platform-accurate. `isMac` is `null` on Windows/pre-boot, so the
+  // `isMac ?` branch only fires on Mac -> Windows copy byte-identical.
+  const isMac = useAppStore((s) => s.isMac);
   const [prefs, setPrefsState] = useState<BackgroundPrefs>(() => getPrefs());
   // The committed API key, hydrated async from DPAPI. Empty string
   // when not yet loaded OR not configured; both states gate the
@@ -401,7 +467,7 @@ function BackgroundCard() {
           font: "var(--type-sm)",
         }}
       >
-        {t("settings.general.bg.help")}
+        {t(isMac ? "settings.general.bg.help.mac" : "settings.general.bg.help")}
       </p>
 
       <Row
@@ -528,8 +594,16 @@ function BackgroundCard() {
 /* ------------------------------------------------------------------ */
 
 function ModelsPanel({ settings, patch }: PanelProps) {
+  // macOS-port (mb-ihg): the Claude API key is DPAPI on Windows but the
+  // macOS Keychain (ADR 0056) on Mac. `isMac` is `null` on Windows/pre-boot,
+  // so Windows copy stays byte-identical.
+  const isMac = useAppStore((s) => s.isMac);
   return (
     <>
+      {/* macOS-only Cleanup-engine status card (source of truth for the
+          Ollama/passthrough signposting). isMac-gated → Windows byte-
+          identical. Re-checks on window focus via the shared hook. */}
+      {isMac ? <CleanupEngineCard /> : null}
       <Card title={t("settings.models.ollama")}>
         <p style={{ color: "var(--on-surf-muted)", margin: 0, font: "var(--type-sm)" }}>
           {t("settings.models.ollama.help")}
@@ -539,7 +613,11 @@ function ModelsPanel({ settings, patch }: PanelProps) {
         <Row
           label={
             settings.claudeKeyConfigured
-              ? t("settings.models.claude.configured")
+              ? t(
+                  isMac
+                    ? "settings.models.claude.configured.mac"
+                    : "settings.models.claude.configured",
+                )
               : t("settings.models.claude.unconfigured")
           }
           control={
@@ -586,7 +664,11 @@ function ModelsPanel({ settings, patch }: PanelProps) {
 /* Advanced panel — learning loop + folder shortcuts + data control     */
 /* ------------------------------------------------------------------ */
 
-function AdvancedPanel({ settings, patch }: PanelProps) {
+function AdvancedPanel({
+  settings,
+  patch,
+  isMac,
+}: PanelProps & { isMac: boolean }) {
   const [runs, setRuns] = useState<LearningRun[] | null>(null);
   const [paths, setPaths] = useState<{ dataDir: string; logsDir: string; modelsDir: string } | null>(
     null,
@@ -594,9 +676,14 @@ function AdvancedPanel({ settings, patch }: PanelProps) {
   const [running, setRunning] = useState(false);
 
   useEffect(() => {
-    void api.list_learning_runs(10).then(setRuns);
+    // mb-kw8: the nightly learning-loop scheduler is `#[cfg(windows)]`, so
+    // on macOS the loop can't run — skip fetching its run history and
+    // hide the whole card below. `app_paths` is cross-platform and stays.
+    if (!isMac) {
+      void api.list_learning_runs(10).then(setRuns);
+    }
     void api.app_paths().then(setPaths);
-  }, []);
+  }, [isMac]);
 
   const triggerRun = async () => {
     setRunning(true);
@@ -610,6 +697,11 @@ function AdvancedPanel({ settings, patch }: PanelProps) {
 
   return (
     <>
+      {/* mb-kw8: learning-loop controls are Windows-only (the nightly
+          scheduler is `#[cfg(windows)]`); hide them on macOS so a
+          non-functional Windows-remnant setting isn't shown. Windows
+          renders the card exactly as today (isMac === false). */}
+      {!isMac ? (
       <Card title={t("settings.advanced.learning")}>
         <p style={{ margin: 0, color: "var(--on-surf-muted)", font: "var(--type-sm)" }}>
           {t("settings.advanced.learning.help")}
@@ -669,6 +761,7 @@ function AdvancedPanel({ settings, patch }: PanelProps) {
           </>
         ) : null}
       </Card>
+      ) : null}
 
       <Card title="Folders">
         {paths
