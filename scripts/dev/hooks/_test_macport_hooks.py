@@ -1,10 +1,14 @@
-"""Dry-run test cases for the four macOS-port wiggum hooks.
+"""Dry-run test cases for the surviving macOS-port wiggum hooks.
 
-Mirrors the harness style of `_test_meeting_coupling.py`. Pure-function
-helpers (`parse_push_lines`, `find_protected_pushes`, `should_block`,
-`should_block_diff`) are imported and exercised directly — no git plumbing,
-no temp repos. The main() functions that actually call git are validated
-in `main_smoke` via `subprocess.run` with synthetic inputs where possible.
+block-push-to-main and block-windows-rs-edit-on-macport were RETIRED after
+the macos-port -> main merge (8e6cd5d), so their cases are gone. This now
+covers the branch-independent guards that remain: block-stt-swap (the
+whisper-rs/metal STT-parity guard) and verify-cargo-build-jobs.
+
+Mirrors the harness style of `_test_meeting_coupling.py`. The pure-function
+helper (`should_block_diff`) is imported and exercised directly — no git
+plumbing, no temp repos. The main() functions that actually call git are
+validated in `main_smoke` via `subprocess.run`.
 
 Run:
     python scripts/dev/hooks/_test_macport_hooks.py
@@ -32,77 +36,7 @@ def _load(mod_filename: str):
     return mod
 
 
-push_mod = _load("block-push-to-main.py")
-wrs_mod = _load("block-windows-rs-edit-on-macport.py")
 stt_mod = _load("block-stt-swap.py")
-
-
-PUSH_CASES = [
-    (
-        "push only to feature branch (ALLOW)",
-        "refs/heads/macos-port abc123 refs/heads/macos-port def456\n",
-        [],
-    ),
-    (
-        "push only to feature branch via -f (ALLOW)",
-        "refs/heads/macos-port abc refs/heads/feature/x def\n",
-        [],
-    ),
-    (
-        "push to main (BLOCK)",
-        "refs/heads/macos-port abc refs/heads/main def\n",
-        ["refs/heads/main"],
-    ),
-    (
-        "push to master (BLOCK)",
-        "refs/heads/macos-port abc refs/heads/master def\n",
-        ["refs/heads/master"],
-    ),
-    (
-        "mixed: feature + main (BLOCK)",
-        "refs/heads/macos-port a refs/heads/macos-port b\n"
-        "refs/heads/main c refs/heads/main d\n",
-        ["refs/heads/main"],
-    ),
-    (
-        "empty stdin (ALLOW)",
-        "",
-        [],
-    ),
-    (
-        "malformed line (ALLOW — no 4-tuple parsed)",
-        "garbage\n",
-        [],
-    ),
-]
-
-
-WINDOWS_RS_CASES = [
-    ("on macos-port, edits windows.rs (BLOCK)",
-     "macos-port",
-     ["src-tauri/src/secrets/windows.rs", "ui/x.ts"],
-     ["src-tauri/src/secrets/windows.rs"]),
-    ("on macos-port, no windows.rs (ALLOW)",
-     "macos-port",
-     ["src-tauri/src/secrets/macos.rs", "ui/x.ts"],
-     []),
-    ("on main, edits windows.rs (ALLOW — branch gate)",
-     "main",
-     ["src-tauri/src/secrets/windows.rs"],
-     []),
-    ("on macos-port, edits multiple windows.rs (BLOCK both)",
-     "macos-port",
-     ["src-tauri/src/hotkey/windows.rs", "src-tauri/src/injection/windows.rs"],
-     ["src-tauri/src/hotkey/windows.rs", "src-tauri/src/injection/windows.rs"]),
-    ("on macos-port, file path that *contains* windows but not windows.rs (ALLOW)",
-     "macos-port",
-     ["src-tauri/src/window_context/macos.rs"],
-     []),
-    ("empty branch (degenerate) — git unreachable, ALLOW",
-     "",
-     ["src-tauri/src/secrets/windows.rs"],
-     []),
-]
 
 
 STT_DIFF_BLOCK = """\
@@ -158,37 +92,6 @@ STT_CASES = [
 ]
 
 
-def run_push_cases() -> int:
-    fail = 0
-    print("--- block-push-to-main ---")
-    for name, stdin_text, want in PUSH_CASES:
-        rows = push_mod.parse_push_lines(stdin_text)
-        got = push_mod.find_protected_pushes(rows)
-        ok = (sorted(got) == sorted(want))
-        status = "OK" if ok else "FAIL"
-        if not ok:
-            fail += 1
-            print(f"  [{status}] {name}\n      want={want}\n      got={got}")
-        else:
-            print(f"  [{status}] {name}")
-    return fail
-
-
-def run_windows_rs_cases() -> int:
-    fail = 0
-    print("--- block-windows-rs-edit-on-macport ---")
-    for name, branch, paths, want in WINDOWS_RS_CASES:
-        got = wrs_mod.should_block(branch, paths)
-        ok = (sorted(got) == sorted(want))
-        status = "OK" if ok else "FAIL"
-        if not ok:
-            fail += 1
-            print(f"  [{status}] {name}\n      want={want}\n      got={got}")
-        else:
-            print(f"  [{status}] {name}")
-    return fail
-
-
 def run_stt_cases() -> int:
     fail = 0
     print("--- block-stt-swap ---")
@@ -215,41 +118,6 @@ def run_main_smoke() -> int:
     """
     fail = 0
     print("--- main(): subprocess smoke ---")
-
-    # block-push-to-main: BLOCK
-    bad_stdin = b"refs/heads/macos-port abc refs/heads/main def\n"
-    r = subprocess.run(
-        [sys.executable, str(HOOK_DIR / "block-push-to-main.py")],
-        input=bad_stdin, capture_output=True,
-    )
-    if r.returncode == 1:
-        print("  [OK] block-push-to-main: exit 1 on refs/heads/main")
-    else:
-        fail += 1
-        print(f"  [FAIL] block-push-to-main: want exit 1, got {r.returncode}\n{r.stderr.decode()}")
-
-    # block-push-to-main: ALLOW
-    r = subprocess.run(
-        [sys.executable, str(HOOK_DIR / "block-push-to-main.py")],
-        input=b"refs/heads/macos-port a refs/heads/macos-port b\n", capture_output=True,
-    )
-    if r.returncode == 0:
-        print("  [OK] block-push-to-main: exit 0 on refs/heads/macos-port")
-    else:
-        fail += 1
-        print(f"  [FAIL] block-push-to-main: want exit 0, got {r.returncode}")
-
-    # block-windows-rs-edit-on-macport: with empty staged set (live git),
-    # should exit 0.
-    r = subprocess.run(
-        [sys.executable, str(HOOK_DIR / "block-windows-rs-edit-on-macport.py")],
-        capture_output=True,
-    )
-    if r.returncode == 0:
-        print("  [OK] block-windows-rs-edit-on-macport: exit 0 on clean state")
-    else:
-        fail += 1
-        print(f"  [FAIL] block-windows-rs-edit-on-macport: exit {r.returncode}\n{r.stderr.decode()}")
 
     # block-stt-swap: clean state, exit 0.
     r = subprocess.run(
@@ -281,8 +149,6 @@ def run_main_smoke() -> int:
 
 def main() -> int:
     fail = 0
-    fail += run_push_cases()
-    fail += run_windows_rs_cases()
     fail += run_stt_cases()
     fail += run_main_smoke()
     print("---")

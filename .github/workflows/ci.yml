@@ -3,6 +3,30 @@
 # Gates pushes to main and runs read-only on PRs (default token scopes;
 # will not write back to fork branches).
 #
+# Cross-platform matrix (mb-xkog):
+#   After the macos-port -> main merge (8e6cd5d) the shared code surface
+#   compiles on BOTH Windows and macOS/Apple Silicon. The Rust gate runs
+#   as a matrix over `windows-2022` (the dev-box-matching pin, below) and
+#   `macos-latest` so neither platform can silently regress. Platform-
+#   independent steps (the UI gate, cargo-audit) run once on the Windows
+#   leg only -- macOS runner minutes bill at 10x, so duplicating a
+#   toolchain-agnostic `npm`/audit pass there is pure waste.
+#
+# Why the macOS leg builds `--features mockingbird/metal`:
+#   That's the real macOS build (the Mac dev wrapper
+#   scripts/dev/cargo-mac.sh auto-injects it). It pulls whisper-rs's
+#   Metal-backed ggml native build, which is exactly the surface we want
+#   CI to protect. `cmake` is preinstalled on macos-latest; the `ort` VAD
+#   session is `load-dynamic` (Cargo.toml) so it needs libonnxruntime.dylib
+#   only at RUNTIME -- a compile-only check/clippy gate needs no dylib.
+#   MACOSX_DEPLOYMENT_TARGET=15.0 mirrors cargo-mac.sh: below 10.15 libc++
+#   marks std::filesystem::path unavailable and ggml-backend-reg.cpp fails
+#   to compile. (Inert on the Windows leg.)
+#
+# Why check/clippy and NOT a tauri bundle on the macOS leg:
+#   This stays a check/lint gate consistent with the Windows leg. The full
+#   .app/.dmg bundle is release.yml's job, not PR CI.
+#
 # Why no `cargo test`:
 #   The test binaries link clean locally (`cargo test --release --no-run`
 #   passes) but exec hits a known DLL ABI mismatch on the maintainer's
@@ -39,19 +63,36 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Pinned to windows-2022 (VS 17) so the toolchain matches the dev
-        # box wrapper (scripts\dev\cargo-with-cuda.ps1 imports vcvars64
-        # from VS 2022). windows-latest rolled forward to VS 18 (2026)
-        # and poisoned a stale cargo cache built against VS 17 in run
-        # 27649041528 (whisper-rs-sys CMake generator mismatch). mb-wgla.
-        os: [windows-2022]
+        include:
+          # Pinned to windows-2022 (VS 17) so the toolchain matches the dev
+          # box wrapper (scripts\dev\cargo-with-cuda.ps1 imports vcvars64
+          # from VS 2022). windows-latest rolled forward to VS 18 (2026)
+          # and poisoned a stale cargo cache built against VS 17 in run
+          # 27649041528 (whisper-rs-sys CMake generator mismatch). mb-wgla.
+          # Runs the UI gate + cargo-audit (both platform-independent) so
+          # they execute exactly once.
+          - os: windows-2022
+            rust_features: ""
+          # Apple Silicon leg (mb-xkog). Builds the Metal STT surface; a
+          # compile-only check/clippy gate, not a bundle.
+          - os: macos-latest
+            rust_features: "--features mockingbird/metal"
     runs-on: ${{ matrix.os }}
+
+    # Mirrors scripts/dev/cargo-mac.sh: pins the whisper.cpp native-build
+    # floor so ggml-backend-reg.cpp (std::filesystem::path) compiles.
+    # Inert on the Windows leg (no clang/Apple toolchain reads it).
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "15.0"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # --- UI gate: platform-independent, run once on the Windows leg to
+      #     avoid burning 10x-billed macOS runner minutes on a duplicate ---
       - name: Setup Node 20
+        if: matrix.os == 'windows-2022'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -69,26 +110,59 @@ jobs:
           # Inject the runner image label so a future intentional bump
           # (windows-2022 -> windows-2025) auto-invalidates the cache.
           # Swatinem's default key uses runner.os = "Windows" which does
-          # NOT distinguish runner image versions. mb-wgla.
+          # NOT distinguish runner image versions. mb-wgla. It also keeps
+          # the Windows and macOS legs on separate cache keys.
           key: ${{ matrix.os }}
 
       # `--ignore-scripts` is mandatory per repo hook policy
       # (block-unsafe-npm). Mini Shai-Hulud guard.
       - name: Install UI deps
+        if: matrix.os == 'windows-2022'
         working-directory: ui
         run: npm ci --ignore-scripts
 
       - name: UI type check
+        if: matrix.os == 'windows-2022'
         working-directory: ui
         run: npx tsc --noEmit
 
       - name: UI tests
+        if: matrix.os == 'windows-2022'
         working-directory: ui
         run: npm test
 
       - name: UI build
+        if: matrix.os == 'windows-2022'
         working-directory: ui
         run: npm run build
+
+      # The macOS leg is a Rust compile/lint gate; it deliberately skips the
+      # (platform-independent) UI build to save 10x-billed mac minutes. But
+      # two build-time checks read on-disk assets the Windows leg produces
+      # for free, so we stub them here. This is a check gate, not a bundle:
+      #
+      #  1. tauri.macos.conf.json bundles three model artifacts as
+      #     `resources` (whisper gguf, silero VAD onnx, ORT dylib).
+      #     tauri-build validates those source paths EXIST even under
+      #     `cargo check`. They're gitignored downloads absent in CI, so we
+      #     touch empty placeholders instead of fetching ~1.6 GB of models.
+      #  2. tauri::generate_context!() panics at compile time if
+      #     build.frontendDist (../ui/dist) doesn't exist. On Windows the
+      #     `npm run build` step creates it; here we stub a minimal dist so
+      #     the Rust codegen proceeds.
+      #
+      # Real assets are produced by `npm run build` + the download scripts
+      # at release time (release.yml). The base tauri.conf.json declares no
+      # models resources, so the Windows leg needs none of this.
+      - name: Stub check-only assets (models + ui/dist)
+        if: matrix.os == 'macos-latest'
+        run: |
+          mkdir -p models
+          touch models/whisper-large-v3-turbo-q5_0.bin
+          touch models/silero_vad.onnx
+          touch models/libonnxruntime.1.22.0.dylib
+          mkdir -p ui/dist
+          echo '<!doctype html><title>ci-stub</title>' > ui/dist/index.html
 
       - name: Cargo fmt check
         run: cargo fmt --all -- --check
@@ -98,20 +172,25 @@ jobs:
       # declared as `[[example]]` targets in `src-tauri/Cargo.toml` (mb-d1ii)
       # so they get linted here but never reach the Tauri MSI bundler
       # (which scans `src/bin/` directly, bypassing Cargo metadata).
+      # ${{ matrix.rust_features }} is empty on Windows, --features
+      # mockingbird/metal on the macOS leg.
       - name: Cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets ${{ matrix.rust_features }} -- -D warnings
 
       - name: Cargo check
-        run: cargo check --workspace --all-targets
+        run: cargo check --workspace --all-targets ${{ matrix.rust_features }}
 
       # cargo-audit is warn-only: advisories surface in the job log as
       # warnings but do not fail the build. The maintainer reviews
       # findings periodically and bumps deps as appropriate. This
       # prevents transient upstream advisories from blocking unrelated
-      # PRs.
+      # PRs. Advisories are keyed off Cargo.lock (platform-independent),
+      # so the Windows leg audits for both.
       - name: Install cargo-audit
+        if: matrix.os == 'windows-2022'
         run: cargo install cargo-audit --locked
 
       - name: Cargo audit (warn-only)
+        if: matrix.os == 'windows-2022'
         continue-on-error: true
         run: cargo audit
