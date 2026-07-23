@@ -17,10 +17,21 @@
 # config `version` ever diverge, the filename follows the CONFIG version,
 # not the tag -- keep them in sync at release time.
 #
-# Unsigned bundle: no Apple Developer account is used. Homebrew's default
-# cask install STRIPS the com.apple.quarantine attribute, so there is NO
-# Gatekeeper wall via this path -- that is the whole point of shipping a
-# cask alongside the raw .dmg.
+# Ad-hoc-signed bundle: no Apple Developer ID / notarization (no paid
+# account). The .app IS validly codesigned (bundle.macOS.signingIdentity
+# "-" in tauri.macos.conf.json), so it does NOT read as "damaged and
+# should be uninstalled" -- that error is caused by an INVALID/unsealed
+# signature, which the ad-hoc sign fixes.
+#
+# NOTE: Homebrew (6.x) still ADDS com.apple.quarantine on cask install --
+# it does NOT strip it. So on first launch Gatekeeper shows the ordinary
+# "unidentified developer" prompt (Apple can't notarization-check an
+# ad-hoc app). Approve once via right-click > Open, or System Settings >
+# Privacy & Security > "Open Anyway". To skip the prompt entirely, install
+# with:  brew install --cask --no-quarantine duz10/mockingbird/mockingbird
+# (Homebrew removed the per-cask `quarantine false` opt-out, so the cask
+# cannot suppress it on the user's behalf.) Without a $99/yr Developer ID
+# + notarization, that one-time approval is inherent to this distribution.
 cask "mockingbird" do
   version "0.3.0-beta.2"
   sha256 "90eae61bf8ee3ec403b41a9e310d622eb26224e689b2a96202c8a57a2bc7ba9e"
