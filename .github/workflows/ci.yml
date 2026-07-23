@@ -136,6 +136,23 @@ jobs:
         working-directory: ui
         run: npm run build
 
+      # tauri.macos.conf.json bundles three model artifacts as `resources`
+      # (whisper gguf, silero VAD onnx, ORT dylib). tauri-build's build
+      # script validates those source paths EXIST even under `cargo check`
+      # -- and they're gitignored downloaded artifacts absent in CI. This
+      # is a compile-only gate, not a bundle, so we stub empty placeholders
+      # to satisfy the existence check rather than download ~1.6 GB of real
+      # models. The real artifacts are fetched by the download scripts at
+      # release time (release.yml). The base tauri.conf.json declares no
+      # models resources, so the Windows leg needs none of this.
+      - name: Stub macOS bundle resources (check-only)
+        if: matrix.os == 'macos-latest'
+        run: |
+          mkdir -p models
+          touch models/whisper-large-v3-turbo-q5_0.bin
+          touch models/silero_vad.onnx
+          touch models/libonnxruntime.1.22.0.dylib
+
       - name: Cargo fmt check
         run: cargo fmt --all -- --check
 
