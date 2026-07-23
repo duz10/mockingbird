@@ -215,12 +215,22 @@ jobs:
         # with "code has no resources but signature indicates they must
         # be present". A downloaded copy then reads as "damaged". Fail the
         # release here rather than ship an un-launchable .dmg.
+        #
+        # We verify the .app INSIDE the built .dmg, not the loose bundle in
+        # target/.../release/bundle/macos/: tauri DELETES that intermediate
+        # .app right after packing the .dmg ("Cleaning ...Mockingbird.app"),
+        # so by the time this step runs the loose bundle is gone. Mounting
+        # the .dmg also verifies the exact bytes we ship.
         run: |
           set -euo pipefail
-          # Locate the assembled bundle regardless of workspace target-dir
-          # layout (root ./target vs ./src-tauri/target).
-          APP="$(find . -type d -path '*/release/bundle/macos/Mockingbird.app' -print -quit)"
-          test -n "$APP" || { echo 'ERROR: Mockingbird.app not found'; exit 1; }
+          DMG="$(find . -type f -path '*/release/bundle/dmg/Mockingbird_*_aarch64.dmg' -print -quit)"
+          test -n "$DMG" || { echo 'ERROR: .dmg not found'; exit 1; }
+          echo "Mounting $DMG"
+          MNT="$(mktemp -d)"
+          hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT"
+          trap 'hdiutil detach "$MNT" || true' EXIT
+          APP="$MNT/Mockingbird.app"
+          test -d "$APP" || { echo 'ERROR: Mockingbird.app not found in .dmg'; exit 1; }
           echo "Verifying signature of $APP"
           codesign -dv --verbose=4 "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
