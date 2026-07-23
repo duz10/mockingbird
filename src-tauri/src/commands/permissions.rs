@@ -17,7 +17,7 @@
 //! panel rendering + deep-link opening fold into the human e2e
 //! (`mac-p3f-permissions-onboarding-renders`, a MANUAL judge).
 
-use crate::permissions::PermissionStatuses;
+use crate::permissions::{PermissionState, PermissionStatuses};
 
 /// Return the current grant state of all four macOS permissions.
 ///
@@ -33,6 +33,33 @@ pub fn mac_permission_statuses() -> Result<PermissionStatuses, String> {
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PermissionStatuses::unsupported())
+    }
+}
+
+/// **Request** microphone access — pops the macOS TCC prompt.
+///
+/// Unlike the other three permissions, macOS Microphone can't be added to
+/// the System Settings list manually: the app appears there only *after*
+/// it calls `AVCaptureDevice.requestAccess(for: .audio)`. So "Open
+/// Settings" alone is a dead end for a fresh install — this command is the
+/// reliable, user-initiated path that pops the prompt and registers the
+/// app. Returns the resulting grant state:
+///   - `granted` -> the mic will work; the panel flips to Granted.
+///   - `denied`/`restricted` -> the user said no (or MDM blocks it); the
+///     UI falls back to opening the Microphone Settings pane, where the
+///     app is now listed and can be toggled on.
+///   - `notDetermined` only if the prompt couldn't be shown.
+///
+/// On non-macOS this is `Unsupported` (the panel is macOS-only anyway).
+#[tauri::command]
+pub fn request_microphone_access() -> Result<PermissionState, String> {
+    #[cfg(target_os = "macos")]
+    {
+        Ok(crate::permissions::macos::request_microphone_access())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(PermissionState::Unsupported)
     }
 }
 

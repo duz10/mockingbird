@@ -38,6 +38,7 @@ import type {
   EffectivePrompt,
   ModeRow,
   PermissionKey,
+  PermissionState,
   PermissionStatuses,
   QueueStatus,
   Vocabularies,
@@ -429,6 +430,13 @@ export const api = {
   mac_open_settings_pane: (permission: PermissionKey) =>
     invoke<void>("mac_open_settings_pane", { permission }),
 
+  /** Request microphone access — pops the macOS TCC prompt and registers
+   *  the app in System Settings -> Privacy -> Microphone. Unlike the other
+   *  three grants, mic can't be added manually, so this is the reliable
+   *  path. Returns the resulting grant state. mb-qz3. */
+  request_microphone_access: () =>
+    invoke<PermissionState>("request_microphone_access"),
+
   /**
    * mb-1z0m (Round 3) -- fire-and-forget IPC-outcome mirror so JS-side
    * `console.warn` failures also land in `mockingbird.log`. Takes no
@@ -791,6 +799,10 @@ function fixtureFor<T>(command: string, args?: object): T {
     case "mac_open_settings_pane":
       // Deep-link open is a real OS side-effect; nothing to fixture.
       return fixture(command, null) as T;
+    case "request_microphone_access":
+      // TCC prompt is a real OS side-effect; browser preview can't show
+      // it. Fixture a granted outcome so the panel flow stays exercisable.
+      return fixture(command, "granted" as PermissionState) as T;
     case "report_ipc_status":
       // mb-1z0m (Round 3) -- fire-and-forget; nothing to fixture.
       return fixture(command, null) as T;
