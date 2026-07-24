@@ -23,6 +23,22 @@ use objc2_foundation::NSString;
 
 use super::{map_av_status, map_bool, map_iohid_access, PermissionState, PermissionStatuses};
 
+/// Is the current thread the AppKit main thread?
+///
+/// Used only for the mb-19f off-main invariant: a `debug_assert!` and a
+/// tracing marker around the blocking mic-prompt wait, so that if a future
+/// change ever routes the blocking `request_microphone_access` back onto
+/// the main thread (re-introducing the run-loop deadlock) it surfaces loudly.
+fn is_main_thread() -> bool {
+    // SAFETY: `+[NSThread isMainThread]` is a Foundation class method that
+    // reads the current thread's main-thread flag and returns a `BOOL`; no
+    // arguments, no mutation, no prompt.
+    unsafe {
+        let is_main: Bool = msg_send![class!(NSThread), isMainThread];
+        is_main.as_bool()
+    }
+}
+
 // --- Microphone: AVFoundation -----------------------------------------------
 
 #[link(name = "AVFoundation", kind = "framework")]
@@ -85,14 +101,24 @@ pub fn request_microphone_access() -> PermissionState {
         "mic request: NotDetermined -> dispatching requestAccess to the MAIN thread to show the TCC prompt"
     );
 
-    // mb-47k: the TCC prompt can ONLY be presented from the AppKit main
-    // thread / main run-loop. Tauri command handlers run off the main
-    // thread (async command thread-pool), so calling `requestAccess`
-    // directly here resolves `denied` WITHOUT ever showing the prompt.
-    // Hop onto the main dispatch queue; the completion handler still fires
-    // on an arbitrary queue and wakes us over the channel. Only the
-    // `Send` `tx` crosses the boundary — the non-`Send` `RcBlock` is built
-    // and used entirely on the main thread inside the closure.
+    // mb-47k / mb-19f: the TCC prompt can ONLY be presented from the
+    // AppKit main thread / main run-loop, so we hop `requestAccess` onto
+    // the main dispatch queue here. CRITICAL: the blocking wait below must
+    // NOT run on the main thread, or it wedges the run loop and the queued
+    // prompt block can never execute (the mb-19f deadlock). This function
+    // is therefore only ever called from OFF the main thread — the
+    // user-initiated command wraps it in `async_runtime::spawn_blocking`
+    // (see `commands::permissions::request_microphone_access`), and the
+    // capture path (`prompt_microphone_access_async`) never blocks at all.
+    // The completion handler fires on an arbitrary queue and wakes us over
+    // the channel. Only the `Send` `tx` crosses the boundary — the
+    // non-`Send` `RcBlock` is built and used entirely on the main thread
+    // inside the closure.
+    debug_assert!(
+        !is_main_thread(),
+        "request_microphone_access must run OFF the main thread (mb-19f); \
+         blocking here wedges the run loop and the TCC prompt never presents"
+    );
     DispatchQueue::main().exec_async(move || {
         let handler = RcBlock::new(move |granted: Bool| {
             let granted = granted.as_bool();
@@ -119,7 +145,15 @@ pub fn request_microphone_access() -> PermissionState {
 
     // Block (on this off-main command thread) until the user answers or
     // the safety timeout elapses; either way, return the fresh
-    // authoritative status.
+    // authoritative status. The `on_main_thread=false` marker below is the
+    // mb-19f canary: if a future refactor ever runs this on the main
+    // thread again, the log makes the regression obvious at a glance.
+    tracing::info!(
+        target: "permissions",
+        on_main_thread = is_main_thread(),
+        thread = std::thread::current().name().unwrap_or("<unnamed>"),
+        "mic request: waiting OFF-MAIN for the TCC answer (main run loop free to present the prompt)"
+    );
     match rx.recv_timeout(MIC_PROMPT_WAIT) {
         Ok(granted) => {
             tracing::info!(target: "permissions", granted, "mic request: user answered the prompt")

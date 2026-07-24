@@ -51,11 +51,25 @@ pub fn mac_permission_statuses() -> Result<PermissionStatuses, String> {
 ///   - `notDetermined` only if the prompt couldn't be shown.
 ///
 /// On non-macOS this is `Unsupported` (the panel is macOS-only anyway).
+///
+/// **Why `async` + `spawn_blocking` (mb-19f).** The core
+/// [`crate::permissions::macos::request_microphone_access`] dispatches the
+/// TCC prompt onto the main run-loop and then *blocks* waiting for the
+/// user's answer. A synchronous `#[tauri::command] fn` is executed
+/// **inline on the main thread** (Tauri runs `Blocking`-kind commands on
+/// the IPC/main thread; only `async` commands are spawned off-main), so a
+/// blocking wait there wedges the run loop -- the prompt block can never
+/// run and the UI beachballs for the full timeout before flipping to
+/// Denied. Declaring the command `async` makes Tauri run it off the main
+/// thread, and `spawn_blocking` moves the blocking wait onto the blocking
+/// pool, leaving the main run loop free to actually present the prompt.
 #[tauri::command]
-pub fn request_microphone_access() -> Result<PermissionState, String> {
+pub async fn request_microphone_access() -> Result<PermissionState, String> {
     #[cfg(target_os = "macos")]
     {
-        Ok(crate::permissions::macos::request_microphone_access())
+        tauri::async_runtime::spawn_blocking(crate::permissions::macos::request_microphone_access)
+            .await
+            .map_err(|e| format!("mic request task failed to join: {e}"))
     }
     #[cfg(not(target_os = "macos"))]
     {
