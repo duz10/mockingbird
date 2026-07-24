@@ -8,6 +8,51 @@ follows [Semantic Versioning](https://semver.org/).
 
 _Nothing yet._
 
+## [0.3.0-beta.3] - 2026-07-24
+
+macOS microphone/dictation hardening. On some macOS installs the mic
+permission prompt never appeared and dictation was dead on arrival; this
+release makes the TCC prompt actually present and the mic grant
+obtainable. Windows is unchanged (all fixes are macOS-overlay-only).
+
+### Fixed
+
+- **macOS mic TCC prompt now presents (main-thread deadlock).** The
+  user-initiated "Request access" ran as a synchronous Tauri command,
+  which executes on the main thread; it then blocked for up to 120s
+  waiting for the TCC answer, wedging the main run loop so the prompt
+  could never display (spinning beachball, then a false "Denied"). The
+  command is now `async` and the blocking wait runs via
+  `spawn_blocking`, keeping the main run loop free to present the
+  prompt.
+- **macOS mic denied under the hardened runtime (missing entitlement).**
+  Ad-hoc signing (added in 0.3.0-beta.2) enabled the hardened runtime,
+  under which macOS refuses to even show the mic prompt without the
+  `com.apple.security.device.audio-input` entitlement
+  (`tccd: "...requires entitlement...; policy disallows prompt"`). A
+  new `Entitlements.plist` grants it, so the prompt presents and the app
+  registers in System Settings -> Privacy -> Microphone.
+- **macOS VAD dylib load under the hardened runtime.** The bundled,
+  ad-hoc-signed `libonnxruntime.dylib` (Silero VAD) is `dlopen`ed at
+  first dictation; hardened-runtime Library Validation would reject a
+  dylib not signed by the same Team ID. The entitlements now include
+  `com.apple.security.cs.disable-library-validation` so it loads.
+
+### Known limitations
+
+- **macOS build is ad-hoc signed (no Developer ID / notarization).**
+  Same posture as the unsigned Windows MSIs. Installing via the Homebrew
+  cask strips quarantine automatically; if you download the `.dmg`
+  directly you may need to clear it manually:
+  `xattr -dr com.apple.quarantine /Applications/Mockingbird.app`.
+- **Dev rebuild caveat (cdhash churn).** Every local `tauri build`
+  produces a new ad-hoc code hash, and macOS binds TCC grants to that
+  hash, so a freshly rebuilt binary starts with no grants. This affects
+  developers rebuilding locally, not users installing a single released
+  `.dmg` (one stable hash, grant once). If permissions seem to vanish
+  after a rebuild: `tccutil reset All com.dustin.mockingbird`, relaunch,
+  and re-grant.
+
 ## [0.3.0-beta.1] - 2026-07-23
 
 First cross-platform release. Mockingbird now ships a native macOS
