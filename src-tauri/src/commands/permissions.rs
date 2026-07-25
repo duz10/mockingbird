@@ -17,7 +17,7 @@
 //! panel rendering + deep-link opening fold into the human e2e
 //! (`mac-p3f-permissions-onboarding-renders`, a MANUAL judge).
 
-use crate::permissions::PermissionStatuses;
+use crate::permissions::{PermissionState, PermissionStatuses};
 
 /// Return the current grant state of all four macOS permissions.
 ///
@@ -33,6 +33,47 @@ pub fn mac_permission_statuses() -> Result<PermissionStatuses, String> {
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PermissionStatuses::unsupported())
+    }
+}
+
+/// **Request** microphone access — pops the macOS TCC prompt.
+///
+/// Unlike the other three permissions, macOS Microphone can't be added to
+/// the System Settings list manually: the app appears there only *after*
+/// it calls `AVCaptureDevice.requestAccess(for: .audio)`. So "Open
+/// Settings" alone is a dead end for a fresh install — this command is the
+/// reliable, user-initiated path that pops the prompt and registers the
+/// app. Returns the resulting grant state:
+///   - `granted` -> the mic will work; the panel flips to Granted.
+///   - `denied`/`restricted` -> the user said no (or MDM blocks it); the
+///     UI falls back to opening the Microphone Settings pane, where the
+///     app is now listed and can be toggled on.
+///   - `notDetermined` only if the prompt couldn't be shown.
+///
+/// On non-macOS this is `Unsupported` (the panel is macOS-only anyway).
+///
+/// **Why `async` + `spawn_blocking` (mb-19f).** The core
+/// [`crate::permissions::macos::request_microphone_access`] dispatches the
+/// TCC prompt onto the main run-loop and then *blocks* waiting for the
+/// user's answer. A synchronous `#[tauri::command] fn` is executed
+/// **inline on the main thread** (Tauri runs `Blocking`-kind commands on
+/// the IPC/main thread; only `async` commands are spawned off-main), so a
+/// blocking wait there wedges the run loop -- the prompt block can never
+/// run and the UI beachballs for the full timeout before flipping to
+/// Denied. Declaring the command `async` makes Tauri run it off the main
+/// thread, and `spawn_blocking` moves the blocking wait onto the blocking
+/// pool, leaving the main run loop free to actually present the prompt.
+#[tauri::command]
+pub async fn request_microphone_access() -> Result<PermissionState, String> {
+    #[cfg(target_os = "macos")]
+    {
+        tauri::async_runtime::spawn_blocking(crate::permissions::macos::request_microphone_access)
+            .await
+            .map_err(|e| format!("mic request task failed to join: {e}"))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(PermissionState::Unsupported)
     }
 }
 

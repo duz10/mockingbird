@@ -151,6 +151,9 @@ pub fn register<R: tauri::Runtime>(builder: Builder<R>) -> Builder<R> {
         // macOS permissions onboarding (mb-mac-v1.4.6 / ADR 0061).
         permissions::mac_permission_statuses,
         permissions::mac_open_settings_pane,
+        // mb-qz3 — explicit mic request (pops TCC prompt; mic can't be
+        // manually added in System Settings until the app requests).
+        permissions::request_microphone_access,
         // mb-1z0m (Round 3) — JS→Rust IPC-outcome mirror.
         system::report_ipc_status,
         // mb-1z0m (Round 4) — React mount beacon (no state, no args).

@@ -346,6 +346,17 @@ impl super::AudioCapture for CpalCapture {
         if self.stream.is_some() {
             return Ok(());
         }
+
+        // mb-qz3: on macOS the microphone TCC grant is unreachable unless
+        // the app *requests* it (it can't be added to System Settings
+        // manually). Fire the request non-blockingly before opening the
+        // input device so first-ever dictation naturally pops the prompt.
+        // No-op once decided; the panel button is the user-initiated path.
+        #[cfg(target_os = "macos")]
+        if matches!(self.source, DeviceSource::Input) {
+            crate::permissions::macos::prompt_microphone_access_async();
+        }
+
         let device = self
             .source
             .resolve(&self.host)

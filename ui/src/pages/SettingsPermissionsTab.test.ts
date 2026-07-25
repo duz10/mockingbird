@@ -58,3 +58,14 @@ describe("api.mac_open_settings_pane (fixture mode)", () => {
     }
   });
 });
+
+describe("api.request_microphone_access (fixture mode)", () => {
+  it("resolves to a valid permission state", async () => {
+    // mb-qz3 — this is the command that pops the macOS TCC prompt (mic
+    // can't be added to System Settings manually). The panel calls it
+    // from the Microphone "Request access" button and branches on the
+    // returned state (granted -> done; denied/restricted -> open pane).
+    const state = await api.request_microphone_access();
+    expect(VALID_STATES).toContain(state);
+  });
+});

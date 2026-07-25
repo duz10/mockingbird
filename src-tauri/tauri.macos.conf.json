@@ -2,7 +2,8 @@
   "$schema": "https://schema.tauri.app/config/2.0.0",
   "bundle": {
     "macOS": {
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "entitlements": "Entitlements.plist"
     },
     "resources": {
       "../models/whisper-large-v3-turbo-q5_0.bin": "models/whisper-large-v3-turbo-q5_0.bin",

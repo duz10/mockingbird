@@ -56,6 +56,9 @@ function toneFor(state: PermissionState): string {
 export function SettingsPermissionsTab() {
   const [statuses, setStatuses] = useState<PermissionStatuses | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // True while the mic TCC prompt is up (the request blocks until the
+  // user answers), so we can disable the button and show progress.
+  const [requestingMic, setRequestingMic] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -83,6 +86,27 @@ export function SettingsPermissionsTab() {
       setError(String(err));
     }
   }, []);
+
+  // Microphone is special: macOS won't list the app in the Microphone
+  // pane until it *requests* access, so "Open Settings" alone is a dead
+  // end. This pops the real TCC prompt. If the user has already denied
+  // (macOS won't re-prompt), fall back to opening the pane — the app is
+  // now listed there and can be toggled on. mb-qz3.
+  const requestMic = useCallback(async () => {
+    setRequestingMic(true);
+    try {
+      const result = await api.request_microphone_access();
+      if (result === "denied" || result === "restricted") {
+        await api.mac_open_settings_pane("microphone");
+      }
+      await refresh();
+      setError(null);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setRequestingMic(false);
+    }
+  }, [refresh]);
 
   if (!statuses) {
     return error ? (
@@ -115,12 +139,21 @@ export function SettingsPermissionsTab() {
 
         {PERMISSIONS.map((perm) => {
           const state = statuses[perm];
+          // Mic in the NotDetermined state gets a "Request access" action
+          // that pops the TCC prompt; every other case (other perms, or a
+          // mic that's already granted/denied) keeps "Open Settings".
+          const onRequest =
+            perm === "microphone" && state === "notDetermined"
+              ? requestMic
+              : undefined;
           return (
             <PermissionRow
               key={perm}
               permission={perm}
               state={state}
+              busy={perm === "microphone" && requestingMic}
               onOpen={() => void openPane(perm)}
+              onRequest={onRequest ? () => void onRequest() : undefined}
             />
           );
         })}
@@ -147,13 +180,24 @@ export function SettingsPermissionsTab() {
 function PermissionRow({
   permission,
   state,
+  busy,
   onOpen,
+  onRequest,
 }: {
   permission: PermissionKey;
   state: PermissionState;
+  busy: boolean;
   onOpen: () => void;
+  /** Present only for the microphone row when a TCC request is possible
+   *  (NotDetermined). When set, the button pops the prompt instead of
+   *  opening System Settings. */
+  onRequest?: () => void;
 }) {
   const granted = state === "granted";
+  const requestable = onRequest !== undefined;
+  const label = requestable
+    ? t("settings.permissions.requestAccess")
+    : t("settings.permissions.openSettings");
   return (
     <div className={styles.row}>
       <div className={styles.rowMain}>
@@ -173,10 +217,11 @@ function PermissionRow({
         </Pill>
         <Button
           variant={granted ? "ghost" : "primary"}
-          onClick={onOpen}
-          ariaLabel={t("settings.permissions.openSettings")}
+          onClick={requestable ? onRequest : onOpen}
+          disabled={busy}
+          ariaLabel={label}
         >
-          {t("settings.permissions.openSettings")}
+          {busy ? t("settings.permissions.requesting") : label}
         </Button>
       </div>
     </div>
