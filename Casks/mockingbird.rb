@@ -33,8 +33,8 @@
 # cannot suppress it on the user's behalf.) Without a $99/yr Developer ID
 # + notarization, that one-time approval is inherent to this distribution.
 cask "mockingbird" do
-  version "0.3.0-beta.2"
-  sha256 "90eae61bf8ee3ec403b41a9e310d622eb26224e689b2a96202c8a57a2bc7ba9e"
+  version "0.3.0-beta.3"
+  sha256 "798971d87b51740bd51cbf64e0843408e482fb38f1bdc9481bb235e8dafef729"
 
   url "https://github.com/duz10/mockingbird/releases/download/v#{version}/Mockingbird_#{version}_aarch64.dmg"
   name "Mockingbird"
