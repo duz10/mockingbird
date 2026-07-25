@@ -2,9 +2,9 @@
 
 Local-first voice dictation, meeting capture, and a personal knowledge engine. Everything runs on your machine. Zero telemetry.
 
-**Platforms.** Windows 10/11 has a downloadable installer (below). **macOS 15+ on Apple Silicon** runs voice dictation and meeting capture (both with local cleanup) at parity — it's a from-source build, no installer yet; see [macOS install](./INSTALL.md#macos-apple-silicon-source-build). Activity capture, the Knowledge Graph, and Mobile Sync are Windows-only for now on the Mac build.
+**Platforms.** Windows 10/11 has a downloadable installer (below). **macOS 15+ on Apple Silicon** runs voice dictation and meeting capture (both with local cleanup) at parity, and now ships a Homebrew cask and a downloadable `.dmg` — see [macOS install](./INSTALL.md#macos-apple-silicon) below. Activity capture, the Knowledge Graph, and Mobile Sync are Windows-only for now on the Mac build.
 
-![release](https://img.shields.io/badge/release-v0.2.0--beta.2-blue)
+![release](https://img.shields.io/badge/release-v0.3.0--beta.3-blue)
 ![platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20%7C%20macOS%2015%2B%20(Apple%20Silicon)-lightgrey)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
@@ -28,16 +28,45 @@ Capture quick text or voice notes from your iPhone and have them land in Mocking
 
 ## Quick install
 
-The fastest path:
+**TL;DR:** install, allow 3 permissions (Microphone, Input Monitoring, Accessibility), and — if you want the optional AI cleanup polish — add [Ollama](https://ollama.com). Basic dictation works without Ollama.
 
-1. Open the [Releases](../../releases) page and pick the MSI for your hardware:
-   - `Mockingbird-Setup-x.y.z.msi` (about 50 MB download, about 80 MB installed) for CPU-only transcription on any 64-bit Windows machine.
-   - `Mockingbird-CUDA-Setup-x.y.z.msi` (about 250 MB download, about 770 MB installed) for fast NVIDIA GPU transcription. Bundles the CUDA runtime libraries so no separate Toolkit install is needed; only an NVIDIA driver is required and that ships with every NVIDIA GPU.
+### Windows
+
+1. Open the [Releases](../../releases) page and pick the installer for your hardware:
+   - `Mockingbird_x.y.z_x64_en-US.msi` (about 50 MB download, about 80 MB installed) for CPU-only transcription on any 64-bit Windows machine.
+   - `Mockingbird-CUDA_x.y.z_x64_en-US.msi` (about 250 MB download, about 770 MB installed) for fast NVIDIA GPU transcription. Bundles the CUDA runtime libraries so no separate Toolkit install is needed; only an NVIDIA driver is required and that ships with every NVIDIA GPU.
 2. Run it. On first launch SmartScreen may warn that the app is unsigned. Click "More info" then "Run anyway".
 3. The first launch downloads a Whisper model (about 500 MB to 2 GB depending on which variant you pick in Settings).
 4. Press Right Alt and start talking. Release to paste into the focused app.
 
-See [`INSTALL.md`](./INSTALL.md) for the standard and from-source paths, including the optional Ollama integration for local LLM cleanup, and [`PREREQS.md`](./PREREQS.md) for the full hardware and OS requirements. **On macOS?** Follow the [macOS (Apple Silicon, source build)](./INSTALL.md#macos-apple-silicon-source-build) walkthrough instead — the Quick install above is Windows-only.
+### macOS (Apple Silicon, macOS 15 Sequoia or newer)
+
+The easiest path is Homebrew:
+
+1. Install it. The first line adds the tap; the second installs the app:
+   ```bash
+   brew tap duz10/mockingbird https://github.com/duz10/mockingbird
+   brew install --cask mockingbird
+   ```
+   Prefer not to use Homebrew? Download `Mockingbird_x.y.z_aarch64.dmg` from the [Releases](../../releases) page, open it, and drag **Mockingbird** into **Applications**.
+2. **First launch — a one-time "open anyway" step.** Because this is a free, unsigned app (no paid Apple certificate), macOS blocks the very first open. This is expected — not a virus warning. Open **System Settings → Privacy & Security**, scroll to the bottom, click **Open Anyway** next to Mockingbird, and confirm. (Comfortable in Terminal? `xattr -dr com.apple.quarantine /Applications/Mockingbird.app` does the same thing. Or install with `HOMEBREW_CASK_OPTS="--no-quarantine" brew install --cask mockingbird` to skip the prompt entirely.)
+3. **Allow 3 permissions** when the app asks (or under System Settings → Privacy & Security): **Microphone**, **Input Monitoring** (for the Right Option push-to-talk key), and **Accessibility** (so it can paste into your app). Grants take effect after you **quit and reopen** Mockingbird. Screen Recording is only needed if you also want meeting capture to record the *other* participants.
+4. Press **Right Option** and start talking; release to paste. The speech models are already **bundled in the app** — nothing to download for basic dictation.
+
+Update later with `brew upgrade --cask mockingbird`.
+
+### Optional: sharper text with local AI (Ollama)
+
+Out of the box you get accurate dictation (the raw transcript). If you want the optional **cleanup pass** — it removes "um" and "uh" and fixes punctuation and capitalization — install [Ollama](https://ollama.com) (free) and pull one model:
+
+1. Install Ollama from [ollama.com](https://ollama.com).
+2. Download a model that fits your RAM:
+   - **16 GB or more (Mac or PC):** `ollama pull qwen2.5:7b-instruct-q4_K_M` (about 4.7 GB).
+   - **8 GB Mac:** `ollama pull qwen2.5:3b-instruct-q4_K_M` (about 1.9 GB) — the app picks this smaller model automatically.
+
+This is optional: skip it and dictation still works, just without the extra polish. Prefer a cloud model? Mockingbird also supports the Anthropic Claude API (opt-in, bring your own key).
+
+See [`INSTALL.md`](./INSTALL.md) for the full walkthrough — including the from-source build and detailed Ollama setup — and [`PREREQS.md`](./PREREQS.md) for the full hardware and OS requirements.
 
 ## How it works (high level)
 

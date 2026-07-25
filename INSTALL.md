@@ -141,8 +141,7 @@ There is **no Apple-signed installer** (no Apple Developer account), so
 every download path is unsigned — the difference is only *how much*
 Gatekeeper you touch. Three methods, cleanest first:
 
-1. **Homebrew cask (recommended).** *Activates once the tap is live
-   post-release.* Homebrew (6.x) **adds** `com.apple.quarantine` on cask
+1. **Homebrew cask (recommended).** Homebrew (6.x) **adds** `com.apple.quarantine` on cask
    install — it does **not** strip it, and the cask cannot opt out (there
    is no `quarantine false` stanza in current Homebrew). The app is ad-hoc
    signed (not notarized), so a plain install hits a one-time Gatekeeper
@@ -161,21 +160,19 @@ Gatekeeper you touch. Three methods, cleanest first:
    if you haven't tapped it. See
    [`docs/macos-port/homebrew-tap.md`](./docs/macos-port/homebrew-tap.md).)
 
-2. **Direct `.dmg` download.** *Activates once the first release is
-   published.* Download `Mockingbird_<version>_aarch64.dmg` from the
+2. **Direct `.dmg` download.** Download `Mockingbird_<version>_aarch64.dmg` from the
    [Releases](https://github.com/duz10/mockingbird/releases) page, open
    it, and drag **Mockingbird.app** to **Applications**. Because it's
    unsigned you must clear Gatekeeper once — see
    [First launch: Gatekeeper](#first-launch-gatekeeper) below.
 
-3. **Build from source (works today).** No release required — clone and
-   build the self-contained `.app` yourself (steps below).
+3. **Build from source.** No release required — clone and build the
+   self-contained `.app` yourself (steps below).
 
-> **Availability:** methods **1** and **2** light up only after the first
-> public release is cut (post-merge, from the CI macOS lane). The
-> **source build works right now**. All three produce the same
-> self-contained (~600 MB) app: the Whisper + Silero models and the ONNX
-> Runtime dylib are bundled, so users never fetch models separately.
+> **Availability:** all three methods work today — the public release is
+> live. They produce the same self-contained (~600 MB) app: the Whisper +
+> Silero models and the ONNX Runtime dylib are bundled, so users never
+> fetch models separately.
 > macOS prerequisites for the source build are in
 > [`PREREQS.md`](./PREREQS.md#building-from-source-on-macos-apple-silicon).
 
