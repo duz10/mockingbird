@@ -1,10 +1,16 @@
 # Homebrew tap setup (macOS distribution)
 
 This documents how the maintainer serves the Mockingbird Homebrew **cask**
-so Mac users can `brew install --cask` the app with **no Gatekeeper
-friction** (Homebrew strips the `com.apple.quarantine` attribute on
-install -- that's the whole reason the cask exists alongside the raw
-`.dmg`).
+so Mac users can `brew install --cask` the app. Note that Homebrew (6.x)
+**adds** `com.apple.quarantine` on cask install -- it does **not** strip
+it, and a cask cannot opt out (there is no `quarantine false` stanza in
+current Homebrew). Since the `.app` is ad-hoc signed (not notarized),
+a plain install still hits a one-time Gatekeeper prompt; set
+`HOMEBREW_CASK_OPTS="--no-quarantine"` for the install to skip it (current
+Homebrew no longer accepts a bare `--no-quarantine` flag on `brew
+install`). The cask still beats a raw `.dmg` download: it wires the
+download URL + sha256 verification, the macOS-version guard, and clean
+uninstall/zap.
 
 > **Prerequisite:** a published `.dmg` release. The cask
 > (`Casks/mockingbird.rb`) is a scaffold with **placeholder `version` +
