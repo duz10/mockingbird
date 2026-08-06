@@ -30,10 +30,10 @@
       <p class="tagline">Local-first voice dictation and meeting capture for Windows and macOS. Knowledge graph capture on Windows today. Fully on-device, zero telemetry.</p>
       <p class="cta-row">
         <a class="btn btn-primary" href="https://github.com/duz10/mockingbird/releases">Download for Windows</a>
-        <a class="btn btn-secondary" href="#macos-install">Build for macOS</a>
+        <a class="btn btn-secondary" href="#macos-install">Get for macOS</a>
         <a class="btn btn-secondary" href="https://github.com/duz10/mockingbird">View on GitHub</a>
       </p>
-      <p class="hero-note">Beta release. Windows 10+ has a downloadable installer; macOS 15+ (Apple Silicon) is a source build you compile yourself - <a href="#macos-install">steps below</a>.</p>
+      <p class="hero-note">Beta release. Windows 10+ has a downloadable installer; macOS 15+ (Apple Silicon) installs via Homebrew or a <code>.dmg</code> - <a href="#macos-install">steps below</a>.</p>
     </header>
 
     <section class="maintainer" aria-labelledby="maintainer-h">
@@ -172,36 +172,50 @@
 
       <h3 id="macos-install">macOS (Apple Silicon)</h3>
       <p class="note">
-        There is no signed installer or <code>.dmg</code> for macOS - it is a source build you
-        compile yourself. You do not need full Xcode, just the Command Line Tools. Requires
-        <strong>macOS 15+</strong> (the ScreenCaptureKit floor for meeting capture).
+        Requires <strong>macOS 15 (Sequoia) or newer</strong> on Apple Silicon. Install with
+        Homebrew (easiest) or download the <code>.dmg</code>. The speech models are bundled in the
+        app, so there is nothing extra to download for basic dictation.
       </p>
       <ol class="steps">
         <li>
-          <strong>Install the toolchain.</strong> Command Line Tools
-          (<code>xcode-select --install</code>), <code>cmake</code> (<code>brew install cmake</code>),
-          <a href="https://rustup.rs/">Rust 1.77+</a>, and <a href="https://nodejs.org/">Node 20+</a>.
+          <strong>Install it with Homebrew.</strong> The first line adds the tap; the second
+          installs the app:
+          <br><code>brew tap duz10/mockingbird https://github.com/duz10/mockingbird</code>
+          <br><code>brew install --cask mockingbird</code>
+          <br>Prefer not to use Homebrew? Download <code>Mockingbird_x.y.z_aarch64.dmg</code> from the
+          <a href="https://github.com/duz10/mockingbird/releases">Releases page</a>, open it, and drag
+          <strong>Mockingbird</strong> into <strong>Applications</strong>.
         </li>
         <li>
-          <strong>Clone the repo and build:</strong> <code>cargo tauri build</code>. No CUDA
-          wrapper is needed on macOS - STT is Metal-accelerated automatically.
+          <strong>First launch: a one-time "Open Anyway" step.</strong> Because this is a free,
+          unsigned app (no paid Apple certificate), macOS blocks the first open - this is expected,
+          not a virus warning. Open <strong>System Settings -&gt; Privacy &amp; Security</strong>,
+          scroll to the bottom, click <strong>Open Anyway</strong> next to Mockingbird, and confirm.
+          (Comfortable in Terminal? <code>xattr -dr com.apple.quarantine /Applications/Mockingbird.app</code>
+          does the same thing.)
         </li>
         <li>
-          <strong>Open the <code>.app</code></strong> from <code>target/release/bundle/macos/</code>.
-          The first launch is blocked by Gatekeeper because the build is unsigned - right-click
-          the app, choose <code>Open</code>, then confirm. macOS remembers the choice afterward.
+          <strong>Allow three permissions</strong> when the app asks (or under System Settings -&gt;
+          Privacy &amp; Security): <strong>Microphone</strong>, <strong>Input Monitoring</strong> (for the
+          Right Option push-to-talk key), and <strong>Accessibility</strong> (so it can paste into your
+          app). Grants take effect after you <strong>quit and reopen</strong> Mockingbird. Screen Recording
+          is only needed if you also want meeting capture to record the other participants.
         </li>
         <li>
-          <strong>Grant permissions when prompted:</strong> Microphone, Input Monitoring,
-          Accessibility, and Screen Recording (the last is required for system-audio meeting
-          capture). Dictation and meeting capture both run fully on-device, same as Windows.
+          <strong>Press Right Option and start talking.</strong> Release to paste into the app that had
+          focus. Update later with <code>brew upgrade --cask mockingbird</code>.
         </li>
       </ol>
       <p class="note">
-        Full installation walkthrough including model setup and optional cloud LLM
+        <strong>Optional cleanup (both platforms):</strong> dictation works on its own. For the optional
+        AI pass that removes "um"/"uh" and fixes punctuation, install <a href="https://ollama.com/">Ollama</a>
+        (free) and pull one model - <code>ollama pull qwen2.5:7b-instruct-q4_K_M</code> on machines with
+        16 GB+ RAM, or <code>ollama pull qwen2.5:3b-instruct-q4_K_M</code> on an 8 GB Mac (the app picks the
+        smaller one automatically). Skip it and you still get accurate raw transcripts.
+      </p>
+      <p class="note">
+        Full installation walkthrough including the from-source build and optional cloud LLM
         configuration: <a href="https://github.com/duz10/mockingbird/blob/main/INSTALL.md">INSTALL.md</a>.
-        macOS build background lives in the
-        <a href="https://github.com/duz10/mockingbird/blob/main/docs/research/macos-implementation-notes.md">macOS implementation notes</a>.
       </p>
     </section>
 
@@ -222,15 +236,15 @@
       <details>
         <summary>Does it work on macOS?</summary>
         <p>
-          Yes - on Apple Silicon, as a source build you compile yourself. There is no signed
-          installer or <code>.dmg</code>; you build the <code>.app</code> with the Command Line
-          Tools, Rust, and Node (see the <a href="#macos-install">macOS quick start</a>). It needs
-          <strong>macOS 15+</strong>, and the first launch requires the Gatekeeper right-click to
-          Open because the build is unsigned. <strong>Dictation and meeting capture</strong> both
-          work on macOS with the same local-first, on-device model as Windows. The knowledge graph,
-          activity capture, and mobile sync layers are <strong>Windows-only for now</strong> and
-          have not yet been ported. Background:
-          <a href="https://github.com/duz10/mockingbird/blob/main/docs/research/macos-implementation-notes.md">the macOS implementation notes</a>.
+          Yes - on Apple Silicon Macs running <strong>macOS 15 (Sequoia) or newer</strong>. Install
+          it with Homebrew or a downloadable <code>.dmg</code> (see the
+          <a href="#macos-install">macOS quick start</a>). Because the app is free and unsigned, the
+          first launch needs a one-time <strong>System Settings -&gt; Privacy &amp; Security -&gt;
+          Open Anyway</strong> approval - normal for indie apps, not a sign anything is wrong.
+          <strong>Dictation and meeting capture</strong> both work with the same local-first,
+          on-device model as Windows, and the speech models are bundled in the app. The knowledge
+          graph, activity capture, and mobile sync layers are <strong>Windows-only for now</strong>
+          and have not yet been ported.
         </p>
       </details>
 
