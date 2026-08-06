@@ -141,11 +141,21 @@ There is **no Apple-signed installer** (no Apple Developer account), so
 every download path is unsigned — the difference is only *how much*
 Gatekeeper you touch. Three methods, cleanest first:
 
-1. **Homebrew cask (cleanest — no Gatekeeper friction).** *Activates once
-   the tap is live post-release.* `brew` strips the quarantine flag on
-   install, so there is no Gatekeeper wall:
+1. **Homebrew cask (recommended).** *Activates once the tap is live
+   post-release.* Homebrew (6.x) **adds** `com.apple.quarantine` on cask
+   install — it does **not** strip it, and the cask cannot opt out (there
+   is no `quarantine false` stanza in current Homebrew). The app is ad-hoc
+   signed (not notarized), so a plain install hits a one-time Gatekeeper
+   prompt on first launch:
    ```bash
    brew install --cask duz10/mockingbird/mockingbird
+   ```
+   Clear that one-time prompt via
+   [First launch: Gatekeeper](#first-launch-gatekeeper) below. To skip it
+   at install time, set `HOMEBREW_CASK_OPTS` (current Homebrew no longer
+   accepts a bare `--no-quarantine` flag on `brew install`):
+   ```bash
+   HOMEBREW_CASK_OPTS="--no-quarantine" brew install --cask duz10/mockingbird/mockingbird
    ```
    (First `brew tap duz10/mockingbird https://github.com/duz10/mockingbird`
    if you haven't tapped it. See
@@ -223,9 +233,10 @@ loop too. See the permissions note below for the dev-vs-`.app` TCC quirk.
 
 ### First launch: Gatekeeper
 
-Applies to the **`.dmg` download** and a **locally built `.app`** — the
-Homebrew cask (method 1) strips quarantine on install, so it skips this
-entirely.
+Applies to the **`.dmg` download**, a **locally built `.app`**, and a
+plain **Homebrew cask** install (method 1) — Homebrew adds quarantine on
+install, so unless you set `HOMEBREW_CASK_OPTS="--no-quarantine"` you clear
+Gatekeeper once here too.
 
 The `.app` is unsigned, so on first open macOS Gatekeeper refuses a plain
 double-click ("Mockingbird can't be opened because Apple cannot check it
