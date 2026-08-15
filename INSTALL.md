@@ -20,7 +20,7 @@ System requirements live in [`PREREQS.md`](./PREREQS.md). Check them first if yo
 
 ### Pick your installer
 
-The [Releases](../../releases) page lists two MSI installers per release. Pick the one that matches your hardware:
+The [Releases](../../releases) page lists two MSI installers per release. Every release tag builds Windows and macOS together, so the newest release is always the right one for Windows — including releases whose notes only describe macOS fixes. Pick the one that matches your hardware:
 
 - **`Mockingbird_x.y.z_x64_en-US.msi`** (about 9 MB download). CPU-only Whisper. Works on any 64-bit Windows machine. Transcription is slower than the GPU variant but has no hardware prereqs beyond a recent x86 CPU.
 - **`Mockingbird-CUDA_x.y.z_x64_en-US.msi`** (about 580 MB download). NVIDIA GPU Whisper via cuBLAS. The MSI bundles NVIDIA's CUDA runtime libraries so you do NOT need to install the CUDA Toolkit separately. The only user-side prereq is an NVIDIA driver, which ships with every NVIDIA GPU and auto-updates via Windows Update or GeForce Experience.
