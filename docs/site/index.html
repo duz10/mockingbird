@@ -39,9 +39,18 @@
     <section class="maintainer" aria-labelledby="maintainer-h">
       <h2 id="maintainer-h">A note from the maintainer</h2>
       <p>
-        This is a reference implementation built for one developer's daily use and published freely.
-        Pull requests are welcomed but not prioritized. If you want a feature or fix that has not
-        been shipped, the recommended path is to fork the project.
+        I build Mockingbird for my own daily use and publish it for anyone who finds it useful.
+        I am one person with limited free time, so I cannot promise fast reviews or a roadmap that
+        matches what you need. That said, I do want to work with people. Bug reports, feature ideas,
+        and pull requests are all welcome, and forking is a first-class option if you want to move
+        faster than I can.
+      </p>
+      <p>
+        Mockingbird was built with Claude, primarily Opus 4.8, running through code-puppy as the
+        coding agent. Work is tracked as issues in Beads, and each session is scoped by a
+        <code>/goals</code> pass that turns a rough intent into a bounded set of tasks before any
+        code is written. Architectural calls are recorded as ADRs in the repo. The full history is
+        public, including the parts that did not work.
       </p>
     </section>
 
@@ -140,8 +149,40 @@
       </figure>
     </section>
 
+    <section class="design-language" aria-labelledby="design-h">
+      <h2 id="design-h">Design language</h2>
+
+      <div class="dl-stage">
+        <svg class="dl-mark" viewBox="0 0 256 256" aria-hidden="true">
+          <defs>
+            <linearGradient id="dl-active-grad" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#DDA17A"/>
+              <stop offset="100%" stop-color="#944730"/>
+            </linearGradient>
+          </defs>
+          <g fill="url(#dl-active-grad)">
+            <ellipse cx="42" cy="128" rx="18" ry="72"/>
+            <ellipse cx="104" cy="128" rx="26" ry="100"/>
+            <ellipse cx="163" cy="128" rx="15" ry="40"/>
+            <path d="M196 105 L196 151 Q196 157 201 153 L229 132 Q234 128 229 124 L201 103 Q196 99 196 105 Z"/>
+          </g>
+        </svg>
+      </div>
+
+      <p>
+        Mockingbird has a documented design language covering color, type, shape, spacing,
+        elevation, motion, and the component set. Everything the app renders traces back to it,
+        including the animated mark above, which is the active listening state. If you are building
+        a feature or a fork, refer to it before inventing new visual patterns.
+      </p>
+
+      <p class="cta-row">
+        <a class="btn btn-primary" href="design-language.html">View Design Language</a>
+      </p>
+    </section>
+
     <section class="privacy" aria-labelledby="privacy-h">
-      <h2 id="privacy-h">Privacy promise</h2>
+      <h2 id="privacy-h">Local-first by default</h2>
       <p>
         Mockingbird runs entirely on your machine. No telemetry. No analytics. No phone-home.
         API keys for optional cloud surfaces (Claude, Unsplash) are encrypted via the OS keystore -
@@ -280,11 +321,12 @@
       <details>
         <summary>I want to contribute.</summary>
         <p>
-          Read
-          <a href="https://github.com/duz10/mockingbird/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>
-          first. Mockingbird is a reference implementation; the maintainer ships features on
-          their own schedule. Forks are the recommended path for anyone who needs something
-          that has not been built.
+          Please do. Start with
+          <a href="https://github.com/duz10/mockingbird/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>,
+          then open an issue or a discussion describing what you have in mind before writing a lot
+          of code, so we do not duplicate work. I am solo and review on evenings and weekends, so
+          expect a slow response rather than no response. If you need something faster than I can
+          ship it, fork it. That is a supported outcome, not a failure.
         </p>
       </details>
     </section>
@@ -295,6 +337,10 @@
         Built with Tauri 2, Rust, React 19, TypeScript, Tailwind v4, SQLite, whisper.cpp,
         Silero VAD, and ONNX Runtime.
       </p>
+      <p>
+        Development tooling: Claude Opus 4.8 as the primary model, code-puppy as the coding agent,
+        and Beads by Steve Yegge for issue tracking.
+      </p>
     </section>
 
     <footer>
@@ -303,7 +349,6 @@
         &middot;
         <a href="https://github.com/duz10/mockingbird">github.com/duz10/mockingbird</a>
       </p>
-      <p class="footer-fineprint">Built solo with substantial AI coding assistance.</p>
     </footer>
 
   </main>

@@ -141,6 +141,68 @@ code {
 }
 .screenshots figcaption strong { color: var(--fg); font-weight: 600; }
 
+/* Design language
+ *
+ * PROVENANCE: the mb-wave-* keyframes, their timings, and the offset phases
+ * below are lifted 1:1 from the design language, section 08 (Logo motion) in
+ * docs/site/design-language.html. The app does the same thing in
+ * ui/src/design/components/MockingbirdMark.module.css, which documents the
+ * same provenance. If the design language changes, change all three.
+ *
+ * The stage is intentionally dark in BOTH light and dark site themes. It is a
+ * brand moment, not a surface, so it does not follow --bg / --bg-elev.
+ */
+.dl-stage {
+  width: 100%;
+  min-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px; /* site scale, not the design language --shape-xl */
+  overflow: hidden;
+  margin-bottom: 1rem;
+  background:
+    radial-gradient(circle at 25% 30%, rgba(216, 144, 96, 0.4), transparent 55%),
+    radial-gradient(circle at 75% 70%, rgba(148, 71, 48, 0.32), transparent 55%),
+    #1a1511; /* warm near-black, matches the design language --neutral-08 */
+}
+.dl-mark { display: block; width: 160px; height: 160px; }
+
+.dl-mark ellipse,
+.dl-mark path {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* Active loop: mismatched periods + offset phases = organic motion */
+@keyframes mb-wave-1 { 0%, 100% { transform: scaleY(0.38); } 50% { transform: scaleY(1);    } }
+@keyframes mb-wave-2 { 0%, 100% { transform: scaleY(0.30); } 50% { transform: scaleY(1.04); } }
+@keyframes mb-wave-3 { 0%, 100% { transform: scaleY(0.50); } 50% { transform: scaleY(0.92); } }
+.dl-mark ellipse:nth-of-type(1) { animation: mb-wave-1 1.35s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+.dl-mark ellipse:nth-of-type(2) { animation: mb-wave-2 1.65s cubic-bezier(0.45, 0, 0.55, 1) infinite -0.4s; }
+.dl-mark ellipse:nth-of-type(3) { animation: mb-wave-3 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite -0.7s; }
+
+/* The design language documents that all motion respects this. Porting the
+ * animation without this block would break a documented contract.
+ *
+ * DO NOT "simplify" these three selectors down to `.dl-mark ellipse`. A media
+ * query contributes ZERO specificity, so this override has to out-specify the
+ * rules it overrides entirely on its own. The animations above are applied via
+ * `.dl-mark ellipse:nth-of-type(n)` (0,2,1); a bare `.dl-mark ellipse` is
+ * (0,1,1) and silently loses, leaving the mark animating for motion-sensitive
+ * users. That is a WCAG 2.2 SC 2.3.3 failure, and it fails quietly: nothing
+ * warns you, the CSS simply does nothing.
+ *
+ * Matching the specificity is preferred over `!important` so this block stays
+ * overridable in the normal cascade. (design-language.html solves the same
+ * problem with `!important` because it blankets many selectors at once rather
+ * than a known three.) */
+@media (prefers-reduced-motion: reduce) {
+  .dl-mark ellipse:nth-of-type(1),
+  .dl-mark ellipse:nth-of-type(2),
+  .dl-mark ellipse:nth-of-type(3) { animation: none; }
+}
+
 /* Privacy callout */
 .privacy p {
   background: var(--bg-elev);
@@ -190,7 +252,6 @@ footer {
   font-size: 0.9rem;
   color: var(--fg-muted);
 }
-.footer-fineprint { font-size: 0.85rem; opacity: 0.8; margin-bottom: 0; }
 
 /* Mobile */
 @media (max-width: 720px) {
@@ -206,4 +267,5 @@ footer {
   }
   .screenshots figure { border-radius: 0; border-left: none; border-right: none; }
   .screenshots figcaption { padding: 0.75rem 1rem; }
+  .dl-mark { width: 120px; height: 120px; }
 }
