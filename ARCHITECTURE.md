@@ -7,8 +7,9 @@ instructions see [`INSTALL.md`](./INSTALL.md). For the build setup see
 ## Top-level shape
 
 Mockingbird is a [Tauri 2](https://tauri.app/) desktop app: a Rust
-backend hosting a [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)
-frontend written in React 19 + TypeScript. The Rust side owns audio,
+backend hosting a system-webview frontend written in React 19 +
+TypeScript ([WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)
+on Windows, WKWebView on macOS). The Rust side owns audio,
 STT, storage, the global hotkey hook, paste injection, and all
 filesystem IO. The TS side owns the UI, settings forms, and overlay
 windows. They talk over Tauri's `invoke` boundary using typed commands
@@ -28,6 +29,8 @@ defined in `src-tauri/src/commands/`.
 +----------------------- syscalls ---------------------------+
 |  Windows: WASAPI | WH_KEYBOARD_LL | SendInput | DPAPI |    |
 |           UI Automation | WebView2 | CUDA (optional)       |
+|  macOS:   CoreAudio | ScreenCaptureKit | CGEventTap |      |
+|           AX API | Keychain | WKWebView | Metal            |
 +------------------------------------------------------------+
 ```
 
@@ -41,7 +44,8 @@ Module-level doc comments explain the WHY in code.
 `src-tauri/src/audio/`
 
 Microphone input via [`cpal`](https://github.com/RustAudio/cpal). System
-audio capture via WASAPI loopback (Windows-specific) for meeting capture.
+audio capture for meeting capture is per-platform: WASAPI loopback on
+Windows, ScreenCaptureKit on macOS (`meetings/sck_macos.rs`).
 Native-format input is resampled through [`rubato`](https://github.com/HEnquist/rubato)
 to the 16 kHz mono signal Whisper expects. Capture is a streaming pull
 model: a thread feeds rolling chunks into a tokio channel consumed by
@@ -74,9 +78,12 @@ Pluggable provider trait. Two providers ship today:
 
 1. **Ollama** (local, default). HTTP to `http://localhost:11434`. Per-mode
    versioned prompts loaded from the database (migration 010 seeds the
-   defaults; migrations 019-021 hold the current tuned versions).
+   ADR-0024 defaults; later migrations up through 030 carry the tuned
+   versions, the per-mode model overrides, and the user prompt
+   overrides).
 2. **Anthropic Claude** (cloud, opt-in). Direct HTTPS to
-   `api.anthropic.com`. API key encrypted via DPAPI.
+   `api.anthropic.com`. API key held in the platform secret store (see
+   Secrets below).
 
 Three dictation modes (`casual`, `normal`, `formal`) plus an on-demand
 `Compress` transform. Each mode picks a provider, a model, a prompt
@@ -92,17 +99,39 @@ enum, and wires a settings UI tab. No other subsystem needs changes.
 
 `src-tauri/src/db/`
 
-SQLite via [`rusqlite`](https://github.com/rusqlite/rusqlite). Database
-file lives at `%LOCALAPPDATA%\Mockingbird\mockingbird.db`. Migrations are
-append-only Rust functions in `db/migrations/` numbered `001`..`NNN`.
-Once a migration is in a tagged release it never changes; corrections
-ship as a new migration that fixes forward.
+SQLite via [`rusqlite`](https://github.com/rusqlite/rusqlite). The
+database file lives under the per-OS app-data root resolved by
+`resolve_app_data_dir`: `%APPDATA%\com.dustin.mockingbird\mockingbird.db`
+on Windows and `~/Library/Application Support/com.dustin.mockingbird/mockingbird.db`
+on macOS. Migrations are append-only `.sql` files in
+`db/migrations/` numbered `001`..`NNN`, embedded into the binary with
+`include_str!` and driven by `db/migrations.rs`. Once a migration is in
+a tagged release it never changes; corrections ship as a new migration
+that fixes forward, and the `block-migration-edit-after-phase-1` hook
+enforces that.
 
-The raw-transcript table (`transcripts(stage='raw')`) is immutable by
-trigger; a `BEFORE UPDATE` trigger raises `SQLITE_CONSTRAINT` on any
-attempt to mutate raw rows. This is one of the binding principles for
-the project and is enforced at the SQL layer (not relying on
-application discipline).
+The raw-transcript table (`transcripts(stage='raw')`) is immutable.
+New facts about an utterance go into a new row; a raw row is never
+UPDATEd. This is one of the binding principles for the project, and it
+is a real invariant: the `block-raw-transcript-edit` hook in
+`scripts/dev/hooks/` scans non-test code for SQL that UPDATEs
+`transcripts` at the raw stage and refuses the write, and the
+application code never issues such a statement.
+
+What does not exist today is a SQL-layer guard. The header of
+`001_initial.sql` says as much: raw-transcript immutability is
+enforced by the hook engine rather than by a trigger in that file, and
+a belt-and-suspenders trigger was explicitly deferred to a future
+migration. The only triggers on `transcripts` are the FTS sync pair
+(`transcripts_fts_insert` and `transcripts_fts_delete`).
+
+The pattern is available and already used elsewhere in this schema:
+`activity_events_no_update` and `activity_events_no_delete`
+(`012_activity_capture.sql`), plus `kg_entity_mentions_no_update` and
+`kg_tag_mentions_no_update` (`024_kg_phase_1b.sql`), all abort
+mutation at the SQL layer. Adding the equivalent `BEFORE UPDATE`
+trigger for raw transcripts in a new migration is a reasonable
+hardening step for a fork.
 
 ### Injection
 
@@ -110,20 +139,26 @@ application discipline).
 
 The paste injector saves the existing clipboard contents (text and
 common binary formats), writes the cleanup result to the clipboard,
-issues a synthesized `Ctrl+V` via `SendInput`, waits for the target app
-to consume it, then restores the original clipboard. A `SecureInputGuard`
-queries the foreground field's UI Automation properties before injecting;
-if the field reports `IsPassword` or otherwise looks like a credential
-input, the paste is aborted and a toast surfaces.
+synthesizes a paste keystroke, waits for the target app to consume it,
+then restores the original clipboard. The keystroke is `Ctrl+V` via
+`SendInput` on Windows and `Cmd+V` via `CGEvent` on macOS, behind a
+common strategy trait. A `SecureInputGuard` queries the foreground
+field before injecting (UI Automation on Windows, the AX API on
+macOS); if the field reports as a password or otherwise looks like a
+credential input, the paste is aborted and a toast surfaces.
 
 ### Hotkey
 
 `src-tauri/src/hotkey/`
 
-Global low-level keyboard hook via `SetWindowsHookExW(WH_KEYBOARD_LL, ...)`.
-The hook runs on its own thread with a dedicated message pump.
-Press-and-hold semantics for dictation; chord toggles (Right Ctrl + `.`)
-for meeting capture. Both are reconfigurable from Settings.
+Global low-level keyboard hook behind a `HotkeyListener` trait:
+`SetWindowsHookExW(WH_KEYBOARD_LL, ...)` on Windows, `CGEventTap` on
+macOS (which requires the Input Monitoring permission). The listener
+runs on its own thread with a dedicated run loop or message pump.
+Press-and-hold semantics for dictation; on Windows a chord toggle
+(Right Ctrl + `.`) starts meeting capture, while on macOS meeting
+capture is driven from the UI and Command Center rather than a chord.
+Both are reconfigurable from Settings.
 
 ### Dictation orchestrator
 
@@ -137,8 +172,9 @@ overlay window for the live VU meter and transcription status.
 
 `src-tauri/src/meetings/`
 
-Twin-stream capture (mic + WASAPI loopback). Per-channel chunked Whisper.
-Deterministic two-channel merger. Optional ephemeral LLM summarization
+Twin-stream capture (mic + system audio: WASAPI loopback on Windows,
+ScreenCaptureKit on macOS). Per-channel chunked Whisper. Deterministic
+two-channel merger. Optional ephemeral LLM summarization
 that is never persisted (the summary is rendered into the overlay then
 dropped). On-disk artefacts are session-scoped chunk WAVs (deleted on
 finalize unless audio retention is enabled) plus the merged Markdown
@@ -152,8 +188,9 @@ subsystem).
 
 `src-tauri/src/kg/` and `src-tauri/src/vault/`
 
-A five-pass pipeline (segment, classify, extract, extract_entities,
-normalize) turns a dictation tail or a hand-typed kg-note into a typed
+Windows-only today. A five-pass pipeline (`kg/passes/`: segment,
+classify, extract, extract_entities, normalize) turns a dictation tail
+or a hand-typed kg-note into a typed
 knowledge entry with open-vocabulary tags and typed entity references.
 Entries persist to SQLite (`kg_entities`, `kg_canonical_tags`,
 `kg_entity_mentions`, `kg_tag_mentions`, `kg_filing_queue`) via the async
@@ -177,8 +214,9 @@ against the vault.
 
 `src-tauri/src/activity/`
 
-Sibling subsystem. Polls the foreground window title and a UI Automation
-snapshot of the focused element on a configurable cadence. Snapshots
+Sibling subsystem, Windows-only today. Polls the foreground window
+title and a UI Automation snapshot of the focused element on a
+configurable cadence. Snapshots
 roll up into per-block summaries via the configured local LLM. Audio
 co-capture is optional per block. An exclusion list lets users mark apps
 that should never be captured. Output is a per-day PDF and a queryable
@@ -188,11 +226,14 @@ SQLite history.
 
 `src-tauri/src/secrets/`
 
-Anthropic and Unsplash API keys are encrypted via
-[Windows DPAPI](https://learn.microsoft.com/en-us/windows/win32/seccrypto/cryptprotectdata)
-(`CryptProtectData` / `CryptUnprotectData`) and stored as opaque blobs in
-the database. The encryption key is derived from the Windows user
-account, so secrets are not portable across machines or accounts.
+Anthropic and Unsplash API keys go through a `SecretStore` trait with a
+per-OS backend. On Windows they are encrypted via
+[DPAPI](https://learn.microsoft.com/en-us/windows/win32/seccrypto/cryptprotectdata)
+(`CryptProtectData` / `CryptUnprotectData`) and written as opaque
+`.dpapi` blobs under `%LOCALAPPDATA%\Mockingbird\secrets\`. On macOS
+they live in the login Keychain via `security-framework`. Either way
+the key material is bound to the OS user account, so secrets are not
+portable across machines or accounts.
 
 ### Inbox courier
 
@@ -209,19 +250,30 @@ the source file is moved to a processed subfolder.
 
 Typed settings facade over the database. Settings groups (`dictation`,
 `meetings`, `kg`, `appearance`, etc.) are versioned structs serialized
-to JSON columns. The settings UI in `ui/src/pages/Settings` is a thin
-form layer over Tauri commands that round-trip these structs.
+to JSON columns. The settings UI (`ui/src/pages/Settings.tsx` plus its
+per-tab `Settings*Tab.tsx` siblings) is a thin form layer over Tauri
+commands that round-trip these structs.
 
 ## Cross-platform design
 
-Mockingbird is Windows-only today. The architecture, however, isolates
-every platform-specific concern behind a trait + `#[cfg(target_os)]`
-implementation. The platform-specific surfaces are:
+Mockingbird ships on Windows and on macOS 15+ (Apple Silicon). macOS
+landed in 0.3.0-beta.1 and is installable from a Homebrew cask as of
+0.3.0-beta.3. Dictation and meeting capture are at parity across both
+platforms. Activity capture, the Knowledge Graph pipeline, and Mobile
+Sync are Windows-only for now.
+
+The architecture isolates every platform-specific concern behind a
+trait + `#[cfg(target_os)]` implementation, and the macOS port is the
+proof that the seam held: the platform surfaces below each grew a
+second backend without the orchestrators above them changing. The
+platform-specific surfaces are:
 
 - Hotkey hook (Windows: `WH_KEYBOARD_LL`; macOS: `CGEventTap`; Linux: a
   display-server-specific path).
-- Audio capture (`cpal` covers mic on all three; loopback is the
-  hard one, see [`docs/research/macos-implementation-notes.md`](./docs/research/macos-implementation-notes.md)).
+- Audio capture (`cpal` covers mic on all three; loopback is the hard
+  one: WASAPI loopback on Windows, ScreenCaptureKit on macOS, and an
+  open question on Linux. See
+  [`docs/research/macos-implementation-notes.md`](./docs/research/macos-implementation-notes.md)).
 - STT acceleration (CUDA on Windows; Metal on macOS; ROCm or Vulkan on
   Linux).
 - Secrets (DPAPI on Windows; Keychain on macOS; Secret Service on
@@ -231,16 +283,17 @@ implementation. The platform-specific surfaces are:
 - Secure-input detection (UI Automation on Windows; AX API on macOS;
   toolkit-specific on Linux).
 
-The `docs/research/macos-implementation-notes.md` document spells out
-the deltas for a macOS port. The maintainer does not pursue macOS
-distribution, but the door is wide open for forkers.
+The `docs/research/macos-implementation-notes.md` document records the
+deltas worked through during the macOS port. No Linux build is
+pursued, but the same seam is where a forker would start.
 
 ## What is intentionally NOT in this app
 
 - Telemetry, analytics, or remote crash reporting. Crashes log to local
   files and stay there.
 - Online accounts or sign-in. Mockingbird does not have an identity
-  layer; it is per-Windows-user by virtue of DPAPI.
+  layer; it is scoped to the logged-in OS user by virtue of DPAPI on
+  Windows and the login Keychain on macOS.
 - Bundled Whisper or LLM models. Users supply their own (the download
   scripts pull from public sources at install time).
 - A/B experimentation, remote feature flags, or any other server-driven

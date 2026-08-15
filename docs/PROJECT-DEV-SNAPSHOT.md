@@ -331,12 +331,15 @@ you will find out mechanically if you violate them.
    a new row. *Why:* provenance. If the raw layer can be rewritten, you
    can never prove what the model actually heard, and every downstream
    quality investigation becomes unfalsifiable. Enforced by the
-   `block-raw-transcript-edit` hook. Note the honest detail: on the
-   dictation `transcripts` table this is **hook-enforced, not
-   trigger-enforced**. Later tables did get SQL triggers (activity events
-   and the knowledge-graph mention tables raise `ABORT` on update). If
-   you want belt and braces on `transcripts`, adding the trigger in a new
-   migration is a reasonable fork improvement.
+   `block-raw-transcript-edit` hook plus application discipline. Note
+   the honest detail: on the dictation `transcripts` table this is
+   **hook-enforced, not trigger-enforced**. `001_initial.sql` says so
+   in its header and records that a belt-and-suspenders trigger was
+   deferred to a later migration. Later tables did get SQL triggers
+   (activity events and the knowledge-graph mention tables raise
+   `ABORT` on update). If you want belt and braces on `transcripts`,
+   adding the trigger in a new migration is a reasonable fork
+   improvement.
 
 3. **Provenance is total.** Every session row pins the exact prompt
    version, dictionary snapshot, and example set that produced it.
@@ -793,9 +796,6 @@ These are not backlog items. They are choices.
   Take advantage of that.
 - **ESLint is not currently running.** The flat-config migration is
   outstanding, so the git hook type-checks with `tsc --noEmit` instead.
-- **`ARCHITECTURE.md` has drifted in one place.** Its cross-platform
-  section still says Mockingbird is Windows-only, which predates the
-  macOS release. Believe this file and the changelog over that paragraph.
 
 ## 8. How this project is built
 
