@@ -197,13 +197,23 @@
       <h3>Windows</h3>
       <ol class="steps">
         <li>
-          <strong>Download the MSI</strong> from the
-          <a href="https://github.com/duz10/mockingbird/releases">Releases page</a>.
+          <strong>Pick your MSI</strong> on the
+          <a href="https://github.com/duz10/mockingbird/releases">Releases page</a>. There are two:
+          <br><code>Mockingbird_x.y.z_x64_en-US.msi</code> (about 9 MB) - works on any 64-bit Windows PC.
+          <br><code>Mockingbird-CUDA_x.y.z_x64_en-US.msi</code> (about 580 MB) - faster transcription,
+          needs an NVIDIA GPU.
+          <br>Not sure? Pick the first one.
         </li>
         <li>
           <strong>Run the installer.</strong> Windows SmartScreen will show a warning because the beta
           is not yet code-signed. That is normal for indie Windows software. Click
           <code>More info</code>, then <code>Run anyway</code>.
+        </li>
+        <li>
+          <strong>First launch downloads a speech model</strong> - about 500 MB to 2 GB depending on the
+          variant you choose in Settings. That is a separate download from the installer, so give it a
+          minute before assuming something is broken. (macOS skips this step: the models ship inside the
+          <code>.dmg</code> and the Homebrew cask.)
         </li>
         <li>
           <strong>Press the dictation hotkey and start speaking.</strong> The transcript pastes

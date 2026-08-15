@@ -7,7 +7,7 @@ What you need to run Mockingbird, and what's optional but nice.
 ### Operating system
 
 - **Windows 10 build 19041 (May 2020 Update) or newer**, or **Windows 11** (any build). 64-bit only; there is no 32-bit build.
-- **macOS 15 (Sequoia) or newer, Apple Silicon** (M1 or later). This is a source build — there is no signed installer for macOS. The floor is macOS 15 because meeting capture uses ScreenCaptureKit's single-session system-audio API, which is 15+. See [`INSTALL.md`](./INSTALL.md#macos-apple-silicon-source-build) for the build steps.
+- **macOS 15 (Sequoia) or newer, Apple Silicon** (M1 or later). Install with the Homebrew cask (primary path) or the downloadable `.dmg`; building from source is also supported. Nothing on macOS is Apple-signed, so the first launch needs a one-time Gatekeeper approval. The floor is macOS 15 because meeting capture uses ScreenCaptureKit's single-session system-audio API, which is 15+. See [`INSTALL.md`](./INSTALL.md#macos-apple-silicon) for all three paths.
 
 Older Windows 10 builds (pre-19041) lack the WebView2 APIs and modern audio capture surface Mockingbird relies on. Intel Macs are not supported (no Metal-tuned build); Linux has no build yet.
 
@@ -96,7 +96,7 @@ See [`INSTALL.md`](./INSTALL.md) Tier 3 for the actual build commands.
 
 ### Building from source on macOS (Apple Silicon)
 
-macOS is source-build only — there is no installer. You need:
+Only needed if you build the `.app` yourself instead of using the Homebrew cask or the `.dmg`. You need:
 
 - **macOS 15 (Sequoia) or newer** on **Apple Silicon** (M1+).
 - **Xcode Command Line Tools** — `xcode-select --install` (provides the clang compiler + git).
@@ -107,7 +107,9 @@ macOS is source-build only — there is no installer. You need:
 - **[Ollama for macOS](https://ollama.com/download)** if you want cleanup (optional; see the RAM-aware note above).
 
 Whisper runs on the **Metal** GPU backend — no CUDA on macOS. The build
-bundles the Whisper + Silero models into the `.app`, so a built-`.app`
-user doesn't fetch models separately. See
-[`INSTALL.md`](./INSTALL.md#macos-apple-silicon-source-build) for the
+bundles the Whisper + Silero models into the `.app`, so macOS users never
+fetch models separately (unlike Windows, where the first launch downloads
+a Whisper model of roughly 500 MB to 2 GB). This holds for the Homebrew
+cask and the `.dmg` too. See
+[`INSTALL.md`](./INSTALL.md#macos-apple-silicon) for the
 exact build commands, permissions, and Gatekeeper steps.
