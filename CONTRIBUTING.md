@@ -14,6 +14,11 @@ This document is the guide for doing that successfully.
 
 In this order, before touching code:
 
+0. [`docs/PROJECT-DEV-SNAPSHOT.md`](./docs/PROJECT-DEV-SNAPSHOT.md).
+   Written for an AI coding agent rather than a human reader: the
+   maintainer's context, conventions, invariants, and hard-won lessons,
+   distilled at a release tag. If you are pointing an agent at this
+   codebase, have it read that file first.
 1. [`ARCHITECTURE.md`](./ARCHITECTURE.md). The subsystem map. One page,
    ~200 lines, covers every directory.
 2. [`src-tauri/src/`](./src-tauri/src/). The Rust backend. Each
@@ -153,6 +158,19 @@ binaries also run cleanly on a Linux developer VM.
   property checks, `mockall` at trait boundaries.
 - **No telemetry. No analytics. No phone-home. Ever.** A PR that adds
   any of these will be rejected without further review.
+
+## Cutting a release
+
+Releases are tag-driven: pushing a `v*.*.*` tag runs
+[`.github/workflows/release.yml`](./.github/workflows/release.yml), which
+builds the Windows MSIs and the macOS `.dmg` and attaches them to a draft
+GitHub Release for manual review before publishing.
+
+At each release tag, regenerate
+[`docs/PROJECT-DEV-SNAPSHOT.md`](./docs/PROJECT-DEV-SNAPSHOT.md) from the
+maintainer's working docs and update its commit sha and tag header. It is
+a point-in-time snapshot, not a live document, so it only stays useful if
+it is re-cut per release.
 
 ## Submitting a PR anyway
 
