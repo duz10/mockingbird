@@ -13,7 +13,10 @@ _Nothing yet._
 macOS microphone/dictation hardening. On some macOS installs the mic
 permission prompt never appeared and dictation was dead on arrival; this
 release makes the TCC prompt actually present and the mic grant
-obtainable. Windows is unchanged (all fixes are macOS-overlay-only).
+obtainable. Windows code is unchanged (all fixes are
+macOS-overlay-only), but this release still ships the full Windows
+installer set — every release tag builds Windows and macOS alike, so
+beta.3 is the current build for both platforms.
 
 ### Fixed
 
@@ -52,6 +55,37 @@ obtainable. Windows is unchanged (all fixes are macOS-overlay-only).
   `.dmg` (one stable hash, grant once). If permissions seem to vanish
   after a rebuild: `tccutil reset All com.dustin.mockingbird`, relaunch,
   and re-grant.
+
+## [0.3.0-beta.2] - 2026-07-23
+
+macOS Gatekeeper fix. The published 0.3.0-beta.1 `.dmg` opened as
+"damaged and should be uninstalled"; this release makes the macOS build
+launchable. Windows code is unchanged (all fixes are
+macOS-overlay-only), and the Windows installers ship as usual.
+
+### Fixed
+
+- **macOS `.dmg` opened as "damaged and should be uninstalled".** The
+  `.app` bundle was never codesigned after the Tauri bundler copied the
+  model/dylib Resources in, so the only signature present was the
+  linker-applied one on the inner Mach-O. The bundle therefore sealed no
+  Resources (`Sealed Resources=none`) and `codesign --verify --deep
+  --strict` failed with "code has no resources but signature indicates
+  they must be present" — which Gatekeeper reads as tampering. Setting
+  `bundle.macOS.signingIdentity` to `"-"` in
+  `src-tauri/tauri.macos.conf.json` makes the bundler run `codesign -s -`
+  (ad-hoc) over the fully assembled bundle, sealing the Whisper model,
+  Silero VAD, and ONNX Runtime dylib.
+- **Homebrew cask `depends_on macos:` used a deprecated form.**
+  `Casks/mockingbird.rb` moved from the string `">= :sequoia"` to the
+  symbol `:sequoia`, clearing the `brew style` offense.
+
+### Added
+
+- **Release-time signing guardrail.** The `macos-latest` leg of
+  `.github/workflows/release.yml` now runs `codesign --verify` on the
+  built `.app` and asserts its Resources are sealed, so an unsigned
+  bundle fails the release instead of shipping an un-launchable `.dmg`.
 
 ## [0.3.0-beta.1] - 2026-07-23
 
