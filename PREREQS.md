@@ -30,8 +30,8 @@ Older Windows 10 builds (pre-19041) lack the WebView2 APIs and modern audio capt
 
 Mockingbird ships in two installer variants on the [Releases](../../releases) page. Pick the one that matches your hardware.
 
-- **`Mockingbird-Setup-x.y.z.msi`** (about 50 MB download, about 80 MB installed). CPU-only Whisper. Runs on any 64-bit Windows machine that meets the rest of the prerequisites. Transcription is slower than GPU mode but works everywhere.
-- **`Mockingbird-CUDA-Setup-x.y.z.msi`** (about 250 MB download, about 770 MB installed). NVIDIA GPU Whisper via cuBLAS. The MSI bundles the NVIDIA CUDA runtime libraries (cudart, cublas, cublasLt) so you do NOT need to install the CUDA Toolkit separately. The only user-side prereq is an NVIDIA driver, which ships with every NVIDIA GPU and auto-updates via Windows Update or GeForce Experience.
+- **`Mockingbird_x.y.z_x64_en-US.msi`** (about 9 MB download). CPU-only Whisper. Runs on any 64-bit Windows machine that meets the rest of the prerequisites. Transcription is slower than GPU mode but works everywhere.
+- **`Mockingbird-CUDA_x.y.z_x64_en-US.msi`** (about 580 MB download). NVIDIA GPU Whisper via cuBLAS. The MSI bundles the NVIDIA CUDA runtime libraries (cudart, cublas, cublasLt) so you do NOT need to install the CUDA Toolkit separately. The only user-side prereq is an NVIDIA driver, which ships with every NVIDIA GPU and auto-updates via Windows Update or GeForce Experience.
 
 The CUDA variant requires an NVIDIA GPU. On a machine with an AMD GPU, Intel integrated graphics, or no GPU, install the CPU variant instead. Installing the CUDA variant on a non-NVIDIA machine will produce a launch failure with a missing-DLL error.
 

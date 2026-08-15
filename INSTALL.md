@@ -5,10 +5,11 @@ straight to [macOS (Apple Silicon)](#macos-apple-silicon) — three install
 methods (Homebrew, `.dmg`, or from source) with the full dictation +
 meeting-capture experience.
 
-On Windows, three tiers, pick whichever fits.
+On Windows, three tiers, pick whichever fits. (On macOS? Skip the tiers and use the
+[macOS (Apple Silicon)](#macos-apple-silicon) section instead.)
 
 - **Tier 1: Easy.** MSI installer. Dictation works out of the box. No cleanup LLM.
-- **Tier 2: Standard.** MSI installer plus local Ollama for cleanup. Recommended.
+- **Tier 2: Standard.** MSI installer plus local Ollama for cleanup. Recommended, but optional: dictation works fully without it.
 - **Tier 3: From source.** Clone, build, run. For developers and forkers.
 
 System requirements live in [`PREREQS.md`](./PREREQS.md). Check them first if you're not sure your machine is supported.
@@ -21,8 +22,8 @@ System requirements live in [`PREREQS.md`](./PREREQS.md). Check them first if yo
 
 The [Releases](../../releases) page lists two MSI installers per release. Pick the one that matches your hardware:
 
-- **`Mockingbird-Setup-x.y.z.msi`** (about 50 MB download, about 80 MB installed). CPU-only Whisper. Works on any 64-bit Windows machine. Transcription is slower than the GPU variant but has no hardware prereqs beyond a recent x86 CPU.
-- **`Mockingbird-CUDA-Setup-x.y.z.msi`** (about 250 MB download, about 770 MB installed). NVIDIA GPU Whisper via cuBLAS. The MSI bundles NVIDIA's CUDA runtime libraries so you do NOT need to install the CUDA Toolkit separately. The only user-side prereq is an NVIDIA driver, which ships with every NVIDIA GPU and auto-updates via Windows Update or GeForce Experience.
+- **`Mockingbird_x.y.z_x64_en-US.msi`** (about 9 MB download). CPU-only Whisper. Works on any 64-bit Windows machine. Transcription is slower than the GPU variant but has no hardware prereqs beyond a recent x86 CPU.
+- **`Mockingbird-CUDA_x.y.z_x64_en-US.msi`** (about 580 MB download). NVIDIA GPU Whisper via cuBLAS. The MSI bundles NVIDIA's CUDA runtime libraries so you do NOT need to install the CUDA Toolkit separately. The only user-side prereq is an NVIDIA driver, which ships with every NVIDIA GPU and auto-updates via Windows Update or GeForce Experience.
 
 If you have an NVIDIA GPU and you care about transcription speed, install the CUDA variant. If you have an AMD or Intel GPU, no GPU, or you want the smallest possible download, install the CPU variant. Installing the CUDA variant on a non-NVIDIA machine will fail at launch with a missing-DLL error; in that case, uninstall it and install the CPU variant.
 
@@ -33,7 +34,7 @@ The two variants register under distinct Add/Remove Programs entries (`Mockingbi
 1. Open the [Releases](../../releases) page and download whichever MSI you picked above.
 2. Run the MSI. Windows SmartScreen will probably show a blue warning that says "Windows protected your PC". This is normal for unsigned Windows apps from independent developers. Click "More info", then "Run anyway". (Code signing is not on the roadmap for the beta.)
 3. Accept the default install location. The installer registers Mockingbird as a startup app; you can disable that later in Settings.
-4. Launch Mockingbird. On first run the app downloads a Whisper model into `%USERPROFILE%\mockingbird_models\`. This is between 500 MB and 2 GB depending on the variant you pick in Settings.
+4. Launch Mockingbird. On first run the app downloads a Whisper model into `%USERPROFILE%\mockingbird_models\`. This is between 500 MB and 2 GB depending on the variant you pick in Settings, and it is a separate download from the MSI itself.
 5. Press Right Alt to record. Release to paste the transcript into the focused app.
 
 That's it. Dictation is working. No optional LLM is configured yet, so you will see Whisper's raw transcript with no cleanup pass.
